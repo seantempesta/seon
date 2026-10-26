@@ -9,7 +9,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
             [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
-            [seon.config :as cfg]))
+            [seon.config :as cfg] [seon.error :as err]))
 
 
 (defn merge-limits
@@ -695,9 +695,9 @@
 (defn- stage-boundary
   "The message that opens run aid's stage of its session, or nil: when the session's agent ran
   another task before (its newest earlier run, by the transaction that started it), the new
-  task's plan and proofs, said once at the boundary (its whole story is (my.task/story): the
-  story's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
-  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's story put at
+  task's plan and proofs, said once at the boundary (its whole task data is (my.task/data): the
+  task data's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
+  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's task data put at
   the top cached 1% of 33k tokens, and the agent took the design for its task)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
   [db aid]
@@ -710,7 +710,7 @@
       (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
-             "\n\nIts whole story (what it cites, its write set): (my.task/story)")))))
+             "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
 (defn- taken-messages
   "How many messages to the runs on run aid's branch (as main names them) branch db holds:
@@ -904,10 +904,12 @@
       ;; run over a tree missing a changed namespace (gate-unread) vouches for none: each :error
       :gated (let [unread (:gate-unread f)
                    rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               (one (write st aid :done (cond-> [{:seon.run/id aid
-                                                  :seon.run/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
-                                          (seq unread) (conj {:seon.run/id aid :seon.run/gate-unread unread})
-                                          (contract/error? r) (conj {:seon.run/id aid :seon.run/error r})))))
+               ;; a failed :tests effect is recorded here, with the results, in one transaction
+               (one (write st aid :done (err/asked-tx (:db st) r :seon.run/deferred-results
+                                                      (cond-> [{:seon.run/id aid
+                                                                :seon.run/deferred-results (vec (for [[t s] rs] {:seon.proof/test t :seon.proof/status s}))}]
+                                                        (seq unread) (conj {:seon.run/id aid :seon.run/gate-unread unread})
+                                                        (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))))
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
@@ -921,8 +923,10 @@
       :committed (let [sha (get-in r [:value :sha])
                        m (cond sha {:seon.run/commit sha}
                                (contract/error? r) {:seon.run/commit-error (:seon.error/message r)})]
+                   ;; a failed commit is recorded here, its row closed by the next commit's sha
                    (if m
-                     (one (write st aid :done (vec (for [{:keys [run]} (:members (:writeback f))] (assoc m :seon.run/id run)))))
+                     (one (write st aid :done (err/asked-tx (:db st) r :seon.run/commit
+                                                            (vec (for [{:keys [run]} (:members (:writeback f))] (assoc m :seon.run/id run))))))
                      (done st))))))
 
 (defn- quiet

@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -87,9 +87,10 @@
                                      (contract/error :seon.root/no-gate-checkout #'my.root/gate!
                                                      "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
                                  rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (cond-> [{:seon.run/id aid
-                                                               :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
-                                                       (contract/error? r) (conj {:seon.run/id aid :seon.run/error r})))
+                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.run/deferred-results
+                                                                   (cond-> [{:seon.run/id aid
+                                                                             :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
+                                                                     (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))
                            [aid rs])))]
     {:asked (vec ids) :ran ran}))
 
@@ -112,15 +113,46 @@
        (merge (zipmap (keys read) (repeat []))
               (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
+(defn tasks-read-tx
+  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
+  on root. A refused read's error names it as its subject and is written with it, in one
+  transaction; the first read whose outcome differs closes it, and the same outcome again
+  writes no datom."
+  {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
+  [outcome] [{:seon.root/id :root :seon.root/tasks outcome}])
+
+(defn load-answer
+  "Answer r of a read of the task files, as load-tasks! answers it: a refused one (a file's or the
+  reconcile's) names :seon.root/tasks as its subject, the read's outcome."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
+
+(defn load-error-tx
+  "The write of load error e at ms on main db: a :platform error (seon.root/platform-tx) and, in
+  the same transaction, the outcome its subject holds (a refused task-file read's, tasks-read-tx)."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms]
+  (cond-> (root/platform-tx db e ms)
+    (= :seon.root/tasks (:seon.error/subject e)) (into (tasks-read-tx {:error (:seon.error/message e)}))))
+
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
-  ones updated, removed ones cancelled; unchanged ones write nothing. Answers the writer's
-  answer with the counts, or the error. Releasing stays run!'s."
+  ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
+  outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
+  one held; a refused one answers its error (load-answer), whose recorder writes both
+  (load-error-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [files (if dir (task-files dir) (task-files))]
-     (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))))
+   (let [db @(:conn sys)
+         files (if dir (task-files dir) (task-files))
+         tx (task/load-tx db files)
+         outcome {:files (count files)}
+         held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+     ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
+     ;; good read still writes nothing
+     (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
+                                   {:files (count files)} (mapcat identity (vals files)))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
@@ -249,7 +281,7 @@
                                 ;; a loader's typed error (a refused task file) is a recorded :platform error; the
                                 ;; problems the load made true are shown by health, and the last are kept in the fact
                                 (doseq [e (load-errors loaded)]
-                                  @(root/transact-main! sys (root/platform-tx @(:conn sys) e (System/currentTimeMillis))))
+                                  @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]
@@ -290,7 +322,8 @@
   "Build the next generation from main's last merges commit, for what cannot load in place
   (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
   seon.program/load-changes!). Waits for the :build effect (seon.fx/build), records what it
-  answered on main (:seon.root/generation) and answers it: what `bin/root next` starts. nil
+  answered on main (:seon.root/generation, and a failure's :effect row naming it:
+  seon.error/asked-tx) and answers it: what `bin/root next` starts. nil
   when no merge was committed."
   {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
   [sys]
@@ -299,7 +332,7 @@
           g (if (contract/error? r)
               {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
               (:value r))]
-      @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation g}])
+      @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.root/generation [{:seon.root/id :root :seon.root/generation g}]))
       g)))
 
 (defn next-generation
@@ -373,7 +406,9 @@
                     usage (when c (turn/usage c))
                     usd (when c (model/cost (:model req) usage))]
                 (cond
-                  (contract/error? r) {:rows rows :usd spent :error r}
+                  ;; a failed call is recorded here, closed by the next judge fact (seon.error/asked-tx)
+                  (contract/error? r) (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.judge/digest []))
+                                          {:rows rows :usd spent :error r})
                   (contract/error? sc) {:rows rows :usd spent :error sc}
                   :else
                   (let [f (judge/fact dg id version calls sc usage usd)]

@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.print :as print] [seon.print.emit :as emit]))
+            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.edn :as sedn] [seon.print :as print] [seon.print.emit :as emit]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -367,7 +367,7 @@
   "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
   its :form/refs (calls it) or its :form/quoted (names it as data: a render, a proc, a form sent
   to an agent), a qualified keyword (an attribute, config key or schema entry) by its
-  :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
+  :form/keywords, the data it operates on. The one query my.agent/callers and the task's data ask."
   {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
   [db x]
   (vec (sort (disj (into #{} (mapcat #(d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db % x))
@@ -400,18 +400,28 @@
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
   :code its source (from the db), whole: the printer cuts it where it is shown, with the form
   that reads its rest; at :doc a var with no doc shows its source. A name that resolves to
-  nothing says so."
+  nothing says so. A var the db holds is read from its facts (its doc, its contract, its
+  recorded source and the arglists it declares), so what it shows changes as the db does; a
+  library var the db does not hold, from the process's var meta, which its build fixes."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :seon.ref/depth] :map]}
   [db sym depth]
-  (let [m (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta)
+  (let [v (some->> (pdb/eid db :var/name sym) (d/entity db))
         src (source-of db sym)
+        ;; arglists only where they are shown: a source read once per such citation
+        m (if v
+            (cond-> {}
+              (and src (#{:summary :doc} depth)) (assoc :arglists (reader/arglists src (symbol (namespace sym))))
+              (:var/doc v) (assoc :doc (:var/doc v))
+              ;; as the import wrote it (seon.edn/encode): a contract that does not decode throws
+              (:var/contract v) (assoc :malli/schema (sedn/decode (:var/contract v))))
+            (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))
               ;; prose, read as itself: unquoted, no escaped quotes (seon.print's prose mark)
               (:doc m) (assoc :doc {:seon.print/prose (:doc m)})
               (:malli/schema m) (assoc :contract (:malli/schema m)))]
     (cond
-      (and (nil? m) (nil? src)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
+      (and (nil? v) (nil? m)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
       ;; its source is code, printed as in its file (seon.print/code)
@@ -482,7 +492,7 @@
   (when-let [b (seq (:seon.ref/below nv))] (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b))))
 
 (defn cited-code
-  "What the screen shows of citation c on db, as Clojure is written in a file (DECISIONS,
+  "What the page shows of citation c on db, as Clojure is written in a file (DECISIONS,
   code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code

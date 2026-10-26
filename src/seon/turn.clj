@@ -19,7 +19,7 @@
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
-            [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
+            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [seon.error :as err] [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
@@ -42,8 +42,7 @@
     (:turn @agent/state)
     (let [db (agent/db)]
       ;; the run is this session's on its own branch too (root writes it on main): the
-      ;; conversation finds the messages its runs took, and the story its first stage's, by it
-      ;; (seon.context/records, session-first-run read the branch)
+      ;; conversation finds the messages its runs took by it (seon.context/records reads the branch)
       (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}])
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
@@ -151,10 +150,9 @@
      :will-merge will-merge :tests tests :attention attention}))
 
 (defn- take!
-  "The messages delivered since the last turn, taken before the turn's screen is evaluated, so
-  each sits in the conversation before the screen that shows what came after it (a session's
-  next stage opens with root's message, seon.reconcile/stage-boundary, before that stage's first
-  screen). The turn is their reader: a message that is a fact is written on this branch first,
+  "The messages delivered since the last turn, taken before the turn's request is made, so each
+  sits in the conversation before the page that shows what came after it (a session's next stage
+  opens with root's message, seon.reconcile/stage-boundary, before that stage's first page). The turn is their reader: a message that is a fact is written on this branch first,
   the same fact root wrote on main, and named by id, so its text is read again from the commit.
   A read that is not the run's turn (take? false: an observer's read of an agent its model
   drives) shows the inbox and leaves it, each message as it was sent. Answers the observations
@@ -195,17 +193,20 @@
     (agent/commit!)
     r))
 
-(defn- screen!
-  "The screen of a turn of task (a model's, or an outside agent's context read): what its forms
-  read (my.task/status: the turn input, as this turn's observe measured it, seon.context/turn-input
-  over in), then its forms evaluated now (the agent's :seon.agent/screen, else seon.screen/forms), each recorded by the screen, so the request (and any later
-  reading of it) ends with their responses (seon.context/request). Answers their records' ids."
-  {:malli/schema [:=> [:cat :seon.task/id :map] [:vector :string]]}
+(defn- observed!
+  "What a turn of task (a model's, or an outside agent's context read) observed, held for
+  my.task/status (`input`): the turn input as this turn's observe measured it
+  (seon.context/turn-input over in)."
+  {:malli/schema [:=> [:cat :seon.task/id :map] :any]}
   [task in]
-  (swap! agent/state assoc-in [:turn :screen]
-         {:task task :input (context/turn-input (agent/db) in (get-in @agent/state [:turn :last]))})
-  ;; the agent's own screen when it set one in its record (swap! of @ctx), else the platform's
-  (vec (keep #(:record (evaluated! % {:origin :screen})) (get @ctx/ctx :seon.agent/screen screen/forms))))
+  (swap! agent/state assoc-in [:turn :observed]
+         {:task task :input (context/turn-input (agent/db) in (get-in @agent/state [:turn :last]))}))
+
+(defn input
+  "What this process's last turn observed (my.task/status): {:task :input}, the task and the turn
+  sections' input as its observe measured it; nil before any turn of this process observed its task."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  [] (get-in @agent/state [:turn :observed]))
 
 (defn cache-miss
   "A :seon.turn/cache-miss when a request's prompt cache hit falls more than one block short of
@@ -241,19 +242,20 @@
         t0 (profile/now-ns)
         ob (cond-> (observed obs) merge? (assoc :merge? true))
         taken (take! true)
-        screen (screen! (:seon.task/id t) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?})
-        basis (cond-> (assoc (basis! (:seon.task/id t) run turn max-turns :model ob taken) :agent (:key @agent/state))
-                (seq screen) (assoc :screen screen))
+        _ (observed! (:seon.task/id t) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?})
+        basis (assoc (basis! (:seon.task/id t) run turn max-turns :model ob taken) :agent (:key @agent/state))
+        id (str run "/" turn)
+        ;; the turn first, what it was made from: its page is drawn on the db that holds it (its
+        ;; proofs as this turn observed them), then what it sent, committed, so a page shows the
+        ;; call in flight and a call that fails keeps what it sent
+        _ (agent/transact! [{:db/id "run" :seon.run/id run}
+                            {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}])
+        _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
-        id (str run "/" turn)
-        ;; the turn as its request goes: what it was made from and what it sent, committed, so a
-        ;; page shows the call in flight and a call that fails keeps what it sent
-        _ (agent/transact! [{:db/id "run" :seon.run/id run}
-                            (cond-> {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}
-                              sent (assoc :seon.turn/sent sent))])
+        _ (when sent (agent/transact! [{:seon.turn/id id :seon.turn/sent sent}]))
         _ (agent/commit!)
         t1 (profile/now-ns)
         r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
@@ -333,9 +335,8 @@
           (and merge? (or (not whole?) (seq unmerged))) (update :merge-turns inc))))))
 
 (defn context-block
-  "The request of task as a model is sent it on this branch now (the proofs run again, the
-  screen's forms evaluated, `screen!`): what an outside agent working the task reads, the system
-  prompt, the story, the conversation and the screen as one text, recorded as a turn of the run
+  "The request of task as a model is sent it on this branch now (the proofs run again): what an
+  outside agent working the task reads, the system prompt and its page, as one text, recorded as a turn of the run
   (origin :outside). It also makes this process work task as run, so the my.* functions act
   on it (my.task/status answers as this read measured). take?: the read is the run's turn (its
   model is outside) and takes the messages delivered; else it is an observer's, and leaves them
@@ -347,11 +348,11 @@
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
         ob (assoc (observed obs) :merge? true)
-        ;; the run's turn (take?) evaluates the screen and keeps what it printed, as a model turn does;
-        ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
+        ;; the run's turn (take?) measures what my.task/status answers, as a model turn does; an
+        ;; observer's read records nothing on the branch beyond the read and leaves the print cache
         taken (take! take?)
-        screen (when take? (screen! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
-        basis (cond-> (basis! task run n 1 :outside ob taken) (seq screen) (assoc :screen screen))
+        _ (when take? (observed! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
+        basis (assoc (basis! task run n 1 :outside ob taken) :agent (:key @agent/state))
         {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
         text (str/join "\n\n" (map :content messages))]

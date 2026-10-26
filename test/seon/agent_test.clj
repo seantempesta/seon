@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.task :as task] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -551,12 +551,19 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
-               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)"))
+               "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
+           (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
+               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)")
+           (let [c (seon.ctx/build (agent/db) (:db/id (d/entity (agent/db) [:seon.agent/key "test/a1"])) ab)
+                 [cu] (vals (:catch-ups (:tree c)))]
+             (is (= [(:branch cfg) (:max-tx @conn)] [(:seon.catch-up/from cu) (:seon.catch-up/from-t cu)])
+                 "the catch-up a fact of the agent's record, in its ctx (task seon.ctx/one-derivation)")
+             (is (some #{[:var 'app.m0/f1]} (:seon.catch-up/applied cu)) "with what it applied")))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
@@ -586,7 +593,7 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (agent/merge-main! #{})
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
@@ -609,7 +616,26 @@
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
          (let [{:keys [t]} (agent/transact! [{:note/text "the agent's"}])]
            (agent/commit!)
-           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t)))))
+           (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @store-conn t))))
+           (is (nil? (:seon.tx/eval (d/entity @store-conn t))) "written outside any eval: it names none"))
+         ;; task seon.ctx/a-change-names-its-eval: a write an eval's code makes names that eval
+         (let [r (repl/eval-string "(seon.agent/transact! [{:note/text \"an eval's\"}])" {"ns" "user" :origin :outside})
+               t (:t (:value r))]
+           (agent/commit!)
+           (is (= [ab (name (:handle r))] ((juxt :seon.tx/branch :seon.tx/eval) (d/entity @store-conn t))) (str "the eval that wrote it: " (:ex r)))
+           (is (nil? (:eval @agent/state)) "and once the eval ends, a write names no eval"))
+         (let [r (repl/eval-string "(throw (ex-info \"boom\" {}))" {"ns" "user" :origin :outside})]
+           (is (:ex r) "an eval that throws")
+           (is (nil? (:eval @agent/state)) "leaves no eval named"))
+         (let [r (repl/eval-string "(do (seon.repl/eval-string \"1\" {\"ns\" \"user\" :origin :screen}) (:eval @seon.agent/state))" {"ns" "user" :origin :outside})]
+           (is (= (name (:handle r)) (:value r)) "an eval inside one names its own, then the outer one's again"))
+         ;; recorded as an agent records: the eval's own record names it too
+         (swap! agent/state assoc :mode :agent :key "test/a1" :id :a1)
+         (let [r (repl/eval-string "(+ 1 2)" {"ns" "user" :origin :outside})]
+           (agent/commit!)
+           (is (= (name (:handle r)) (:record r)) "recorded")
+           (is (= (name (:handle r)) (:seon.tx/eval (d/entity @store-conn (:tx (first (d/datoms @store-conn :avet :seon.eval/id (:record r)))))))
+               "its record's transaction names it"))
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
@@ -649,8 +675,8 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; story in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
-  ;; the reconciler, the implement's first turn, on the design's session, sends the design's story
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
@@ -664,7 +690,7 @@
         {:keys [design implement boundary]} (:value r)
         last-design (peek design) first-implement (first implement)]
     (is (and (seq design) (seq implement) boundary) (pr-str r))
-    (is (= (second (first design)) (second first-implement)) "the design's story, in the same place")
+    (is (= (second (first design)) (second first-implement)) "the design's task data, in the same place")
     (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
     (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
 
@@ -703,15 +729,13 @@
   (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
                               (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
                                    "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
-                                   "   :read (count (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))"
-                                   "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
+                                   "   :read (mapv :content (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's four evals (show, status, changes, related)")
-    (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
-    (is (str/includes? (str (:screen (:value turn))) "[:h1 \"a1\"]") (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
-    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 6 (:read (:value turn))) "read back from its records")))
+    (is (= [:section :page] (:sent (:value turn))) "the help page, then the page whole")
+    (is (= 2 (count (:read (:value turn)))) "read back from its records")
+    (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
+    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
 (deftest code-sent-again-is-told-on-its-answer
   ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
@@ -820,9 +844,11 @@
 (deftest related-is-an-eval-of-the-plan-and-of-any-text
   ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
-  (let [[db _ dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+  (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        ;; the agent working the task, as a session holds it: its entity and its running run
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
         old @agent/state]
-    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
       (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
           "the screen form: the sections nearest the plan, the cited one left out")
@@ -833,21 +859,23 @@
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
 
-(deftest a-parked-agent-draws-its-own-render-and-a-gone-one-answers-at-once
-  ;; root, 2026-10-25: a key of @ctx whose render the branch defines is drawn by its agent while the
-  ;; page is viewed (seon.render.ui/ctx, the render proc's {:op :render} ask): an agent parked between
-  ;; requests answers it with its render's HTML, recording nothing; a request to an agent that is
-  ;; gone is answered at once, so the page shows the key's structure and never waits
+(deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
+  ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :render} ask is
+  ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders
+  ;; drawn by that render, recording nothing; a request to an agent that is gone is answered at
+  ;; once, so its page is drawn by root from its branch and never waits
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
-        [_ _ before drawn after gone]
+        [_ _ swapped before drawn after gone]
         (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
+                   "(swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
-                               " @(seon.root/call! sys {:op :render :id id :schema :lab.ctx/steps :value [\"read the plan\" \"write the test\"]}))")}
+                               " @(seon.root/call! sys {:op :render :id id}))")}
                    n
-                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone :schema :lab.ctx/steps :value []})"}])]
-    (is (= {:html "<ol><li>read the plan</li><li>write the test</li></ol>"} (:value drawn)) (pr-str drawn))
+                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone})"}])
+        steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts (:value drawn)))]
+    (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (str "the swap! answered " (pr-str swapped) "; the parts: " (pr-str (map :key (:parts (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))

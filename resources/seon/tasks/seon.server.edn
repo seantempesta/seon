@@ -44,7 +44,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "the-outside-context-is-what-a-model-is-sent"
-  :seon.task/plan "Dogfood (gap 6): the :context op for an outside agent prints ```seon.turn/context-block``` (the story and the turn sections), not what a model is sent (the system prompt, the story, the conversation and the screen, ```seon.context/parts-of```), so a Claude session dogfooding through the server works from a different context than the models whose turns we measure. The change: the op answers the parts a model's request is made of, printed in order through the one printer, from parts-of; delete context-block if nothing else reads it. Builds on `seon.server/the-context-op-answers-the-text`."
+  :seon.task/plan "Dogfood (gap 6): the :context op for an outside agent prints ```seon.turn/context-block``` (the task's data and the turn sections), not what a model is sent (the system prompt, the task's data, the conversation and the screen, ```seon.context/parts-of```), so a Claude session dogfooding through the server works from a different context than the models whose turns we measure. The change: the op answers the parts a model's request is made of, printed in order through the one printer, from parts-of; delete context-block if nothing else reads it. Builds on `seon.server/the-context-op-answers-the-text`."
   :seon.task/kind :work
   :seon.task/proofs #{seon.server-test/the-context-op-answers-what-a-model-is-sent}}
  {:seon.task/name "done-answers-the-verdict"

@@ -6,7 +6,7 @@
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner]))
+            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -96,7 +96,7 @@
           (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :base "b2"})) "laws")) "laws reads the tree alone")
           (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1"})))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
-      (is (= #{"laws" "lmdb-kill"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill has a binary of its own")
+      (is (= #{"laws" "lmdb-kill" "lmdb-sem"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
@@ -256,6 +256,13 @@
     (clojure.java.shell/sh "git" "-C" d "add" ".")
     d))
 
+(defn- close-stores!
+  "Close the envs of a test's own scratch stores (store paths). program-db keeps its branch's
+  connection for the process (its db reads the store), so a shard running these tests held one
+  env per scratch store and past nine an open failed with MDB_SEM_UNDO_FULL
+  (docs/failure-points.md#lmdb-robust-locks): a test's own store ends with the test."
+  [& paths] (run! klmdb/close-env! paths))
+
 (defn- calls-of
   "{var calls} of the contracted functions thunk called."
   [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
@@ -270,15 +277,36 @@
                       "test/app/fi_calc_test.clj" "(ns app.fi-calc-test (:require [clojure.test :refer [deftest is]] [app.fi-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
                       "test/app/fi_empty_test.clj" "(ns app.fi-empty-test)\n"})
         store (str (scratch-dir) "/store")
-        branches #(let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)] (try (set (d/branches conn)) (finally (d/release conn))))
+        ;; a store's branches, or :no-store: a check never opens (and so makes) a missing path
+        branches #(if-not (pdb/store? store)
+                    :no-store
+                    (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)] (try (set (d/branches conn)) (finally (d/release conn)))))
         thrown (try (runner/plan-of d "tests" false nil store) nil (catch Throwable t t))]
+   (try
     (is (some? thrown) "a file that does not read: the plan throws")
+    ;; the full run of 2026-10-26 passed the store's own error (MDB_SEM_UNDO_FULL, scratch stores
+    ;; left open) as this throw, and then read a store it had half made
+    (is (not (#{:lmdb-error :db-does-not-exist} (:type (ex-data thrown)))) "the file's, not the store's")
     (is (= #{:db} (branches)) "and leaves no branch named for its tree")
     (spit (str d "/src/app/fi_calc.clj") good)
     (clojure.java.shell/sh "git" "-C" d "add" ".")
     (let [p (runner/plan-of d "tests" false nil store)]
       (is (contains? (:digests p) 'app.fi-calc-test/adds) "the tree read: its test is planned")
-      (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))))
+      (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))
+    (finally (close-stores! store)))))
+
+(deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
+  ;; the full run of 2026-10-26: this namespace's scratch stores stayed open (program-db keeps its
+  ;; branch's connection), nine of them by its end, and the shard's next opens failed with
+  ;; MDB_SEM_UNDO_FULL (each open env takes one of kern.sysv.semume's 10). A test's own store ends
+  ;; with the test, so a process plans on any number in turn
+  (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
+                      "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
+        planned (vec (for [_ (range 12)
+                           :let [store (str (scratch-dir) "/store")]]
+                       (try (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.ps-calc-test/adds)
+                            (finally (close-stores! store)))))]
+    (is (= (repeat 12 true) planned) "twelve stores in turn, each planned")))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
@@ -290,9 +318,12 @@
                       "test/app/kc_calc_test.clj" "(ns app.kc-calc-test (:require [clojure.test :refer [deftest is]] [app.kc-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"
                       "test/app/kc_other_test.clj" "(ns app.kc-other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other (is true))\n"})
         store (str (scratch-dir) "/store")
+        ;; stores that keep no tree, each made once: what a whole import gives
+        [fresh fresh2 fresh3] (repeatedly 3 #(str (scratch-dir) "/fresh"))
         plan #(runner/plan-of d "tests" false nil store)
         first-calls (calls-of plan)
         p1 (plan)]
+   (try
     (is (= 1 (first-calls 'seon.source/import-tx)) "an empty store: the tree is imported once")
     (let [again (calls-of plan)]
       (is (nil? (again 'seon.source/import-tx)) "the same tree: its kept branch, no import")
@@ -301,10 +332,10 @@
     (spit (str d "/src/app/kc_calc.clj") "(ns app.kc-calc)\n(defn add [a b] (+ b a))\n")
     (let [edited (calls-of plan)
           p2 (plan)
-          fresh (runner/plan-of d "tests" false nil (str (scratch-dir) "/fresh"))]
+          whole (runner/plan-of d "tests" false nil fresh)]
       (is (nil? (edited 'seon.source/import-tx)) "an edited tree: no import")
       (is (= 1 (edited 'seon.source/refresh-tx)) "the nearest kept tree brought current, once")
-      (is (= (:digests fresh) (:digests p2)) "the same digests a whole import of the edited tree gives")
+      (is (= (:digests whole) (:digests p2)) "the same digests a whole import of the edited tree gives")
       (is (not= (get-in p1 [:digests 'app.kc-calc-test/adds]) (get-in p2 [:digests 'app.kc-calc-test/adds])) "the test reaching the edit moved")
       (is (= (get-in p1 [:digests 'app.kc-other-test/other]) (get-in p2 [:digests 'app.kc-other-test/other])) "the other did not"))
     (spit (str d "/src/app/kc_calc.clj") calc)
@@ -312,8 +343,7 @@
       (is (nil? (back 'seon.source/refresh-tx)) "the first tree again: its kept branch")
       (is (= (:digests p1) (:digests (plan)))))
     (testing "a moved file and a deleted one: the kept program is what a whole import of the tree gives"
-      (let [store-of #(str (scratch-dir) "/fresh")
-            files-of (fn [db] (source/source-files db))]
+      (let [files-of (fn [db] (source/source-files db))]
         ;; a namespace moved to a new file and renamed, its body kept: git's rename detection would
         ;; list only the new path, and the old namespace would stay in the kept program
         (let [body (apply str (for [i (range 40)] (str "(deftest t" i " (is (= " i " " i ")))\n")))]
@@ -321,23 +351,25 @@
           (runner/program-db d store)
           (.delete (java.io.File. (str d "/test/app/kc_big_test.clj")))
           (spit (str d "/test/app/kc_bigger_test.clj") (str "(ns app.kc-bigger-test (:require [clojure.test :refer [deftest is]]))\n" body)))
-        (let [kept (runner/program-db d store) fresh (runner/program-db d (store-of))]
+        (let [kept (runner/program-db d store) fresh (runner/program-db d fresh2)]
           (is (= (files-of fresh) (files-of kept)))
           (is (nil? (seon.db/eid kept :ns/name 'app.kc-big-test)) "the old namespace is gone"))
         (.delete (java.io.File. (str d "/test/app/kc_bigger_test.clj")))
-        (let [kept (runner/program-db d store) fresh (runner/program-db d (store-of))]
+        (let [kept (runner/program-db d store) fresh (runner/program-db d fresh3)]
           (is (= (files-of fresh) (files-of kept)))
-          (is (not (some #{"test/app/kc_bigger_test.clj"} (files-of kept))) "a deleted file is gone"))))))
+          (is (not (some #{"test/app/kc_bigger_test.clj"} (files-of kept))) "a deleted file is gone"))))
+    (finally (close-stores! store fresh fresh2 fresh3)))))
 
 (defn kept-checkout-of
-  "program-db's arguments for a checkout whose src holds n functions (app.kp-big) and a store
-  that already keeps its tree (the first call, not measured, imports it)."
+  "program-db's arguments for a checkout whose src holds n functions (app.kp-big) and the
+  process's one program store, which then keeps its tree on a branch of its own (the first call,
+  not measured, imports it)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :string :string]]}
   [n]
   (let [d (checkout! {"deps.edn" "{}"
                       "src/app/kp_big.clj" (apply str "(ns app.kp-big)\n" (for [i (range n)] (str "(defn f" i " [x] (+ x " i "))\n")))
                       "test/app/kp_big_test.clj" "(ns app.kp-big-test (:require [clojure.test :refer [deftest is]] [app.kp-big :as b]))\n(deftest f0 (is (= 1 (b/f0 1))))\n"})
-        store (str (scratch-dir) "/store")]
+        store (ts/program-store)]
     (runner/program-db d store)
     [d store]))
 

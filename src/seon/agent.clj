@@ -19,12 +19,13 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :embedded-from (the db embed-written! last read the branch's writes up to) :vectors-t (the transaction of its last vector write)
-;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them) :related (my.task/related's sections nearest the plan, seon.context/related-at)
+;; :embedded-from (the db embed-written! last read the branch's writes up to)
+;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
+;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
 
@@ -157,7 +158,7 @@
     (let [r (d/with (db) tx-data)]
       (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]))
       {:t (:max-tx (:db-after r)) :datoms (count (:tx-data r)) :local true})
-    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state))})]
+    (let [r (dw/apply! (:store-conn @state) {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:eval @state) (assoc :seon.tx/eval (:eval @state))))})]
       (when-not (map? r) (throw (ex-info (str "transact refused: " (ex-message r)) {:writer-error (ex-message r)})))
       ;; :tx, the transaction that moved :db: what seon.ctx patches @ctx from
       (swap! state assoc :db (:db-after r) :tx (select-keys r [:db-after :tx-data]) :dirty? true)
@@ -260,8 +261,7 @@
            (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
            (contract/error? r) r
            :else (let [{:keys [model vectors tokens]} (:value r)
-                       w (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
-                   (swap! state assoc :vectors-t (:t w))
+                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
                    (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
                    (count ask))))))))
 
@@ -290,8 +290,13 @@
       (let [carried (task/carry-tx (:base @state) main head)
             rep (d/merge-db conn #{main-b} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                                               (into (:tx carried)))
-                             (pdb/tx-meta (:branch @state)))
+                                               (into (:tx carried))
+                                               ;; the catch-up itself, a fact of the agent's record (its :catch-ups)
+                                               (conj {:seon.catch-up/id (str (name (:branch @state)) "@" (:max-tx main))
+                                                      :seon.catch-up/agent {:seon.agent/key (:key @state)}
+                                                      :seon.catch-up/from main-b :seon.catch-up/from-t (:max-tx main)
+                                                      :seon.catch-up/applied (vec (:apply r)) :seon.catch-up/conflicts (vec (:conflicts r))}))
+                             (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
         ;; the merge base is now main's head: what main changed is not this branch's change
@@ -512,20 +517,6 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
     (await-reply! k))))
-
-(defn screen
-  "This agent's screen: its page as root's render proc holds it (seon.render.proc/screen-of), without
-  its conversation and without presentation, at main's t: {:t :page}. Asked of root on its request
-  channel, after committing what it applied, with that commit's t (root answers from a read of its
-  branch that covers it); root renders it, never this process (an agent cannot draw its own view)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  ;; what it applied is committed first, and the request names that commit's t: root answers from
-  ;; a read of the branch that has it (the branch review's F3)
-  (commit!)
-  (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :screen :k k :t (:max-tx (db))})) (lib/c-exit 0))
-    (await-reply! k)))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing

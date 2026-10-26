@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -271,24 +271,19 @@
 
 (defn- instrument
   "Instrument a definition by its contract (G1's proto.agent/admit!, Seon's rule): a function var
-  with :malli/schema is armed and leaves the agent's uncontracted set; one without joins
-  it, and the response carries the warning naming every uncontracted definition so far.
-  Answers the response's additions (its reply item's keys)."
-  {:malli/schema [:=> [:cat :seon.host/var] [:maybe :seon.wire/msg]]}
+  with :malli/schema is armed and leaves the agent's uncontracted set; one without joins it.
+  Answers what happened to it, {:var :armed true} (with :error when its contract could not be
+  armed) or {:var :uncontracted set}, the agent's uncontracted definitions after it; nil for a
+  var that is no function. response turns them into the eval's warnings."
+  {:malli/schema [:=> [:cat :seon.host/var] [:maybe :map]]}
   [v]
   (when (contract/function-var? v)
     (let [sym (symbol v)]
       (if (contract/contract v)
         (let [r (contract/arm! v)]
           (swap! agent/state update :uncontracted (fnil disj #{}) sym)
-          (if (contract/error? r)
-            {:contract :invalid :contract-error r}
-            {:contract r}))
-        (let [u (:uncontracted (swap! agent/state update :uncontracted (fnil conj #{}) sym))]
-          {:warnings [{:seon.repl/finding :uncontracted-definition
-                                     :seon.repl/fix (str "Declare a contract: (defn " (name sym) " {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
-                                                         "A branch carrying an uncontracted function is refused at merge.")
-                                     :uncontracted (vec (sort-by str u)) :count (count u)}]})))))
+          (cond-> {:var sym :armed true} (contract/error? r) (assoc :error r)))
+        {:var sym :uncontracted (:uncontracted (swap! agent/state update :uncontracted (fnil conj #{}) sym))}))))
 
 (defn wrap-instrument
   "Each var a form defined (wrap-record's :repl/defined) is instrumented by its contract
@@ -300,7 +295,7 @@
          (fn [m]
            ;; arming compiles the contract: against the branch's population, as its eval did
            (binding [mr/*registry* (if (seq (:repl/defined m)) (branch-registry) {})]
-             (reduce (fn [m s] (if-let [v (find-var s)] (merge m (instrument v)) m)) m (:repl/defined m))))))))
+             (reduce (fn [m s] (if-let [i (some-> (find-var s) instrument)] (update m :instrumented (fnil conj []) i) m)) m (:repl/defined m))))))))
 
 (def middleware
   "Outermost first. Answers pass innermost first: record, cost, instrument, caught. The
@@ -334,7 +329,10 @@
   answered: the values before an error stay), the last form's value (:value, as *1 holds it),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
-  seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
+  seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
+  of each var it defined, in order: the agent's uncontracted definitions as they stand at the
+  eval's end when it defined one, with the fix; each contract that could not be armed, by its var),
+  and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
@@ -343,11 +341,22 @@
         lst (peek fs)
         vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
-        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))]
+        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
+        is (into [] (mapcat :instrumented) fs)
+        ;; the uncontracted set as the eval left it: each uncontracted var's account holds the set
+        ;; after it, and a var armed later in the eval leaves it
+        left (reduce (fn [u i] (if (:uncontracted i) (:uncontracted i) (disj (or u #{}) (:var i)))) nil is)
+        warnings (cond-> (vec (for [i is :when (:error i)] {:seon.repl/finding :invalid-contract :var (:var i) :error (:error i)}))
+                   (and (some :uncontracted is) (seq left))
+                   (conj {:seon.repl/finding :uncontracted-definition
+                          :seon.repl/fix (str "Declare a contract on each: (defn f {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
+                                              "A branch carrying an uncontracted function is refused at merge.")
+                          :uncontracted (vec (sort-by str left)) :count (count left)}))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
       (and (> (count fs) 1) (seq vs)) (assoc :values vs)
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
+      (seq warnings) (assoc :warnings warnings)
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
@@ -357,11 +366,10 @@
 
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
-  session (root's server), a context read, the screen (the forms run before each model
-  request, seon.turn), else the agent itself (its model's turn)."
+  session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
   [origin]
-  (case origin :ui "user" :outside "outside" :context "context" :screen "screen" (name (or (:id @agent/state) :root))))
+  (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
@@ -439,39 +447,75 @@
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
-         handle (symbol "result" (str "e" (eval-n!)))]
-     (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
-           ;; printing is inside the boundary: a value that throws as it is realized is the error
-           [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
-                         (answered)
-                         (catch Throwable e
-                           (let [em (agent/error-map e)]
-                             (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
-                             (answered))))
-           recorded (into [] (mapcat :recorded) @answers)]
-       (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-       ;; the screen's responses are replaced each request: no later response reads them
-       (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
-       ;; the handle a printed cut reads through, as the REPL's *1 is read
-       (intern (create-ns 'result) (symbol (name handle)) r)
-       (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
-                code req)))))
+         handle (symbol "result" (str "e" (eval-n!)))
+         ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
+         ;; eval inside it (a context read's) names its own, then this one's again
+         outer (:eval @agent/state)]
+     (swap! agent/state assoc :eval (name handle))
+     (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
+                ;; printing is inside the boundary: a value that throws as it is realized is the error
+                [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                              (answered)
+                              (catch Throwable e
+                                (let [em (agent/error-map e)]
+                                  (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
+                                  (answered))))
+                recorded (into [] (mapcat :recorded) @answers)]
+            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+            (swap! agent/state update :seen print/seen r)
+            ;; the handle a printed cut reads through, as the REPL's *1 is read
+            (intern (create-ns 'result) (symbol (name handle)) r)
+            (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
+                     code req))
+          (finally (swap! agent/state assoc :eval outer))))))
 
-(defn draw
-  "Value v drawn as HTML by the render its schema k names on this branch (root's render proc asks:
-  seon.render.ui/ctx), under the branch's schemas, recording nothing: {:html s}, or {:error e}
-  when the render throws (an agent's own render, unmerged: the boundary that answers it, so the
-  asker always has an answer and the agent goes on)."
-  {:malli/schema [:=> [:cat :any :keyword] [:or [:map [:html :string]] [:map [:error :map]]]]}
-  [v k]
-  (try {:html (with-branch-schemas #(h/html (render/html v {:schema k})))}
-       (catch Throwable e {:error (agent/error-map e)})))
+(defn- draw-part
+  "Part p's faces through memo m (seon.render/drawn), or its error's render when its render throws
+  (an agent's own render, unmerged: the boundary that answers it, so the page always has the part
+  and the agent goes on). Answers [m' faces]."
+  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
+  [m p]
+  (try (render/drawn m p)
+       (catch Throwable e (let [err (agent/error-map e)]
+                            [m {:html (render/html err {}) :inline (render/html err {:as :inline})}]))))
+
+(defn- drawn-parts
+  "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
+  @ctx, with the renders that read the branch's db), drawn here under its branch's schemas, each
+  through the part memo this process holds (:drawn)."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector [:tuple :seon.render/part :seon.render/faces]]]]]}
+  []
+  (with-branch-schemas
+    #(let [c (ctx/record)
+           [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
+                              [(:drawn @agent/state {}) []] (render/html c (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx)))]
+       ;; the memo holds the parts this page has now, none it dropped
+       (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
+       {:t (get-in c [:tree :t] 0) :parts out})))
+
+(defn parts
+  "This agent's page as its parts' html (root's render proc asks, its {:op :render}:
+  seon.render.proc/ask-parts): {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their
+  order. Records nothing."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
+  []
+  (let [{:keys [t parts]} (drawn-parts)] {:t t :parts (mapv (fn [[p f]] (render/part-html p f)) parts)}))
+
+(defn page
+  "This agent's page as the model reads it: its :task region (seon.render/render-ctx), each part's hiccup
+  exactly as its render returned it, by part key, in the page's order, the same hiccup the page
+  shows (`parts`); the chat and the tiles left out, which the transcript carries. What the model's
+  request holds is the same page re-derived at each turn's commit (seon.context/page, world)."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])
+                           (filter (comp #{:task} :region first) (:parts (drawn-parts))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, a value to draw as {:op :render :id :schema :value},
+  :sock (an eval as {:op :eval :id :forms}, its page's parts to draw as {:op :render :id},
   Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
@@ -483,10 +527,10 @@
   ([st _] st)
   ([st _ m]
    (cond
-     ;; root's render proc asks for a value drawn by a render this agent defines (seon.render.ui/ctx):
-     ;; drawn here under its branch's schemas, answered as HTML, and nothing recorded
+     ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
+     ;; schemas by the renders it defines, answered as HTML, and nothing recorded
      (= :render (:op m))
-     [st {:sock [{:op :reply :id (:id m) :response (draw (:value m) (:schema m))}]}]
+     [st {:sock [{:op :reply :id (:id m) :response (parts)}]}]
      (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began

@@ -63,18 +63,15 @@
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
   ;; (seon.render/schema-of, no validation) and rendered once, in the printer's one pass
   (cost/proof
-    {:of 'seon.render/ai :input 'seon.render-cost-test/runs
-     :n "runs in a vector, each shown by its own :ai render in the printer's text"
+    {:of 'seon.render/html :input 'seon.render-cost-test/runs
+     :n "runs in a vector, each shown by its own render in the printer's hiccup"
      :work (str "one pass: per run, the printer classifies it once and asks its render once: one "
-                "identity lookup over its three keys, its :ai render (seon.render.ai/run's line), cut "
-                "to one line by seon.print/line, then the printer lays the line out as a leaf. Nothing per "
+                "identity lookup over its three keys, a call of its render (seon.render.ui/run-row) inline, "
+                "and its one line by seon.print/line, then the printer lays it out as a leaf. Nothing per "
                 "run is done twice and no run is printed as data")
      :growth :linear
-     ;; nineteen contracted calls a run, along the path above: seon.render's nested, render-of
-     ;; for each face with own-key, schema-of and declared (its parents) each, render and print-ai's
-     ;; own call for the :ai face, the run's render and its parts, print/line and its prose;
-     ;; measured 1,947 / 19,047 / 76,047 calls at 100 / 1k / 4k (8.3-8.6 us, 18.4-18.9 KB an
-     ;; run), the 47 the print's own whatever its size
+     ;; contracted calls a run, along the path above: seon.render's nested, render-of with
+     ;; own-key, schema-of and declared (its parents) each, print/line and its prose
      :per-n {:calls 19}
      :fixed {:calls 47}
      :sizes [100 1000 4000]}))
@@ -213,9 +210,10 @@
                 "its place in the walk's map and in the sort by transaction. Contracted calls flat in the rows; bytes "
                 "~6 KB a row (was 49.5 KB, every row pulled whole: a-page-walks-each-db-once)")
      :growth :linear
-     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations
+     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations; 65 at 100
+     ;; with the agent's catch-ups a unit (task seon.ctx/one-derivation): its index read, empty here
      :per-n {:bytes 6100}
-     :fixed {:calls 59 :bytes 2650000}
+     :fixed {:calls 65 :bytes 2650000}
      :sizes [100 1000 4000]}))
 
 (defn- watching
@@ -285,10 +283,10 @@
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/debug-of
      :n "model turns the debug page already holds"
      :work (str "the new turn's row, a component (seon.render.ui/component, as [:debug ...]), read back from its "
-                "records (its two evals, each by its :seon.render/ai render), its request sized from those parts "
-                "(seon.context/sent-split: system, story, conversation, screen), and rendered once: the contracted calls, "
-                "flat in the turns held. A real turn also reads back its help page and its task story as of their t "
-                "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the story's run "
+                "records (its two evals, each by seon.context/eval-messages), its request sized from those parts "
+                "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
+                "flat in the turns held. A real turn also reads back its help page and its task data as of their t "
+                "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the task data's run "
                 "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
                 "query of every turn's id, its place in the sort and its slot, no render")
      :growth :linear
@@ -351,3 +349,37 @@
           [st2 _] (#'seon.render.proc/pass-view (#'seon.render.proc/invalidate (assoc st1 :main-db (:db-after r)) touched) :a1)]
       ;; the agent's two components (its head, its line in the sidebar of root's agents), whatever the rows
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
+
+(defn ctx-of
+  "The input of size n: an agent's held record (seon.ctx/build's shape) of one run, its task with one proof,
+  one turn, and n evals, each a record of a short form and its value; and the renders a view reads
+  the db through, as a map lookup each (the db's own cost is theirs, not the view's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  [{:tree {:t n :branch :b
+    :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
+                    :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
+                    :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
+    :evals (into {} (for [i (range n) :let [id (str "e" i)]]
+                      [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
+                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
+   (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
+     {:db (ts/test-db) :cites (constantly []) :task-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
+
+(deftest a-view-costs-its-parts
+  ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its
+  ;; members, the conversation sorted once
+  (cost/proof
+    {:of 'seon.render/render-ctx :input 'seon.render-cost-test/ctx-of
+     :n "evals in the agent's ctx"
+     :work (str "one pass over ctx's members: the task's, the proofs' and the run's parts (a few contracted calls, "
+                "fixed), then a part per eval, each its record less its id, and the conversation sorted by entity "
+                "id once (n log n comparisons, no contracted call), and each eval asked once whether its value has a render "
+                "of its own (its tile: four contracted calls): linear in the evals")
+     :growth :linear
+     ;; measured: 4 calls and 244 KB at 100 evals before the tiles; each eval now asks once whether its
+     ;; value has a render of its own (its tile: render-of, own-key, schema-of, declared), 404 calls and
+     ;; 372 KB at 100
+     :per-n {:calls 4 :bytes 3700}
+     :fixed {:calls 4 :bytes 10000}
+     :sizes [100 1000 4000]}))

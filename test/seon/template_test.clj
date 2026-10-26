@@ -69,7 +69,7 @@
 
 (deftest each-steps-instructions-are-its-task-briefly-prose-first
   ;; root, 2026-10-25: each step's instructions short, prose first (its goal, when it is done, by
-  ;; what means: the standard format's stage stories), with no ;; anywhere
+  ;; what means: the standard format's stage task data), with no ;; anywhere
   (doseq [[k v] tpl/instructions]
     (is (str/starts-with? v "Your task: ") (str k ": its goal first"))
     (is (not (str/includes? v ";;")) (str k ": no ;; reaches the model"))
