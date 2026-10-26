@@ -1053,14 +1053,14 @@
   answers a write on main ({:ok true :t}, seon.writer/commit-batch: the one answer of that shape
   this proc asks for; a branch's write is answered otherwise) before its commit reaches this proc
   on :main, another in, so a step taking the answer would read a db older than its own write.
-  Before main's first commit every such answer is ahead of it."
+  Before main's first commit every answer waits for it: no step has a db to read yet."
   {:malli/schema [:=> [:cat :map :map] :boolean]}
-  [st m] (let [{:keys [ok t]} (:r m)] (boolean (and ok (int? t) (or (nil? (:t st)) (< (:t st) t))))))
+  [st m] (let [{:keys [ok t]} (:r m)] (boolean (or (nil? (:t st)) (and ok (int? t) (< (:t st) t))))))
 
 (defn- take-answer
   "[st requests] with answer m taken by the flight step that asked it (advance), and the next
   pass when that ended its flight."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state [:map [:tag :int] [:r :any]]] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st m]
   (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
         [st [aid step]] (step/answered st (:tag m))

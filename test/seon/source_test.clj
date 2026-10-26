@@ -461,8 +461,9 @@
     (is (every? #(str/starts-with? % "reference-code/") (keys (:pins r))))))
 
 (deftest a-test-that-reaches-a-process-is-found-by-the-reach-walk
-  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (a shell, a
-  ;; fork, a root of its own, the binary) never runs automatically, only when named; it is
+  ;; root's ruling (2026-10-22, owner 2026-10-23): a test that reaches a process (an agent, a
+  ;; fork, a root of its own, the binary) never runs automatically, only when named; a shell call
+  ;; is none (audit 2026-10-26, item 7: it left main-test's laws out of every plain prove). It is
   ;; found by the compiler's facts (the one reach walk, :seon.config.source/process-vars),
   ;; never a marker. Each process var, reached directly or through a helper, and a test that
   ;; reaches none. Step E's run 4: a change to seon.problems/report reached tests that boot a
@@ -471,7 +472,8 @@
                   " [seon.lib :as lib] [seon.test-store :as ts] [seon.agent-test :as at] [seon.program :as sp]))\n\n"
                   "(defn- shell-ok? [] (zero? (:exit (sh/sh \"true\"))))\n\n"
                   "(deftest via-shell (is (shell-ok?)) (is (= 2 (p/twice 1))))\n\n"
-                  "(deftest via-fork (is (lib/fork! (fn [] 0))))\n\n"
+                  "(defn- forks? [] (lib/fork! (fn [] 0)))\n\n"
+                  "(deftest via-fork (is (forks?)))\n\n"
                   "(deftest via-binary (is (ts/binary-sh \"./seon\" \"version\")))\n\n"
                   "(deftest via-root (is (at/in-agent [\"1\"])))\n\n"
                   ;; tree-readers names binary-sh and a shell as quoted data: a test that only reaches that list
@@ -483,11 +485,11 @@
                                                                "test/app/proc_test.clj" text}))
         idx (program/reach-index db {:env "" :tree ""})
         mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
-    (is (= {'app.proc-test/via-shell true 'app.proc-test/via-fork true 'app.proc-test/via-binary true
+    (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork true 'app.proc-test/via-binary true
             'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
            (update-vals mine :process?))
-        "each process var marks the test that reaches it, and only that")
-    (is (= #{'app.proc-test/via-shell 'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
+        "each process var marks the test that reaches it, and only that: a shell is none")
+    (is (= #{'app.proc-test/via-fork 'app.proc-test/via-binary 'app.proc-test/via-root}
            (set (filter #(= "app.proc-test" (namespace %)) (program/process-tests idx)))))
     ;; only seon.test-store/binary-sh runs target/seon (:seon.config.source/binary-vars): a shell
     ;; or a fork is a process, not the binary, so a run of only those builds nothing (via-root
@@ -497,10 +499,11 @@
            (update-vals mine :binary?)))
     (testing "why a test is a process test: the process var it uses, and the chain of calls to it (dogfood 2026-10-25: :deferred named the test and nothing else)"
       (let [g (program/reach-graph db nil)]
-        (is (= {:uses ['clojure.java.shell/sh] :through ['app.proc-test/via-shell 'app.proc-test/shell-ok?]}
-               (program/process-path g 'app.proc-test/via-shell)) "through its helper")
-        (is (= {:uses ['seon.lib/fork!] :through ['app.proc-test/via-fork]}
-               (program/process-path g 'app.proc-test/via-fork)) "used by the test itself")
+        (is (nil? (program/process-path g 'app.proc-test/via-shell)) "a shell, even through a helper, is no process")
+        (is (= {:uses ['seon.lib/fork!] :through ['app.proc-test/via-fork 'app.proc-test/forks?]}
+               (program/process-path g 'app.proc-test/via-fork)) "through its helper")
+        (is (= {:uses ['seon.test-store/binary-sh] :through ['app.proc-test/via-binary]}
+               (program/process-path g 'app.proc-test/via-binary)) "used by the test itself")
         (is (nil? (program/process-path g 'app.proc-test/pure)) "a test that reaches no process has none")))))
 
 ;; ---- a changed file re-imports only what reaches it (task seon.source/an-import-reads-only-changed-files)

@@ -287,7 +287,7 @@
   ;; tools.reader.impl.utils (`<=clojure-1-7-alpha5 is not bound`), so a root cannot be built
   ;; open-world; with inference on the same app builds and reads.
   (let [checkout (.getCanonicalPath (java.io.File. "."))
-        out (str checkout "/target/reader-no-wp")
+        out (str checkout "/target/reader-no-wp-" (random-uuid))
         build (sh/sh "env" "JOLT_NO_WP_INFER=1" (str "JOLT_PWD=" checkout) "target/jolt/jolt" "-A:hello" "build" "-m" "build.reader" "-o" out)]
     (try
       (is (= 0 (:exit build)) "the build without whole-program inference succeeds")
