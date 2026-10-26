@@ -311,8 +311,10 @@
   filesystem. A store is named by the id it records, never its path (store-cfg), so it opens
   where it lands. A create that fails or is killed leaves only its own directory, never a data
   file holding no database at path (which every later open read as \"Database does not exist\");
-  a killed one's directory is garbage, nothing kept. Of two creators the one
-  whose rename finds path taken removes its own. Answers whether this call's store is at path."
+  a killed one's directory is garbage, nothing kept. A rename that finds a store at path lost a
+  race to another creator: its directory goes and the winner's store is opened. One that finds
+  anything else there is :seon.db/store-unplaced (docs/failure-points.md). Answers whether this
+  call's store is at path."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int] :boolean]}
   [backend path n]
   (let [tmp (str path ".making-" (random-uuid))
@@ -320,9 +322,15 @@
         placed (volatile! false)]
     (try
       (d/create-database (made-cfg tcfg))
-      (let [conn (d/connect tcfg)] (seed! conn n) (sync! tcfg) (d/release conn))
-      ;; [rc errno] (capture-native-error): a taken path is the winner's store, not a failure here
-      (vreset! placed (zero? (first (posix/c-rename tmp path))))
+      (let [conn (d/connect tcfg)] (try (seed! conn n) (sync! tcfg) (finally (d/release conn))))
+      (let [[rc errno] (posix/c-rename tmp path)]
+        (vreset! placed (zero? rc))
+        (when-not (or @placed (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path)))
+          (let [e (contract/error :seon.db/store-unplaced #'seon.db/make!
+                                  (str "a store made at " tmp " could not be renamed to " path ": " (ffi/errno-message errno))
+                                  {:path path :errno errno
+                                   :seon.error/fix "Remove what stands at the path (it holds no store: no data file), then open the store again."})]
+            (throw (ex-info (:seon.error/message e) e)))))
       @placed
       (finally
         ;; a create that threw midway may hold its env (Datahike releases the store only at its end)
@@ -338,6 +346,7 @@
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
   [backend path n main]
   (let [made? (and (not (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))) (make! backend path n))
+        ;; a store this call did not make: found there, or made by a creator that won the rename
         exists? (not made?)
         ;; read once the store is there: it records the id it was made with (store-cfg)
         cfg (store-cfg backend path)]

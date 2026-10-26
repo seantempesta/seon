@@ -217,22 +217,32 @@
   ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
   ;; after its env had made data.mdb, and the path then held a file with no database that no open
   ;; recovered ("Database does not exist"). Here a child creates a store and is killed the moment a
-  ;; data file shows at the path: each path then holds a whole store or none, and the next open
-  ;; answers either. Ten creates (n <= 20); stores on disk of this test's own, removed at the end
+  ;; data file shows, at the path or in a directory beside it (where a create builds it): each path
+  ;; then holds a whole store or none, and the next open answers either. Ten creates (n <= 20); the
+  ;; kill's moment moves with the machine, the verdict holds for any. Stores on disk of this test's
+  ;; own, removed at the end
   (let [base (str (System/getProperty "user.dir") "/target/db-test-create-" (random-uuid))
+        data-shown? (fn [path]
+                      (or (.exists (java.io.File. (str path "/data.mdb")))
+                          (some #(and (str/starts-with? (.getName ^java.io.File %) (str (.getName (java.io.File. path)) ".making-"))
+                                      (.exists (java.io.File. ^java.io.File % "data.mdb")))
+                                (.listFiles (java.io.File. base)))))
         killed (fn [path]
-                 (let [f (java.io.File. (str path "/data.mdb"))]
-                   (lib/fork! {:child #(pdb/open! :lmdb path 0 :db)
-                               :refused (fn [n] {:refused n})
-                               ;; the kill follows the data file's first sight (a store made whole
-                               ;; shows it only once made); a bound on looking, not a clock
-                               :parent (fn [pid] (loop [i 0] (when (and (not (.exists f)) (< i 100000000)) (recur (inc i))))
-                                         (lib/c-kill pid 9) (lib/wait-status pid))})))
+                 (lib/fork! {:child #(pdb/open! :lmdb path 0 :db)
+                             :refused (fn [n] {:refused n})
+                             ;; a bound on looking, never a verdict: a kill at any moment must leave a whole store or none
+                             :parent (fn [pid] (loop [i 0] (when (and (not (data-shown? path)) (< i 10000000)) (recur (inc i))))
+                                       (lib/c-kill pid 9) (lib/wait-status pid))}))
         opens (fn [path] (try (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true) :opens)
                               (catch Exception x (ex-message x))))]
+    (.mkdirs (java.io.File. base))
     (try
       (is (= (repeat 10 :opens) (vec (for [i (range 10) :let [p (str base "/store-" i)]] (do (killed p) (opens p)))))
           "every path a killed create left opens")
+      (testing "a create that completes leaves nothing beside its store"
+        (let [p (str base "/whole")]
+          (is (= :opens (opens p)))
+          (is (empty? (filter #(str/starts-with? (.getName ^java.io.File %) "whole.making-") (.listFiles (java.io.File. base)))))))
       (finally (clojure.java.shell/sh "rm" "-rf" base)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
