@@ -143,7 +143,7 @@
                            (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task run (= "outside" (:model env))))) {:origin :context})]
                              (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:out r)}))
                            (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))}
-   :message {:doc "Send a running agent a message (the owner's words): root delivers it, and the agent's next turn reads it in its current-state block (:messages). The page's message bar sends the same request (seon.root/message!)."
+   :message {:doc "Send an agent a message (the owner's words): an entry on main to the run it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}} :required ["agent" "body"]
              :answer (fn [sys ag req] @(c/message! sys ag (:body req)))}
    :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."

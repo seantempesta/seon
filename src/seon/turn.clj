@@ -150,26 +150,30 @@
      :will-merge will-merge :tests tests :attention attention}))
 
 (defn- take!
-  "The messages delivered since the last turn, taken before the turn's request is made, so each
-  sits in the conversation before the page that shows what came after it (a session's next stage
-  opens with root's message, seon.reconcile/stage-boundary, before that stage's first page). The turn is their reader: a message that is a fact is written on this branch first,
-  the same fact root wrote on main, and named by id, so its text is read again from the commit.
-  A read that is not the run's turn (take? false: an observer's read of an agent its model
-  drives) shows the inbox and leaves it, each message as it was sent. Answers the observations
-  they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when there are some."
+  "The entries since the last turn (a person's message, root's at a stage boundary, a refused
+  verdict: :seon.message/kind), taken before the turn's request is made, so each sits in the
+  conversation before the page that shows what came after it (a session's next stage opens with
+  its :stage entry, seon.reconcile/stage-boundary, before that stage's first page). They are the
+  facts main holds to the session's runs that this branch does not (seon.agent/untaken-entries):
+  delivery is the fact, which root syncs before anything that follows it. The turn is their
+  reader: each is written on this branch first, the same fact root wrote on main, and named by
+  id, so its text is read again from the commit; with them, what root wrote on main of the
+  agent's own entities (seon.agent/untaken-facts). The inbox holds the sends no fact holds
+  (another agent's), shown and taken with them. A read that is not the run's turn (take? false:
+  an observer's read of an agent its model drives) shows both and writes nothing. Answers the
+  observations they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when
+  there are some."
   {:malli/schema [:=> [:cat :boolean] :map]}
   [take?]
-  (let [msgs (agent/inbox)
-        {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
-        _ (when (seq facts)
-            (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
-        _ (agent/commit!)
-        ;; taken once their facts are committed: a refused write leaves them in the inbox
-        _ (when take? (agent/taken! (count msgs)))]
+  (let [sends (agent/inbox)
+        entries (if take? (agent/take-main!) (agent/untaken-entries))]
+    ;; taken once their facts are committed: a refused write leaves them for the next turn
+    (when take? (agent/taken! (count sends)))
     (cond-> {}
-      (seq facts) (assoc :message-ids (mapv :id facts))
-      ;; a send no fact holds (another agent's, until its sender writes one)
-      (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))))
+      (and take? (seq entries)) (assoc :message-ids (mapv :id entries))
+      ;; an observer's read: the entries as they are, unwritten
+      (and (not take?) (seq entries)) (assoc :messages (mapv #(select-keys % [:from :body]) entries))
+      (seq sends) (update :messages (fnil into []) (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) sends)))))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -412,8 +416,11 @@
           (let [m (branch/merge-main!)]
             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
           (empty? reasons) (end! st :green nil nil)
-          stop (end! st (:outcome stop) (:reason stop) nil)
+          ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
+          ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
+          (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
+          stop (end! st (:outcome stop) (:reason stop) nil)
           :else (let [st' (act! st obs model)]
                   (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
