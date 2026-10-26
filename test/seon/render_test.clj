@@ -1083,7 +1083,7 @@
         branch (d/db-with branch [{:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
-                                                                :reasons ["demo/f-test is red"]}}}])
+                                                                :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
         parts (r/render-ctx c (seon.context/renders branch))
         ks (mapv :key parts)

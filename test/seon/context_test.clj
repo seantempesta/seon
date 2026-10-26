@@ -752,7 +752,8 @@
             "prose as content, the reasoning as returned, the call")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (str/starts-with? (:content (peek r1)) "{:page {[:run]") "a turn taken: the run's part alone, its turns taken")
+        (is (str/includes? (:content (peek r1)) "[:run]") "a turn taken: the run's part, its turns taken")
+        (is (str/includes? (:content (peek r1)) "2 of 4") "and the status, the turn of how many")
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
 

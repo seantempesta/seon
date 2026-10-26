@@ -179,7 +179,10 @@
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
-        [prev turn] (take-last 2 (cons nil (sort-by :seon.turn/n (filter #(= :model (:seon.turn/origin %)) (vals (:turns run))))))
+        ;; the newest model turn and the one before it (its last reply)
+        ts (vec (sort-by :seon.turn/n (filter #(= :model (:seon.turn/origin %)) (vals (:turns run)))))
+        turn (peek ts)
+        prev (get ts (- (count ts) 2))
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
                          :opened (boolean (:seon.eval/opened e))
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})
