@@ -397,6 +397,11 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
+ ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
+ ;; a-contract-carries-its-cost-bound 2026-10-26 (test.check's sample sizes, 0 to 100). At the bound:
+ ;; no case is drawn larger; a bound must hold past it on its own terms, which its :gen can draw.
+ :seon.config.proofs/case-sizes 101
  ;; Unit: engine ticks. What one measure of a call's ticks may be off by, whatever the load: Chez
  ;; feeds the timer in chunks of 1,000 ticks, and some calls are charged one whole chunk more
  ;; than others on the same input, plus up to ~50 ticks. Provenance: worktree session store,

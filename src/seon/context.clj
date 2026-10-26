@@ -627,7 +627,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (apply array-map (mapcat (fn [p] [(:key p) (:html (render/part-faces p))])
-                           (filter #(= :task (:region %)) (render/html c (assoc (renders db) :schema :seon.render/render-ctx))))))
+                           (filter #(= :task (:region %)) (render/html (assoc (renders db) :schema :seon.render/render-ctx) c)))))
 
 (defn- told?
   "Is ctx path p told to the model elsewhere: by its transcript (an eval's record, its turns and
