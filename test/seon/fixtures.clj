@@ -8,7 +8,7 @@
   task's agent redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.task :as task] [seon.source :as source] [seon.reader :as reader]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
@@ -262,6 +262,23 @@
   (my.turn/wait), so each run parks and the next message wakes it (design agent-loop section 2)."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(my.turn/wait)")
+
+(defn stage-decls
+  "Request decl as the staged tasks a request once was, for the tests of what reads them
+  (seon.task/session-key, seon.reconcile/stage-boundary): decl as the design step, then
+  <name>-implement needing it, then <name>-merge needing that, all on design's branch. A
+  request is one :whole task now (seon.template/request)."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  (let [tns (:seon.task/ns decl) nm (:seon.task/name decl)
+        did (task/task-id tns nm) iid (task/task-id tns (str nm "-implement"))
+        b (or (:seon.task/branch decl) (task/default-branch did))]
+    [(assoc decl :seon.task/kind :design :seon.task/branch b :seon.task/instructions "Write the proof red, and the plan.")
+     {:seon.task/ns tns :seon.task/name (str nm "-implement") :seon.task/kind :implement :seon.task/branch b
+      :seon.task/plan "" :seon.task/instructions "Make the proofs pass." :seon.task/needs #{did}}
+     {:seon.task/ns tns :seon.task/name (tpl/merge-name nm) :seon.task/kind :merge :seon.task/branch b
+      :seon.task/plan (str "Merge the work of task " iid " into main.") :seon.task/instructions (tpl/instructions :merge)
+      :seon.task/needs #{iid}}]))
 
 (defn stages
   "The scripted model of a request's stages on one session (seon.agent-test): the design writes

@@ -707,11 +707,11 @@
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
   ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through the stages' one transaction
-  ;; (seon.template/stages, which a request no longer makes: a whole task has no next stage) and
+  ;; (seon.fixtures/stage-decls: a request is one whole task now, with no next stage) and
   ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
-  (let [code (str "(let [_ @(seon.root/transact-main! sys (seon.template/request-tx @(:conn sys) (seon.template/stages {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})))"
+  (let [code (str "(let [_ @(seon.root/transact-main! sys (seon.template/request-tx @(:conn sys) (seon.fixtures/stage-decls {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})))"
                   " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"

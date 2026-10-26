@@ -25,7 +25,7 @@
   ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
   ;; the task's references, and so its context, exactly as a plan's does (the navigation functions
   ;; every kind shares are the help page's, docs/agent.md)
-  (doseq [kind [:design :implement :test :merge]
+  (doseq [kind [:merge :whole]
           :let [[written] (task/create-tx (db-with-program) [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
     (is (= (set (ref/names (template/instructions kind))) (set (:seon.task/references written))) (str kind ": every name, derived"))))
 
