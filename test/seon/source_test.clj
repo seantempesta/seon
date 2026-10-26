@@ -97,6 +97,16 @@
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
     [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
 
+(deftest a-change-to-a-namespace-with-no-file-is-named-never-dropped
+  ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
+  ;; so a merge of source with nowhere to write it records that (seon.reconcile :octopus-merged)
+  (let [main (main-with-file)
+        [main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")
+        [main3 ours3] (merged main 'app.no-file "(defn probe [] 1)")]
+    (is (= {} (source/unfiled-forms main2 ours)) "a filed namespace's change has its file")
+    (is (= [] (source/changed-files main3 ours3)))
+    (is (= {'app.no-file [[:var 'app.no-file/probe]]} (source/unfiled-forms main3 ours3)))))
+
 (deftest a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
     (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
@@ -256,13 +266,25 @@
         tree (str dir "/tree")
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
+        ;; and its own results directory: a proof that resolves its var at run time
+        ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
+        ;; stored there closed its task with no turn and merged nothing
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+               :env {"SEON_TEST_RESULTS" (str dir "/test-results")}}
+        ;; any failure or error in this test keeps its boot logs: each report passes through
+        red (volatile! false)
+        report clojure.test/report
+        ;; bin/root start truncates runs/root.log: each boot's log is copied to its own file
+        ;; (runs/boot-N.log) before the next boot, so a red keeps every boot's
+        boots (volatile! 0)
+        keep-boot! (fn [] (sh/sh "cp" (str dir "/runs/root.log") (str dir "/runs/boot-" (vswap! boots inc) ".log")))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
                                                        "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
         ;; the printed value of a root eval; a reply that is an error stays the error value
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))]
+    (binding [clojure.test/report (fn [m] (when (#{:fail :error} (:type m)) (vreset! red true)) (report m))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
@@ -270,9 +292,13 @@
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
-        (is (= 2 (count (:commits t2))) "two merges committed")
+        (is (= 2 (count (:commits t2)))
+            (when-not (= 2 (count (:commits t2)))
+              (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
+                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out ?turns :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out] [(get-else $ ?r :seon.run/turns :none) ?turns]]) @(:conn sys))))")))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
+        (keep-boot!)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
         ;; does): main still holds the old one, which load-all! runs at boot (and another test
         ;; namespace's require marks it loaded), and the import must still apply the new
@@ -287,6 +313,7 @@
           (is (= [2 [1 2]] (ask "[(seon.generation/generation) (seon.generation/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
+              _ (keep-boot!)
               nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
           (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
@@ -294,9 +321,17 @@
               "the new generation runs both, resumed on main holding its generation")))
       (finally
         (ts/stop-root! @root)
+        (keep-boot!)
+        ;; a red keeps every boot's log (target/restart-test-<uuid>/boot-N.log, named in the
+        ;; failure), the evidence a deleted scratch dir took with it
+        (when @red
+          (let [kept (str here "/target/restart-test-" (random-uuid))]
+            (.mkdirs (java.io.File. kept))
+            (doseq [n (range 1 (inc @boots))] (sh/sh "cp" (str dir "/runs/boot-" n ".log") kept))
+            (println "the restart test's boot logs kept in" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
-        (sh/sh "rm" "-rf" dir)))))
+        (sh/sh "rm" "-rf" dir))))))
 
 (deftest a-schema-file-round-trips-through-the-program
   ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
