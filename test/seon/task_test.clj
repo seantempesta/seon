@@ -21,15 +21,6 @@
     (is (not (contains? (first (task/create-tx (db-with-program) [(decl "No names here.")])) :seon.task/references))
         "no names, no key")))
 
-(deftest the-writer-derives-a-tasks-sections
-  ;; the sections a plan cites, by address, beside the names it cites: the same producer, the same
-  ;; text, the one parser (seon.ref/addresses); a page cited with no section is no section
-  (let [[written] (task/create-tx (db-with-program) [(decl "Read [vectors](docs/vector.md#the-pyramid), docs/ctx.md#the-pattern and docs/plan.md; make `demo/f` pass.")])]
-    (is (= #{"docs/vector.md#the-pyramid" "docs/ctx.md#the-pattern"} (:seon.task/sections written)))
-    (is (= #{'demo/f} (set (:seon.task/references written))) "its names beside them")
-    (is (not (contains? (first (task/create-tx (db-with-program) [(decl "Make `demo/f` pass.")])) :seon.task/sections))
-        "no section, no key")))
-
 (deftest a-templates-instructions-are-cited-as-a-plan-is
   ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
   ;; the task's references, and so its context, exactly as a plan's does (the navigation functions

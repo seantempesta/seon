@@ -653,11 +653,3 @@
   [text]
   (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (distinct))
         (:seon.ref/citations (parse nil text))))
-
-(defn addresses
-  "The wiki sections text cites (a page's path with a section's anchor), as their addresses, once
-  each in first-mention order: names' twin for the sections a text cites."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
-  [text]
-  (into [] (comp (filter :seon.ref/anchor) (map #(str (:seon.ref/path %) "#" (:seon.ref/anchor %))) (distinct))
-        (:seon.ref/citations (parse nil text))))
