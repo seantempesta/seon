@@ -65,6 +65,16 @@
     (is (= [(:work tpl/instructions) (:merge tpl/instructions)] (mapv :seon.task/instructions ds)))
     (is (not (task/merges? (:seon.task/kind w))) "the work task does not merge itself")
     (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
+    ;; the capped runs of 2026-10-26 (notes: context-for-20-turns): three agents hunted a bug main had
+    ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
+    ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
+    ;; wrong and write the deftest red, and build its input as the existing tests build theirs
+    (let [w (:work tpl/instructions)
+          steps ["reproduce what the plan says is wrong in one eval" "if the output is already right" "(my.task/fail! "
+                 "Once the output is wrong, stop reading" "as a deftest" "existing tests build theirs" "never the live db"
+                 "register it" "run it red" "make it pass"]]
+      (is (every? #(str/includes? w %) steps) "each step is in the design-build instructions")
+      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: reproduce, fail! or stop reading, the deftest, red, green"))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 

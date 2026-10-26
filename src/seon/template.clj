@@ -59,14 +59,15 @@
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. You do it at the REPL, proof first: reproduce what the plan says is wrong as a deftest, evaluated in its "
-              "test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your branch's program, so you write "
-              "no file), register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then make "
-              "it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
-              "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. If the "
-              "plan's premise is false (what it says is wrong is not), fail the task with the evidence "
-              "(``(my.task/fail! \"why\" evidence)``) rather than saying so in prose. Its merge task brings main's work in "
-              "after you.")
+              "branch. First reproduce what the plan says is wrong in one eval and read its output: if the output is already "
+              "right, the premise is false, so fail the task with that output at once (``(my.task/fail! \"why\" evidence)``). "
+              "Once the output is wrong, stop reading: write it as a deftest in its test namespace (``(in-ns 'ns.x-test)``, then "
+              "the deftest: what you evaluate is your branch's program, so you write no file), its input built as the function's "
+              "existing tests build theirs (their helpers and fixtures, never the live db, ordered literals where order shows), "
+              "register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then make it pass "
+              "by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
+              "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. Its "
+              "merge task brings main's work in after you.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
                "work merged in. You do it at the REPL, proof first: reproduce what the plan says is wrong as a deftest, evaluated "
                "in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your branch's program, so you "
