@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.system :as system] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -1093,6 +1093,17 @@
         (#'p/pass (assoc st' :waiting {3 debug} :recorded (seon.problems/health db)) o2)
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
+
+(deftest a-whole-tasks-page-holds-its-instructions
+  ;; the context audit of 2026-10-26 (notes: known-context-problems): the task part drew the plan and
+  ;; dropped the task's own data, its instructions with it, so no agent read how its kind is worked
+  ;; (reproduce first, fail! when already right, stop reading once wrong); now drawn above the plan, whole
+  (let [db (ts/test-db)
+        db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
+        h (h/html (:html (r/part-faces {:key [:task] :value {:seon.task/id "demo/w"} :schema :seon.render/task-page :db db})))]
+    (is (str/includes? h "reproduce what the plan says is wrong") "the whole instructions are on the page")
+    (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
+    (is (< (str/index-of h "reproduce what the plan says is wrong") (str/index-of h "Make w true.")) "above the plan")))
 
 (deftest a-view-is-its-ctxs-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts (slice 2a of the one derivation): an agent's ctx as
