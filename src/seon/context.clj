@@ -291,14 +291,6 @@
     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
                 :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it"))))
 
-(defn first-t
-  "Entity e's first transaction on db: the least tx of its datoms (an identity's, which an upsert
-  never writes again, among them), the order an entry was written in. A fact of history, read when
-  a render needs it (a view orders its conversation by it), never held: memoize it by e, since it
-  never changes."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
-  [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce min)))
-
 (declare cited)
 
 (defn task-data
@@ -338,34 +330,6 @@
       near (assoc :similar near)
       (not write-set?) (dissoc :write-set)))))
 
-(defn- latest-t
-  "The newest transaction of entity e's datoms on db, or nil when it has none: what moves when
-  anything of e changes. One seek of e."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
-  [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce max)))
-
-(defn- var-entities
-  "The entities var v's page reads on db: its var, its form and the forms that name it (its
-  callers), or none when v resolves to nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:sequential pos-int?]]}
-  [db v]
-  (if-let [e (pdb/eid db :var/name v)]
-    (cons e (concat (some-> (d/entity db e) :var/form :db/id vector)
-                    (map :e (d/datoms db :avet :form/refs v)) (map :e (d/datoms db :avet :form/quoted v))))
-    ()))
-
-(defn cites
-  "The program's vars task m's plan cites beside its proofs (program-vars: not a
-  reproduction's test helper, library call or handle), in the plan's order, each once: each is its own
-  part of the task's page ([:task :cites sym], seon.render/render-ctx, drawn by `cited`), so a cited
-  var's edit changes that part alone."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :qualified-symbol]]}
-  [db m]
-  (let [t (task/task db (:seon.task/id m))
-        {:keys [plan proofs]} (:seon.task/accumulated t)]
-    (into [] (comp (map :seon.ref/name) (remove (set proofs)) (distinct))
-          (program-vars db (ref/references db (str plan "\n" (:seon.task/instructions t)))))))
-
 (defn cited
   "Var v as the task's page shows it: its source and its callers (docs/callers), or that it
   resolves to nothing."
@@ -373,46 +337,6 @@
   [db v]
   (let [r (docs/resolve-ref db v :code)]
     (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (assoc r :callers (docs/callers db v)))))
-
-(defn cited-key
-  "What `cited` reads for var v on db, as a value: v and the newest transaction of each entity it
-  reads (var-entities), so its part draws again only when one of them is written."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :any]}
-  [db v] [v (into (sorted-map) (for [e (var-entities db v)] [e (latest-t db e)]))])
-
-(defn task-key
-  "What task m's task data reads on db beside its cited vars (each its own part, `cited-key`), as a
-  value: its accumulated plan, instructions and proofs, and the newest transaction of each entity
-  it reads beside them (each proof's var with its forms; each section cited; the tasks along
-  :needs, in the accumulated plan). Equal keys, an equal task data, so a view's memo of it is a key
-  compare. Not read: what task-data reads beside the db (a cited file's text on disk, a
-  namespace's meta in the process). Work: the plan's references parsed, a seek per entity it names."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
-  [db m]
-  (let [t (task/task db (:seon.task/id m))
-        {:keys [plan proofs]} (:seon.task/accumulated t)
-        cs (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        es (concat (mapcat #(var-entities db %) proofs)
-                   (for [c cs :let [a (:seon.ref/address c) e (when a (pdb/eid db :seon.section/address a))] :when e] e))]
-    [(:seon.task/accumulated t) (:seon.task/instructions t)
-     (into (sorted-map) (for [e (distinct es)] [e (latest-t db e)]))]))
-
-(defn related-key
-  "What related reads for task entity te on db beside the plan's reference graph (the task's key and
-  its cited vars' keys, which render-ctx composes with this one), as a value: the count shown, and
-  the newest vector written (its text's transaction, one seek of the indexed :seon.vector/text-t:
-  any text embedded since, the plan's or a section's or a form's, moves it)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
-  [db te]
-  [(related-count db te) (:v (first (d/rseek-datoms db :avet :seon.vector/text-t)))])
-
-(defn renders
-  "What a view reads db through (seon.render/render-ctx's fs), over db: the db its parts' renders draw
-  on, a task's cited vars, the keys its memo compares (a task's task key, a cited var's key, a
-  task entity's related key), and an entity's first transaction (the conversation's order)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn]
-                                                  [:related-key :seon.host/fn] [:first-t :seon.host/fn]]]}
-  [db] {:db db :cites #(cites db %) :task-key #(task-key db %) :cited-key #(cited-key db %) :related-key #(related-key db %) :first-t #(first-t db %)})
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from
@@ -652,13 +576,15 @@
 
 (defn page
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
-  commit): the :task region of render-ctx (seon.render/render-ctx), each part's hiccup exactly as
-  its render returned it, by key, in order: the same hiccup the person's page shows (seon.repl/page
-  draws it through this process's memo)."
+  commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
+  seon.render/draw), each component's hiccup exactly as its render returned it, by its element id,
+  in order: the same hiccup the person's page shows (seon.repl/render-ctx-hiccup draws it through this
+  process's walk)."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (apply array-map (mapcat (fn [p] [(:key p) (:html (render/part-faces p))])
-                           (filter #(= :task (:region %)) (render/html (assoc (renders db) :schema :seon.render/render-ctx) c)))))
+  (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
+    (try (apply array-map (mapcat identity (render/placed-hiccup w "#p-task")))
+         (finally (render/dispose-walk! w)))))
 
 (defn- told?
   "Is ctx path p told to the model elsewhere: by its transcript (an eval's record, its turns and

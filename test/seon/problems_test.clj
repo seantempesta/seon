@@ -733,14 +733,14 @@
 
 (defn- literal-catch-sites
   "The old bin/laws rule over text: each line of each src file but e2e.clj (check.clj is test/'s now), strings
-  and comments stripped, holding `(catch ` is a site of the last top-level def before it, as
-  ns/name."
+  and comments stripped, holding `(catch ` is a site of the last top-level def before it (a deftype's
+  or defrecord's by its type's name), as ns/name."
   [files]
   (set (for [[path text] files :when (not (re-find #"/(check|e2e)\.clj$" path))
              :let [nsym (seon.source/file-ns text)]
              site (loop [lines (str/split-lines text) in-str? false n nil acc []]
                     (if-let [l (first lines)]
-                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce) (\S+)(?: (\S+))?" l)]
+                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce|deftype|defrecord) (\S+)(?: (\S+))?" l)]
                                 (if (str/starts-with? (second m) "^") (nth m 2) (second m))
                                 n)
                             [code in-str?] (loop [cs (seq l) in-str? in-str? out []]
@@ -765,7 +765,8 @@
         db (d/db-with db0 (seon.source/import-tx db0 files))
         class (set (map #(str (:site %)) (get-in (problems/health db) [:classes :unnamed-site :rows])))
         literal (literal-catch-sites files)
-        extras {}]
+        ;; a catch in a deftype's method is its form's, which defines the type and its factory both
+        extras {"seon.ratom/->Reaction" "the factory seon.ratom/Reaction's form defines"}]
     (is (seq literal))
     (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
     (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))

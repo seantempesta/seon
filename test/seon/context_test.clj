@@ -373,10 +373,10 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(str/includes? (:content (second r0)) %) ["{:page" "[:task :cites demo/f]" "Doubles." "[:status]" "1 of 4"]) "the page whole, by part key: the turn's status too")
-        (is (str/includes? (:content (peek r1)) "[:task :cites demo/f]") "the cited var's edit: its part, by its key")
+        (is (every? #(re-find % (:content (second r0))) [#"\{:page" #"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+" #"1 of 4"]) "the page whole, by component key: the turn's status too")
+        (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
-        (is (not (str/includes? (:content (peek r1)) "[:task]")) "a part that did not change is not told again")
+        (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
         (is (str/includes? (:content (peek r1)) "2 of 4") "the turn's status, what changed of it")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
@@ -404,7 +404,7 @@
             page (context/page db (ctx/build db a :b))
             text (print/text (vary-meta page assoc :seon.print/full true))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
-        (is (contains? page [:status]) "the status is on the page")
+        (is (some #(str/starts-with? % "status-") (keys page)) "the status is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the status")))))
@@ -445,16 +445,18 @@
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
-        hiccup (seon.render.ui/cited {:db db} {:var 'ctx-big/big})
+        ;; the task's record as ctx holds it: its newest run's task citing the var, with its form
+        c {:runs {1 {:task {:cited {2 {:var/name 'ctx-big/big :form {:form/src src}}}}}}}
+        hiccup (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 'ctx-big/big)
         html (seon.web.html/html hiccup)
         model (print/text (vary-meta hiccup assoc :seon.print/full true))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "seon.context/cited") "its cut names the form that reads the rest")
+    (is (str/includes? html "seon.render.ui/cited-of") "its cut names the form that reads the rest")
     (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the call's budget: " (select/estimate model) " tokens"))
     (is (str/includes? model "#'seon.render/html") "the call as returned")
-    (is (str/includes? model "seon.context/cited") "and the cut names the form that reads the rest")
+    (is (str/includes? model "seon.render.ui/cited-of") "and the cut names the form that reads the rest")
     (is (= "[#'seon.context/cited 1 {:a 1}]" (print/text [#'seon.context/cited 1 {:a 1}])) "a vector headed by a var with no budget is data")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
@@ -798,8 +800,8 @@
             "prose as content, the reasoning as returned, the call")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (str/includes? (:content (peek r1)) "[:status]") "a turn taken: the status, the turn of how many")
-        (is (not-any? #(str/includes? (:content (peek r1)) %) ["[:task]" "[:related]" "[:run]"]) "the status alone")
+        (is (re-find #"status-\d+" (:content (peek r1))) "a turn taken: the status, the turn of how many")
+        (is (not-any? #(re-find % (:content (peek r1))) [#"task-data-\d+" #"related-\d+" #"run-head-\d+"]) "the status alone")
         (is (str/includes? (:content (peek r1)) "2 of 4"))
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
@@ -941,14 +943,16 @@
         dir (fn [& xs] (let [v (vec (concat xs (repeat (- 768 (count xs)) 0.0))) n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
         db (ts/test-db)
         db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
-                                                  :seon.section/lead (str "Section " i " says one thing. And more.")})))
+                                                  :seon.section/lead (str "Section " i " says one thing. And more.")
+                                                  :seon.section/text (str "Section " i " says one thing. And more.")})))
+        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
+        ;; held before the task cites them: a name in a namespace the program does not hold is not cited
+        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
-        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss)
-        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
@@ -992,24 +996,74 @@
       (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (context/related s te)))
           "a section embedded on the branch with the plan unchanged is in the next answer"))))
 
+(defn- walked
+  "Agent demo/a1's page on db (sections-near's, with a run of demo/r), walked live over a reactive
+  atom holding its ctx, as its process holds it: [walk atom db-cell rid]. A change is (step! walk
+  atom db-cell tx-data): the transaction applied, ctx patched by its datoms, the walk framed."
+  [db]
+  (let [db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task [:seon.task/id "demo/r"] :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        cell (volatile! db)
+        c (volatile! (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        a (seon.ratom/atom (:tree @c))
+        w (render/walker {:ref a :changes ctx/changes} #(deref cell) [(requiring-resolve (render/declared :seon.render/render-ctx)) {}])]
+    (render/frame! w nil)
+    [w a cell c (pdb/eid db :seon.run/id "demo/r#1")]))
+
+(defn- step!
+  "Transaction tx-data on walked's db: ctx patched by its datoms, the walk framed. Answers the units
+  whose html changed, by id."
+  [[w a cell c] tx-data]
+  (let [u0 (into {} (map (juxt :id :html)) (render/placed-units w))
+        r (d/with @cell tx-data)]
+    (vreset! cell (:db-after r))
+    (vswap! c ctx/patch (:db-after r) (:tx-data r) :b)
+    (reset! a (:tree @c))
+    (render/frame! w (:tx-data r))
+    (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
+      (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
+
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
-  ;; caught up), the next view shows its new source, through the parts' memo. Each cited var is its
-  ;; own part ([:task :cites sym]), so the edit's page diff is that var's part alone
-  (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
-        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
-        c (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b)
-        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (assoc acc (:key p) f)])) [memo (array-map)] (render/html (assoc (context/renders db) :schema :seon.render/render-ctx) c)))
-        [m0 fs0] (draw {} c db)
-        rep (d/with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
-        [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))
-        page (fn [fs k] (seon.web.html/html (:html (get fs k))))]
-    (is (contains? fs0 [:task :cites 'demo/g]) "the cited var, a part of its own")
-    (is (not (str/includes? (page fs0 [:task :cites 'demo/g]) ":redefined")))
-    (is (str/includes? (page fs1 [:task :cites 'demo/g]) "(defn g [] :redefined)") "the next view's part: the new source")
-    (is (= [[:task :cites 'demo/g] [:related]] (vec (for [k (keys fs1) :when (not= (page fs0 k) (page fs1 k))] k)))
-        "the edit's page diff: that var's part, and related, whose call graph it moved; the task's part not")
-    (is (identical? (get fs0 [:task]) (get fs1 [:task])) "the task's part, which cites it, from the memo")))
+  ;; caught up), the next view shows its new source. Each cited var is its own component, which reads
+  ;; the db, so the edit runs that var's component again (its db reads touched) and the task's not
+  (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
+        [w _ _ _ rid :as walk] (walked db)
+        cited (str "cited-" rid "-demo_2Fg")
+        html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/placed-units w)))]
+    (is (some? (html cited)) "the cited var, a component of its own")
+    (is (not (str/includes? (html cited) ":redefined")))
+    (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
+      (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
+      (is (some #{cited} changed) "the edit's page diff holds that var's component")
+      (is (not-any? #(str/starts-with? % "task-data-") changed) "and not the task's, which cites it"))
+    (render/dispose-walk! w)))
+
+(deftest the-task-draws-what-it-needs
+  ;; notes/context-for-20-turns-2026-10-26.md (D1-D4): the task's list draws the whole plan (D4),
+  ;; each proof written with its source (D1; its last result is the status's), each var the plan cites
+  ;; with its source (D2, a component of its own) and each section the plan cites with its text (D3)
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
+        db (d/db-with db [{:db/id "t" :form/id "demo-test/g-test" :form/src "(deftest g-test (is (= :one (g))))"}
+                          {:var/name 'demo-test/g-test :var/form "t"} [:db/add te :seon.task/proofs 'demo-test/g-test]])
+        [w _ _ _ rid] (walked db)
+        units (render/placed-units w)
+        html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
+        task (html "task-data-")]
+    (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
+    (is (str/includes? task "(deftest g-test (is (= :one (g))))") "D1: the proof written, its source")
+    (is (str/includes? (html (str "cited-" rid "-demo_2Fg")) "(defn g [])") "D2: the cited var's source, its own component")
+    (is (str/includes? task "Section 1 says one thing.") "D3: the cited section's text, not its address")
+    (render/dispose-walk! w)))
+
+(deftest a-db-component-runs-again-on-what-it-read
+  ;; a component that reads the db runs under d/with-reads: a transaction touching what it read runs
+  ;; it again, any other leaves it (the task's own keys, context/task-key and related-key, deleted)
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
+        [w :as walk] (walked db)
+        ran #(do (vreset! (:ledger w) {}) (step! walk %) (into #{} (for [[f c] (render/ledger w) :when (or (:miss c) (:same c))] (name f))))]
+    (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task-data")) "an agent written: nothing the task's data reads")
+    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task-data") "the plan rewritten: the task's data runs again")
+    (render/dispose-walk! w)))
 
 (deftest a-vars-arglists-are-its-recorded-sources
   ;; what a var declares, read from its source as the db records it (seon.reader/arglists)
@@ -1020,40 +1074,6 @@
   (let [db (d/db-with (db-with-program) (program-facts '[[demo-only/h "(defn h \"Holds what the db says.\" [a b] a)" []]]))]
     (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (docs/resolve-ref db 'demo-only/h :summary))
         "a var only the db holds: its summary from its facts")))
-
-(deftest related-key-moves-with-a-vector-written
-  ;; related is memoized by related-key: the same while nothing it reads is written, moved when a
-  ;; text is embedded (the indexed :seon.vector/text-t's newest)
-  (let [[db te dir] (sections-near "Make the page say one thing.")
-        k0 (context/related-key db te)
-        unrelated (d/db-with db [{:seon.agent/key "demo/a1"}])
-        s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
-        se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
-        embedded (d/db-with s (vector/tx-data [se] [(:max-tx s)] [(dir 1.0 0.5)] [10] "m"))]
-    (is (= k0 (context/related-key unrelated te)) "an agent written: the same key")
-    (is (not= k0 (context/related-key embedded te)) "a section embedded: a new key")
-    ;; the plan rewritten moves the task's key, which render-ctx composes into related's read
-    (is (not= (context/task-key db {:seon.task/id "demo/r"}) (context/task-key (d/db-with db [[:db/add te :seon.task/plan "Say another thing."]]) {:seon.task/id "demo/r"}))
-        "the plan rewritten: the task's key moves")))
-
-(deftest the-task-key-moves-with-what-it-reads
-  ;; the task's data (seon.context/task-data), memoized by what it read (task-key): the key is
-  ;; the same while nothing it reads is written, and moves when the plan, or a var it cites, does
-  (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
-        m {:seon.task/id "demo/r" :db/id te}
-        k0 (context/task-key db m)
-        unrelated (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
-        replan (d/db-with db [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]])
-        redef (d/db-with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] 2)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
-        caller (d/db-with db [{:db/id "c" :form/id "demo/k" :form/src "(defn k [] (g))" :form/refs #{'demo/g}}])]
-    (is (= k0 (context/task-key unrelated m)) "a run and an agent written: nothing the task's data reads, the same key")
-    (is (= (context/task-data db (task/task db "demo/r")) (context/task-data unrelated (task/task unrelated "demo/r"))) "and the same task data")
-    (is (not= k0 (context/task-key replan m)) "the plan rewritten: a new key")
-    ;; a cited var is a part of its own: its key moves, the task data's stays (seon.context/cited-key)
-    (is (= k0 (context/task-key redef m)) "a cited var redefined: the task data's key stays")
-    (is (not= (context/cited-key db 'demo/g) (context/cited-key redef 'demo/g)) "and the var's own key moves")
-    (is (not= (context/cited-key db 'demo/g) (context/cited-key caller 'demo/g)) "a new caller of a cited var: its key moves")
-    (is (= (:tx (first (d/datoms db :eavt te :seon.task/id))) (context/first-t db te)) "an entity's first transaction, its identity's")))
 
 (deftest related-fuses-the-plans-references-with-meaning
   ;; seon.context/related's graph half: the plan cites `demo/h`, so its caller demo/k (no vector:
@@ -1124,7 +1144,8 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c"
                                               :seon.task/plan "Reproduce: (let [x (demo-test/f-test)] (demo/f (clojure.string/trim x))) answers result/e1."}]))]
-    (is (= '[demo/f] (context/cites db {:seon.task/id "demo/c"})))))
+    ;; the cited set is the task's references (ctx's :cited joins them by :var/name)
+    (is (= #{'demo/f} (set (:seon.task/references (d/pull db [:seon.task/references] [:seon.task/id "demo/c"])))))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never

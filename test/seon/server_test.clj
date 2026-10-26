@@ -114,8 +114,8 @@
                                                     " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?t :seon.turn/sent _] [?t :seon.turn/n ?n]] db))")}])
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (clojure.string/includes? text "(seon.repl/page)") "the screen's form, the page, as a model's request ends with it")
-    (is (clojure.string/includes? text "[:task]") "the page by part key")
+    (is (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)") "the form that shows the render of ctx now")
+    (is (re-find #"task-data-\d+" text) "the render of ctx by component key")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))

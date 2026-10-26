@@ -475,12 +475,32 @@
 
 (declare steps)
 
+(deftest the-page-draws-what-the-task-record-holds
+  ;; the live-agents context audit (2026-10-26): the task's record held each cited var's tests and
+  ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
+  ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
+  (let [db (d/db-with (seeded 3) [{:seon.proof/latest "app.x-test/t0" :seon.proof/status :fail :seon.proof/run "r"
+                                   :seon.proof/branch "main" :seon.proof/t 1}
+                                  ;; a second test, with no result on main, and a caller that is no test
+                                  {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
+                                  {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x/g :var/form "g"}])
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
+        cited (part "cited-")
+        task (pr-str (part "task-data-"))]
+    (is (some #(and (= {'app.x-test/t0 :fail 'app.x-test/t1 :none} (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
+        (str "the cited var's tests with their last results on main (none for one main never ran), then its other callers: " (pr-str cited)))
+    (is (str/includes? task "What x does.") "the cited section's text, not only its address")
+    (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
+
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
   ;; easily update it and just add more data and render functions"): its key registered with a
   ;; render is an attribute at once; @ctx's eval is recorded as its basis, never a copy; the page
   ;; renders it from the branch, and a key whose render the branch defines is drawn by its agent as
-  ;; a part of its page (seon.repl/parts; root, 2026-10-25: "nothing is stored")
+  ;; a part of its page (seon.repl/render-ctx; root, 2026-10-25: "nothing is stored")
   (let [form '[:vector {:seon.render/html seon.ctx-test/steps} :string]
         db (seeded 3)
         reg (my.schema/registration db :lab.ctx/steps form false)]
@@ -492,21 +512,22 @@
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
           as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (reset! seon.agent/state nil))))
           rec (as-agent #(seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil))
-          drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/parts) (finally (reset! seon.agent/state nil)))
-          steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts drawn))]
+          drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (reset! seon.agent/state nil)))
+          ;; the keys it added, one component (ctx-keys) holding each key's own
+          steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
       (is (= {:schema :seon.ctx/ctx :basis {:t (:t tree) :branch :b}} (select-keys rec [:schema :basis])) "the record names the value's basis")
       (is (not (contains? (:response rec) :value)) "and holds no copy of the record")
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
-      (is (= "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:html steps))
-          "the agent draws its key, a part of its page, by the render its branch names, recording nothing")
-      (testing "the page the model reads (seon.repl/page, the screen) is the page the user sees (seon.repl/parts), hiccup for html"
-        (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/parts) (seon.repl/page)]
+      (is (str/includes? (:html steps) "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>")
+          "the agent draws its key, a component of its page, by the render its branch names, recording nothing")
+      (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
+        (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (reset! seon.agent/state nil)))
-              shown (remove (comp #{:eval :turn :message} first :key) (:parts parts))]
-          (is (= (map :key shown) (keys page)) "every part but the conversation's, in the page's order")
-          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each part's hiccup is the html the page shows, byte for byte")
-          (is (vector? (get page [:lab.ctx/steps])) "as hiccup, exactly as its render returned it")))
+              shown (:units parts)]
+          (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
+          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each component's hiccup is the html the page shows, byte for byte")
+          (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
               h (seon.web.html/html (seon.render.ui/evaluation {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
@@ -515,10 +536,10 @@
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
-              r (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/parts) (finally (reset! seon.agent/state nil)))
-              boom (some #(when (= [:lab.ctx/boom] (:key %)) %) (:parts r))]
-          (is (re-find #"cannot draw this" (:html boom)) "the render's throw, as its error's render in its part's place")
-          (is (some #(= [:lab.ctx/steps] (:key %)) (:parts r)) "and every other part drawn"))))))
+              r (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (reset! seon.agent/state nil)))
+              keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
+          (is (re-find #"cannot draw this" keys-html) "the render's throw, as its error's render in its component's place")
+          (is (re-find #"<ol><li>read the plan" keys-html) "and every other component drawn"))))))
 
 (defn boom
   "A render that throws, as an agent's unmerged one may."

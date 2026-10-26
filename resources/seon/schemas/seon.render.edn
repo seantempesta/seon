@@ -71,6 +71,9 @@
  :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
+ ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
+ ;; them): drawn in its place; :seon.error/in the render
+ :seon.render/component-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]]]
  ;; a view whose render threw (seon.render.proc/view-pass, a failure point: renders are code, and agents
  ;; write them): its page is this error, recorded as a platform problem; :seon.error/in the function it threw in
  :seon.render/view-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/view-defect]] [:view :string]
@@ -96,26 +99,9 @@
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
+ ;; an agent's page: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
+ :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
- ;; a ctx as the page and the model are drawn from it (seon.render/render-ctx, faces, drawn)
- :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]
-                    ;; a part that reads the db: what its memo compares, and the db its render draws on
-                    [:read {:optional true} :any] [:db {:optional true} :seon.host/db]
-                    ;; its region of the page (seon.render/render-ctx), and, for an eval, whether ctx holds it opened
-                    [:region {:optional true} [:enum :task :chat :tiles]] [:opened {:optional true} :boolean]]
- ;; render-ctx: the agent page's layout, a render of the record (seon.render/render-ctx), which a branch may override
- :seon.render/render-ctx [:map {:seon.render/html seon.render/render-ctx} [:tree :map]]
- ;; the task, drawn as the task's data (seon.context/task-data over the db), and its related
- :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
- :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
- ;; what the newest model turn observed (seon.render.ui/status over its basis): the task, the turn, the one before it
- :seon.render/status [:map {:seon.render/html seon.render.ui/status} [:task :seon.task/id] [:turn pos-int?] [:last {:optional true} pos-int?]]
- ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)
- :seon.render/cited [:map {:seon.render/html seon.render.ui/cited} [:var :symbol]]
- :seon.render/faces [:map [:html {:optional true} :any] [:inline {:optional true} :any]]
- ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
- :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:region {:optional true} [:enum :task :chat :tiles]]
-                         [:html {:optional true} :string] [:inline {:optional true} :string]]
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]

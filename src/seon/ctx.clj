@@ -546,7 +546,7 @@
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]]] :nil]}
   [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])}))) nil)
 
-(defn- moved
+(defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!
   records it), else what differs between the two values (a merge, a resume)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :map]] [:sequential :any]]}
