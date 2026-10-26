@@ -90,16 +90,15 @@
       (let [v (get m attr) vs (if (set? v) (sort-by #(if (map? %) (:db/id %) %) v) (if (some? v) [v] []))]
         (cap (keep (fn [x] (if by (pdb/eid db by x) (:db/id x))) vs))))))
 
-(def ^:private newest-first
-  "A collection's order: its members' ids, greatest (newest, for ids issued in time order) first; a
-  key that is no id (a new member a swap! names) after them, by its printed name. Fixed, and a
-  function of the keys alone, so a member joins or leaves by one assoc or dissoc."
-  (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b)))))
-
 (defn- members-map
-  "Pairs [[id node] …] as a collection: a map sorted newest-first."
+  "Pairs [[id node] …] as a collection: a map sorted by its members' ids, greatest (newest, for ids
+  issued in time order) first; a key that is no id (a new member a swap! names) after them, by its
+  printed name. Fixed, and a function of the keys alone, so a member joins or leaves by one assoc or
+  dissoc."
   {:malli/schema [:=> [:cat [:sequential [:tuple :any :map]]] :map]}
-  [pairs] (into (sorted-map-by newest-first) pairs))
+  [pairs]
+  (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b)))))
+        pairs))
 
 (defn- stub?
   "Is x the {:db/id e} an entity held at another path is held as?"
