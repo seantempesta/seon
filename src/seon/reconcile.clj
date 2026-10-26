@@ -637,8 +637,8 @@
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per run) as one step-fn: main's
-;; commits arrive through a sliding buffer of one (a reconciler reads main's latest db, so a
-;; commit it missed is covered by the next); each action is a flight, a short chain of
+;; commits arrive in order through a blocking buffer (:seon.config.root/reconciler-buf: it reads
+;; every commit's datoms); each action is a flight, a short chain of
 ;; requests to the api (spawn, eval, tests, the writer's reads and writes, kill), each answer
 ;; arriving on :answers keyed by its request id. An action whose run is in flight is not
 ;; started twice.
@@ -1034,10 +1034,12 @@
 
 (defn- behind?
   "Whether answer m is to a write on main that main's commits have not reached yet: the writer
-  answers a write ({:ok true :t}) before its commit reaches this proc on :main, another in, so a
-  step taking the answer would read a db older than its own write."
+  answers a write on main ({:ok true :t}, seon.writer/commit-batch: the one answer of that shape
+  this proc asks for; a branch's write is answered otherwise) before its commit reaches this proc
+  on :main, another in, so a step taking the answer would read a db older than its own write.
+  Before main's first commit every such answer is ahead of it."
   {:malli/schema [:=> [:cat :map :map] :boolean]}
-  [st m] (let [{:keys [ok t]} (:r m)] (boolean (and ok (int? t) (< (:t st -1) t)))))
+  [st m] (let [{:keys [ok t]} (:r m)] (boolean (and ok (int? t) (or (nil? (:t st)) (< (:t st) t))))))
 
 (defn- take-answer
   "[st requests] with answer m taken by the flight step that asked it (advance), and the next
@@ -1052,7 +1054,7 @@
     [st (into outs more)]))
 
 (defn reconciler-proc
-  "The reconciler. In :main (main's commits {:t :ops :db}, a sliding buffer of one) and :answers (the
+  "The reconciler. In :main (main's commits {:t :ops :db}, in order, a blocking buffer) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
   Args: :boot (this root's boot id); in :judge (outside agents' runs handed back).
   Starts deepest-first (finish chains under way)."
@@ -1061,7 +1063,7 @@
                 :judge "outside agents' runs to judge {:op :judge :run :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))
+       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
   ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
                  ::flow/in-ports {:judge (:judge args)}))

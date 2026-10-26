@@ -953,11 +953,16 @@
         [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
         ;; the answer first, as the writer sends it, then main's commit
         [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true :t (:max-tx db2) :datoms (count ops2)}})
-        [_ outs4] (main st db2 ops2)
+        [st4 outs4] (main st db2 ops2)
+        ;; a commit main's buffer has not brought yet: a later one takes the answer too
+        [db3 ops3] (commit db2 [{:seon.task/id "demo/d" :seon.task/plan "Make d true, again."}])
+        [_ outs5] (main st db3 ops3)
         stage (fn [outs] (filter #(and (= :message (get-in % [:req :op])) (= :stage (get-in % [:req :kind]))) (reqs outs)))]
     (is (= "demo/i" (get-in asked [:req :opts :task])) "the next stage's spawn")
     (is (empty? (reqs outs3)) "its write's answer waits: main has not reached the write")
-    (is (= 1 (count (stage outs4))) "main's commit of it takes the answer: the stage's entry, read off the db holding the run")))
+    (is (= 1 (count (stage outs4))) "main's commit of it takes the answer: the stage's entry, read off the db holding the run")
+    (is (empty? (:behind st4)) "and holds it no longer")
+    (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well")))
 
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
