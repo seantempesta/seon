@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/stalls MS BOUNDS LOG:PID ... — name a stalled test, never end it: while any PID runs, each LOG
-# (a shard's, bin/test) whose last "started <test>" line is followed by no write for longer than
+# (a shard's, bin/test) whose last test line is "started <test>" (no "ended" since) and no write for longer than
 # that test's bound prints and records "STALLED <test> <quiet ms> (LOG)", once per test. A test's
 # bound is its line in BOUNDS ("<test> <ms>": :seon.config.proofs/stall-factor times its own last
 # run, the plan's out/stall-bounds), else MS (:seon.config.agent/stall-ms, the floor). Exits when
@@ -14,8 +14,11 @@ while true; do
     log=${pair%:*} pid=${pair##*:}
     kill -0 $pid 2>/dev/null || continue
     alive=1
-    t=$(grep '^started' "$log" 2>/dev/null | tail -1); t=${t#started }
-    [[ -n $t && ${seen[$log]} != $t ]] || continue
+    # the shard's last test line: a test still running only after "started" (an "ended" test is done)
+    t=$(grep -E '^(started|ended) ' "$log" 2>/dev/null | tail -1)
+    [[ $t == started\ * ]] || continue
+    t=${t#started }
+    [[ ${seen[$log]} != $t ]] || continue
     b=${bound[$t]:-$MS}
     age=$(( ($(date +%s) - $(stat -f %m "$log")) * 1000 ))
     (( age > b )) && { seen[$log]=$t; echo "STALLED $t $age ms (bound $b ms, $log)" | tee -a "$log" }

@@ -215,7 +215,8 @@
 
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
-  (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); then
+  (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
+  red one printed (RED); then
   its greens stored at their digests (seon.proofs/store-greens!), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
@@ -230,7 +231,9 @@
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) nil
-                                               (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
+                                               ;; a test's end, so bin/stalls never names one that finished
+                                               :else (do (println "ended" (:test x))
+                                                         (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks))
           ;; the tree the tests read is the plan's from before the run to after it: an edit

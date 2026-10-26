@@ -240,8 +240,8 @@
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
  ;; guessed tolerance the agent proc held as a var (30 s; a model call answers or streams within
- ;; it). Past it nothing is ended. 0: no check. SEON_STALL_MS: bin/test's own proof sets a small one.
- :seon.config.agent/stall-ms #long #or [#env SEON_STALL_MS 30000]
+ ;; it). Past it nothing is ended. 0: no check.
+ :seon.config.agent/stall-ms 30000
 
  ;; ==== merges =================================================================================
 

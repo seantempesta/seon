@@ -133,10 +133,12 @@
 (defn earlier-agents-tx
   "A new boot's root is no longer the root of the agents an earlier boot started: their link to
   root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root)."
+  root's agents are this boot's (root's walk, :seon.agent/_root); and a stall one showed is over,
+  its :seon.agent/stall retracted with its process (an open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
-              [:db/retract a :seon.agent/root r])))
+  [db] (into (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
+                    [:db/retract a :seon.agent/root r]))
+             (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))
 
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
