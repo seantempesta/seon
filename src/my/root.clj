@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -87,9 +87,10 @@
                                      (contract/error :seon.root/no-gate-checkout #'my.root/gate!
                                                      "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
                                  rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (cond-> [{:seon.run/id aid
-                                                               :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
-                                                       (contract/error? r) (conj {:seon.run/id aid :seon.run/error r})))
+                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.run/deferred-results
+                                                                   (cond-> [{:seon.run/id aid
+                                                                             :seon.run/deferred-results (vec (for [[t st] rs] {:seon.proof/test t :seon.proof/status st}))}]
+                                                                     (contract/error? r) (conj {:seon.run/id aid :seon.run/error r}))))
                            [aid rs])))]
     {:asked (vec ids) :ran ran}))
 
@@ -160,7 +161,8 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
-   (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)) {:pages (count (docs/pages (config/checkout) dir))} nil)))
+   (let [[baseline tx] (root/wiki-baseline sys (config/checkout) dir)]
+     (write-declared! sys (into (docs/load-dir-tx @(:conn sys) (config/checkout) dir baseline) tx) {:pages (count (docs/pages (config/checkout) dir))} nil))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
@@ -321,7 +323,8 @@
   "Build the next generation from main's last merges commit, for what cannot load in place
   (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
   seon.program/load-changes!). Waits for the :build effect (seon.fx/build), records what it
-  answered on main (:seon.root/generation) and answers it: what `bin/root next` starts. nil
+  answered on main (:seon.root/generation, and a failure's :effect row naming it:
+  seon.error/asked-tx) and answers it: what `bin/root next` starts. nil
   when no merge was committed."
   {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
   [sys]
@@ -330,7 +333,7 @@
           g (if (contract/error? r)
               {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
               (:value r))]
-      @(root/transact-main! sys [{:seon.root/id :root :seon.root/generation g}])
+      @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.root/generation [{:seon.root/id :root :seon.root/generation g}]))
       g)))
 
 (defn next-generation
@@ -404,7 +407,9 @@
                     usage (when c (turn/usage c))
                     usd (when c (model/cost (:model req) usage))]
                 (cond
-                  (contract/error? r) {:rows rows :usd spent :error r}
+                  ;; a failed call is recorded here, closed by the next judge fact (seon.error/asked-tx)
+                  (contract/error? r) (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.judge/digest []))
+                                          {:rows rows :usd spent :error r})
                   (contract/error? sc) {:rows rows :usd spent :error sc}
                   :else
                   (let [f (judge/fact dg id version calls sc usage usd)]
