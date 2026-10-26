@@ -215,8 +215,8 @@
 
 (def fit-requests
   "The five tasks fit to measure (jolt/fit-tasks, 2026-10-24), as a user would ask for them: a
-  short problem description each, no proof, no write set (design writes its own proofs, red, and
-  names what to change), each a request for seon.template/request (one task one agent works whole:
+  short problem description each, no proof, no write set (its agent writes its own proofs, red,
+  and names what to change), each a request for seon.template/request (design-build, then merge:
   my.root/request! writes it). Kept here, not run: the clean path's measurement waits
   for the owner's go (root, 2026-10-25)."
   [{:seon.task/ns 'seon.ref :seon.task/name "a-summary-says-what-it-left"

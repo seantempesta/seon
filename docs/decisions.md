@@ -108,8 +108,8 @@ Owner, 2026-10-25: chose "Diffs between turns". `(seon.screen/show {:since t})` 
 ### Merge the agent-view branch to main once its review is done
 Owner, 2026-10-25: "873 lines isn't that much if you think it's good lets merge to main. ... I want to see the web work too so if merging to main makes that easier lets do it". Stated in: this entry.
 
-### One go for every request
-Owner, 2026-10-26: "switch to one-go for all tests until we figure out a better solution". A request is one task one agent works whole, writing its red proof, making it green and keeping it green on main's merged program; the design → implement → merge stages are kept as what it replaced. Measured first on the same ten requests, thinking off: 2/10 merged at $0.073 and 92.4% cached, against the stages' 2/10 at $0.145 and 86.3% (jolt/one-go's commits). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
+### A request is design-build, then merge
+Owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge" and "don't get rid of the other tasks. I still want to experiment later on". A request's default is its design-build task (one agent: the red proof, then green on its branch) followed by its merge task; the one-go task and the design → implement → merge stages stay, chosen for an experiment. The one-go task replaced the stages first ("switch to one-go for all tests until we figure out a better solution"), measured on the same ten requests, thinking off: 2/10 merged at $0.073 and 92.4% cached, against the stages' 2/10 at $0.145 and 86.3% (jolt/one-go's commits). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
 
 ## 2026-10-24 rulings
 
