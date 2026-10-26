@@ -1022,7 +1022,9 @@
                                " @(seon.root/call! sys {:op :render :id id}))")}
                    n
                    {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone})"}])
-        steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts (:value drawn)))]
-    (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (str "the swap! answered " (pr-str swapped) "; the parts: " (pr-str (map :key (:parts (:value drawn))))))
+        ;; the keys it added, one component (seon.render.ui/ctx-keys) holding each key's own
+        steps (some #(when (= "ctx-keys" (:id %)) %) (:units (:value drawn)))]
+    (is (str/includes? (str (:html steps)) "<ol><li>read the plan</li><li>write the test</li></ol>")
+        (str "the swap! answered " (pr-str swapped) "; the units: " (pr-str (map :id (:units (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))

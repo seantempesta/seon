@@ -910,18 +910,23 @@
 (defn task-page
   "The task its run works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its plan as prose, then what to prove,
-  the sections and the similar as a call of the one printer, [#'seon.render/html opts data],
+  each written proof with its source from ctx, the sections cited with their text and the similar
+  as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
   the task's own attributes in ctx change or a transaction touches what task-data read. Each var
   the plan cites is a component of its own (`cited`)."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [{:seon.task/keys [id kind execution]} (get-in c [:runs rid :task])]
+  (let [{:seon.task/keys [id kind execution] :as t} (get-in c [:runs rid :task])
+        ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
+        sources (into {} (for [v (vals (:proved t)) :let [src (get-in v [:form :form/src])] :when src] [(:var/name v) (print/code src)]))]
     [:section {:class "tile"}
      [:h2 {:class "kicker"} "task"]
      [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
-     ;; its plan as prose here, the rest of its data by the printer (each cited var is its own component)
-     (let [data (context/task-data db (task/task db id) false)]
+     ;; its plan as prose here, the rest of its data by the printer (each cited var is its own component);
+     ;; each proof how to run it and, written, its source (its last result is the status's)
+     (let [data (cond-> (context/task-data db (task/task db id) false)
+                  (seq sources) (update :to-prove #(into (empty %) (for [[s run] %] [s (if-let [src (sources s)] {:run run :source src} run)]))))]
        ;; a cut names the form that answers the whole at the agent's REPL
        (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
              [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)} (dissoc data :task)]))]))

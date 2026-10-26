@@ -1006,6 +1006,23 @@
       (is (not-any? #(str/starts-with? % "task-page-") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
+(deftest the-task-draws-what-it-needs
+  ;; notes/context-for-20-turns-2026-10-26.md (D1-D4): the task's list draws the whole plan (D4),
+  ;; each proof written with its source (D1; its last result is the status's), each var the plan cites
+  ;; with its source (D2, a component of its own) and each section the plan cites with its text (D3)
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
+        db (d/db-with db [{:db/id "t" :form/id "demo-test/g-test" :form/src "(deftest g-test (is (= :one (g))))"}
+                          {:var/name 'demo-test/g-test :var/form "t"} [:db/add te :seon.task/proofs 'demo-test/g-test]])
+        [w _ _ _ rid] (walked db)
+        units (render/page-units w)
+        html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
+        task (html "task-page-")]
+    (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
+    (is (str/includes? task "(deftest g-test (is (= :one (g))))") "D1: the proof written, its source")
+    (is (str/includes? (html (str "cited-" rid "-demo_g")) "(defn g [])") "D2: the cited var's source, its own component")
+    (is (str/includes? task "Section 1 says one thing.") "D3: the cited section's text, not its address")
+    (render/dispose-walk! w)))
+
 (deftest a-db-component-runs-again-on-what-it-read
   ;; a component that reads the db runs under d/with-reads: a transaction touching what it read runs
   ;; it again, any other leaves it (the task's own keys, context/task-key and related-key, deleted)

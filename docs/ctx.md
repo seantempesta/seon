@@ -65,7 +65,7 @@ Refused, nothing written, with the error that says why (`seon.ctx-test/a-swap-wr
 
 The record's environment is read-only; everything else is writable, and history keeps what a write retracts.
 
-**The page is the agent's to change.** The page is render-ctx, the render :seon.render/render-ctx declares (```seon.render/render-ctx```, the layout), composed of keyed sub-renders, each declared on its schema; an agent overrides the layout or any sub-render by registering its own render on its branch, and its model reads the same output (```seon.repl/page```).
+**The page is the agent's to change.** The page is the render :seon.render/render-ctx declares (```seon.render.ui/agent-page```, the layout), composed of components keyed by what they show ([render](render.md#components)); an agent overrides the layout or any sub-render by registering its own render on its branch, and its model reads the same output (```seon.repl/page```).
 
 ## Provenance: who made each fact
 
