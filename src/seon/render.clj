@@ -457,3 +457,17 @@
                 (list (into (cond-> [tag] (:href attrs) (conj {:href (:href attrs)})) ks))))))
         (sequential? x) (mapcat project x)
         :else ()))
+
+(defn model-page
+  "The page as the model reads it (revision 4.2): the theme once (theme), then each of parts that
+  is not the conversation (the agent's evals, turns and messages, which its own transcript
+  carries), its key and its hiccup projected to its meaning (project), each drawn whole and eager,
+  and one line naming the form that reads a part's full hiccup (what the projection left out:
+  utility classes, ids, data-* attributes). parts: [{:key :html}], each html the part's hiccup."
+  {:malli/schema [:=> [:cat [:sequential [:map [:key [:vector :any]] [:html :any]]]] :any]}
+  [parts]
+  [:page
+   [:theme theme]
+   (for [{:keys [key html]} parts :when (not (#{:eval :turn :message} (first key)))]
+     (into [:part {:key key}] (project html)))
+   [:cut "a part's full hiccup, its utility classes and attributes too: (my.agent/part [:task])"]])

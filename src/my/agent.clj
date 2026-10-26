@@ -17,6 +17,7 @@
                               what it changed since main, each one with a result at its digest reused
     @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
                               kept current as it works; the page shows it as a block
+    (part [:task])            a part of this agent's page as its full hiccup, every class and attribute
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
@@ -25,7 +26,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.render :as render] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -130,6 +131,15 @@
      (cond (contract/error? q) q
            (nil? q) []
            :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
+
+(defn part
+  "Part k of this agent's page as its full hiccup ([:task], [:proofs], [:eval \"e12\"] …): every
+  class and attribute it draws with, what the page's projection for the model leaves out
+  (seon.render/model-page names this form); nil when the page has no such part."
+  {:malli/schema [:=> [:cat [:vector :any]] :any]}
+  [k]
+  (when-let [p (some #(when (= k (:key %)) %) (render/view (seon.ctx/record) (context/renders (agent/db))))]
+    (:html (render/part-faces p))))
 
 (defn related
   "The wiki sections nearest x by meaning, a text (embedded as a search's query by root's :embed
