@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.root/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts] [seon.sock]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts] [seon.sock :as sock]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -895,14 +895,17 @@
              {:cycle i :ok false :exit exit :err err :health #{}})))))
 
 (defn- in-child
-  "f's answer in a child lib/fork! makes, as its exit status: 0 when (f) answers true, 1 when
-  it answers anything else; on a future with a 5 s deadline when deadline? (2: no answer, so a
-  child whose runtime is broken ends instead of hanging), else on the child's own fiber."
-  [deadline? f]
-  (lib/fork! {:child #(lib/c-exit (if deadline?
-                                    (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1))
-                                    (if (true? (f)) 0 1)))
+  "f's answer in a child lib/fork! makes, run on the child's own fiber, as its exit status: 0
+  when (f) answers true, 1 when it answers anything else."
+  [f]
+  (lib/fork! {:child #(lib/c-exit (if (true? (f)) 0 1))
               :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+
+(defn- in-child-bounded
+  "in-child's answer with f on a future with a 5 s deadline: 2 when it has not answered, so a
+  child whose runtime is broken ends instead of hanging."
+  [f]
+  (in-child #(let [r (deref (future (f)) 5000 ::hung)] (if (= ::hung r) (lib/c-exit 2) r))))
 
 (def ^:private fork-cases
   "The forking cases seon.lib-test runs, each in a fresh process (target/seon forks CASE) whose
@@ -911,13 +914,13 @@
   that instant. Each answers the data its test asserts."
   {"line-parks"
    ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's
-   #(in-child false
+   #(in-child
       (fn []
-        (let [[r w] (seon.sock/socketpair)
+        (let [[r w] (sock/socketpair)
               ticks (volatile! 0) stop (volatile! false)
               _ (a/go-loop [] (when-not @stop (a/<! (a/timeout 5)) (vswap! ticks inc) (recur)))
-              _ (future (Thread/sleep 200) (seon.sock/write-line! w "done"))
-              rd (seon.sock/line-reader r)
+              _ (future (Thread/sleep 200) (sock/write-line! w "done"))
+              rd (sock/line-reader r)
               before @ticks
               lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))
               during (- @ticks before)]
@@ -930,7 +933,7 @@
           block (byte-array (* 300 1024 1024))]
       (java.util.Arrays/fill block (byte 7))
       (let [held (lib/real-mb)
-            child (in-child true (fn [] (let [b0 (lib/real-mb)]
+            child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
                                           ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
                                           (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
                                           (< 28 (- (lib/real-mb) b0) 60))))]
@@ -939,9 +942,9 @@
    #(let [c (a/chan) r (a/go (a/<! c))]
       (a/>!! c 41)
       {:parent (a/<!! r)
-       :go (in-child true (fn [] (let [c (a/chan) r (a/go (a/<! c))] (a/>!! c 41) (= 41 (a/<!! r)))))
-       :timeout (in-child true (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
-       :store (in-child true (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
+       :go (in-child-bounded (fn [] (let [c (a/chan) r (a/go (a/<! c))] (a/>!! c 41) (= 41 (a/<!! r)))))
+       :timeout (in-child-bounded (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
+       :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
                                       (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})})
 
@@ -962,7 +965,7 @@
                                    (catch Throwable e (ex-message e)))}))
   (lib/c-exit 0))
 
-(defn- exact? [row] (and (empty? (:running row)) (empty? (:stopped row))))
+(defn- exact? [row] (and (:ok row) (empty? (:running row)) (empty? (:stopped row))))
 
 (defn- pause-row
   "Pause/resume in this process, which boots root once: a paused agent's two requests, held
