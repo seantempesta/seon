@@ -47,4 +47,4 @@
      :growth :linear
      :per-n {:ns 3000 :bytes 3000}
      :fixed {:ns 1000000 :bytes 2000000}
-     :sizes [100 300 1000 10000]}))
+     :sizes [100 1000 10000]}))

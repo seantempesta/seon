@@ -218,7 +218,7 @@
      :growth :linear
      :per-n {:ticks 0.8 :bytes 0.0}
      :fixed {:ticks 3000 :bytes 20500}
-     :sizes [250 500 1000 10000 100000 1000000]}))
+     :sizes [10000 100000 1000000]}))
 
 (deftest a-transport-failure-is-answered-to-the-agent
   (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}

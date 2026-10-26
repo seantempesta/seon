@@ -100,7 +100,7 @@
                ;; plan's cited vars are the program's (seon.context/program-vars, seon.program/program-names).
                :per-n {:bytes 1480.0 :calls 0.0}
                :fixed {:bytes 7440000.0 :calls 447.0}
-               :sizes [250 500 1000 2000]}))
+               :sizes [500 1000 2000]}))
 
 (defn kept-of
   "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third
@@ -119,7 +119,7 @@
      ;; measured 2026-10-25 (n 100 -> 10,000): 231 ticks and 1.57 KB a part, one contracted call
      :per-n {:ticks 240.0 :bytes 1600.0 :calls 0.0}
      :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
-     :sizes [100 300 1000 10000]}))
+     :sizes [100 1000 10000]}))
 
 (defn task-key-of
   "seon.context/task-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."

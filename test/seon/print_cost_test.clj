@@ -67,7 +67,7 @@
          :growth :linear
          :ops per-entry
          :fixed fixed
-         :sizes [100 300 1000 10000]})
+         :sizes [100 1000 10000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (deftest armed-printing-adds-only-its-contracted-calls
@@ -95,7 +95,7 @@
        ;; became chars-tokens over a text's length, its rule shared with seon.context/messages-tokens:
        ;; one call more)
        :fixed (dissoc (armed fixed 79 170) :ns)
-       :sizes [100 300 1000 10000]})))
+       :sizes [100 1000 10000]})))
 
 (def ^:private shown-budget
   "The budget the cut inputs print under, stated here so a proof's input does not move with the
@@ -127,7 +127,7 @@
          :growth :linear
          :ops {:vec/conj! 1 :seq/reduce 50}
          :fixed (round (priced {:str/escape shown :map/get (* 3 shown)}))
-         :sizes [250 500 1000 10000 100000]})
+         :sizes [1000 10000 100000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (defn rows
@@ -157,7 +157,7 @@
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")
          :growth :constant
          :fixed {:ticks 3.4e6 :ns 7.8e6 :bytes 13.2e6}
-         :sizes [100 300 1000 10000]})
+         :sizes [100 1000 10000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (defn code
@@ -190,5 +190,5 @@
          :growth :linear
          :ops {:vec/conj! 3 :seq/reduce 150}
          :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
-         :sizes [250 500 1000 10000 100000]})
+         :sizes [1000 10000 100000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))

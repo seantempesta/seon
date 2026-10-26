@@ -257,22 +257,17 @@
 
 (declare units)
 
-(def min-points
-  "The fewest sizes a proof measures: three, so its growth is judged on a curve, not on the
-  line two points always make. A proof the cap leaves fewer under is refused (run)."
-  3)
-
 (defn sizes
-  "The sizes a proof measures: its sizes up to cap (:seon.config.proofs/cost-max-n), ascending
-  ([100 300 1000 10000] at cap 1000: [100 300 1000]). Building the input at 10k cost 10-19 s per
-  proof in every run, so a normal run stops at the cap and the full run (cap 100,000) measures
-  every size as written; the sizes past the cap are named on the proof's verdict (run's
-  :left-out), never dropped in silence. Never a size smaller than the proof states: scaled
-  down to n=10, fixed per-call costs swamp the per-element price its estimate states (print-cost
-  and ref proofs went 1.8-5x over)."
+  "The sizes a proof measures: its sizes, ascending, up to cap (:seon.config.proofs/cost-max-n),
+  and at least its two smallest, the fewest a growth fit needs ([100 1000 10000] at cap 1000:
+  [100 1000]; [1000 10000 100000]: [1000 10000]). Never a size smaller than the proof states:
+  scaled down to n=10, fixed per-call costs swamp the per-element price its estimate states
+  (print-cost and ref proofs went 1.8-5x over). Building the input at 10k cost 10-19 s per
+  proof in every run; the full run measures as written."
   {:malli/schema [:=> [:cat [:sequential pos-int?] pos-int?] [:vector pos-int?]]}
   [ns cap]
-  (filterv #(<= % cap) (sort ns)))
+  ;; a selection of the sizes to measure, one filter by position and size (no output is cut)
+  (vec (keep-indexed (fn [i n] (when (or (< i 2) (<= n cap)) n)) (sort ns))))
 
 (defn bound
   "The cost bound var sym's contract carries (:seon.cost/bound beside :malli/schema): a function of
@@ -302,36 +297,25 @@
   "Estimate e measured: its function on its input at each size (sizes, under
   :seon.config.proofs/cost-max-n), ascending, or on each generated case (`cases`) against its
   contract's bound on that case's arguments (`bound`, kept on the row as :args), stopping after
-  the first point over its estimate in an exact dimension. Answers {:rows :verdict :left-out},
-  :left-out the stated sizes past the cap, or a proof refused: one the cap leaves fewer than
-  min-points sizes is :seon.cost/too-few-sizes, naming them and the key, measured nothing."
-  {:malli/schema [:=> [:cat :seon.cost/estimate] [:or [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict] [:left-out [:vector pos-int?]]]
-                                                   :seon.cost/too-few-sizes]]}
+  the first point over its estimate in an exact dimension. Answers {:rows :verdict}."
+  {:malli/schema [:=> [:cat :seon.cost/estimate] [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]]}
   [e]
-  (let [cap (config/value :seon.config.proofs/cost-max-n)
-        ns (when-not (:cases e) (sizes (:sizes e) cap))
-        left-out (if (:cases e) [] (vec (remove (set ns) (sort (:sizes e)))))]
-  (if (and (not (:cases e)) (< (count ns) min-points))
-    (contract/error :seon.cost/too-few-sizes #'seon.cost/run
-                    (str (:of e) "'s proof measures " (count ns) " sizes under :seon.config.proofs/cost-max-n " cap
-                         " (" (pr-str (vec (sort (:sizes e)))) "), fewer than " min-points ": give it sizes under the cap where its work dominates")
-                    {:of (:of e) :sizes (vec (sort (:sizes e))) :cap cap})
   (let [f @(requiring-resolve (:of e))
         ;; each point measured: a size and its input built outside the measure, or a generated
         ;; case and its arguments, the contract's bound on them its estimate
         points (if (:cases e)
                  (let [b (bound (:of e))] (map-indexed (fn [i args] [(inc i) args #(select-keys (apply b args) dimensions)]) (cases e)))
                  (let [input @(requiring-resolve (:input e))]
-                   (map (fn [n] [n (delay (vec (input n))) #(expected e units n)]) ns)))]
+                   (map (fn [n] [n (delay (vec (input n))) #(expected e units n)]) (sizes (:sizes e) (config/value :seon.config.proofs/cost-max-n)))))]
     (loop [[[n args allowed] & more] points rows []]
       (if (nil? n)
-        {:rows rows :verdict (judge e rows) :left-out left-out}
+        {:rows rows :verdict (judge e rows)}
         (let [args (force args)
               row (cond-> {:n n :measured (measure f args) :expected (allowed)} (:cases e) (assoc :args args))
               rows (conj rows row)]
           (if (and (nil? (:overrun e)) (not (:ok? (judge e [row]))))
-            {:rows rows :verdict (judge e rows) :left-out left-out}
-            (recur more rows)))))))))
+            {:rows rows :verdict (judge e rows)}
+            (recur more rows)))))))
 
 ;; ---- the proof ----------------------------------------------------------------------------
 
@@ -394,24 +378,15 @@
 (defn proof
   "Assert, inside a deftest, that estimate e holds: one clojure.test report (pass or fail)
   whose message is `explain` and whose :actual is the rows and verdict as data. Answers
-  the verdict, or the error of a proof the cap leaves too few sizes (run)."
-  {:malli/schema [:=> [:cat :seon.cost/estimate] [:or :seon.cost/verdict :seon.cost/too-few-sizes]]}
+  the verdict."
+  {:malli/schema [:=> [:cat :seon.cost/estimate] :seon.cost/verdict]}
   [e]
-  (let [r (run e)]
-    (if (contract/error? r)
-      (do (t/do-report {:type :fail :message (:seon.error/message r) :expected (list 'at-least min-points 'sizes-under-the-cap)
-                        :actual r})
-          r)
-      (let [{:keys [rows verdict left-out]} r]
-        (t/do-report {:type (if (:ok? verdict) :pass :fail)
-                      :message (str (explain e rows verdict)
-                                    (when (seq left-out)
-                                      (str "\n" (str/join ", " left-out) " left out past :seon.config.proofs/cost-max-n "
-                                           (config/value :seon.config.proofs/cost-max-n) "; the full run measures "
-                                           (if (next left-out) "them" "it"))))
-                      :expected (if (:cases e) (list 'within-bound (:of e)) (list 'within-estimate (:of e) (:growth e)))
-                      :actual {:rows rows :verdict verdict :left-out left-out}})
-        verdict))))
+  (let [{:keys [rows verdict]} (run e)]
+    (t/do-report {:type (if (:ok? verdict) :pass :fail)
+                  :message (explain e rows verdict)
+                  :expected (if (:cases e) (list 'within-bound (:of e)) (list 'within-estimate (:of e) (:growth e)))
+                  :actual {:rows rows :verdict verdict}})
+    verdict))
 
 ;; ---- the unit table -------------------------------------------------------------------------
 

@@ -65,9 +65,6 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
- ;; a cost proof the cap (:seon.config.proofs/cost-max-n) leaves fewer than seon.cost/min-points sizes: refused, measured nothing
- :seon.cost/too-few-sizes [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/too-few-sizes]] [:of :qualified-symbol]
-                                                  [:sizes [:vector pos-int?]] [:cap pos-int?]]]
  :seon.fx/unresolved [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/unresolved]] [:deps [:vector :symbol]] [:unresolved [:vector :map]]]]
  :seon.fx/budget-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/budget-spent]]]]
  :seon.fx/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]

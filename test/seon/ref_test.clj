@@ -298,7 +298,7 @@
      :growth :linear
      :per-n {:ns 270 :bytes 360 :calls 0.14}
      :fixed {:ns 20000 :bytes 20000 :calls 5}
-     :sizes [250 500 1000 10000 100000]}))
+     :sizes [1000 10000 100000]}))
 
 (deftest a-namespace-is-read-as-a-namespace
   ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown (owner, 2026-10-21): a

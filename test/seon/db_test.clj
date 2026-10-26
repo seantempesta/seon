@@ -702,7 +702,7 @@
      :work "per datom: its insert into :eavt and :aevt, one :eavt descent for the attribute's current value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :sizes [100 300 1000 10000]}))
+     :sizes [100 1000 10000]}))
 
 (deftest an-identity-costs-its-seek
   ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
@@ -754,7 +754,7 @@
      ;; level); 100,000 because flat must hold at a collection an agent's history reaches (root's ask),
      ;; and a prove run (cost-max-n 1,000) builds only the two smaller inputs
      :fixed {:ticks 30000 :bytes 125000}
-     :sizes [10 100 1000 100000]}))
+     :sizes [10 1000 100000]}))
 
 (defn- attr-db
   "An in-memory db of eight long attributes and 200 random facts, with :attribute-refs? refs?

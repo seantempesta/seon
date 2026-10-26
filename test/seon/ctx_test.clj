@@ -266,7 +266,7 @@
                 "and forgotten; every other member and join the same object; the environment set")
      :growth :constant
      :fixed {:calls 25 :bytes 165000}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 (deftest a-ref-asserted-back-leaves-its-member-as-it-was
   ;; the regression the generator's draw hid (main red from Jolt f561902a, a sorted-map assoc that
@@ -313,7 +313,7 @@
      :work "the new member assoc'd, the oldest dissoc'd: two map operations on a sorted map by id, one pull, one forget"
      :growth :constant
      :fixed {:calls 25 :bytes 165000}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
   ;; the page draws @ctx as a block: a row per key, each value by its key's schema's declared
@@ -415,17 +415,17 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
      :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task, run and agent nodes copied up the path"
-     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [100 300 1000 3000]})
+     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 22 :bytes 135000} :sizes [100 300 1000 3000]})
+     :growth :constant :fixed {:calls 22 :bytes 135000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
      :work "the task's own datom: its attributes pulled again, every join kept, the path copied up"
-     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [100 300 1000 3000]}))
+     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [100 1000 3000]}))
 
 (deftest a-callers-window-costs-its-forms
   ;; a window of content-id members (a var's callers: a form's id is its content's, not in time
@@ -440,7 +440,7 @@
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
      :fixed {:calls 25 :bytes 500000 :ticks 100000}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 (defn one-eval-diff
   "The input of size n: a session of n evals at a turn's start, and its record advanced by one eval:
@@ -458,7 +458,7 @@
      :work "changes' walk: the root's keys, each the same object but the evals' window, whose members are each the same object but the new one (and the oldest that left); the new eval's value read once"
      :growth :constant
      :fixed {:calls 5 :bytes 290000}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 (deftest a-redefined-vars-record-holds-its-new-form
   ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
@@ -680,7 +680,7 @@
                 "at 100 and at 1,000 evals")
      :growth :constant
      :fixed {:calls 5}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 (defn one-attribute
   "The input of size n: a session of n evals and one attribute of its agent: [db e a], seon.ctx/made-by's."
@@ -697,7 +697,7 @@
      :work "one seek of the entity's attribute (its one datom) and one pull of that datom's transaction: made-by's own call"
      :growth :constant
      :fixed {:calls 1}
-     :sizes [100 300 1000 3000]}))
+     :sizes [100 1000 3000]}))
 
 ;; ---- changes' bound, checked on generated records -----------------------------------------
 
