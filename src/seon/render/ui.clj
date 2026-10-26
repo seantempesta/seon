@@ -933,7 +933,7 @@
              (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
                (list [:h3 heading " " [:code address]]
                      [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))
-             [#'render/html {:handle '(dissoc (my.task/data) :task :write-set :sections)} (dissoc data :task :sections)]))]))
+             [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} (dissoc data :task :sections)]))]))
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
@@ -960,7 +960,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :symbol] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _ var]
   [:section {:class "cited"} [:h2 (str "cites " var)]
-   [#'render/html {:handle (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))}
+   [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))}
     (cited-of db c var)]])
 
 (defn status
@@ -979,7 +979,7 @@
       (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] (:db/id turn)))
             l (when lst (d/pull db [:seon.turn/truncated :seon.turn/calls] (:db/id lst)))]
         [:section {:class "status"} [:h2 "status"]
-         [#'render/html {:handle '(my.task/status)}
+         [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
           (context/turn-state db (task/task db task) (context/turn-input db b l))]]))))
 
 (defn related
@@ -990,7 +990,7 @@
   [{c :seon.ctx/ctx db :seon.db/db} rid]
   (let [r (context/related db (get-in c [:runs rid :task :db/id]))]
     [:section {:class "related"} [:h2 "related"]
-     (if r [#'render/html {:handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
+     (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
 
 (defn run-head
   "The run (a component over ctx): its relevant attributes and the turns it took, by its schema's
