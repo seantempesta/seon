@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
-            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.print :as print] [seon.print.emit :as emit]))
+            [seon.config :as cfg] [seon.lib :as lib] [seon.reader :as reader] [seon.edn :as sedn] [seon.print :as print] [seon.print.emit :as emit]))
 
 ;; ---- one page, parsed into sections ----------------------------------------------------
 
@@ -407,11 +407,13 @@
   [db sym depth]
   (let [v (some->> (pdb/eid db :var/name sym) (d/entity db))
         src (source-of db sym)
+        ;; arglists only where they are shown: a source read once per such citation
         m (if v
             (cond-> {}
-              src (assoc :arglists (reader/arglists src (symbol (namespace sym))))
+              (and src (#{:summary :doc} depth)) (assoc :arglists (reader/arglists src (symbol (namespace sym))))
               (:var/doc v) (assoc :doc (:var/doc v))
-              (:var/contract v) (assoc :malli/schema (first (reader/read-text (:var/contract v) (symbol (namespace sym))))))
+              ;; as the import wrote it (seon.edn/encode): a contract that does not decode throws
+              (:var/contract v) (assoc :malli/schema (sedn/decode (:var/contract v))))
             (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         doc (cond-> {:symbol sym}
               (:arglists m) (assoc :arglists (:arglists m))

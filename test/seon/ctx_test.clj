@@ -279,6 +279,19 @@
      :fixed {:calls 1}
      :sizes [100 1000 3000]}))
 
+(deftest a-redefined-vars-record-holds-its-new-form
+  ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
+  ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
+        e (:db/id (d/entity db [:var/name 'demo/f]))
+        c (ctx/build db e :b)
+        rep (d/with db [{:db/id "g" :form/id "demo/f-2" :form/src "(defn f [] 2)"} [:db/add e :var/form "g"]])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (= "(defn f [] 1)" (get-in (:tree c) [:form :form/src])) "built: the var with its form")
+    (is (= "(defn f [] 2)" (get-in (:tree c') [:form :form/src])) "patched: the new form, whole")
+    (is (contains? (:changed c') [:form]))
+    (is (= (dissoc c' :changed) (dissoc (ctx/build (:db-after rep) e :b) :changed)) "as a build holds it")))
+
 (declare steps)
 
 (deftest an-agent-adds-a-datum-and-its-render

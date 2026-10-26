@@ -802,7 +802,7 @@
   request (`request`, its :seon.render/ai render; the run sections the first turn's, made again
   from its own basis). The one maker of a context: the model's request is this, and so is
   every later reading of it. opts :printed, what the run's earlier requests printed (the cache
-  `printed-run` answers, with the task story's text by its ref): only what is new is printed.
+  `printed-run` answers, with the task's rendered text by its ref): only what is new is printed.
   {:block :messages :sent :printed}."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]
                   [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]]}
@@ -812,18 +812,18 @@
         t (task/task db task)
         block (if screen (render-task db t) (current-state db t (turn-input db basis (peek prev))))
         a (when agent (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent]))
-        ;; the task story is its session's first turn's: the task of the agent's first run as of that
+        ;; the task rendered is its session's first turn's: the task of the agent's first run as of that
         ;; turn's t, so a later stage's request keeps the earlier stages' as its exact prefix (its
-        ;; own story came as a message at the boundary: seon.reconcile/stage-boundary)
+        ;; own task came as a message at the boundary: seon.reconcile/stage-boundary)
         first-run (when a (session-first-run db (:db/id a)))
         prev0 (if (and first-run (not= first-run run)) (model-turns db first-run Integer/MAX_VALUE) prev)
-        story-t (if (seq prev0) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev0))))) (:max-tx db))
+        task-t (if (seq prev0) (:max-tx (d/commit-as-db db (:commit (:seon.turn/basis (first prev0))))) (:max-tx db))
         task-e (if (identical? prev0 prev) (pdb/eid db :seon.task/id task) (:db/id (:seon.run/task (d/entity db [:seon.run/id first-run]))))
-        run-ref [:task task-e story-t]
-        ;; the story is the same each turn of a session: printed once, by its ref
-        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (printed-task db task-e story-t)))
-        r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
+        run-ref [:task task-e task-t]
+        ;; the task rendered is the same each turn of a session: printed once, by its ref
+        task-text (when (seq prev0) (or (get-in printed [:task run-ref]) (printed-task db task-e task-t)))
+        r (request a {:db db :basis basis :block block :help (system-text db) :run task-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
     {:block block :messages (:messages r) :sent (:sent r)
-     :printed (cond-> (:printed r) story-text (assoc :story {run-ref story-text}))})))
+     :printed (cond-> (:printed r) task-text (assoc :task {run-ref task-text}))})))

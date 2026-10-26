@@ -380,11 +380,8 @@
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
   ;; for a var as it does for a section (docs/references.md#the-delimiter-picks-the-depth)
-  (binding [*ns* *ns*]
-    (eval '(ns ctx-depth))
-    (eval '(defn sq "Squares x. Used by area." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)))
-    (eval '(defn cube "Cubes x." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x)))
-    (eval '(defn tri "Triples x." {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))))
+  ;; the vars are the db's alone (no namespace of them in this process): what each shows is read
+  ;; from its facts (seon.docs/resolve-ref)
   (let [db (d/db-with (db-with-program)
                       (program-facts '[[ctx-depth/sq "(defn sq \"Squares x. Used by area.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" []]
                                        [ctx-depth/cube "(defn cube \"Cubes x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))" []]
@@ -1003,6 +1000,16 @@
         [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))]
     (is (not (str/includes? (:text (first fs0)) ":redefined")))
     (is (str/includes? (:text (first fs1)) "(defn g [] :redefined)") "the next view's task: the new source")))
+
+(deftest a-vars-arglists-are-its-recorded-sources
+  ;; what a var declares, read from its source as the db records it (seon.reader/arglists)
+  (is (= '([x]) (seon.reader/arglists "(defn sq \"Squares.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" 'demo)))
+  (is (= '([x] [x y]) (seon.reader/arglists "(defn f ([x] x) ([x y] (+ x y)))" 'demo)) "each arity's")
+  (is (= '([& body]) (seon.reader/arglists "(defmacro m [& body] `(do ~@body))" 'demo)) "a macro's")
+  (is (nil? (seon.reader/arglists "(def x 1)" 'demo)) "no arglists: no function")
+  (let [db (d/db-with (db-with-program) (program-facts '[[demo-only/h "(defn h \"Holds what the db says.\" [a b] a)" []]]))]
+    (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (docs/resolve-ref db 'demo-only/h :summary))
+        "a var only the db holds: its summary from its facts")))
 
 (deftest related-key-moves-with-a-vector-written
   ;; related is memoized by related-key: the same while nothing it reads is written, moved when a

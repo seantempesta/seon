@@ -95,13 +95,13 @@
            ")"))))
 
 (defn arglists
-  "The arglists definition text src declares (a defn's, defn-'s, defmacro's or fn's, written in
+  "The arglists definition text src declares (a defn's, defn-'s or defmacro's, written in
   namespace nsym): its params vector, or each arity's; nil when it is no such definition. One
   read: what a var's arglists are, from its recorded source rather than a process's var meta."
   {:malli/schema [:=> [:cat :string :symbol] [:maybe [:sequential vector?]]]}
   [src nsym]
   (let [f (first (read-text src nsym))]
-    (when (and (seq? f) ('#{defn defn- defmacro fn} (first f)))
+    (when (and (seq? f) ('#{defn defn- defmacro} (first f)))
       (if-let [params (some #(when (vector? %) %) (drop 2 f))]
         (list params)
         (seq (keep #(when (and (seq? %) (vector? (first %))) (first %)) (drop 2 f)))))))
