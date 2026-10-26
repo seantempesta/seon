@@ -848,25 +848,24 @@
     (is (= [:whole :green :merged true] (:value r)) (pr-str r))))
 
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
-  ;; the other way: a whole run that ends with its proof red is not merged; root's verdict, the
-  ;; done rule's reasons as data, goes to its session, and the session's next run's first request
-  ;; carries it (seon.reconcile's :verdict, taken by seon.turn's take!)
+  ;; the other way: a whole run whose proof is red is not merged. Its run does not end red: it
+  ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
+  ;; rule's reasons as data in what it observed (a run root refuses at its end gets root's verdict
+  ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
+  ;; ends on the run's own end, which always comes
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
-                  " _ (seon.root/await-db sys \"the next run parked, or the task held\" #(or (= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#2\"]))) (= :held (seon.reconcile/task-state (seon.reconcile/index %) \"demo/wr\"))))"
-                  " db @(:conn sys)"
-                  " v (datahike.api/q '[:find [?id ?body] :where [?r :seon.run/id \"demo/wr#1\"] [?m :seon.message/to ?r] [?m :seon.message/kind :verdict] [?m :seon.message/id ?id] [?m :seon.message/body ?body]] db)"
+                  " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead :ended} (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#1\"]))))"
+                  " db @(:conn sys) r (seon.task/run db \"demo/wr#1\")"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/wr\")}}))"
-                  " sent (datahike.api/q '[:find ?s . :where [?r :seon.run/id \"demo/wr#2\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 0] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b)]"
-                  " [(:seon.run/outcome (seon.task/run db \"demo/wr#1\")) (seon.reconcile/task-state (seon.reconcile/index db) \"demo/wr\") (first v)"
-                  "  (mapv :reason (:reasons (seon.edn/decode (second v)))) (boolean (some #(= [:message (first v)] (vec (take 2 %))) sent))])")
+                  " obs (datahike.api/q '[:find ?b . :where [?r :seon.run/id \"demo/wr#1\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 1] [?u :seon.turn/origin :model] [?u :seon.turn/basis ?b]] b)]"
+                  " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"demo/wr\") (mapv :reason (get-in obs [:observed :reasons])) (get-in obs [:observed :merge])])")
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
                         {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
-        [outcome state vid reasons told?] (:value r)]
-    (is (= :red outcome) (pr-str r))
+        [status state reasons merge] (:value r)]
+    (is (= :parked status) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (= "v-demo/wr#1" vid) "root's verdict to the run")
-    (is (= [:proof-red] reasons) "its reasons as data: the proof is red")
-    (is told? "the session's next run's first request carries it")))
+    (is (= [:proof-red] reasons) "its next turn carries why, as data: the proof is red")
+    (is (= [] (:conflicts merge)) "its merge readiness was measured that turn: nothing would conflict, the red proof alone keeps it from merging")))
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own

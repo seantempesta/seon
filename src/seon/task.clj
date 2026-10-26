@@ -34,7 +34,7 @@
 
 (defn merges?
   "Whether a task of kind merges main into its branch at each green and its green branch into
-  main: a merge task, and a whole one (seon.template/whole: one agent works the request
+  main: a merge task, and a whole one (seon.template/request: one agent works the request
   through and merges it)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :boolean]}
   [kind] (contains? #{:merge :whole} kind))

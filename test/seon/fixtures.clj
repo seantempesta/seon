@@ -305,16 +305,15 @@
     "The proof passes."))
 
 (defn whole-red
-  "The scripted model of a whole task that ends red (seon.agent-test): its first run writes a red
-  proof, registers it and ends its turn with prose; its next run (the session again, woken by
-  root's verdict, so the conversation already holds the first run's turns) waits."
+  "The scripted model of a whole task whose proof stays red (seon.agent-test): it writes a red
+  proof and registers it, then waits (my.turn/wait), so its run parks with the proof red."
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [{:keys [turn messages]}]
-  (cond (some #(= "assistant" (name (:role %))) (if (zero? turn) messages [])) "(my.turn/wait)"
-        (zero? turn) (fenced "Write the proof, red, and register it."
-                             (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
-                                  "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
-        :else "I stop here."))
+  [{:keys [turn]}]
+  (if (zero? turn)
+    (fenced "Write the proof, red, and register it."
+            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
+                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
+    "(my.turn/wait)"))
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

@@ -460,7 +460,7 @@
   )
 
 (deftest a-whole-task-works-in-parallel-and-its-green-merges
-  ;; owner, 2026-10-26 (seon.template/whole): a whole task's runs start as work does, not one at a
+  ;; owner, 2026-10-26 (seon.template/request): a whole task's runs start as work does, not one at a
   ;; time as merges do; its green run merges into main as a merge run's does; out of turns, it parks
   (let [whole (fn [nm] (assoc (decl nm) :seon.task/kind :whole))]
     (is (= [(spawn "a" 1) (spawn "b" 1)] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")

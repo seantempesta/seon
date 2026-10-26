@@ -54,7 +54,7 @@
     (is (not (contains? d :seon.task/proofs)) "no proof given: the agent writes its own")
     (is (re-find #"Reproduce: [\(\[].*[\)\]] answers [\[\"0-9a-z].*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
     (is (< (count (:seon.task/plan d)) 1000) (str "short: " (:seon.task/name d)))
-    (is (seq (task/create-tx (ts/test-db) (tpl/whole d))) "each a valid task set")))
+    (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
 
 (deftest a-design-build-request-is-its-design-build-task-and-its-merge
   ;; owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge", then the
@@ -82,11 +82,11 @@
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 
-(deftest a-whole-request-is-one-task-one-agent-works-whole
-  ;; owner, 2026-10-26: "build a do everything in one go task": an experiment's choice, one task
-  ;; of kind :whole on its own branch, with the whole instructions
+(deftest a-request-is-one-whole-task-one-agent-works-through
+  ;; owner, 2026-10-26: "build a do everything in one go task", then the default: a request is one
+  ;; task of kind :whole on its own branch, with the whole instructions
   (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
-        [w :as ws] (tpl/whole d)]
+        [w :as ws] (tpl/request d)]
     (is (= 1 (count ws)))
     (is (= [:whole :task-demo-w] [(:seon.task/kind w) (:seon.task/branch w)]))
     (is (= (:whole tpl/instructions) (:seon.task/instructions w)))

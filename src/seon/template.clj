@@ -10,7 +10,7 @@
     and proofs inherited). A task that needs another's work needs its merge, so it starts
     from a main that holds that work.
   - a request (one declaration: what the user asked) becomes, by default (`my.root/request!`),
-    one :whole task that designs, builds and merges itself (`whole`); for experiments,
+    one :whole task that designs, builds and merges itself (`request`); for experiments,
     `design-build` makes its design-build task (kind :work: the red proof, then green on its
     branch) followed by its merge task (`with-merge`), and `stages` design -> implement -> merge
     on design's branch. `request-tx` writes any of these released in one transaction (DECISIONS, A
@@ -118,16 +118,18 @@
   design-build task (decl, kind :work, the :work instructions: one agent writes the red proof
   and makes it green on its branch, and does not merge), followed by its merge task
   (with-merge), which merges main into the branch, keeps the proofs green and merges the branch
-  into main. An experiment's choice; `whole` is the default (my.root/request!)."
+  into main. An experiment's choice; `request` is the default (my.root/request!)."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   (with-merge [(assoc decl :seon.task/kind :work :seon.task/instructions (instructions :work))]))
 
-(defn whole
-  "Request decl as one task of kind :whole on its own branch, the default (my.root/request!; owner:
-  \"keep experimenting with having the agent do everything in one task\"): one agent writes the
-  red proof, makes it green, merges main and keeps it green, and its green branch merges into
-  main itself (seon.task/merges?)."
+(defn request
+  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the task
+  that works it, the default (my.root/request!; owner: \"keep experimenting with having the agent
+  do everything in one task\"): one task of kind :whole on its own branch, which one agent works
+  through: it writes the red proof, makes it green, merges main and keeps it green, and its green
+  branch merges into main itself (seon.task/merges?). `design-build` and `stages` are the
+  experiments' choices."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
@@ -152,7 +154,7 @@
     [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
 
 (defn request-tx
-  "The one transaction that writes a request's tasks ds (whole's, design-build's or stages') on main,
+  "The one transaction that writes a request's tasks ds (request's, design-build's or stages') on main,
   released: the reconciler sees the whole set at once and forks its first agent only once it
   is committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]
