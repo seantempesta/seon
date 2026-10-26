@@ -321,7 +321,8 @@
     (try
       (d/create-database (made-cfg tcfg))
       (let [conn (d/connect tcfg)] (seed! conn n) (sync! tcfg) (d/release conn))
-      (vreset! placed (zero? (posix/c-rename tmp path)))
+      ;; [rc errno] (capture-native-error): a taken path is the winner's store, not a failure here
+      (vreset! placed (zero? (first (posix/c-rename tmp path))))
       @placed
       (finally
         ;; a create that threw midway may hold its env (Datahike releases the store only at its end)
