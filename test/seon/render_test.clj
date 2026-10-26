@@ -1111,6 +1111,23 @@
     (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
     (is (= parts (r/render-ctx c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
 
+(deftest the-status-shows-what-an-outside-read-observed
+  ;; task seon.render/the-status-before-any-model-turn: an outside read (seon.turn/context-block,
+  ;; origin :outside) records what it observed as a model turn does, so [:status] is drawn from
+  ;; the newest turn of either origin; an outside read has no turn count
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        branch (d/db-with branch [{:seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :outside
+                                   :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
+                                                     :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
+        c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
+        status (some #(when (= [:status] (:key %)) %) (r/render-ctx c (seon.context/renders branch)))
+        h (h/html (:html (r/part-faces status)))]
+    (is (some? status) "the status, from the outside read")
+    (is (= (:db/id (d/entity branch [:seon.turn/id "demo/f#1/read-1"])) (get-in status [:value :turn])) "the newest turn: the outside read")
+    (is (str/includes? h ":pass") (str "what it observed: " h))
+    (is (not (str/includes? h " of ")) "an outside read has no turn count")))
+
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
   ;; printer, [#'seon.render/html value opts], which the page's serializer expands when it writes the

@@ -76,7 +76,7 @@ Each v1 capability for building and printing the model's context, and where it s
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.context`, `seon.ref`, `seon.reader/forgive` | present |
 | `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
-| context: stable run sections, cached; small turn sections; must-reads capped | `seon.context/messages` (the help, the run sections, the scrollback, the turn); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
+| context: stable run sections, cached; small turn sections; must-reads capped | ```seon.context/request``` (the help, the session's records, and the page at each model turn, whole then what changed: ```seon.context/world```); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |

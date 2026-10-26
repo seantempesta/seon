@@ -161,7 +161,7 @@
   seon.render.ui/cited, compared by its own key, so a cited var's edit is that part's change
   alone; [:related], drawn by
   seon.render.ui/related (seon.context/related), compared by its related key; [:status], what the
-  newest model turn observed, as (my.task/status) answers it (seon.render.ui/status: each proof
+  newest turn (a model's or an outside read's) observed, as (my.task/status) answers it (seon.render.ui/status: each proof
   with its failures, source and calls, the done rule's reasons, the turn of how many, what the
   merge will carry, the last reply); [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
@@ -179,10 +179,11 @@
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
-        ;; the newest model turn and the one before it (its last reply)
-        ts (vec (sort-by :seon.turn/n (filter #(= :model (:seon.turn/origin %)) (vals (:turns run)))))
+        ;; the newest turn of either origin (a model's, or an outside read's: each records what it
+        ;; observed), in the order written, and the model turn before it (its last reply)
+        ts (vec (sort-by t-of (vals (:turns run))))
         turn (peek ts)
-        prev (get ts (- (count ts) 2))
+        prev (last (filter #(= :model (:seon.turn/origin %)) (butlast ts)))
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
                          :opened (boolean (:seon.eval/opened e))
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})
