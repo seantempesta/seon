@@ -999,24 +999,26 @@
      [#'ctx-key {} k])])
 
 (defn eval-item
-  "An eval of the conversation as the user's chat column draws it (a component over ctx): the prose
-  beside it and its one line, inline, behind an arrow that opens it; its value drawn only once ctx
-  holds it opened (:seon.eval/opened: a reader opened it, a fact that reaches the branch by take!).
-  Its <details> carries its handle's anchor (eval-<id>): a handle printed anywhere links here, open
-  or not."
+  "An eval of the conversation (a component over ctx), as a reference, never a copy (owner: \"the
+  render should be quite different really from the eval data as the focus for the ui is on the
+  prose\"): the prose the agent wrote beside it and its handle (result/e12), which names its value
+  wherever the transcript and a printed cut name it; the model reads its content once, in its
+  transcript. Opened (:seon.eval/opened: a reader opened it, a fact that reaches the branch by
+  take!), its value is drawn under it. Its <details> carries its handle's anchor (eval-<id>): a
+  handle printed anywhere links here, open or not."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
-        v (dissoc e :db/id :seon.eval/agent)
-        s (render/entity-schema e :seon.eval/agent)
+        rec (:seon.eval/record e)
         opened? (:seon.eval/opened e)]
     [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} opened? (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
-      [:summary {:class "flex min-w-0 items-baseline gap-2 truncate" :seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c)
+      [:summary {:class "flex min-w-0 items-baseline gap-2" :seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c)
                  :seon/args {:key (:seon.agent/key c) :eval (:seon.eval/id e)}}
-       (render/html {:as :inline :chat true :schema s} v)]
-      (when opened? (render/html {:schema s} v))]]))
+       (when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
+       [:code (str (get-in rec [:response :handle]))]]
+      (when opened? (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
 (defn turn-item
   "A model turn or an outside read of the run (a component over ctx): its header by its schema's
@@ -1033,20 +1035,36 @@
   [{c :seon.ctx/ctx} rid eid]
   [:li {:class "py-1"} (render/html {:schema :seon.message/fact} (dissoc (ratom/realize (get-in c [:runs rid :messages eid])) :db/id :seon.message/to))])
 
+(defn eval-tile
+  "An eval whose value has a render of its own (a component over ctx): that value, by it."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} eid]
+  [:section {:class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
+   (render/html {} (ratom/realize (get-in c [:evals eid :seon.eval/record :response :value])))])
+
 (defn render-ctx
   "The render of an agent's ctx, its layout (the declared html render of :seon.render/render-ctx,
-  which an agent overrides on its branch like any render): what the agent is working on now and
-  how, its ctx read through the view as components in the task's list (p-task), each keyed by what
-  it shows: the newest run's task, each var its plan cites, what is related, what its newest turn
-  observed, the run, then each key the agent added to its ctx. No eval is in it (owner: \"my point
-  was to not show the same eval data in the render function\"): the conversation is the transcript,
-  which the model reads once as its turns and the user reads as the chat column (`transcript`). It
-  reads its task's cited names and the run, so it runs again only when the newest run changes or the
-  plan cites another var."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  which an agent overrides on its branch like any render): its ctx, read through the view, as components placed in the
+  render's three lists, each keyed by what it shows (an eid, a var, a key). The task's list (p-task):
+  the newest run's task, each var its plan cites, what is related, what its newest turn observed,
+  the run, then each key the agent added to its ctx. The conversation (c-rows): its evals, the run's
+  turns and its messages, in the order they were written (eids are issued in that order). The
+  tiles (p-tiles): each eval whose value has a render of its own, newest first. It reads the
+  lists' members' ids and its task's cited names, and on the db the transaction of each member's
+  identity (when it was written: some ids are content-derived, so an id is no order), which is never
+  written again, so it runs again only when a list gains or loses a member, the newest run
+  changes, or the plan cites another var."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
   (let [[rid run] (the-run c)
-        task (:task run)]
+        task (:task run)
+        evals (:evals c)
+        ;; in the order written: the transaction of each member's identity datom, then its id
+        born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
+        conv (map second (sort (concat (map #(born :seon.eval/id %) (keys evals)) (map #(born :seon.turn/id %) (keys (:turns run)))
+                                       (map #(born :seon.message/id %) (keys (:messages run))))))
+        ev? (set (keys evals))
+        tu? (set (keys (:turns run)))]
     [:div {:id "render-ctx"}
      [:div {:id "p-task"}
       (when task (list [#'task-data {} rid]
@@ -1056,27 +1074,12 @@
                        [#'related {} rid]
                        (when (seq (:turns run)) [#'status {} rid])))
       (when run [#'run-head {} rid])
-      [#'ctx-keys {}]]]))
-
-(defn transcript
-  "The conversation as the user reads it, the chat column beside render-ctx (a component over ctx
-  and the db, drawn by the same walk): its evals, the run's turns and its messages, in the order
-  they were written (the transaction of each member's identity datom: some ids are content-derived,
-  so an id is no order; an identity is written once, so the read never moves), each a component
-  keyed by its entity. Not part of render-ctx: the model reads the conversation once, as its turns.
-  It runs again only when a list gains or loses a member."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [[rid run] (the-run c)
-        evals (:evals c)
-        born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
-        conv (map second (sort (concat (map #(born :seon.eval/id %) (keys evals)) (map #(born :seon.turn/id %) (keys (:turns run)))
-                                       (map #(born :seon.message/id %) (keys (:messages run))))))
-        ev? (set (keys evals))
-        tu? (set (keys (:turns run)))]
-    [:div {:id "transcript"}
+      [#'ctx-keys {}]]
      [:ol {:id "c-rows"}
-      (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]]))
+      (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]
+     [:aside {:id "p-tiles"}
+      (for [[id e] evals :let [v (get-in e [:seon.eval/record :response :value])] :when (and (some? v) (render/render-of (ratom/realize v) nil))]
+        [#'eval-tile {} id])]]))
 
 (defn render-ctx-chrome
   "Agent id's render of ctx, in root's chrome, as it drew it (seon.render/placed-units of its walk; for an agent with no
@@ -1103,7 +1106,7 @@
         [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
         [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
         (when input (slot "p-input"))]
-       [:aside {:class "grid content-start gap-2"}]]]
+       [:aside {:id "p-tiles" :class "grid content-start gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto"} (for [u (in "#p-tiles")] (slot (:id u)))]]]
      :seon.render/units
      (vec (concat [{:id "p-head" :comp (conj (vec head) :block)}
                    {:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "text-2xs text-text-500"} (or caption "")])}]

@@ -497,8 +497,8 @@
       (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
         (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (reset! seon.agent/state nil)))
-              shown (filter #(= "#p-task" (:container %)) (:units parts))]
-          (is (= (map :id shown) (keys page)) "every component of the task's list, in order; the conversation is the transcript, not the render")
+              shown (:units parts)]
+          (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
           (is (= (map :html shown) (map seon.web.html/html (vals page))) "each component's hiccup is the html the page shows, byte for byte")
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
