@@ -325,7 +325,7 @@
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before but its last message (the
-  ;; turn sections), even after the program the task cites changed
+  ;; turn sections), even after the program the task cites, or the task's plan, changed
   (ts/test-branch!
     (fn [_ conn]
       (wiki! conn)
@@ -341,8 +341,13 @@
             r0 (request 0)
             _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
             r1 (request 1)
+            ;; the plan rewritten mid-run (the story ctx derives follows it, seon.ctx/derived): the
+            ;; request's prefix is the story as of the session's first turn, so its bytes stay
+            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
             r2 (request 2)]
         (is (= (pop r0) (subvec r1 0 (dec (count r0)))) "turn 1 starts with turn 0's request but its turn sections")
+        (is (and (str/includes? (:content (second r2)) "triple") (not (str/includes? (:content (second r2)) "quadruple")))
+            "a plan changed mid-run: the story sent is still the first turn's, byte for byte")
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
