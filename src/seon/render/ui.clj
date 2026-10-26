@@ -908,7 +908,7 @@
   what to prove, the sections and the similar, drawn by the one printer as the data it is."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.task/keys [id kind execution] :as task} opts]
-  [:section {:class "part"}
+  [:section {:class "tile"}
    [:h2 {:class "kicker"} "task"]
    [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
    (when-let [story (some-> (:db opts) (context/story task))]
@@ -923,7 +923,7 @@
   {:malli/schema [:=> [:cat :seon.render/related :seon.render/opts] :any]}
   [{:keys [task]} opts]
   (let [r (when-let [db (:db opts)] (context/related db task))]
-    [:section {:class "part"} [:h2 {:class "kicker"} "related"]
+    [:section {:class "tile"} [:h2 {:class "kicker"} "related"]
      (if r (render/html r {}) [:p {:class "muted"} "nothing related yet"])]))
 
 (defn part-id
