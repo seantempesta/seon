@@ -17,6 +17,8 @@ Pins (docs/forks.md): Chez fa6a4c73; Jolt 2eda21da (d598fc04, the fiber dump, me
 
 ## In flight
 
+What each working session is doing now and takes next; every session is linked to root's (list_sessions linked).
+
 | Session | Now | Next |
 |---|---|---|
 | **Render build** (agent view) | build 3 on jolt/render-walk: seon.ratom (Reagent's ratom, cursors inferred), the walk, one cache, the per-render ledger, the task render drawing cited source, tests and section text within the printer's budget; deletes the parts layer and the hand-built cache keys | 3b-root (task seon.render/every-page-is-its-parts): root's page and the debug page through the same walk, deleting seon.render.system and the old unit walk |
@@ -28,6 +30,8 @@ Pins (docs/forks.md): Chez fa6a4c73; Jolt 2eda21da (d598fc04, the fiber dump, me
 | **Live agents** | one-go default with the merge gate judging main's tests, not the branch's (proof red, fix next) | the next live run on the refreshed requests, when the owner allows paid runs |
 
 ## Waiting on the owner
+
+The rulings and calls root holds for the owner.
 
 - Paid model runs: on hold until the owner says.
 - Delete jolt/evaluations, jolt/acts-by-second-move and jolt/flow-lab (carried forward or superseded; notes/branch-merit-2026-10-26.md); carry or delete examples, wiki, unitflake, one-content-keyed-derivation.
