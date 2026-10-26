@@ -243,9 +243,9 @@
                  :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
                                         {:agent :a1 :quiet-ms 4000 :last-op waits})}
         facts (fn [o] (into [] cat (writes o)))
-        retracts? (fn [o] (some #(and (vector? %) (= :seon.agent/stalled (last %))) (facts o)))
+        retracts? (fn [o] (some #(and (vector? %) (= :seon.agent/stall (last %))) (facts o)))
         [st o1] (step (api view) :back stalled)]
-    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.agent/stalled %)) (facts o1)) "recorded on the agent, with what it waits on")
+    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.agent/stall %)) (facts o1)) "recorded on the agent, with what it waits on")
     (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
     (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
 
@@ -267,18 +267,18 @@
         "its cause pre-filled with the stall")
     (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
         "held, for an outside worker, its proofs the boundary conditions")
-    (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (into [] cat (writes o1))))) :back (stalled :a1)))))
+    (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
         "a later stall of the same run writes none")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no run: none")))
 
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
   (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
-                                     :seon.agent/stalled {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
+                                     :seon.agent/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
                                     {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
         rows (get-in (problems/health db) [:classes :stalled :rows])]
     (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
     (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
-    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stalled]])) [:classes :stalled :rows]))
+    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stall]])) [:classes :stalled :rows]))
         "closed once the fact is retracted")))
 
 (deftest an-effect-error-is-counted-by-root
@@ -963,7 +963,8 @@
                :work "one lookup per class with an open row, found at the first row"
                :growth :constant
                :per-n {:ns 0 :bytes 0 :calls 0}
-               :fixed {:ns 3000000 :bytes 4000000 :calls 45}
+               ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up
+               :fixed {:ns 3000000 :bytes 4000000 :calls 47}
                :sizes [10 100 1000]}))
 
 (deftest attention-survives-a-store-write

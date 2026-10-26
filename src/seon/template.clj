@@ -183,7 +183,7 @@
      :seon.task/plan (str "Agent " (name agent) " stalled on run " run ": it sent root nothing for " (:quiet-ms s)
                           " ms with a request in flight" (some->> (:last-op s) :kind name (str ", "))
                           (some->> (:last-op s) :form (str " "))
-                          " (its :seon.agent/stalled on main, an open :stalled problem in my.root/problems).\n\n"
+                          " (its :seon.agent/stall on main, an open :stalled problem in my.root/problems).\n\n"
                           "Find why, while it is stuck, and capture the evidence"
                           (if pid (str " of its process " pid " and its children: `sample " pid " 3`, `lsof -p " pid
                                        "`, `ps -o pid,ppid,stat,etime,%cpu,command -g $(ps -o pgid= -p " pid ")`")

@@ -716,7 +716,7 @@
            stall (tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})
            _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Work." :seon.task/proofs #{}} stall]))
            _ (d/transact conn (task/run-start-tx "demo/t#1" "demo/t" "boot-1" :a1 {:branch :task-demo-t :model nil :max-turns 4} 1000 "Work."))
-           _ (d/transact conn [{:seon.agent/key k :seon.agent/stalled {:quiet-ms 4000}}])
+           _ (d/transact conn [{:seon.agent/key k :seon.agent/stall {:quiet-ms 4000}}])
            ab (pdb/on-main (:branch cfg) :stall-task)
            _ (d/branch! conn (:branch cfg) ab)
            store-conn (d/connect (assoc cfg :branch ab))
@@ -729,7 +729,7 @@
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t-1" :db @store-conn})
          (is (pos? (:fail (proofs) 0)) "red: the agent is stalled, no cause is recorded")
-         (d/transact conn [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/stalled]])
+         (d/transact conn [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/stall]])
          (my.task/update! :seon.task/cause merge {:what "a test child parked on a pipe nobody wrote" :evidence {:sample "..." :lsof "..."} :bug? false})
          (agent/commit!)
          (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")

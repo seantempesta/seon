@@ -325,7 +325,7 @@
         [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
     (is (= {:op :kill :id :a1 :ended true} (:req (first outs))))
     (is (= [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended]
-            {:seon.run/id "demo/a#1" :seon.run/reason "no branch :demo/a" :seon.run/error no}]
+            {:seon.run/id "demo/a#1" :seon.run/outcome :error :seon.run/reason "no branch :demo/a" :seon.run/error no}]
            (update (get-in (second outs) [:req :req :tx-data]) 1 dissoc :seon.run/end-ms)))
     (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 

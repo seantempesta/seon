@@ -385,10 +385,10 @@
         ;; a stall (1,000 ms bound): an open :stalled problem while it sleeps, closed once it answers
         stalled-rows #(get-in (seon.problems/health %) [:classes :stalled :rows])
         r2p (c/submit! sys a "(Thread/sleep 2500) :awake")
-        during (seon.root/await-db sys "a's stall on main" #(seq (stalled-rows %)))
+        during (seon.root/await-db sys #(seq (stalled-rows %)))
         stall (first (some-> during stalled-rows))
         r2 @r2p
-        after (seon.root/await-db sys "a's stall closed" #(empty? (stalled-rows %)))
+        after (seon.root/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
         _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))

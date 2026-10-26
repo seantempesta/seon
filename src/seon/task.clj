@@ -171,7 +171,7 @@
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
    :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms
-   :stalled :seon.agent/stalled})
+   :stalled :seon.agent/stall})
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
