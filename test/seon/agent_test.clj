@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -159,6 +159,37 @@
   (let [{:keys [agents left out]} (root-ended "(clojure.core.async/<!! (clojure.core.async/chan))" false)]
     (is (= #{:a1 :a2} (set (keys agents))) out)
     (is (empty? left) (str "agents still alive: " left "\n" out))))
+
+(deftest a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
+  ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
+  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forks
+  ;; holds the write end past the child's exit. The read ends at the end of file or the child's
+  ;; exit, whichever comes first, and the child marks its end FD_CLOFORK so nothing it forks holds it.
+  ;; The grandchild here waits on a pipe of its own, which the test closes after the read. A
+  ;; regression waits for ever (no clock may end it): a hang is this test's red. The result line,
+  ;; longer than the reader's 1 MB read, is read whole after the exit
+  (let [result (pr-str {:pass 1 :fail 0 :error 0 :reports [] :pad (apply str (repeat 1200000 "x"))})
+        run (fn [clofork?]
+              (let [[r w] (sock/socketpair)
+                    [gr gw] (sock/socketpair)
+                    pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                                    :child (fn []
+                                             (lib/c-close r) (lib/c-close gw)
+                                             (when clofork? (sock/clofork! w))
+                                             (lib/fork! {:refused (fn [_] nil) :parent (fn [_] nil)
+                                                         :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
+                                             (sock/write-line! w result))})]
+                (lib/c-close w) (lib/c-close gr)
+                (try (let [res (agent/read-to-exit r pid)
+                           st (lib/wait-status pid)]
+                       (assoc res :status st))
+                     (finally (lib/c-close r) (lib/c-close gw)))))]
+    (let [held (run false)]
+      (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
+      (is (= {:exit 0} (:status held)) "and the child exited, not killed")
+      (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
+          "and the run's answer names the held pipe beside what the child wrote"))
+    (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
 
 (deftest a-blocked-agent-ends-on-its-socket-eof
   ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork
@@ -520,15 +551,15 @@
 
 (deftest a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test is red, with how the child ended"
-    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
+    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9} false)]
       (is (= {'app-test/slow :error} (proofs/results run)))
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= {:signal 9} (:exit (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
+      (is (= res (agent/test-run-answer (pr-str res) {:exit 0} false)))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/test-run-answer nil {:exit 1})]
+    (let [run (agent/test-run-answer nil {:exit 1} false)]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
@@ -740,11 +771,12 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! with the
+  ;; staged choice (seon.template/stages, an experiment's: the default request is design-build and merge) and
   ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
-  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"} seon.template/stages)"
                   " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
@@ -813,6 +845,15 @@
     (is (= [:cap 3] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))
     (is (some #(and (= :eval (first %)) (symbol? (:same-as (get % 2)))) (:value sent))
         (str "turn 2 sent turn 1's answer marked :same-as turn 0's: " (pr-str (:value sent))))))
+
+(deftest a-whole-tasks-work-turns-are-no-merge-turns
+  ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
+  ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
+  ;; whole task's turn is a merge turn only while what both sides changed is unresolved
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/w\" :run \"demo/w#1\" :max-turns 4})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]
+                         :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
@@ -888,14 +929,16 @@
 
 (deftest memory-is-read-when-asked
   ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
-  ;; value kept for a time, so two calls back to back see what the process allocated between
-  ;; them (a reading cached for a second answers the first one again)
-  (let [before (agent/mem-mb)
-        held (byte-array (* 96 1024 1024))
-        _ (dotimes [i (quot (alength held) 4096)] (aset-byte held (* i 4096) 1))
-        after (agent/mem-mb)]
-    (is (>= (- after before) 64.0) (str "96 MB written between two calls shows in the second: " before " -> " after))
-    (is (pos? (alength held)) "held until the second reading")))
+  ;; value kept for a time, so each call reads the process's ledger again (lib/real-mb, one
+  ;; task_info probe). The megabytes it answers move with the machine (a collection between two
+  ;; calls lowers them), so the test counts the readings, exactly (seon.profile's counted calls):
+  ;; a reading kept answers the second call without a probe
+  (let [reads (volatile! nil)
+        [a b] (profile/measure! #(vector (agent/mem-mb) (agent/mem-mb))
+                                (fn [_] (vreset! reads (into {} (map (juxt :var :calls)) (profile/touched)))))]
+    (is (= 2 (get @reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
+    (is (= 2 (get @reads 'seon.lib/mp-probe)) "each the process's own task_info probe")
+    (is (and (pos? a) (pos? b)) "a reading in MB")))
 
 (deftest related-is-an-eval-of-the-plan-and-of-any-text
   ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode

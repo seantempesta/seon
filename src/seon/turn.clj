@@ -244,7 +244,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? run] :as st} {:keys [results tests-ms] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? whole? run] :as st} {:keys [results tests-ms unmerged] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
@@ -338,7 +338,9 @@
                                                  :shown {'seon.docs/resolve-ref (set (keep :symbol (:write-set block)))
                                                          'seon.context/current-state (set (map :test (:proofs block)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
-          merge? (update :merge-turns inc))))))
+          ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
+          ;; only a turn with what both sides changed still to resolve
+          (and merge? (or (not whole?) (seq unmerged))) (update :merge-turns inc))))))
 
 (defn context-block
   "The request of task as a model is sent it on this branch now (the proofs run again): what an
@@ -400,13 +402,13 @@
   [{:keys [task run model max-turns]}]
   (let [{:keys [plan-before]} (begin! task run)
         t0-task (task/task (agent/db) task)
-        merge? (= :merge (:seon.task/kind t0-task))
+        merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
     ;; every run starts on main: a kept branch made before main moved merges it first, so
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run
+    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       (let [{:keys [reasons unmerged] :as obs} (observe task plan-before)
             stop (get-in @agent/state [:turn :stop])

@@ -61,6 +61,7 @@
  ;; the test service's prove agent could not load the checkout's tests (seon.prove)
  :seon.test/prepare [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/prepare]]]]
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
+ :seon.lib/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/unwatched]] [:fd :int] [:pid :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]

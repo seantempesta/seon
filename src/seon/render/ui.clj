@@ -918,7 +918,7 @@
                                                                   :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}])])
 
 (defn status
-  "What the newest model turn of the task observed (the declared html render of
+  "What the newest turn of the task observed, a model's or an outside read's (the declared html render of
   :seon.render/status), as (my.task/status) answers it: seon.context/turn-state over the turn's
   recorded basis (seon.context/turn-input, with the turn before it for its last reply) on opts
   :db, as a call of the one printer (the model reads the data)."
@@ -939,7 +939,7 @@
   [{:keys [task]} opts]
   (let [r (when-let [db (:db opts)] (context/related db task))]
     [:section {:class "tile"} [:h2 {:class "kicker"} "related"]
-     (if r [#'render/html r {:handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
+     (if r [#'render/html r {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
 
 (defn part-id
   "The element id of an agent page's part by its key ([:eval \"e12\"] -> \"q-eval-e12\")."
