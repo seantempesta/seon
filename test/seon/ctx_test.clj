@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check.generators :as gen] [clojure.string :as str] [clojure.walk :as walk]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -769,6 +769,17 @@
    :n "a generated record and the same record after up to five edits sharing what they leave, or an equal copy sharing nothing"
    :work "the walk's keys where the two sides are not the same object, each value compared there, each change and its sort"})
 
+(deftest changes-answers-what-every-pair-walked-answers
+  ;; the walk in step (a collection's entries through its order, a member that is the same object
+  ;; passed by) answers what the walk of every key of both sides answers, on generated records
+  (let [r (tc/quick-check 200 (prop/for-all [[a b] records] (= (changes-unskipped a b) (ctx/changes a b))) :seed (proofs/test-seed))]
+    (is (:pass? r) (pr-str (select-keys r [:seed]) (get-in r [:shrunk :smallest]))))
+  (let [db (seeded 0) c (ctx/build db (aid db) :b) rep (d/with db (eval-tx 1))
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (nil? (:evals (:tree c))) "a collection with no members is not held (node)")
+    (is (= [[:add [:evals] (:evals (:tree c'))]] (ctx/changes c c')) "so its first member adds it whole, as every other pair walked")
+    (is (= [] (ctx/changes (assoc-in c [:tree :t] 1) (assoc-in c [:tree :t] 2))) "the root's environment is not its data")))
+
 (deftest changes-holds-its-bound-on-generated-records
   ;; task seon.cost/a-contract-carries-its-cost-bound: the bound sketches the walk; a copy that
   ;; skips nothing goes over it, so the proof can fail
@@ -783,11 +794,38 @@
   (let [m (fn [a b] (select-keys (cost/measure ctx/changes [a b]) [:ticks :bytes]))
         t (record-of {:evals 0 :runs 0 :cites 0 :len 10})
         per (fn [case a b] (let [x (case a) y (case b)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (double (- b a)))]))))
-        ;; a collection of n members re-made as a new map: n keys visited, nothing changed
-        keys-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
+        ;; a collection of n members re-made as a new map: n entries stepped past, nothing changed
+        entries-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
+        ;; n members of two keys each re-made: n entity pairs walked into, each two entries and four keys
+        entities-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :a (str "v" i)}))}]
+                              (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        ;; n evals as the generator makes them, each rebuilt equal (walk/postwalk, as :rebuilt does):
+        ;; per member an entity pair, two entries, eight keys, and its :seon.eval/record compared by =
+        ;; (walk-of's size of it)
+        eq-at (fn [n] (let [t {:db/id 1 :evals (members (map #(an-eval % 30) (range n)))}]
+                        (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (walk/postwalk identity e)])) %)))))
+        rec-size (#'seon.ctx/walk-of {:db/id 1 :r (:seon.eval/record (an-eval 7 30))} {:db/id 1 :r (walk/postwalk identity (:seon.eval/record (an-eval 7 30)))})
+        ;; n members each holding a one-member collection re-made (the member itself kept): per member
+        ;; what a member holding a string costs, less two entries, plus a collection pair walked into
+        coll-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :c (members [{:db/id 0}])}))}]
+                          (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (update e :c (fn [c] (into (empty c) c)))])) %)))))
+        str-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :c "x"}))}]
+                         (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        ;; 300 members of k keys each re-made (small entities, array maps, as a record's members are):
+        ;; per key added, a key of each side visited
+        members-of (fn [k] (let [t {:db/id 1 :evals (members (for [i (range 300)] (into {:db/id i} (for [j (range (dec k))] [(keyword (str "a" j)) (str "v" i j)]))))}]
+                             (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        keys-per (let [x (members-of 2) y (members-of 6)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (* 300.0 4))])))
         ;; n evals each changed
         changes-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (edited t [:all-evals 1]))))
-        measured {:fixed (m t t) :key (per keys-at 100 1000) :change (per changes-at 100 1000)}]
+        side (fn [x] (update-vals x #(/ % 2)))
+        ;; a key or an entry is a step of one side (walk-of counts both): half of each pair's
+        key (side keys-per) entry (side (per entries-at 100 1000))
+        entity (merge-with - (per entities-at 100 1000) (update-vals entry #(* 2 %)) (update-vals key #(* 4 %)))
+        measured {:fixed (m t t) :key key :entry entry :change (per changes-at 100 1000)
+                  :entity entity
+                  :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
+                  :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 8 %))) #(/ % (:eq rec-size)))}]
     (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
