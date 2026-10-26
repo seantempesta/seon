@@ -291,7 +291,12 @@
       (let [carried (task/carry-tx (:base @state) main head)
             rep (d/merge-db conn #{main-b} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
                                                (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                                               (into (:tx carried)))
+                                               (into (:tx carried))
+                                               ;; the catch-up itself, a fact of the agent's record (its :catch-ups)
+                                               (conj {:seon.catch-up/id (str (name (:branch @state)) "@" (:max-tx main))
+                                                      :seon.catch-up/agent {:seon.agent/key (:key @state)}
+                                                      :seon.catch-up/from main-b :seon.catch-up/from-t (:max-tx main)
+                                                      :seon.catch-up/applied (vec (:apply r)) :seon.catch-up/conflicts (vec (:conflicts r))}))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]

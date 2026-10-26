@@ -84,6 +84,8 @@
                   [m ix])))
             [m ix] (get units s))))
 
+(def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
+
 (defn- environment
   "The map's environment: the db's t, the branch and the commit the db is (none for a value as of
   an earlier t: its basis names it)."
@@ -103,22 +105,25 @@
 (defn build
   "The record of entity e on db as ctx's value {:tree :ix :born :changed}: e and its units, and
   its environment on branch; each member's first transaction (:born, what `order` sorts by);
-  :changed :all, since every value is new (a memo of a part misses once, everywhere). Any entity
+  :changed #{[]}, the root path, since every value is new (a memo of a part misses once,
+  everywhere). Any entity
   an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no e (an
   agent whose entity its branch does not hold yet), its environment alone. O(the record)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed :any]]]}
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed [:set [:vector :any]]]]]}
   [db e branch]
   (let [[tree ix] (if e (node db e nil [] {}) [{} {}])]
-    {:tree (merge tree (environment db branch)) :ix ix :born (born db ix {} (keys ix)) :changed :all}))
+    {:tree (merge tree (environment db branch)) :ix ix :born (born db ix {} (keys ix)) :changed #{[]}}))
 
 (defn order
   "The keys of the unit at path p of c (its members' map: [:evals], [:runs id :turns]) by each
   member's first transaction: the order its entries happened in, derived from the facts (never a
-  stored vector). O(n log n) in the unit's members."
+  stored vector); entries of one transaction by their keys. Every member has its first
+  transaction (an identity's datom), so none is missing. O(n log n) in the unit's members, each
+  call: a view memoizes it on the unit (identical? while no member joined or left).
   {:malli/schema [:=> [:cat [:map [:tree :map] [:born :map]] [:vector :any]] [:vector :any]]}
   [c p]
   (let [u (get-in (:tree c) p)]
-    (vec (sort-by (fn [k] [(get (:born c) (:db/id (get u k)) 0) (str k)]) (keys u)))))
+    (vec (sort-by (fn [k] [(get (:born c) (:db/id (get u k))) k]) (keys u)))))
 
 ;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance) --------------------------
 
@@ -146,13 +151,6 @@
   {:malli/schema [:=> [:cat :any] [:sequential :any]]}
   [t] (distinct (keep :db/id (tree-seq map? vals t))))
 
-(defn- unindex
-  "ix without the paths at or below q of the entities subtree t (at q) holds."
-  {:malli/schema [:=> [:cat :map :any [:vector :any]] :map]}
-  [ix t q]
-  (reduce (fn [ix e] (let [r (into #{} (remove #(under? (first %) q)) (get ix e))] (if (seq r) (assoc ix e r) (dissoc ix e))))
-          ix (held-in t)))
-
 (defn- unit-of
   "The unit of schema s whose attribute is a, or nil."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :keyword] [:maybe :map]]}
@@ -164,17 +162,24 @@
   {:malli/schema [:=> [:cat :map [:vector :any] :any] :map]}
   [t p a] (if (seq p) (update-in t p dissoc a) (dissoc t a)))
 
+(defn- forget
+  "c's index without subtree t at path q: each entity's paths at or below q, and the first
+  transaction of each it then holds at no other path."
+  {:malli/schema [:=> [:cat :map :any [:vector :any]] :map]}
+  [c t q]
+  (let [es (held-in t)
+        ix (reduce (fn [ix e] (let [r (into #{} (remove #(under? (first %) q)) (get ix e))] (if (seq r) (assoc ix e r) (dissoc ix e))))
+                   (:ix c) es)]
+    (assoc c :ix ix :born (reduce (fn [b e] (if (contains? ix e) b (dissoc b e))) (:born c) es))))
+
 (defn- leave
-  "c without the member (or forward unit) at path p; a unit it empties goes with it, and so does
-  the first transaction of each entity it held at no other path."
+  "c without the member (or forward unit) at path p; a unit it empties goes with it."
   {:malli/schema [:=> [:cat :map [:vector :any]] :map]}
-  [{:keys [tree ix] :as c} p]
+  [{:keys [tree] :as c} p]
   (let [unit (pop p) t (without tree unit (peek p))
         ;; a unit emptied is no key, as a build holds it
-        t (if (and (seq unit) (empty? (get-in t unit))) (without t (pop unit) (peek unit)) t)
-        ix' (unindex ix (get-in tree p) p)]
-    (assoc c :tree t :ix ix' :born (reduce (fn [b e] (if (contains? ix' e) b (dissoc b e))) (:born c) (held-in (get-in tree p)))
-           :changed (conj (:changed c) p))))
+        t (if (and (seq unit) (empty? (get-in t unit))) (without t (pop unit) (peek unit)) t)]
+    (-> (forget c (get-in tree p) p) (assoc :tree t :changed (conj (:changed c) p)))))
 
 (defn- join
   "c with entity e of schema s added at path p, whole as db holds it, with the first transaction
@@ -196,7 +201,7 @@
         path (conj p a)]
     (cond
       (and u (not (:rev? u))) (if added
-                                (let [q (conj p (:key u))] (join (update c :ix unindex (get-in (:tree c) q) q) db v nil q))
+                                (let [q (conj p (:key u))] (join (forget c (get-in (:tree c) q) q) db v nil q))
                                 (if (= v (get-in (:tree c) (conj p (:key u) :db/id))) (leave c (conj p (:key u))) c))
       (and (seq p) (not added) (= a (identities s))) (leave c p)
       ;; the record's own entity gone (a task or run retracted): its environment alone, as a build of no entity
@@ -221,7 +226,8 @@
   datom, and the read of each entity that joins. An identity never changes (an upsert key).
   Answers :changed, the paths this transaction changed (an attribute's, a member's that joined
   or left): every path not at, under or above one of them holds the value it held before, the
-  same object (identical?), so a part's memo is a pointer test."
+  same object (identical?), so a part's memo is a pointer test. The environment (:t :branch
+  :commit) is the root map's, new each transaction, and no path of :changed."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map] [:born :map]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed [:set [:vector :any]]]]]}
   [c db datoms branch]
   (-> (reduce
@@ -246,7 +252,7 @@
                  held (get (:ix c) e)]
              (reduce (own held) (reduce link c put) put))))
        (assoc c :changed #{}) (group-by :e datoms))
-      (update :tree merge (environment db branch))))
+      (update :tree #(merge (apply dissoc % environment-keys) (environment db branch)))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
@@ -264,7 +270,6 @@
   [c {:keys [t ops db]} branch]
   (patch c db (for [[op e a v] ops] {:e e :a a :v v :tx t :added (= op :db/add)}) branch))
 
-(def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
 (defn- registered?
   "Has attribute a a schema: the platform's, or one this branch registered (the REPL binds it)?"
@@ -402,6 +407,11 @@
     (let [[gone added] (d/datoms-diff a b :eavt [])]
       (concat (map #(assoc % :added false) gone) added))))
 
+(defn- agent-record
+  "The record of the agent state st names (its key's entity on db, its branch), built."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db st] (build db (some->> (:key st) (pdb/eid db :seon.agent/key)) (:branch st)))
+
 (defn- on-state
   "The watch on the agent's state: a new agent, key or branch builds ctx, as does a db moved while
   the record lacks its agent's entity; a db moved patches it;
@@ -411,11 +421,11 @@
   (let [a (:db o) b (:db n)]
     (cond
       (nil? b) nil
-      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (install! (build b (some->> (:key n) (pdb/eid b :seon.agent/key)) (:branch n)))
+      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (install! (agent-record b n))
       (identical? a b) nil
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
-      (nil? (get-in @held [:tree :db/id])) (install! (build b (some->> (:key n) (pdb/eid b :seon.agent/key)) (:branch n)))
+      (nil? (get-in @held [:tree :db/id])) (install! (agent-record b n))
       (= (:max-tx a) (:max-tx b)) (install! (-> @held (update :tree merge (environment b (:branch n))) (assoc :changed #{})))
       :else (let [c (patch @held b (moved a b (:tx n)) (:branch n))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)

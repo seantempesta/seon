@@ -156,7 +156,7 @@
                      [:seon.eval/record :seon.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent :seon.catch-up/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -399,6 +399,20 @@
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
+ ;; a catch-up: one merge of main into the agent's branch (seon.agent/merge-main!), written in the
+ ;; merge's own transaction, so the agent's record holds what main brought it (its ctx's
+ ;; :catch-ups, in the order they happened) and a view reads it as a fact
+ :seon.catch-up/id [:and {:seon.db/identity true} :string]
+ :seon.catch-up/agent [:and {:seon.db/index true} :seon.db/ref]
+ ;; the branch merged in, and its t: main's head the catch-up merged
+ :seon.catch-up/from :seon.db/branch
+ :seon.catch-up/from-t :int
+ ;; the program keys main changed that applied, and those that conflicted (left unmerged)
+ :seon.catch-up/applied [:vector :seon.merge/program-key]
+ :seon.catch-up/conflicts [:vector :seon.merge/conflict]
+ :seon.catch-up/fact [:map {:seon.db/attributes true} [:seon.catch-up/id :seon.catch-up/id] [:seon.catch-up/agent :seon.catch-up/agent]
+                      [:seon.catch-up/from :seon.catch-up/from] [:seon.catch-up/from-t :seon.catch-up/from-t]
+                      [:seon.catch-up/applied :seon.catch-up/applied] [:seon.catch-up/conflicts :seon.catch-up/conflicts]]
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/run [:and {:seon.db/index true} :seon.db/ref]
  :seon.turn/n :int

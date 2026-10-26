@@ -45,8 +45,9 @@
       ;; the run is this session's on its own branch too (root writes it on main): the
       ;; conversation finds the messages its runs took, and the story its first stage's, by it
       ;; (seon.context/records, session-first-run read the branch)
-      (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}
-                         :seon.run/story (context/run-state db (task/task db task))}])
+      ;; the story once, as the run begins: a resumed run keeps the one its stage began with
+      (agent/transact! [(cond-> {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}
+                          (nil? (:seon.run/story (d/entity db [:seon.run/id run]))) (assoc :seon.run/story (context/run-state db (task/task db task))))])
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 

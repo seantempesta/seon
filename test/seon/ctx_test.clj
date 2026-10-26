@@ -62,7 +62,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 12)
+    (case (.nextInt r 13)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -74,6 +74,9 @@
       8 [[:db/add [:seon.agent/key k] :seon.agent/status (nth [:idle :busy] (.nextInt r 2))]]
       9 (if (seq turns) [[:db/add [:seon.turn/id (nth turns (.nextInt r (count turns)))] :seon.turn/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
       10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
+      12 [{:seon.task/id (str "lab/other" i) :seon.task/ns 'app.y :seon.task/name (str "other" i) :seon.task/plan "Another."
+           :seon.task/kind :work}
+          [:db/add [:seon.run/id run] :seon.run/task [:seon.task/id (str "lab/other" i)]]]
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
@@ -90,9 +93,10 @@
         (is (= #{'app.x-test/t0} (get-in t [:runs "lab/ctx#1" :task :seon.task/proofs])))
         (is (= 20 (count (get-in t [:runs "lab/ctx#1" :turns]))))
         (is (= #{"m20" "m40" "m60"} (set (keys (get-in t [:runs "lab/ctx#1" :messages])))))))
-    (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] misordered []]
+    (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] misordered [] checked 0]
       (if (= i 150)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
+            (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared)))
             (is (empty? misordered) (str "a unit not in the order its members were first written: " (first misordered))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
@@ -107,9 +111,10 @@
           (recur db' c' (inc i)
                  (cond-> bad (not= (dissoc c' :changed) (dissoc b :changed)) (conj [i tx]))
                  (into unshared (for [p kept :when (not (identical? (get-in (:tree c) p) (get-in (:tree c') p)))] [i p]))
-                 (cond-> misordered (not= evals (vec (sort-by (juxt born str) (keys (:evals (:tree c')))))) (conj [i evals]))))))
-    (testing "a build answers every path changed: a memo misses once, everywhere"
-      (let [db (seeded 5)] (is (= :all (:changed (ctx/build db (aid db) :b))))))))
+                 (cond-> misordered (not= evals (vec (sort-by (juxt born identity) (keys (:evals (:tree c')))))) (conj [i evals]))
+                 (+ checked (count kept))))))
+    (testing "a build answers the root path changed: a memo misses once, everywhere"
+      (let [db (seeded 5)] (is (= #{[]} (:changed (ctx/build db (aid db) :b))))))))
 
 (deftest any-entitys-record-follows-mains-commits
   ;; root's, the user's and a task's record are built over their entity and patched from the
@@ -127,8 +132,12 @@
               commit {:t (:max-tx db') :ops (pdb/report->tx rep) :db db'}
               cs' (into {} (for [[e c] cs] [e (ctx/follow c commit :main)]))]
           (recur db' cs' (inc i)
-                 (into bad (for [[e c] cs' :let [b (ctx/build db' (when (d/entity db' e) e) :main)]
-                                 :when (not= (dissoc c :changed) (dissoc b :changed))] [i e tx]))))))))
+                 (into bad (for [[e c] cs' :let [b (ctx/build db' (when (seq (d/datoms db' :eavt e)) e) :main)]
+                                 :when (not= (dissoc c :changed) (dissoc b :changed))] [i e tx]))))))
+    (testing "a followed run retracted: its environment alone, as a build of no entity"
+      (let [rep (d/with db0 [[:db/retractEntity re]]) db' (:db-after rep)
+            c (ctx/follow (ctx/build db0 re :main) {:t (:max-tx db') :ops (pdb/report->tx rep) :db db'} :main)]
+        (is (= (dissoc (ctx/build db' nil :main) :changed) (dissoc c :changed)))))))
 
 (deftest the-agents-state-keeps-ctx
   ;; the atom follows the agent's db: built when the state first holds it, patched from the

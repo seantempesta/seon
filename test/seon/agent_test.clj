@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.task :as task] [seon.repl :as repl] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -551,14 +551,19 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
                "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
-               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)"))
+               "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)")
+           (let [c (seon.ctx/build (agent/db) (:db/id (d/entity (agent/db) [:seon.agent/key "test/a1"])) ab)
+                 [cu] (vals (:catch-ups (:tree c)))]
+             (is (= [(:branch cfg) (:max-tx @conn)] [(:seon.catch-up/from cu) (:seon.catch-up/from-t cu)])
+                 "the catch-up a fact of the agent's record, in its ctx (task seon.ctx/one-derivation)")
+             (is (some #{[:var 'app.m0/f1]} (:seon.catch-up/applied cu)) "with what it applied")))
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
