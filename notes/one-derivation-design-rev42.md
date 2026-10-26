@@ -14,14 +14,15 @@ Agent view, for root. It applies the owner's two rulings of 2026-10-26 on top of
 - **Shape:** `{path [old new]}` in ctx's own shape. A member that went is `[old nil]`, and a new one is `[nil new]`.
 - **Cost proof:** calls linear in the changed paths, never in ctx.
 
-## 2. The model's page: the same hiccup, drawn stateless and eager, meaning only
-The model reads the hiccup the user sees, drawn in a way that does not depend on any tab. The review found three ways today's renders would make it differ:
-- **Eager, not per-tab.** Today a fold's content is drawn only when a tab has opened it (render/ui.clj:785, 764, 622), and an eval's value is cut to the page's budget per tab (ui.clj:498-504). The model's draw opens every fold: one draw per part, with no tab state. The user's page folds that same hiccup with `<details>`, so what the page folds is in the data.
-- **Meaning only, by one projection at print time.** Renders carry 182 utility class strings and Datastar attributes (ui.clj:502, 588). Rewriting every render is the alternative, and it is ruled out. Instead, one step projects a part's hiccup for the model: it keeps the tag, its semantic class (`.part`, `.badge`, `.ref`: input.css `@layer components`) and its text and values, and leaves out utility classes, `data-*` and `on*` attributes, and layout-only wrappers. It is one function, beside the printer.
-- **Values stay data.** A value inside a part is kept as the value, not as `print-html`'s span tree (render.clj:115-123), so the printer prints it as its structure, at a fraction of the tokens.
+## 2. The model's page: the same hiccup, exactly as each render returned it
+The owner, after approval, 2026-10-26: "don't leave anything out I want the agent to understand problems with the rendering functions"; "Keep things simple so we can easily modify the system".
+- **No projection, no stripping, no theme map.** The model reads each part's hiccup exactly as its render returned it: classes, `data-*` and `on*` attributes, wrappers. A render's bug is visible in what the agent reads, and the fix for a large page is a more compact render, which the agent can see and make. Today's renders return their utility classes themselves (no expansion at HTML emit), so there is no theme map to send.
+- **Drawn eager, with no per-tab state.** The model's draw opens every fold. The user's page is the same hiccup.
+- **Measured** (a1, live, 2026-10-26): the page as returned, without the conversation, is 4,501 tokens (task 3,052, related 822, proofs 314, verdict 206, run 107), against 5,226 for that agent's request today. Nothing is stripped.
 
 ## 3. Renders memoised by value; order computed in view
 - **`(view c db)`:** the record and the agent's branch db as of its t. The conversation's order is each member's first transaction, `seon.context/first-t` (jolt/ctx-atom), one seek per member. It is not memoised: the review cut the cache as more mechanism than the lookup it saves.
+- **The cited vars as their own sub-parts** (root, 2026-10-26): `task-page` draws each var the plan cites as its own part, `[:task :cites sym]`, so a cited edit's page diff is that var's part alone, not the whole story.
 - **The task part's render, `seon.render.ui/task-page`.** It is run-state (context.clj:280) over the task and the db as of t, drawn as hiccup with what the task cites, what to prove and its write set. It lives in seon.render.ui, which already requires seon.context (ui.clj:19). Declared on `:seon.task/task`, it replaces `task-box` (ui.clj:357) wherever a task is drawn.
 - **The related part's render, `seon.render.ui/related`:** over the plan's vectors.
 - **One memo, by value:** `{part-key [fns value read-t hiccup]}`, a hit when the fns and the value are identical and `read-t` is the same.
@@ -32,7 +33,7 @@ The model reads the hiccup the user sees, drawn in a way that does not depend on
 | role | carries |
 |---|---|
 | system | the rules, pinned per session |
-| user, first | the model's page, whole: its parts' projected hiccup in view order |
+| user, first | the page, whole: its parts' hiccup as returned, in view order, without the conversation |
 | assistant | the agent's prose and eval calls |
 | tool | the eval's answer: value, out, err, error and cost |
 | user, each later turn | `[from <sender>]` each message taken (4.1 §5's entries); `[page]` each non-conversation part whose hiccup changed, by key; `[ctx]` each changed ctx path no part on the page draws |
@@ -49,7 +50,7 @@ The model reads the hiccup the user sees, drawn in a way that does not depend on
 | `seon.render/ai`, `print-ai`, `rendered?`, `printed` | root's context (render/proc.clj:642, feeding `/context.txt`, root's debug tile and two docs pages); the stream's web-call line (proc.clj:748); MCP error text (server.clj:233, 258) | root's context: root's page, its parts' projected hiccup, with the `-data` functions (`system-data` and its kin) kept as part values. The stream line and MCP errors: the printer, with errors message-first at their producer (`seon.contract/error`) |
 | `seon.render.ai`'s hand-written faces (render/ai.clj, 222 lines), less the `-data` functions | the above | the `-data` functions as part values |
 | `:seon.render.config/root-context-budget` | root's context | the part's budget |
-| `part-faces`' text face and the `:page`/`:value` split | view, repl/parts, proc | one face, hiccup; the model's projection (§2) |
+| `part-faces`' text face and the `:page`/`:value` split | view, repl/parts, proc | one face, the hiccup as returned |
 | ctx's derived members, `:born`, `order` | (done on jolt/ctx-atom) | `first-t`, renders over the db |
 | 14 test references to `:ai` faces | tests | rewritten with their slices |
 
@@ -67,10 +68,10 @@ The model reads the hiccup the user sees, drawn in a way that does not depend on
   - `(view c db)`;
   - `task-page` and `related` in seon.render.ui;
   - the memo with `read-t`;
-  - the model's projection (§2);
   - `my.task/related` and the tests ctx-atom left red;
   - then §5's deletions and the world message (§4), with related-sections for the request's assembly (4b).
 
-## 9. Open, for root and the owner
-- **(a) The theme map.** The review would cut it, since it is CSS and the rulings ask for meaning only. The owner earlier asked to compress, not remove: "if we remove the styling and don't show the removal how do agents easily update it". With the projection keeping semantic classes, an agent that edits a render sees which class a part uses, and the stylesheet's `@layer components` is one form away. My recommendation: no theme map in the request; the stylesheet is cited by its section. The owner rules.
-- **(b)** Root's context becomes root's page as projected hiccup. `/context.txt` and root's debug tile then show that.
+## 9. Settled after approval (2026-10-26)
+- No projection and no theme map (the owner, above).
+- Cited vars as sub-parts (root).
+- The conversation parts are told by the transcript, once.
