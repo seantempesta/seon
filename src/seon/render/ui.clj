@@ -906,8 +906,6 @@
      (let [data (context/task-data db (task/task db id) false)]
        ;; a cut names the form that answers the whole at the agent's REPL
        (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
-             ;; the data as a call of the printer, expanded when the page is written: the model reads
-             ;; the call with the value as data, not the printer's hiccup of it
              [#'render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)}])))])
 
 (defn cited
