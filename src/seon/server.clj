@@ -65,7 +65,7 @@
             (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
-                                           (repl/record-details @(:conn sys) code r {} nil) nil))
+                                           (repl/record-details @(:conn sys) code r {} nil)))
     (dissoc r :value)))
 
 (defn- attach!

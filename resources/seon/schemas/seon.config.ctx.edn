@@ -1,0 +1,4 @@
+;; What a record holds (seon.ctx; docs/ctx.md#the-pattern): the windows its entity schemas'
+;; patterns name by config key (a :limit that is a keyword), so no limit is a literal.
+{:seon.config.ctx/window [:int {:min 1 :seon.config/unit "members" :description "The newest members a collection of a record holds (a pattern's :limit :seon.config.ctx/window, read newest first): an agent's evals, runs, turns and messages; root's agents."}]
+ :seon.config.ctx/callers [:int {:min 0 :seon.config/unit "forms" :description "The newest forms naming a cited var a task's record holds (its callers: :form/_refs by name)."}]}

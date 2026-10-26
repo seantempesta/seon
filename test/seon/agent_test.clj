@@ -686,20 +686,22 @@
            _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                                {:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
            [a b] (sock/socketpair)
-           old @agent/state]
+           old @agent/state
+           ;; a collection's member in the agent's ctx, found by its id
+           member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
-         (is (nil? (get-in @seon.ctx/ctx [:runs "demo/w#1" :seon.run/outcome])) "before the take, nothing of main's")
+         (is (nil? (:seon.run/outcome (member :runs :seon.run/id "demo/w#1"))) "before the take, nothing of main's")
          (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
          (is (= [] (agent/take-main!)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
          (is (= [nil :waiting "waiting for a message"]
-                (mapv #(get-in @seon.ctx/ctx [:runs "demo/w#1" %]) [:seon.run/status :seon.run/outcome :seon.run/reason]))
+                (mapv (member :runs :seon.run/id "demo/w#1") [:seon.run/status :seon.run/outcome :seon.run/reason]))
              "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
          (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
-         (is (true? (get-in @seon.ctx/ctx [:evals "e1" :seon.eval/opened])) "and the opened eval")
+         (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
