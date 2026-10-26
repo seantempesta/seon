@@ -47,6 +47,27 @@ st=0 P=()
 # each shard's wall and CPU seconds kept beside its log (shard-<i>.time); its tests' own in their results (:ms)
 TIMEFMT='real %E user %U sys %S'
 for f in $F; do { time (runner --shard "$f" > "${f%.edn}.log" 2>&1) } 2> "${f%.edn}.time" & P+=($!); done
+# a stalled test is named, never ended: a running shard whose log is quiet past the stall bound
+# (seon.agent-proc/stall-ms, 30 s) since its last "started" line prints STALLED with the test and
+# its quiet ms, once per test, and records it in the shard's log (an observation: docs/clocks.md)
+STALL_MS=30000
+stalls() {
+  local -A seen; local i log t age alive
+  while true; do
+    alive=0
+    for (( i = 1; i <= ${#F}; i++ )); do
+      kill -0 $P[$i] 2>/dev/null || continue
+      alive=1 log=${F[$i]%.edn}.log
+      t=$(grep '^started' "$log" | tail -1); t=${t#started }
+      [[ -n $t && ${seen[$i]} != $t ]] || continue
+      age=$(( ($(date +%s) - $(stat -f %m "$log")) * 1000 ))
+      (( age > STALL_MS )) && { seen[$i]=$t; echo "STALLED $t $age ms (shard $F[$i])" | tee -a "$log" }
+    done
+    (( alive )) || return 0
+    sleep 5
+  done
+}
+stalls & W=$!
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?
@@ -56,5 +77,6 @@ for (( i = 1; i <= ${#F}; i++ )); do
     grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
   fi
 done
+kill $W 2>/dev/null
 if (( st == 0 )); then echo "TEST OK"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st
