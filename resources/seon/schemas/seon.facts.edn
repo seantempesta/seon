@@ -121,6 +121,9 @@
  :seon.eval/id [:and {:seon.db/identity true} :string]
  :seon.eval/agent :seon.db/ref
  :seon.eval/by [:and {:seon.db/index true} :string]
+ ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
+ ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
+ :seon.eval/opened :boolean
  ;; its details as one EDN value (seon.repl/record-details): the code, the response whole with its
  ;; value when that is plain data (seon.db/plain?), else the response as it printed then
  ;; (:printed) and the value's type (:type); never a text made for a reader (seon.print/record-text
@@ -151,9 +154,12 @@
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
+ ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
+ ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
+ :seon.agent/opened [:set :string]
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation :seon.render/ai seon.context/eval-messages}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
-                     [:seon.eval/record :seon.eval/record]]
+                     [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
  :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent :seon.catch-up/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
@@ -164,7 +170,7 @@
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/screen {:optional true} :seon.agent/screen]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
-                       [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
+                       [:seon.agent/answered-t {:optional true} :seon.agent/answered-t] [:seon.agent/opened {:optional true} :seon.agent/opened]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]
@@ -224,7 +230,7 @@
  :seon.run/task [:and {:seon.db/index true} :seon.db/ref]
  ;; finished: its task is done (seon.reconcile/finished); judged: ended or dead, the done rule's to judge;
  ;; failed: its agent died or was lost, a death (seon.problems/report)
- :seon.run/status [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :parked :closed :refused]]
+ :seon.run/status [:and {:seon.db/index true :seon.db/taken true :seon.status/finished #{:done :merged} :seon.status/judged #{:ended :dead} :seon.status/failed #{:dead :lost}} [:enum :running :ended :killed :dead :lost :done :merged :behind :parked :closed :refused]]
  :seon.run/boot :string
  ;; the agent that works it (seon.task/agent-key)
  :seon.run/agent :seon.db/ref
@@ -234,8 +240,8 @@
  :seon.run/branch :keyword
  :seon.run/model :string
  :seon.run/max-turns :int
- :seon.run/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error :no-end]
- :seon.run/reason [:string {:seon.render/prose true}]
+ :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end]
+ :seon.run/reason [:string {:seon.render/prose true :seon.db/taken true}]
  :seon.run/turns :int
  ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
  :seon.run/taken :int
@@ -394,9 +400,13 @@
  ;; the run it is to (the agent working it takes it)
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
  :seon.message/body [:string {:seon.render/prose true}]
+ ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
+ ;; stage boundary (:stage), the judge's refusal with its reasons (:verdict); each wakes its session
+ :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message :seon.render/ai seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
+                     [:seon.message/kind {:optional true} :seon.message/kind]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
  ;; a catch-up: one merge of main into the agent's branch (seon.agent/merge-main!), written in the

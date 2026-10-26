@@ -574,7 +574,7 @@
             run! (fn [run agent] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key agent}}]))
             _ (run! "demo/f#1" "b/a1")
             _ (ev! "e1" "b/a1" "demo/f#1" "(f 1)")
-            _ (d/transact conn (task/message-tx "m1" "user" "demo/f#1" "use g"))
+            _ (d/transact conn (task/message-tx "m1" :message "user" "demo/f#1" "use g"))
             _ (run! "demo/f#2" "b/a1")
             _ (ev! "e2" "b/a1" "demo/f#2" "(f 2)")
             _ (ev! "x1" "b/a9" "other#1" "(other)")
@@ -613,7 +613,7 @@
             _ (turn! "demo/d#1" b0 (:sent first-stage))
             boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
             _ (run! "demo/i#1" "demo/i")
-            _ (d/transact conn (task/message-tx "m1" "root" "demo/i#1" boundary))
+            _ (d/transact conn (task/message-tx "m1" :stage "root" "demo/i#1" boundary))
             _ (ev! "s1" "screen" "demo/i#1")
             second-stage (context/render @conn (basis "demo/i" "demo/i#1" "s1"))
             ms0 (:messages first-stage) ms1 (:messages second-stage)

@@ -173,27 +173,33 @@
      :will-merge will-merge :tests tests :attention attention}))
 
 (defn- take!
-  "The messages delivered since the last turn, taken before the turn's screen is evaluated, so
-  each sits in the conversation before the screen that shows what came after it (a session's
-  next stage opens with root's message, seon.reconcile/stage-boundary, before that stage's first
-  screen). The turn is their reader: a message that is a fact is written on this branch first,
-  the same fact root wrote on main, and named by id, so its text is read again from the commit.
-  A read that is not the run's turn (take? false: an observer's read of an agent its model
-  drives) shows the inbox and leaves it, each message as it was sent. Answers the observations
-  they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when there are some."
+  "The entries since the last turn (a person's message, root's at a stage boundary, a refused
+  verdict: :seon.message/kind), taken before the turn's screen is evaluated, so each sits in the
+  conversation before the screen that shows what came after it (a session's next stage opens
+  with its :stage entry, seon.reconcile/stage-boundary, before that stage's first screen). They
+  are the facts main holds to the session's runs that this branch does not
+  (seon.agent/untaken-entries): delivery is the fact, which root syncs before anything that
+  follows it. The turn is their reader: each is written on this branch first, the same fact root
+  wrote on main, and named by id, so its text is read again from the commit. The inbox holds
+  the sends no fact holds (another agent's), shown and taken with them. A read that is not the
+  run's turn (take? false: an observer's read of an agent its model drives) shows both and
+  writes nothing. Answers the observations they add: {:message-ids [..]} and
+  {:messages [{:from :body} ..]}, each only when there are some."
   {:malli/schema [:=> [:cat :boolean] :map]}
   [take?]
-  (let [msgs (agent/inbox)
-        {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
-        _ (when (seq facts)
-            (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
-        _ (agent/commit!)
-        ;; taken once their facts are committed: a refused write leaves them in the inbox
-        _ (when take? (agent/taken! (count msgs)))]
+  (let [sends (agent/inbox)
+        entries (agent/untaken-entries)]
+    (when take?
+      (let [tx (into (agent/untaken-facts) (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries)]
+        (when (seq tx) (agent/transact! tx)))
+      (agent/commit!)
+      ;; taken once their facts are committed: a refused write leaves them for the next turn
+      (agent/taken! (count sends)))
     (cond-> {}
-      (seq facts) (assoc :message-ids (mapv :id facts))
-      ;; a send no fact holds (another agent's, until its sender writes one)
-      (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))))
+      (and take? (seq entries)) (assoc :message-ids (mapv :id entries))
+      ;; an observer's read: the entries as they are, unwritten
+      (and (not take?) (seq entries)) (assoc :messages (mapv #(select-keys % [:from :body]) entries))
+      (seq sends) (update :messages (fnil into []) (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) sends)))))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its

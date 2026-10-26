@@ -96,6 +96,56 @@
         (recur))))
   (:inbox @state))
 
+(defn untaken-entries
+  "The entries main holds to the runs of this agent's session (the runs on its branch, as main
+  names them) that its branch does not hold yet, in main's order: each {:id :kind :from :to :body}.
+  Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
+  process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
+  ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
+  the frame alone left such a run with nothing, parked short of main's count, and spawned again).
+  O(the entries to the session's runs)."
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
+  []
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)]
+    (->> (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
+                :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
+                [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
+                [(get-else $ ?m :seon.message/kind :message) ?kind]]
+              main (:branch @state))
+         (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
+         (sort-by first)
+         (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
+
+(def taken-attributes
+  "The attributes of the runs of an agent's session that root writes on main and its turn copies
+  onto its branch (seon.turn/take!), so its ctx holds them: those whose schema says
+  {:seon.db/taken true}, read here once."
+  (into #{} (filter #(:seon.db/taken (contract/properties %))) (keys contract/forms)))
+
+(defn untaken-facts
+  "The transaction that copies onto this branch what main holds and its branch does not, of its
+  own entities: the taken attributes (taken-attributes) of the runs on its branch that it
+  holds, and each eval of its own its agent's :seon.agent/opened names, as that eval's
+  :seon.eval/opened. take! is the one way outside facts reach the branch, and so its ctx
+  (owner, 2026-10-26: a change the agent's context and page show goes through the data its
+  context reads). O(the session's runs and the opened evals on main)."
+  {:malli/schema [:=> [:cat] :seon.db/tx-data]}
+  []
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)
+        pattern (into [:seon.run/id] taken-attributes)]
+    (vec (concat
+           (for [m (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern (:branch @state))
+                 :let [held (d/entity b [:seon.run/id (:seon.run/id m)])
+                       new (into {} (remove (fn [[k v]] (= v (get held k)))) m)]
+                 :when (and held (seq (dissoc new :seon.run/id)))]
+             (assoc new :seon.run/id (:seon.run/id m)))
+           (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key @state)]))
+                 :let [e (d/entity b [:seon.eval/id id])]
+                 :when (and e (not (:seon.eval/opened e)))]
+             {:seon.eval/id id :seon.eval/opened true})))))
+
 (defn messages
   "The inbox (inbox), taken: its reader is the turn that read them."
   {:malli/schema [:=> [:cat] [:vector :map]]}
@@ -737,7 +787,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 

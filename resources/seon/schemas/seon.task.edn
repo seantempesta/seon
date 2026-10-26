@@ -148,6 +148,11 @@
                          ;; a judged run parked its session (a park outcome: its process kept, the next message
                          ;; wakes it, design agent-loop section 2): written :parked, once
                          [:park [:map {:closed true} [:op [:= :park]] [:run :seon.run/id]]]
+                         ;; a work run's end the done rule refused: a :verdict entry to its session (its
+                         ;; reasons, what root judged on) which wakes it, or a hold when the session's last
+                         ;; verdict gave the same reasons (seon.reconcile start)
+                         [:verdict [:map {:closed true} [:op [:= :verdict]] [:run :seon.run/id] [:task :seon.task/id]
+                                    [:reasons [:vector :seon.reconcile/not-done]]]]
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]
                                   [:run :seon.run/id]]]
                          ;; a parked session's next run on its live process (agent): no fork

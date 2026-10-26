@@ -220,13 +220,14 @@
         (agent-tx boot :user {})))
 
 (defn message-tx
-  "Message mid from from to run aid, its body: the one message fact, written by root on main
-  and by the turn that takes it on its branch (one entity: both ids are content ids)."
-  {:malli/schema [:=> [:cat :string :string [:maybe :seon.run/id] :any] [:vector :map]]}
-  [mid from aid body]
+  "Message mid of kind (:seon.message/kind) from from to run aid, its body: the one message
+  fact, written by root on main and by the turn that takes it on its branch (one entity: both
+  ids are content ids)."
+  {:malli/schema [:=> [:cat :string :seon.message/kind :string [:maybe :seon.run/id] :any] [:vector :map]]}
+  [mid kind from aid body]
   ;; the run its own entity map: only a top-level map takes its content id (Datahike's
   ;; content-tempids); its tempid is its id, so every ref to it in one transaction is one entity
-  (cond-> [(cond-> {:seon.message/id mid :seon.message/from from :seon.message/body body}
+  (cond-> [(cond-> {:seon.message/id mid :seon.message/kind kind :seon.message/from from :seon.message/body body}
              aid (assoc :seon.message/to aid))]
     aid (conj {:db/id aid :seon.run/id aid})))
 

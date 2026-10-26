@@ -8,7 +8,7 @@
             [seon.task :as task]
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
-            [clojure.string :as str] [clojure.set] [seon.config :as cfg]
+            [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
             [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
 
 (defn- empty-db [] (ts/test-db))
@@ -130,9 +130,9 @@
     ;; green: a work task is accepted on its branch
     (run "a" 1 :ended :outcome :green :results {(t "a") :pass (t "b") :fail})
     [{:op :accept :run "demo/a#1" :task "demo/a"}]
-    ;; its proof red: the task is held for root
+    ;; its proof red: the agent is told (a verdict, which wakes it)
     (run "a" 1 :ended :outcome :red :results {(t "a") :fail})
-    [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended red: proof-red demo-test/a-test"}]
+    [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :proof-red :symbol 'demo-test/a-test}]}]
     ;; out of turns with its proof red: it parks (written :parked, released), never held (design agent-loop section 1)
     (run "a" 1 :ended :outcome :cap :results {(t "a") :fail})
     [{:op :park :run "demo/a#1"}]
@@ -141,15 +141,15 @@
     [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended error: proof-red demo-test/a-test"}]
     ;; its proof never ran: unknown, which refuses done as red does
     (run "a" 1 :ended :outcome :green :results {})
-    [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: proof-unknown demo-test/a-test"}]
+    [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :proof-unknown :symbol 'demo-test/a-test}]}]
     ;; b needs a, so b carries a's proof (accumulated along :needs): red there is b's own red
     (concat (merged "a") (run "b" 1 :ended :outcome :green :results {(t "a") :fail (t "b") :pass}))
-    [{:op :hold :run "demo/b#1" :task "demo/b" :problem "run demo/b#1 ended green: proof-red demo-test/a-test"}
+    [{:op :verdict :run "demo/b#1" :task "demo/b" :reasons [{:reason :proof-red :symbol 'demo-test/a-test}]}
      {:op :spawn :task "demo/c" :run "demo/c#1"
       :env {:branch :task-demo-c :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
     ;; a stray red: a red test that is no task's proof
     (run "a" 1 :ended :outcome :green :results {(t "a") :pass 'demo-test/other :error})
-    [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: stray-red demo-test/other"}]
+    [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :stray-red :symbol 'demo-test/other}]}]
     ;; its agent died
     (run "a" 1 :dead)
     [{:op :hold :run "demo/a#1" :task "demo/a" :problem "its agent died"}]))
@@ -242,6 +242,44 @@
     (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
     (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
 
+(deftest a-refused-end-is-a-verdict-that-wakes-and-the-same-one-again-holds
+  ;; design one-derivation 4.1 section 5 and root's ruling (2026-10-26): a work run's end the done
+  ;; rule refuses is words to the agent, a :verdict entry with the reasons and the facts root
+  ;; judged on, which wakes its session; the same reasons again hold the task for root (told
+  ;; the same twice is no news); different reasons wake it again. A merge's refusal holds
+  (let [rs (fn [db aid] (:reasons (first (filter #(= :verdict (:op %)) (actions-for db)))))
+        start (fn [db act] (second (#'r/start {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} act)))
+        tx-of (fn [outs] (get-in (first outs) [:req :req :tx-data]))
+        ended (fn [n] (run "a" n :ended :results {(t "a") :fail} :outcome :red))
+        db1 (db-of [(decl "a")] :extra (ended 1))
+        reasons (rs db1 "demo/a#1")]
+    (testing "the judge: a refused :red or :green end of a work run is a verdict with the done rule's reasons"
+      (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons reasons}] (filterv #(= :verdict (:op %)) (actions-for db1))))
+      (is (= [{:reason :proof-red :symbol (t "a")}] reasons)))
+    (testing "the first: the run parks with a :verdict entry, synced, carrying the reasons and what root judged on"
+      (let [outs (start db1 {:op :verdict :run "demo/a#1" :task "demo/a" :reasons reasons})
+            tx (tx-of outs)
+            entry (first (filter :seon.message/kind tx))]
+        (is (true? (get-in (first outs) [:req :req :flush?])) "synced before the spawn that reads it")
+        (is (some #(= [:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :ended :parked] %) tx))
+        (is (= [:verdict "demo/a#1"] [(:seon.message/kind entry) (:seon.message/to entry)]))
+        (is (= {:reasons reasons :results {(t "a") :fail}} (select-keys (sedn/decode (:seon.message/body entry)) [:reasons :results])))))
+    (let [verdict (fn [db n why] (d/db-with db (task/message-tx (str "v-demo/a#" n) :verdict "root" (str "demo/a#" n) (sedn/encode {:reasons why}))))
+          db2 (-> (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :red) (ended 2))) (verdict 1 reasons))]
+      (testing "parked by a verdict, its process gone: the next run is a spawn, never a wake"
+        (is (= [(spawn "a" 2)] (actions-for (-> (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :red) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]))
+                                                (verdict 1 reasons))))))
+      (testing "the same reasons again: held for root, saying so"
+        (let [tx (tx-of (start db2 {:op :verdict :run "demo/a#2" :task "demo/a" :reasons reasons}))]
+          (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/execution :running :held] %) tx))
+          (is (str/starts-with? (get-in (some :seon.task/failure tx) [:reason]) "the same verdict again: "))
+          (is (not-any? :seon.message/kind tx) "and no entry")))
+      (testing "different reasons: a verdict again, which wakes"
+        (let [tx (tx-of (start db2 {:op :verdict :run "demo/a#2" :task "demo/a" :reasons [{:reason :no-proofs}]}))]
+          (is (= :verdict (:seon.message/kind (first (filter :seon.message/kind tx))))))))
+    (testing "a merge's refusal holds, as before"
+      (is (= [:hold] (mapv :op (actions-for (db-of [(assoc (decl "a") :seon.task/kind :merge)] :extra (ended 1)))))))))
+
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
   ;; work! reached it, so root answers that agent ended; the run took nothing, so it is :lost, not
@@ -257,7 +295,7 @@
     (is (= [(spawn "a" 3)]
            (actions-for (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :waiting) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]
                                                            (run "a" 2 :lost)
-                                                           (task/message-tx "m1" "user" "demo/a#1" "carry on")))))
+                                                           (task/message-tx "m1" :message "user" "demo/a#1" "carry on")))))
         "the next run is a spawn")))
 
 (deftest the-judge-reads-its-branch-in-one-request
@@ -323,7 +361,7 @@
                             [{:seon.run/id "demo/y#1" :seon.run/basis-t basis}]))]
     (is (= {:op :accept :run "demo/y#1" :task "demo/y"}
            (first (actions-for (db-of two :extra (concat merged-x (y 50)))))))
-    (is (= :hold (:op (first (actions-for (db-of two :extra (concat merged-x (y 150))))))))))
+    (is (= :verdict (:op (first (actions-for (db-of two :extra (concat merged-x (y 150))))))) "refused: told the agent")))
 
 (deftest contracts-are-checked
   ;; with the contracts on (:seon.config.contract/instrument, config: in every digest), a call
@@ -487,17 +525,15 @@
              (map :task (filter #(= :spawn (:op %)) (actions-for (mdb two :extra (concat extra [{:seon.root/id :root :seon.config.merge/max-running 8}]))))))))))
 
 (deftest unmerged-refuses-done
-  (is (= [{:op :hold :run "demo/a#1" :task "demo/a"
-           :problem "run demo/a#1 ended green: unmerged [:var app/f]"}]
+  (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :unmerged :key "[:var app/f]"}]}]
          (actions-for (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass}
                                                      :unmerged ["[:var app/f]"]))))))
 
 (deftest an-open-problem-its-work-caused-refuses-done
   ;; notes/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
-  ;; the done rule, so the task is held for root naming it; its evaluations were never refused
+  ;; the done rule, so the agent is told naming it (a :verdict); its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
-    (is (= [{:op :hold :run "demo/a#1" :task "demo/a"
-             :problem (str "run demo/a#1 ended green: open-problem " msg)}]
+    (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :open-problem :key msg}]}]
            (actions-for (db-of diamond :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass} :caused [msg])))))
     (is (= [{:reason :open-problem :key msg}]
            (r/done-explain {:proofs #{(t "a")} :results {(t "a") :pass} :main-green #{} :allowed-red #{} :uncontracted #{} :caused #{msg}})))))
@@ -539,8 +575,8 @@
       (is (= [:no-design]
              (mapv :reason (r/done-explain (r/done-input (r/index db) "demo/a" {(t "a") :fail} #{} []
                                                            nil (:seon.run/plan (task/run db "demo/a#1")) #{})))))))
-  (testing "ended green with the plan unchanged: refused, so it is held for root, never accepted"
-    (is (= [{:op :hold :run "demo/a#1" :task "demo/a" :problem "run demo/a#1 ended green: no-design"}]
+  (testing "ended green with the plan unchanged: refused, so the agent is told why, never accepted"
+    (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :no-design}]}]
            (actions-for (design-db (run "a" 1 :ended :outcome :green :results {(t "a") :fail})))))))
 
 (deftest a-design-step-is-done-when-it-improved-the-plan
@@ -549,22 +585,35 @@
          (actions-for (design-db (concat (run "a" 1 :ended :outcome :green :results {(t "a") :fail})
                                          [{:seon.task/id "demo/a" :seon.task/plan "Make a true. Design: (defn f [xs] ...) one pass over xs."}]))))))
 
+(defn- told
+  "db with a :verdict entry to run aid giving reasons, as the judge's first refusal of the session wrote it."
+  [db aid reasons] (d/db-with db (task/message-tx (str "v-told-" aid) :verdict "root" aid (sedn/encode {:reasons reasons}))))
+
 (defn- held
-  "main db after the hold the reconciler's one action for it writes (its :hold op), and the action."
+  "main db after the hold the reconciler's one action for it writes, and the action (its :problem
+  the hold's): a work run's refused end holds when the session was told the same verdict
+  already (start), so the verdict is told first; a death or a merge's refusal holds at once."
   [db]
   (let [[act :as acts] (actions-for db)]
-    (assert (= [:hold] (map :op acts)) (pr-str acts))
-    [(d/db-with db (r/hold-tx (task/run db (:run act)) (:problem act))) act]))
+    (assert (#{[:hold] [:verdict]} (map :op acts)) (pr-str acts))
+    (if (= :hold (:op act))
+      [(d/db-with db (r/hold-tx (task/run db (:run act)) (:problem act))) act]
+      (let [db (told db (:run act) (:reasons act))
+            [_ outs] (#'r/start {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} act)
+            tx (get-in (first outs) [:req :req :tx-data])]
+        [(d/db-with db tx) (assoc act :problem (:reason (some :seon.task/failure tx)))]))))
 
 (deftest a-refused-run-holds-its-task-and-creates-none
   ;; owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be
-  ;; retried". Every reason holds its task as my.task/fail! does: its failure (the reason,
-  ;; the run), the measured evidence, the run closed; no task is created or cancelled
+  ;; retried", and root, 2026-10-26: a work run's refused end is told to the agent once (a
+  ;; :verdict), and the same verdict again holds. Every hold holds its task as my.task/fail!
+  ;; does: its failure (the reason, the run), the measured evidence, the run closed; no task is
+  ;; created or cancelled
   (doseq [[why extra problem]
           [["a red proof" (run "add" 1 :ended :outcome :red :results {(t "add") :fail})
-            "run demo/add#1 ended red: proof-red demo-test/add-test"]
+            "the same verdict again: proof-red demo-test/add-test"]
            ["its proof never run" (run "add" 1 :ended :outcome :red :results {})
-            "run demo/add#1 ended red: proof-unknown demo-test/add-test"]
+            "the same verdict again: proof-unknown demo-test/add-test"]
            ["a dead agent" (run "add" 1 :dead) "its agent died"]
            ["a merge conflict" (concat (run "add" 1 :done)
                                        (run "add-merge" 1 :ended :outcome :red :results {(t "add") :pass}
@@ -628,8 +677,9 @@
   ;; the reconciler proc's own steps: the reason's hold is one write; once it is committed
   ;; and answered nothing is left to do (quiet, naming the held task as a root cause); a
   ;; root-only commit after it asks nothing
-  (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
-                :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail}))
+  (let [db (told (mdb [(decl "add") (decl "twice" :needs ["add"])]
+                      :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail}))
+                 "demo/add#1" [{:reason :proof-red :symbol (t "add")}])
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
@@ -644,7 +694,7 @@
         quiet (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) (reqs outs2))]
     (is (empty? others) "one request: the hold")
     (is (= :held (:seon.task/execution (task/task db2 "demo/add"))))
-    (is (= [{:task "demo/add" :cause "run demo/add#1 ended red: proof-red demo-test/add-test" :run "demo/add#1"
+    (is (= [{:task "demo/add" :cause "the same verdict again: proof-red demo-test/add-test" :run "demo/add#1"
              :blocks ["demo/add-merge" "demo/twice" "demo/twice-merge"]}]
            (:root-causes quiet)) "quiet, naming the held task and what it blocks")
     (is (not-any? #(= :spawn (get-in % [:req :op])) (reqs outs2)) "nothing starts")
@@ -801,13 +851,13 @@
   (let [red {(t "a") :fail}
         parked (fn [outcome taken] (into (run "a" 1 :parked :results red :outcome outcome)
                                          [{:seon.run/id "demo/a#1" :seon.run/taken taken}]))
-        msg (fn [mid] (task/message-tx mid "user" "demo/a#1" "carry on"))
+        msg (fn [mid] (task/message-tx mid :message "user" "demo/a#1" "carry on"))
         wake {:op :wake :task "demo/a" :run "demo/a#2" :agent :a-a1
               :env {:branch (task/default-branch "demo/a") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
-    (testing "judged: a park outcome parks the run; a red outcome holds the task"
+    (testing "judged: a park outcome parks the run; a red outcome is a verdict to the agent"
       (is (= [{:op :park :run "demo/a#1"}]
              (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :waiting)))))
-      (is (= :hold (:op (first (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :red))))))))
+      (is (= :verdict (:op (first (actions-for (db-of [(decl "a")] :extra (run "a" 1 :ended :results red :outcome :red))))))))
     (testing "parked, nothing new: nothing starts"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (parked :waiting 0)))))
       (is (= [] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (msg "m1"))))) "one message, already taken")
