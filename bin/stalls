@@ -1,10 +1,13 @@
 #!/bin/zsh
-# bin/stalls MS LOG:PID ... — name a stalled test, never end it: while any PID runs, each LOG (a
-# shard's, bin/test) whose last "started <test>" line is followed by no write for longer than MS
-# prints and records "STALLED <test> <quiet ms> (LOG)", once per test. Exits when every PID has.
-# An observation of time, named in docs/clocks.md (bin/test's stall bound, :seon.config.agent/stall-ms).
-MS=$1; shift
-typeset -A seen; local pair log pid t age alive
+# bin/stalls MS BOUNDS LOG:PID ... — name a stalled test, never end it: while any PID runs, each LOG
+# (a shard's, bin/test) whose last "started <test>" line is followed by no write for longer than
+# that test's bound prints and records "STALLED <test> <quiet ms> (LOG)", once per test. A test's
+# bound is its line in BOUNDS ("<test> <ms>": :seon.config.proofs/stall-factor times its own last
+# run, the plan's out/stall-bounds), else MS (:seon.config.agent/stall-ms, the floor). Exits when
+# every PID has. An observation of time, named in docs/clocks.md.
+MS=$1 BOUNDS=$2; shift 2
+typeset -A seen bound; local pair log pid t age alive b line
+[[ -r $BOUNDS ]] && while read -r line; do bound[${line%% *}]=${line##* }; done < $BOUNDS
 while true; do
   alive=0
   for pair in "$@"; do
@@ -13,8 +16,9 @@ while true; do
     alive=1
     t=$(grep '^started' "$log" 2>/dev/null | tail -1); t=${t#started }
     [[ -n $t && ${seen[$log]} != $t ]] || continue
+    b=${bound[$t]:-$MS}
     age=$(( ($(date +%s) - $(stat -f %m "$log")) * 1000 ))
-    (( age > MS )) && { seen[$log]=$t; echo "STALLED $t $age ms ($log)" | tee -a "$log" }
+    (( age > b )) && { seen[$log]=$t; echo "STALLED $t $age ms (bound $b ms, $log)" | tee -a "$log" }
   done
   (( alive )) || exit 0
   sleep 1

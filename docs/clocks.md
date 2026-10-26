@@ -44,7 +44,7 @@ Each is a defect named with the task that removes it, so the laws check stays a 
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs), `seon.agent-proc/await-dead` (the SIGKILL ladder): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.root/a-stall-is-past-the-requests-own-bound`.
-- `bin/stalls`, which `bin/test` runs beside its shards (the same bound, `:seon.config.agent/stall-ms`, observed outside any root): every second it reads each running shard's last `started` line and the age of its log, and past the bound prints and records `STALLED <test> <ms>` once per test. An observation only: nothing is ended or retried. It goes with the same task.
+- `bin/stalls`, which `bin/test` runs beside its shards (observed outside any root): every second it reads each running shard's last `started` line and the age of its log, and past that test's bound (`:seon.config.proofs/stall-factor` times its own last recorded run, floored at `:seon.config.agent/stall-ms`, which also bounds a test with no record) prints and records `STALLED <test> <ms>` once per test. An observation only: nothing is ended or retried. It goes with the same task.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 - `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 

@@ -73,6 +73,7 @@
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]
   [:seon.config.proofs/max-assertions :seon.config.proofs/max-assertions]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]

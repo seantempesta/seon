@@ -199,12 +199,18 @@
 (defn- write-shards!
   "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), each written as
   out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t}, t the planned tree's id)
-  for bin/test to run, one process each (bin/test removes the last run's first). Answers the
-  shard count."
+  for bin/test to run, one process each (bin/test removes the last run's first), and each
+  measured test's stall bound as out/stall-bounds (\"<test> <ms>\" lines, for bin/stalls). Answers
+  the shard count."
   [out tests digests tree]
-  (let [sh (shards tests (config/value :seon.config.proofs/jobs) (measured-ms tests))]
+  (let [ms (measured-ms tests)
+        sh (shards tests (config/value :seon.config.proofs/jobs) ms)
+        floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)]
     (doseq [[i ts] (map-indexed vector sh)]
       (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree})))
+    ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
+    ;; record takes the floor, out/stall-ms)
+    (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
     (count sh)))
 
 (defn- shard!
