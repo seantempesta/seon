@@ -648,7 +648,8 @@
   Printed whole as one user message: the page and each change told once."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
-  (let [at #(d/commit-as-db db %)
+  ;; the request's own commit is db itself (a judge's speculative db, d/with, has no commit of its own)
+  (let [at #(if (= % (d/commit-id db)) db (d/commit-as-db db %))
         branch (:seon.agent/branch (d/entity db a))
         db1 (at c1)
         v (if (nil? c0)
@@ -781,15 +782,16 @@
 
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
-  the commit b names: its task's data (the block the turn's waste reads), and the messages, the
-  agent's request (`request`), b's :agent's. The one maker of a context: the model's request is this, and so is every
+  the commit b names: its task's current state (the task's data and the turn's state from what b
+  observed: the block the turn's waste reads, what the page shows), and the messages, the agent's
+  request (`request`), b's :agent's. The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :printed, what the run's earlier requests printed (the cache
   `printed-run` answers): only what is new is printed. {:block :messages :sent :printed}."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
                   [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
   ([db basis] (render db basis {}))
   ([db {:keys [task agent] :as basis} {:keys [printed]}]
-  (let [block (task-data db (task/task db task))
+  (let [block (current-state db (task/task db task) (turn-input db basis nil))
         a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
         r (request a {:db db :basis basis :block block :help (system-text db) :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]})]

@@ -392,6 +392,7 @@
             page (context/page db (ctx/build db a :b))
             text (print/text (vary-meta page assoc :seon.print/full true))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
+        (is (contains? page [:status]) "the status is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the status")))))
@@ -441,7 +442,8 @@
     (is (str/includes? html "seon.context/cited") "its cut names the form that reads the rest")
     (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the call's budget: " (select/estimate model) " tokens"))
     (is (str/includes? model "#'seon.render/html") "the call as returned")
-    (is (str/includes? model "seon.context/cited") "and the cut names the form that reads the rest")))
+    (is (str/includes? model "seon.context/cited") "and the cut names the form that reads the rest")
+    (is (= "[#'seon.context/cited 1 {:a 1}]" (print/text [#'seon.context/cited 1 {:a 1}])) "a vector headed by a var with no budget is data")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]
@@ -774,7 +776,8 @@
         (is (not-any? #(str/includes? (:content (peek r1)) %) ["[:task]" "[:related]" "[:run]"]) "the status alone")
         (is (str/includes? (:content (peek r1)) "2 of 4"))
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
-        (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")))))
+        (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
+        (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
 
 (deftest an-assertion-message-of-any-value-is-kept-as-text
   ;; clojure.test's is takes any message (a doseq's keyword, say); a run whose test reported one

@@ -196,7 +196,8 @@
         rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
         ;; a call ([#'f value opts], a vector headed by a var, as seon.web.html expands it, whose opts
         ;; carry a budget): its value printed at that budget and handle, so a reader sees the cut the page shows
-        ;; and the form that reads the rest
+        ;; and the form that reads the rest. Its budget is its own, beside the enclosing value's, as the
+        ;; page's writer gives it; a plain vector headed by a var, with no budgeted opts, prints as data
         call (when (and (vector? x) (var? (first x)) (pos-int? (:budget (nth x 2 nil)))) x)
         ;; a value an earlier response showed is the form that reads it again (seen-form); a
         ;; print given no earlier responses looks nothing up

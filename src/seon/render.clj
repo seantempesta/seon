@@ -183,7 +183,7 @@
         ;; observed), in the order written, and the model turn before it (its last reply)
         ts (vec (sort-by t-of (vals (:turns run))))
         turn (peek ts)
-        prev (last (filter #(= :model (:seon.turn/origin %)) (pop (or (not-empty ts) [nil]))))
+        prev (last (filter #(= :model (:seon.turn/origin %)) (butlast ts)))
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
                          :opened (boolean (:seon.eval/opened e))
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})

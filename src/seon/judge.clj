@@ -12,16 +12,19 @@
 
 (defn request
   "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 0: the
-  messages seon.context/render makes for a fresh run whose proofs have no result yet, and
-  the model and thinking mode the task resolves to. act! renders from what observe measured
+  messages seon.context/render makes for a fresh agent's run whose proofs have no result yet
+  (the agent and its run written on a speculative db, d/with: nothing stored), and the model
+  and thinking mode the task resolves to. act! renders from what observe measured
   (its proofs run first): for a proof not written yet that reads :undefined either way, so
   the judge's tasks are ones whose proofs are not written."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any]]]}
   [db t]
-  (let [id (:seon.task/id t)]
-    {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :run (str id "#first-move") :turn 0
+  (let [id (:seon.task/id t)
+        k (str id "/first-move") run (str id "#first-move")
+        db (:db-after (d/with db [{:seon.agent/key k} {:seon.run/id run :seon.run/task [:seon.task/id id] :seon.run/agent [:seon.agent/key k]}]))]
+    {:messages (:messages (context/render db {:commit (d/commit-id db) :task id :run run :turn 0
                                               :max-turns (config/value :seon.config.agent/max-turns) :origin :model
-                                              :observed {:results {} :reds []}}))
+                                              :observed {:results {} :reds []} :agent k}))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
      :thinking (:value (config/resolve :seon.config.ai/thinking {:task t}))}))
 
