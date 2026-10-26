@@ -81,8 +81,8 @@
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)
               ["(let [s (clojure.repl/source-fn 'seon.reconcile)] (mapv #(clojure.string/includes? s %) [\";; branch-messages\" \";; hairy\"]))" :text "[true true]"]
               ["(clojure.repl/source seon.reconcile/ns)" :text "(source seon.reconcile)"]
-              ["(clojure.repl/source seon.reconcile/not-yet)" :text "no such var is defined"]
-              ["(clojure.repl/source seon.reconcile/not-yet-either)" :text "Every definition of its namespace, a line each: (source seon.reconcile)"]
+              ["(clojure.repl/source seon.reconcile/not-yet)" :text "names no var on this branch"]
+              ["(clojure.repl/source seon.reconcile/not-yet-either)" :text "every definition of seon.reconcile, a line each: (source seon.reconcile)"]
               ;; what an agent naturally types answers as it reads (step 6, 2026-10-25: a run read its
               ;; helpers by a doseq over quoted names, then by #'f, and got invalid-input each time)
               ["(clojure.repl/source 'seon.reconcile/merge-limits)" :text "(defn merge-limits"]
@@ -197,6 +197,31 @@
     (is (vector? (:value library)) "a library's var is a var")
     (is (vector? (:value fresh)) (str "a var just defined at the REPL is a var: " (pr-str fresh)))
     (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))))
+
+(deftest a-missing-name-says-the-nearest
+  ;; the live rounds' repeats (notes/live-2026-10-25.md; jolt/repeat-causes): agents re-sent a guessed
+  ;; name after "Source not found ... If your plan names it as new, write it" and after a missing
+  ;; namespace with no alternative. The one answer (my.agent/no-var) names the nearest existing names
+  ;; by Jolt's did-you-mean ranking, and says write it only when the task cites the name
+  (let [[typo no-ns bare loaded guessed _ cited new-ns] (at/in-agent ["(my.agent/no-var (seon.agent/db) 'seon.reconcile/root-cause)"
+                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcil/root-causes)"
+                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcil)"
+                                                         "(my.agent/no-var (seon.agent/db) 'clojure.string)"
+                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
+                                                         "(my.task/update! :seon.task/plan str \" Add ```seon.reconcile/to-write``` and ```seon.fresh-ns/made```.\")"
+                                                         "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
+                                                         "(my.agent/no-var (seon.agent/db) 'seon.fresh-ns/made)"])
+        msg #(str (:seon.error/message (:value %)))]
+    (is (= 'seon.reconcile/root-causes (first (:nearest (:value typo)))) (str "a typo's nearest is the name it missed: " (pr-str typo)))
+    (is (str/includes? (msg typo) "nearest: seon.reconcile/root-causes"))
+    (is (str/includes? (msg typo) "every definition of seon.reconcile, a line each: (source seon.reconcile)"))
+    (is (str/includes? (msg no-ns) "names no namespace on this branch (seon.reconcil)") (pr-str no-ns))
+    (is (some #{'seon.reconcile} (:nearest (:value no-ns))) "a missing namespace's nearest are namespaces")
+    (is (some #{'seon.reconcile} (:nearest (:value bare))) (str "a bare name's nearest include namespaces: " (pr-str bare)))
+    (is (nil? (:value loaded)) (str "a namespace's name that names one is not missing: " (pr-str loaded)))
+    (is (str/includes? (msg new-ns) "write it: (in-ns 'seon.fresh-ns) (defn made ...)") (str "a cited function of a new namespace is one to write: " (msg new-ns)))
+    (is (not (str/includes? (msg guessed) "write it")) (str "a guessed name the task does not cite is not one to write: " (msg guessed)))
+    (is (str/includes? (msg cited) "your task cites it, so write it: (in-ns 'seon.reconcile) (defn to-write ...)") (msg cited))))
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
