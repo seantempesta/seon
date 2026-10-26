@@ -818,7 +818,7 @@
   ;; done rule's reasons as data, goes to its session, and the session's next run's first request
   ;; carries it (seon.reconcile's :verdict, taken by seon.turn's take!)
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
-                  " _ (seon.root/await-db sys \"the next run parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#2\"]))))"
+                  " _ (seon.root/await-db sys \"the next run parked, or the task held\" #(or (= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#2\"]))) (= :held (seon.reconcile/task-state (seon.reconcile/index %) \"demo/wr\"))))"
                   " db @(:conn sys)"
                   " v (datahike.api/q '[:find [?id ?body] :where [?r :seon.run/id \"demo/wr#1\"] [?m :seon.message/to ?r] [?m :seon.message/kind :verdict] [?m :seon.message/id ?id] [?m :seon.message/body ?body]] db)"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/wr\")}}))"
