@@ -4,7 +4,7 @@
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -212,6 +212,28 @@
         (is (not-any? #(= "the first store's" (:v %)) (d/datoms @conn :aevt :note/text)) "none of the removed store's facts")
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-create-that-fails-leaves-no-store
+  ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
+  ;; after its env had made data.mdb, and the path then held a file with no database that no open
+  ;; recovered ("Database does not exist"). Here a child creates a store and is killed the moment a
+  ;; data file shows at the path: each path then holds a whole store or none, and the next open
+  ;; answers either. Ten creates (n <= 20); stores on disk of this test's own, removed at the end
+  (let [base (str (System/getProperty "user.dir") "/target/db-test-create-" (random-uuid))
+        killed (fn [path]
+                 (let [f (java.io.File. (str path "/data.mdb"))]
+                   (lib/fork! {:child #(pdb/open! :lmdb path 0 :db)
+                               :refused (fn [n] {:refused n})
+                               ;; the kill follows the data file's first sight (a store made whole
+                               ;; shows it only once made); a bound on looking, not a clock
+                               :parent (fn [pid] (loop [i 0] (when (and (not (.exists f)) (< i 100000000)) (recur (inc i))))
+                                         (lib/c-kill pid 9) (lib/wait-status pid))})))
+        opens (fn [path] (try (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true) :opens)
+                              (catch Exception x (ex-message x))))]
+    (try
+      (is (= (repeat 10 :opens) (vec (for [i (range 10) :let [p (str base "/store-" i)]] (do (killed p) (opens p)))))
+          "every path a killed create left opens")
+      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
