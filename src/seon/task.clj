@@ -52,13 +52,11 @@
   [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
 
 (defn- references-of
-  "The :seon.task/references and :seon.task/sections a declaration states: the names and the wiki
-  sections its text cites (seon.ref/names, seon.ref/addresses), derived and never authored; each
-  absent when it cites none."
+  "The :seon.task/references a declaration states: the names its text cites (seon.ref/names),
+  derived and never authored; absent when it cites none."
   {:malli/schema [:=> [:cat :seon.task/declaration] :map]}
   [decl]
-  (let [text (cited-text decl) ns (set (ref/names text)) as (set (ref/addresses text))]
-    (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
+  (let [ns (set (ref/names (cited-text decl)))] (if (seq ns) {:seon.task/references ns} {})))
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
@@ -135,10 +133,12 @@
 (defn earlier-agents-tx
   "A new boot's root is no longer the root of the agents an earlier boot started: their link to
   root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root)."
+  root's agents are this boot's (root's walk, :seon.agent/_root); and a stall one showed is over,
+  its :seon.agent/stall retracted with its process (an open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
-              [:db/retract a :seon.agent/root r])))
+  [db] (into (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
+                    [:db/retract a :seon.agent/root r]))
+             (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))
 
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
@@ -172,7 +172,8 @@
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
-   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
+   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms
+   :stalled :seon.agent/stall})
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
@@ -202,7 +203,7 @@
 (defn agent-tx
   "What root observes of agent id in its boot, as facts on the agent's entity: the root that
   started it, and each member m holds of root's view (status, pid, memory, the form running,
-  its task's id or description, branch, when it forked and ended); a member m holds as nil is
+  its task's id or description, branch, when it forked and ended, a stall it shows); a member m holds as nil is
   no longer true, and retracted (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
@@ -323,7 +324,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:sequential :any]]
                   [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]
@@ -378,8 +379,7 @@
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/references t) (update :seon.task/references set)
-    (:seon.task/sections t) (update :seon.task/sections set)))
+    (:seon.task/references t) (update :seon.task/references set)))
 
 (def placeholder-assertion
   "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
@@ -530,7 +530,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/references :seon.task/sections
+   :seon.task/kind :seon.task/evidence :seon.task/references
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused

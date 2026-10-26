@@ -569,38 +569,34 @@
 
 (defn- walk-of
   "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :keys, the keys
-  of both sides of each entity pair that is not the same object (the root's environment left out,
-  as changes leaves it); :entries, the entries of both sides of each collection pair that is not
-  the same object, each stepped past; :eq, the elements compared by = where neither is walked
-  into; :changes, what it answers. It restates changes' walk on purpose: a bound is the algorithm
-  sketched beside it, and the walk's predicates stay local to it (a contracted helper would add an
-  armed call to every key it visits)."
-  {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:entries nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
+  of both sides of each entity or collection pair that is not the same object (the root's
+  environment left out, as changes leaves it); :eq, the elements compared by = where neither is
+  walked into; :changes, what it answers. It restates changes' walk on purpose: a bound is the
+  algorithm sketched beside it, and the walk's predicates stay local to it (a contracted helper
+  would add an armed call to every key it visits)."
+  {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
   [a b]
   (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
-        collection? (fn [x] (and (map? x) (sorted? x)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
         size (fn size [x] (cond (map? x) (reduce-kv (fn [n k v] (+ n 1 (size k) (size v))) 0 x)
                                 (coll? x) (reduce (fn [n v] (+ n 1 (size v))) 0 x)
                                 :else 1))
         go (fn go [acc root? a b]
              (cond (identical? a b) acc
                    (or (nil? a) (nil? b)) (update acc :changes inc)
-                   (and (entity? a) (entity? b) (= (:db/id a) (:db/id b)))
+                   (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
                    (let [ks (cond->> (distinct (concat (keys a) (keys b))) root? (remove (set environment-keys)))]
                      (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :keys + (count a) (count b)) ks))
-                   (and (collection? a) (collection? b))
-                   (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :entries + (count a) (count b)) (distinct (concat (keys a) (keys b))))
                    :else (cond-> (update acc :eq + (min (size a) (size b))) (not= a b) (update :changes inc))))]
-    (go {:keys 0 :entries 0 :eq 0 :changes 0} true a b)))
+    (go {:keys 0 :eq 0 :changes 0} true a b)))
 
 (def change-steps
   "What each step of changes' walk costs, measured once with the contracts on, on a case that
   isolates it (seon.ctx-test/changes-step-costs-are-current measures them again): the call itself,
-  an entity's key visited (at entities of 100 to 1,000 attributes), a collection's entry stepped past
-  (its sorted map's seq, and its key compared by =; at collections of 100 to 1,000 members), each a
-  step of one side, as walk-of counts them, an element compared by =, and a change (its tuple, and its path printed for the
-  sort, at 100 to 1,000 changes)."
-  {:fixed {:ticks 148.0 :bytes 1008.0} :key {:ticks 20.0 :bytes 42.0} :entry {:ticks 37.0 :bytes 194.0} :eq {:ticks 1.0 :bytes 0.0} :change {:ticks 3788.0 :bytes 30810.0}})
+  a key visited (sorted gets through the members' comparator, the members? scan, distinct over
+  concat; at collections of 100 to 1,000 members), an element compared by =, and a change (its
+  tuple, and its path printed for the sort, at 100 to 1,000 changes)."
+  {:fixed {:ticks 148.0 :bytes 1008.0} :key {:ticks 927.0 :bytes 2980.0} :eq {:ticks 1.0 :bytes 0.0} :change {:ticks 3788.0 :bytes 30810.0}})
 
 (defn- changes-bound
   "What one call of changes may cost on c0 and c1: its fixed part and each step of its walk
@@ -610,49 +606,34 @@
   (let [w (walk-of (tree-of c0) (tree-of c1))
         {:keys [fixed]} change-steps]
     (-> (into {} (for [d [:ticks :bytes]]
-                   [d (+ (get fixed d) (* (:keys w) (get-in change-steps [:key d])) (* (:entries w) (get-in change-steps [:entry d]))
-                         (* (:eq w) (get-in change-steps [:eq d]))
+                   [d (+ (get fixed d) (* (:keys w) (get-in change-steps [:key d])) (* (:eq w) (get-in change-steps [:eq d]))
                          (* (:changes w) (get-in change-steps [:change d])))]))
         (assoc :out {:changes (:changes w)}))))
 
 (defn changes
   "What changed from record (or map) c0 to c1, as data in the record's own shape: [[op path value]
   …], op :add (value the new one), :remove (value nil) or :replace (value the new one), in the
-  order of their paths. It walks the two maps together: one entity's two nodes (a map with its
-  :db/id) into their keys, two collections (a join's members, a map sorted by their ids) into their
-  entries in step in their one order, and any other value (and another entity under the same key)
-  compared whole. It skips a pair that is the same object (identical?) before comparing it (=): a
-  patch keeps every subtree it did not reach the same object, so the walk costs what changed, and
-  a step past each other member of a collection it enters. The environment (:t :branch :commit)
-  is the record's basis, not its data: left out.
+  order of their paths. It walks the two maps together, one entity's two nodes (a map with its
+  :db/id) and two collections (a join's map of members) into their keys, any other value (and
+  another entity under the same key) compared whole, and
+  skips a pair that is the same object (identical?) before comparing it (=): a patch keeps
+  every subtree it did not reach the same object, so the walk costs what changed, never the
+  record. The environment (:t :branch :commit) is the record's basis, not its data: left out.
   The one diff of ctx: a turn's (diff), and what a view or the model's request redraws."
   {:malli/schema [:=> [:cat :map :map] [:vector [:tuple [:enum :add :remove :replace] [:vector :any] :any]]]
    :seon.cost/bound (fn [c0 c1] (changes-bound c0 c1))}
   [c0 c1]
   (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
-        collection? (fn [x] (and (map? x) (sorted? x)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
         walk (fn walk [acc p a b]
                (cond (identical? a b) acc
                      (nil? a) (conj acc [:add p b])
                      (nil? b) (conj acc [:remove p nil])
-                     ;; one entity's two nodes: a's keys, then b's that a lacks; another entity under
-                     ;; the same key (retracted and made again) is replaced whole
-                     (and (entity? a) (entity? b) (= (:db/id a) (:db/id b)))
-                     (let [skip (if (empty? p) (set environment-keys) #{})
-                           acc (reduce-kv (fn [acc k v] (if (skip k) acc (walk acc (conj p k) v (get b k)))) acc a)]
-                       (reduce-kv (fn [acc k v] (if (or (skip k) (contains? a k)) acc (walk acc (conj p k) nil v))) acc b))
-                     ;; two collections, each sorted by its members' ids in one order: their entries in
-                     ;; step, a member that is the same object passed by with no path made
-                     (and (collection? a) (collection? b))
-                     (let [cmp (.comparator a)]
-                       (loop [acc acc xs (seq a) ys (seq b)]
-                         (cond (nil? xs) (reduce (fn [acc y] (walk acc (conj p (key y)) nil (val y))) acc ys)
-                               (nil? ys) (reduce (fn [acc x] (walk acc (conj p (key x)) (val x) nil)) acc xs)
-                               :else (let [x (first xs) y (first ys) c (if (= (key x) (key y)) 0 (.compare cmp (key x) (key y)))]
-                                       (cond (neg? c) (recur (walk acc (conj p (key x)) (val x) nil) (next xs) ys)
-                                             (pos? c) (recur (walk acc (conj p (key y)) nil (val y)) xs (next ys))
-                                             (identical? (val x) (val y)) (recur acc (next xs) (next ys))
-                                             :else (recur (walk acc (conj p (key x)) (val x) (val y)) (next xs) (next ys)))))))
+                     ;; one entity's two nodes, or two collections: into their keys; another entity
+                     ;; under the same key (retracted and made again) is replaced whole
+                     (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
+                     (reduce (fn [acc k] (walk acc (conj p k) (get a k) (get b k)))
+                             acc (remove (if (empty? p) (set environment-keys) #{}) (distinct (concat (keys a) (keys b)))))
                      (= a b) acc
                      :else (conj acc [:replace p b])))]
     (vec (sort-by (fn [[_ p]] (str/join "\u0001" (map str p))) (walk [] [] (tree-of c0) (tree-of c1))))))

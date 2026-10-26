@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [my.docs] [clojure.core.async.flow :as flow] [clojure.test]
@@ -98,7 +98,7 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms])
+  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
   "What root records of agent entry a: its observed-keys, less :task for an agent a run started,
@@ -207,6 +207,8 @@
   (if-let [a (get-in st [:view :agents id])]
     (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
+               ;; a stall ends with the process
+               (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
                (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v x n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
@@ -216,6 +218,24 @@
         ;; the agents with an eval in flight: the stall check's set
         (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
     st))
+
+(defn- stall-task
+  "Root's task to deal with agent id's stall s, when it works a run (seon.template/stall: one per
+  agent and run, so a later stall of the same run writes none): written to main, held, worked by
+  a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
+  can give root\"). A refused write is the agent's problem, as its facts' are."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
+  [st o id s]
+  (let [{:keys [run pid]} (get-in st [:view :agents id])
+        db (some-> (:conn st) deref)]
+    (if (and run db (not (:writer-closed st)))
+      (let [decl (tpl/stall id run (assoc s :pid pid))
+            tx (when-not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl)))
+                 (task/create-tx db [decl]))]
+        (cond (nil? tx) st
+              (contract/error? tx) (problem st (err/occurrence tx :agent {:agent id :task (:task (get-in st [:view :agents id]))} (System/currentTimeMillis)))
+              :else (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}}) st)))
+      st)))
 
 (defn- to-agent
   "Send m to agent id's proc: an output of this step to [id :in] (seon.step/out! on o; the
@@ -528,11 +548,12 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's proc observed it stalled (seon.agent-proc :stall?)
-      :stalled (-> st (set-agent o (:agent m) {:stalled (:quiet-ms (:error m))})
-                   (problem (err/occurrence (:error m) :agent {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])
-                                                               :form (get-in m [:error :last-op :form])}
-                                            (System/currentTimeMillis))))
+      ;; an agent's proc observed it stalled (seon.agent-proc :stall?): a fact on the agent, what it
+      ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
+      ;; frame (:spoke) or its end retracts it
+      :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
+                 (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s)))
+      :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
                      (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
@@ -769,7 +790,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :stall-ms (the stall bound, seon.agent-proc/stall-ms, for the checks that
+   runs' model) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -846,7 +867,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
+                         :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)

@@ -19,13 +19,14 @@
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
-  :seon.task/instructions, or :seon.task/proofs, the set of its proofs: a design registers each
-  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
+  :seon.task/instructions, :seon.task/proofs, the set of its proofs: a design registers each
+  red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`, or a stall
+  task's :seon.task/cause: `(my.task/update! :seon.task/cause merge {:what .. :evidence {..} :bug? ..})`), written
   on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the member's
   value after the update, as clojure.core/swap! answers the new value (the whole task, its
   instructions and task data was most of each answer: the live agents' rounds), or
   :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
-  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/invalid-member]]}
+  {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/cause :seon.task/invalid-member]]}
   [member f & args]
   (let [tx (task/member-tx (current) member f (vec args))]
     (if (contract/error? tx)

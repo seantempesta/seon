@@ -150,6 +150,10 @@
  :seon.agent/description [:string {:seon.render/prose true}]
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
+ ;; root observed it stalled (seon.agent-proc's stall check: a request in flight, no frame past the bound), with
+ ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
+ ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
+ :seon.agent/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
  :seon.ctx/pattern [:vector :any]
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
@@ -159,13 +163,14 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/stall :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
                        [:seon.agent/mem-mb {:optional true} :seon.agent/mem-mb] [:seon.agent/running {:optional true} :seon.agent/running]
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
+                       [:seon.agent/stall {:optional true} :seon.agent/stall]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
@@ -177,9 +182,6 @@
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
  :seon.task/references [:set :qualified-symbol]
- ;; the wiki sections the plan and instructions cite, by address (seon.ref/addresses): the
- ;; section-address twin of :seon.task/references, written by the same producer from the same text
- :seon.task/sections [:set :string]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -198,21 +200,30 @@
  ;; whose merge was refused (seon.reconcile/hold-tx: why, the run), or marked failed
  ;; (my.task/fail!, root or a check: why, the value that shows it, the run); root's judge
  ;; carries a run's own onto main (state :failed), where it stays as a record after a release
+ ;; a stall task's subject and finding (seon.template/stall): the stall root observed (the agent, its run,
+ ;; what it waited on, how long, its pid), written with the task; then the cause its worker records
+ ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
+ ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
+ :seon.task/cause [:map [:stall [:map [:agent :keyword] [:run :seon.run/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
+                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                   [:what {:optional true} :string] [:evidence {:optional true} :map]
+                   [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
-                          [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections]
+                          [:seon.task/references {:optional true} :seon.task/references]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
+                          [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
@@ -234,7 +245,9 @@
  :seon.run/branch :keyword
  :seon.run/model :string
  :seon.run/max-turns :int
- :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end]
+ ;; how a run ended: the agent's own end, judged, or root's (:dead, :lost, :killed, :refused). Every
+ ;; way a run leaves :running writes one, so a run with none is running (its page tile reads it so)
+ :seon.run/outcome [:enum {:seon.db/taken true} :green :red :waiting :cap :failed :merge-failed :error :no-end :dead :lost :killed :refused]
  :seon.run/reason [:string {:seon.render/prose true :seon.db/taken true}]
  :seon.run/turns :int
  ;; the messages to its session's runs its branch had taken when the run was judged (seon.reconcile/judge-tx): main holding more wakes a parked one
