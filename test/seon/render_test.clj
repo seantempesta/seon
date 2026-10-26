@@ -1170,7 +1170,7 @@
         draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/render-ctx c (seon.context/renders branch))))
         [m1 fs1] (draw {})
         [_ fs2] (draw m1)
-        c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
+        c2 (assoc-in c [:tree :evals (seon.db/eid branch :seon.eval/id "e1") :seon.eval/record :response :value] 5)
         [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/render-ctx c2 (seon.context/renders branch)))]
     ;; the task's part reads the db (its task data), compared by its task key: the same db, from the memo
     (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
