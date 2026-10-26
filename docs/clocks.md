@@ -35,7 +35,7 @@ The sites where time decides because the owner allowed it, the provider's delaye
 
 Tests whose subject is itself a timeout or a measurement window, so the clock read there is what they test.
 
-- `seon.lib-test/in-child`: what it tests is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends).
+- `seon.check/fork-cases`, `seon.lib-test/fork-case`: what they test is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends), run in a fresh process (`target/seon forks CASE`) and asserted by the test.
 - `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
 
 ## Time decides, owed its owner's fix
@@ -44,6 +44,7 @@ Each is a defect named with the task that removes it, so the laws check stays a 
 site is red, and a fixed one leaves this list in the fix's commit.
 - `seon.root/start!` (Flow's `:stop-timeout-ms`), `seon.root/stop!` (timed derefs), `seon.agent-proc/await-dead` (the SIGKILL ladder): task `seon.root/shutdown-and-death-are-dataflow`.
 - `seon.root/api-proc` (the stall timer): with `seon.root/back-op` (its `:stall-check`, a clock read compared to the bound) and `seon.agent-proc/agent-proc` (the `:last-frame-ms` the stall compares), task `seon.root/a-stall-is-past-the-requests-own-bound`.
+- `bin/stalls`, which `bin/test` runs beside its shards (observed outside any root): every second it reads each running shard's last `started` line and the age of its log, and past that test's bound (`:seon.config.proofs/stall-factor` times its own last recorded run, floored at `:seon.config.agent/stall-ms`, which also bounds a test with no record) prints and records `STALLED <test> <ms>` once per test. An observation only: nothing is ended or retried. It goes with the same task.
 - `seon.web/web-proc` (the HTTP adapter's keep-alive and write timeouts, literals): task `seon.web/web-server-threads-are-joined-at-stop`.
 - `seon.model-test/chunks`: a `Thread/sleep` between a streamed reply's chunks (each `>!!` is its own write without it): task `seon.model/a-streamed-reply-test-sleeps-not`.
 
@@ -70,11 +71,11 @@ A measured time chooses which work goes first, never whether a result is green (
 Clock reads whose value is recorded or shown and never compared to decide anything.
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
-- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
+- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/stall-task`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
 - `seon.profile/measure!`: the one measurement of a call ([cost](cost.md)): its wall ns are what the REPL records as a form's ms, its CPU ns what a cost proof times; shown, never compared.
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.
-- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply (`seon.fork-server/server-step`'s on its `:applied`, `:fork` and `:static` events, with a commit's lag from the writer's stamp).
+- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.root/boot!` (the boot's open, preload, load and program ms), `seon.server/root-eval`: a duration recorded on the work's own fact or reply (`seon.fork-server/server-step`'s on its `:applied`, `:fork` and `:static` events, with a commit's lag from the writer's stamp).
 - `my.root/watch!`: the time a file watcher's death was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.

@@ -9,7 +9,8 @@
   (ts/process-store))
 
 (deftest root-threads-are-what-root-declares
-  ;; three start!/stop! cycles in one process: while running (three agents just
+  ;; three start!/stop! cycles, each in a process of its own (a process boots root once: a
+  ;; second-boot-in-one-process-is-refused): while running (three agents just
   ;; evaluated) and after each stop!, every thread is one seon.check/declared-threads
   ;; names, by name stem, the GC's sweepers are the declared number, and the OS counts
   ;; nothing else. A diff of {} is exact; anything else names what differs. No web
@@ -25,6 +26,19 @@
     (is (= 3 (count (:running res)) (count (:stopped res))))
     (is (= [{} {} {}] (:running res)))
     (is (= [{} {} {}] (:stopped res)))))
+
+(deftest a-second-boot-in-one-process-is-refused
+  ;; root boots on its main carrier, before any thread, and forks its fork server there while it
+  ;; is the one thread (seon.root/boot!); its threads (Jolt's carriers, timer, poller) outlive
+  ;; stop!, so a second start! in that process would fork beside them. It is refused by name
+  ;; instead, and nothing is forked
+  (let [main (str "root-test-" (random-uuid))
+        {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
+                                      "./seon" "boot-twice" :dir "target")
+        _ (ts/drop-main! (test-store) main)
+        res (edn/read-string (last (str/split-lines out)))]
+    (is (= 0 exit) (str out err))
+    (is (re-find #"fibers already run on carrier threads" (str (:second res))) (pr-str res))))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.root/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
@@ -194,6 +208,16 @@
       ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
       ;; loaded it; the count is the boot's load
       (is (= 2 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file and root's task, loaded at boot")
+      ;; its watcher's roots are what its loaders read and the refs, never the checkout, whose builds,
+      ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
+      ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
+      (let [[roots dirs co] (ask "(let [co (seon.config/checkout)] [(:roots (:seon.root/watch (datahike.api/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co))) co])")]
+        (is (not-any? #{co} roots) (str "the checkout is no watched root: " roots))
+        (is (= dirs (set (butlast roots))) "the loaders' dirs, then the refs")
+        (is (str/ends-with? (last roots) "/refs") (str roots))
+        ;; its task dir is outside its checkout, and a task file there is the task loader's
+        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) nil nil [[:path \"" runs "/tasks/x.edn\"]])))")))
+            "a task file in a task dir outside the checkout loads the tasks"))
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]
              (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))

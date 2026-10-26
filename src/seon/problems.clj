@@ -117,6 +117,23 @@
   (assoc fields :signature s :open? true :message message :producer nil :owner-ns owner :proofs [] :evidence evidence
          :answered-by (get-in ans [:signature s] []) :at-ms nil))
 
+(defn stalled-agents
+  "Each agent root observes stalled now (its :seon.agent/stall: a request in flight and no frame
+  past the stall bound, seon.agent-proc), as a :stalled row naming what it waits on: open while
+  the fact holds, closed by its next frame or its end, which retract it. Cost: the agents
+  holding the fact (one AEVT range)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{e :e st :v} (d/datoms db :aevt :seon.agent/stall)
+             :let [{id :seon.agent/id pid :seon.agent/pid} (d/pull db [:seon.agent/id :seon.agent/pid] e)
+                   {:keys [kind form]} (:last-op st)
+                   s (str "stalled " (some-> id name))]]
+         (derived-row ans s 'seon.agent-proc
+                      (str "agent " (some-> id name) " sent nothing for " (:quiet-ms st) " ms with a request in flight"
+                           (when kind (str ": " (name kind) (when form (str " " form)))))
+                      {:kind :stalled :agent id :pid pid :quiet-ms (:quiet-ms st) :waits-on (:last-op st)}
+                      {:agent id}))))
+
 (defn dead-citations
   "Each name a wiki section cites (:seon.section/names) that names nothing on db
   (seon.ref/names-on-db?, the one rule for a name), and each link it makes that reached no
@@ -613,7 +630,7 @@
   ([db] (health db {}))
   ([db fold]
    (let [ans (answers db)
-         derived {:dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
+         derived {:stalled (stalled-agents db ans) :dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
                   :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
                   :leadless-section (leadless-sections db ans)
                   :uncited-task (uncited-tasks db ans)}

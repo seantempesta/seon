@@ -17,7 +17,9 @@
                                   {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
-                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]])))))
+                                 [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
+                                 ;; a test the agent wrote in its scratch namespace, no proof of its task
+                                 [user/scratch-test "(deftest scratch-test (is (= 1 2)))"]])))))
 
 (defn- wiki!
   "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
@@ -126,6 +128,9 @@
       (let [b (context/current-state db t {:results {'user/scratch-test :fail} :reasons [{:reason :stray-red :symbol 'user/scratch-test}] :turn 1 :max-turns 4})]
         (is (= ['(my.task/update! :seon.task/proofs conj (quote user/scratch-test))]
                (keep :do (filter #(= :stray-red (:reason %)) (:refused b)))))))
+    (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
+      (let [b (context/current-state db t {:results {'demo-test/gone :fail} :reasons [{:reason :stray-red :symbol 'demo-test/gone}] :turn 1 :max-turns 4})]
+        (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
     (testing "nothing refused, nothing failed: no section"
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
@@ -463,6 +468,20 @@
         "measured and nothing to carry says so")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))
         "not measured (a basis from before it was) is no section, never an empty one")))
+
+(deftest a-task-that-merges-itself-sees-whether-it-can-merge
+  ;; owner, 2026-10-26: merge readiness on the page every turn, so the agent knows when it can
+  ;; merge: ready when the done rule passes and merging main conflicts nowhere; what main changed
+  ;; is shown, never a reason; a task that does not merge itself has no such section
+  (let [db (db-with-program)
+        state #(context/turn-state db (task-f db) (assoc % :turn 1 :max-turns 4))]
+    (is (= {:main-moved [[:var 'demo/g]] :conflicts [] :ready true}
+           (:merge (state {:merge {:main-moved [[:var 'demo/g]] :conflicts []} :reasons []}))) "green, main moved: ready")
+    (is (false? (get-in (state {:merge {:main-moved [[:var 'demo/f]] :conflicts [[:var 'demo/f]]} :reasons []}) [:merge :ready]))
+        "merging main would conflict: not ready")
+    (is (false? (get-in (state {:merge {:main-moved [] :conflicts []} :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}) [:merge :ready]))
+        "a red proof: not ready")
+    (is (not (contains? (state {:reasons []}) :merge)) "unmeasured: no section")))
 
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
@@ -1063,6 +1082,32 @@
       (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
                               {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
         (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
+
+(deftest a-prose-requests-functions-come-from-its-nearest-and-their-neighbours
+  ;; task seon.context/a-prose-request-finds-its-functions: a plan citing no defined var (a user's
+  ;; request in prose; `demo/nope` names none) seeds related's call graph with the program functions
+  ;; nearest it by meaning, read past the tests nearer still (:seon.config.render/related-seeds-near):
+  ;; twenty-five tests sit nearer the plan than demo/g, so meaning's candidates (related-near per
+  ;; line) hold no program function, and demo/h (no vector) is found only as g's callee
+  (doseq [plan ["Make the page say one thing." "Make the page say one thing, as `demo/nope` does."]]
+    (let [[db te dir] (sections-near plan)
+          db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])" :form/defines #{"hv"}} {:db/id "hv" :var/name 'demo/h :var/form "h" :var/kind :fn}
+                            {:form/id "demo/g" :form/refs #{'demo/h} :form/defines #{[:var/name 'demo/g]}}])
+          db (d/db-with db (vec (for [i (range 25)] (let [f (str "t" i)]
+                                                      {:db/id f :form/id (str "demo-test/t" i) :form/src "(deftest t (g))" :form/refs #{'demo/g}
+                                                       :form/defines #{(str f "v")}}))))
+          db (d/db-with db (vec (for [i (range 25)] {:db/id (str "t" i "v") :var/name (symbol "demo-test" (str "t" i)) :var/form [:form/id (str "demo-test/t" i)] :var/kind :test})))
+          ts (for [i (range 25)] (pdb/eid db :form/id (str "demo-test/t" i)))
+          db (d/db-with db (vector/tx-data (vec ts) (repeat 25 1) (for [i (range 25)] (dir 1.0 (* 0.001 (inc i)))) (repeat 25 10) "m"))
+          rel (context/related db te)]
+      (is (some #{'demo/h} (:functions rel)) (str "the nearest function's callee, for: " plan " " (pr-str (:functions rel))))
+      ;; a plan citing a defined var keeps its own graph: g's callee is not reached from meaning
+      (let [db (d/db-with db [{:db/id "q" :form/id "demo/q" :form/src "(defn q [])" :form/defines #{"qv"}} {:db/id "qv" :var/name 'demo/q :var/form "q" :var/kind :fn}
+                              {:db/id "c" :form/id "demo/c" :form/src "(defn c [] (q))" :form/refs #{'demo/q} :form/defines #{"cv"}} {:db/id "cv" :var/name 'demo/c :var/form "c" :var/kind :fn}
+                              {:seon.task/id "demo/r" :seon.task/plan (str plan " Change `demo/q`.")}])
+            fs (:functions (context/related db te))]
+        (is (some #{'demo/c} fs) (str "a cited var's graph: its caller " (pr-str fs)))
+        (is (not-any? #{'demo/h} fs) "and not meaning's seed")))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never

@@ -23,9 +23,9 @@
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
 (defn request!
-  "Work request decl as the tasks template makes of it (seon.template/request, the default: its
-  design-build task and its merge; seon.template/whole or seon.template/stages for an
-  experiment), written released in one transaction on main (seon.template/request-tx), so no
+  "Work request decl as the tasks template makes of it (seon.template/request, the default: one
+  task that designs, builds and merges itself; seon.template/design-build or
+  seon.template/stages for an experiment), written released in one transaction on main (seon.template/request-tx), so no
   agent forks before every task of it is set. Answers the writer's answer with the tasks'
   ids, or the error."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/declaration] :map]
@@ -177,17 +177,6 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
   [sys] (problems/health @(:conn sys) (root/errors sys)))
 
-(defn- loader
-  "Which of main's loaders reads checkout path (relative): :docs (a page under docs/), :tasks
-  (a task file), :source (Seon's source, :seon.config.source/dirs), or nil."
-  {:malli/schema [:=> [:cat :string] [:maybe [:enum :docs :tasks :source]]]}
-  [path]
-  (let [under? (fn [dir] (str/starts-with? path (str dir "/")))]
-    (cond (and (under? "docs") (str/ends-with? path ".md")) :docs
-          (and (str/starts-with? (str (config/checkout) "/" path) (str (config/value :seon.config.root/tasks-dir) "/"))
-               (str/ends-with? path ".edn")) :tasks
-          (some under? (config/value :seon.config.source/dirs)) :source)))
-
 (def ^:private kinds "Main's loaders, each a kind of what changed on disk." #{:docs :tasks :source})
 
 (defn- load-kinds!
@@ -220,13 +209,25 @@
   {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
    :source (mapv #(str co "/" %) (config/value :seon.config.source/dirs))})
 
+(defn- loader
+  "Which of main's loaders reads path (absolute) under checkout co: :docs (a page, .md, under the
+  wiki's dir), :tasks (a task file, .edn, under the task dir, which a test root keeps outside its
+  checkout), :source (under a source dir), or nil: the dirs are loader-dirs, the ones watched."
+  {:malli/schema [:=> [:cat :string :string] [:maybe [:enum :docs :tasks :source]]]}
+  [co path]
+  (let [dirs (loader-dirs co)
+        under? (fn [k] (some #(str/starts-with? path (str % "/")) (get dirs k)))]
+    (cond (and (under? :docs) (str/ends-with? path ".md")) :docs
+          (and (under? :tasks) (str/ends-with? path ".edn")) :tasks
+          (under? :source) :source)))
+
 (defn watch-loads
   "What a watcher's batch makes root load, each kind with the first record of the batch that made
-  it ({kind [record-kind path]}: what root's watch fact keeps as :last-load, so a load says why): a changed path under checkout co by its loader; the
+  it ({kind [record-kind path]}: what root's watch fact keeps as :last-load, so a load says why): a changed path by its loader; the
   checkout's own branch moving (own, its ref under refs: a commit or merge on it) the source, and
   no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
   coalesced or dropped what happened under it) the loaders reading under that path (a rescan of
-  target/ none, of the checkout every kind), and of refs the source alone."
+  a loader's dir that loader), and of refs the source alone."
   {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]]
                   [:map-of [:enum :docs :tasks :source] [:tuple :keyword :string]]]}
   [co refs own batch]
@@ -237,8 +238,7 @@
                     ks (cond (and (#{:rescan :root} kind) under-refs?) [:source]
                              (#{:rescan :root} kind) (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
                              under-refs? (when (= path own) [:source])
-                             (str/starts-with? path (str co "/")) (keep identity [(loader (str/replace-first path (str co "/") ""))])
-                             :else [])]
+                             :else (keep identity [(loader co path)]))]
                 ;; the first record that made each kind keeps it
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
             {} batch)))
@@ -254,8 +254,10 @@
         {:seon.root/id :root :seon.root/watch (assoc held :error (:seon.error/message e))}))
 
 (defn watch!
-  "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
-  a Claude session, an agent, the owner's editor, git), and loads on its own branch's ref only
+  "Root watches what its loaders read, loader-dirs (the wiki, the task files, the source dirs),
+  and its repository's refs (seon.watch, FSEvents: every writer, a Claude session, an agent, the
+  owner's editor, git), never the whole checkout, whose builds (target/), store (runs/) and, in
+  the main tree, other worktrees no loader reads. It loads on its own branch's ref only
   (watch-loads: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
   (seon.root/import-source!), and here the task files, once the watcher is ready (a fresh or
@@ -270,7 +272,7 @@
   (let [co (config/checkout)
         refs (fx/git-refs co)
         own (fx/head-ref co)
-        roots (vec (remove nil? [co refs]))
+        roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)

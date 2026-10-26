@@ -28,7 +28,7 @@
   functions carry contracts in their metadata and are armed at boot."
   (:refer-clojure :exclude [resolve])
   (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
-            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d]))
+            [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [datahike.db.utils :as dbu]))
 
 ;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
 
@@ -338,6 +338,5 @@
   in force and main's copy of it differed)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (let [schema (d/schema db)]
-    (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
-                          [k (if (= :db.cardinality/many (get-in schema [k :db/cardinality])) (set v) v)])))))
+  (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
+                        [k (if (dbu/multival? db k) (set v) v)]))))

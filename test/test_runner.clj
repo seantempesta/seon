@@ -199,17 +199,24 @@
 (defn- write-shards!
   "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), each written as
   out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t}, t the planned tree's id)
-  for bin/test to run, one process each (bin/test removes the last run's first). Answers the
-  shard count."
+  for bin/test to run, one process each (bin/test removes the last run's first), and each
+  measured test's stall bound as out/stall-bounds (\"<test> <ms>\" lines, for bin/stalls). Answers
+  the shard count."
   [out tests digests tree]
-  (let [sh (shards tests (config/value :seon.config.proofs/jobs) (measured-ms tests))]
+  (let [ms (measured-ms tests)
+        sh (shards tests (config/value :seon.config.proofs/jobs) ms)
+        floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)]
     (doseq [[i ts] (map-indexed vector sh)]
       (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree})))
+    ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
+    ;; record takes the floor, out/stall-ms)
+    (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
     (count sh)))
 
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
-  (seon.proofs/run-tests!), each test named as it starts and each red one printed (RED); then
+  (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
+  red one printed (RED); then
   its greens stored at their digests (seon.proofs/store-greens!), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
@@ -224,7 +231,9 @@
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) nil
-                                               (not (proofs/green? x)) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))
+                                               ;; a test's end, so bin/stalls never names one that finished
+                                               :else (do (println "ended" (:test x))
+                                                         (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks))
           ;; the tree the tests read is the plan's from before the run to after it: an edit
@@ -274,7 +283,7 @@
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
-  them (both empty: nothing to build, nothing to seed). Answers the exit
+  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound bin/test reads. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
@@ -297,6 +306,8 @@
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
+        _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
         _ (when (seq (filter binary run-tests)) (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))))

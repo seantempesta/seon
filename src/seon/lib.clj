@@ -5,7 +5,8 @@
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
-            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]))
+            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]
+            [seon.edn :as sedn]))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -189,6 +190,12 @@
   {:malli/schema [:=> [:cat :int] :int]}
   [n] (collect-sweepers* n))
 
+(defchecked ^:private throw-frames [:=> [:cat :any] :string]
+  ;; the frames a throw unwound from, innermost first, as Jolt's fiber dump names them (fibers.ss
+  ;; jolt-continuation-frames over the throw's continuation, source-registry.ss
+  ;; jolt-error-continuation): what a forked child that threw out of its code says of where
+  (scm/eval-string "(lambda (e) (let ((k (jolt-error-continuation e))) (if k (format \"~s\" (jolt-continuation-frames k 30)) \"no continuation\")))"))
+
 (defchecked ^:private gc-stats* [:=> [:cat] [:vector :int]]
   (scm/eval-string "(lambda () (let ([s (statistics)] [ms (lambda (t) (+ (* 1000 (time-second t)) (quotient (time-nanosecond t) 1000000)))])
                                   (jolt-vector (sstats-gc-count s) (ms (sstats-gc-real s)) (ms (sstats-gc-cpu s)))))"))
@@ -229,7 +236,7 @@
   "The one spawning skeleton (AGENTS section 2): fork only while this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child), checked once. Then
   (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
-  stderr; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
+  stderr with the frames it unwound from; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
   and unwinding into them would run the parent's code in the child; (refused n) here, n the
   active threads (1: the OS refused); or (parent pid) here, whose answer is this fn's. fd, the
   child's own, is closed here. double? forks the child again and reaps the middle: a clone is
@@ -243,7 +250,8 @@
         (try (when (or (not double?) (zero? (c-fork))) (child))
              (vreset! status 0)
              (catch Throwable e
-               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (pr-str (ex-data e))) (flush)))
+               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (sedn/encode (ex-data e))
+                                         "\n  from:" (throw-frames e)) (flush)))
              ;; a finally is a winder, run on any exit from the try (a fiber's park drops it)
              (finally (c-exit @status))))
       (do (some-> fd c-close)

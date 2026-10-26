@@ -213,22 +213,33 @@
     (fenced "A small value." "(+ 1 2)")
     (fenced "Done reading." "(my.turn/wait)")]})
 
-(def fit-requests
-  "The five tasks fit to measure (jolt/fit-tasks, 2026-10-24), as a user would ask for them: a
-  short problem description each, no proof, no write set (its agent writes its own proofs, red,
-  and names what to change), each a request for seon.template/request (design-build, then merge:
-  my.root/request! writes it). Kept here, not run: the clean path's measurement waits
-  for the owner's go (root, 2026-10-25)."
-  [{:seon.task/ns 'seon.ref :seon.task/name "a-summary-says-what-it-left"
-    :seon.task/plan "When a wiki section is cited at summary depth, the agent sees only the first sentence of its lead and nothing says there is more. It should say how much of the lead it left out and how to read the rest."}
-   {:seon.task/ns 'seon.model :seon.task/name "the-transport-failure-docstring-is-true"
-    :seon.task/plan "The docstring of seon.model/transport-error says a failed request is kept and retried after a pause, but a transport failure goes straight back to the agent. Make the docstring say what really happens."}
-   {:seon.task/ns 'seon.context :seon.task/name "a-proof-that-never-ran-says-so"
-    :seon.task/plan "When one of my proofs has no test result yet, my status says it ran and asserted nothing. It should say it has not run."}
-   {:seon.task/ns 'seon.print :seon.task/name "a-long-name-cut-says-its-chars"
-    :seon.task/plan "When the printer cuts a long keyword it just shows …+N; it should say how many chars it left and how to read the rest."}
-   {:seon.task/ns 'seon.print :seon.task/name "a-map-shows-its-first-entry"
-    :seon.task/plan "Printing a big map with a small budget fails, saying it needs 33 characters, while a vector of the same size shows its first item and a cut. A map should show its first entry and a cut too."}])
+(def requests
+  "The ten requests a live run measures, as a user would ask for them: a short problem
+  description and the one form that reproduces it, with what it answers and what it should, no
+  proof and no write set (its agent writes its own proof, red, and names what to change). Each is
+  a request for seon.template/request (design-build, then merge: my.root/request! writes it).
+  Each reproduction was run on main before the set was used: a request whose reproduction
+  answers right is done, and is replaced, never measured."
+  [{:seon.task/ns 'seon.context :seon.task/name "the-related-list-says-what-each-lead-left"
+    :seon.task/plan "The related sections list on an agent's page shows the first sentence of each section's lead and nothing says how much was left out or how to read the rest. Reproduce: (let [db (seon.test-store/test-db) db (datahike.api/db-with db (seon.docs/load-tx db \"docs\" {\"docs/flow.md\" \"# Flow\\n\\n## Step\\n\\nA step returns its state and outputs. It never blocks.\\n\"}))] (get-in (seon.context/related-view db {:sections [\"docs/flow.md#step\"]}) [:sections 0])) answers \"docs/flow.md#step: A step returns its state and outputs.\"; it should also say how much of the lead it left and the citation that reads the rest."}
+   {:seon.task/ns 'seon.context :seon.task/name "a-message-and-an-eval-of-one-id-both-print"
+    :seon.task/plan "When a run holds a message and an eval with the same id, the conversation keeps only one of them, because the printed parts are looked up by the bare id. Each record should be kept under its own kind, so both are printed. Reproduce: (let [ev [[:eval \"x\"] {:seon.eval/id \"x\" :seon.eval/by \"a1\" :seon.eval/record {:code \"(+ 1 1)\" :call-id \"c1\" :call 0 :response {:handle 'result/x :value 2 :ms 1}}} :seon.db/eval-fact 1] msg [[:message \"x\"] {:seon.message/id \"x\" :seon.message/from \"root\" :seon.message/body \"hello\"} :seon.message/fact 2] c (#'seon.context/printed-run [ev msg] nil)] [(count (:ids c)) (count (:parts c))]) answers [1 1]; it should answer [2 2]."}
+   {:seon.task/ns 'my.agent :seon.task/name "the-help-docstring-says-what-it-does-now"
+    :seon.task/plan "The docstring of my.agent/help ends by telling what an anchor answered before this change, which is history, not what the function does. Make it say only what the function answers now. Reproduce: (re-find #\"Before this\" (:doc (meta #'my.agent/help))) answers \"Before this\"; it should answer nil."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-mixed-collection-shows-no-empty-members"
+    :seon.task/plan "Printing many like maps with one keyword among them gives a line of {…7 (get-in result/e1 [N])} for most members, each saying nothing. Members that show nothing should end in one cut after the members that do show something. Reproduce: (let [rows (vec (for [i (range 177)] (array-map :seon.docs/section (keyword \"render\" (str \"section-\" i)) :seon.docs/page \"docs/render.md\" :seon.problem/class :stale-section :seon.problem/since 1761360000000 :cited 'seon.print/print-value :lead \"A section whose lead cites a var that moved.\" :n i)))] (count (re-seq #\"\\{…\" (:text (seon.print/print-value (assoc rows 3 :odd) {:handle 'result/e1 :budget 1000}))))) answers 105; it should answer 0."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-namespaced-map-indents-its-keys-past-its-opener"
+    :seon.task/plan "A map whose keys share a namespace prints as #:seon.task{:kind :work, and its later keys sit one column in, under the #, so they read as the parent's. Keys should start one column past the opener, and the budget should count that. Reproduce: (let [{:keys [text]} (seon.print/print-value {:seon.task/kind :work :seon.task/id \"demo/f\" :seon.task/plan (apply str (repeat 70 \"p\"))} {:handle 'result/h1 :width 40})] (mapv #(count (re-find #\"^ *\" %)) (clojure.string/split-lines text))) answers [0 1 1 3]; it should answer [0 12 12 14], the keys starting past #:seon.task{."}
+   {:seon.task/ns 'seon.print :seon.task/name "a-long-string-does-not-starve-its-siblings"
+    :seon.task/plan "When one member of a value is a long string and another a big collection, the string takes the whole budget and the collection shows nothing, not even its first element. Every member should show its first part before any one grows. Reproduce: (let [v {:form \"(code-of 0)\" :out (apply str (repeat 480 \"output line of the code\\n\")) :value (vec (range 2000))}] (boolean (re-find #\":value \\[0\" (:text (seon.print/print-value v {:budget 545 :handle 'result/e1}))))) answers false (the value prints as […2000 (get-in result/e1 [:value])]); it should answer true."}
+   {:seon.task/ns 'seon.render.ui :seon.task/name "a-size-just-under-a-megabyte-rolls-over"
+    :seon.task/plan "A size just under a megabyte reads 1024.0 KB: the rounding should carry into the next unit. Reproduce: (seon.render.ui/bytes-str 1048575) answers \"1024.0 KB\"; it should answer \"1.0 MB\"."}
+   {:seon.task/ns 'seon.ref :seon.task/name "a-first-sentence-ends-at-its-question-mark"
+    :seon.task/plan "A section's summary ends at the first full stop followed by a space, so a lead that opens with a question, or with a full stop inside brackets, shows too much. Reproduce: (mapv seon.ref/lead-sentence [\"Is it fast? Yes. It is.\" \"A thing (see the page.) Then more.\"]) answers [\"Is it fast? Yes.\" \"A thing (see the page.) Then more.\"]; it should answer [\"Is it fast?\" \"A thing (see the page.)\"]."}
+   {:seon.task/ns 'seon.print.emit :seon.task/name "a-cut-of-one-character-says-char"
+    :seon.task/plan "A cut that left one character says …+1 chars; it should say …+1 char, as the line count already says 1 more line. Reproduce: [(seon.print.emit/cut-words 1 0 nil) (seon.print.emit/cut-words 1 1 nil)] answers [\"…+1 chars\" \"…+1 chars in 1 more line\"]; it should answer [\"…+1 char\" \"…+1 char in 1 more line\"]."}
+   {:seon.task/ns 'seon.ref :seon.task/name "a-name-ending-in-a-star-is-not-cited-as-another"
+    :seon.task/plan "A name ending in * is never a reference, but in prose its trailing star is trimmed as if it were emphasis, so ns.x/f* is cited as ns.x/f, another var. Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo* are listed.\") answers [seon.print.emit/foo]; it should answer []."}])
 
 (def ^:private all-replies
   "Scripted replies by task name (calc) and by task id (a scenario's tasks live in a task
@@ -281,6 +292,28 @@
                                   "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)\n"
                                   "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")"))
         :else "The proof is written and red, and the plan says what implement changes."))
+
+(defn whole-green
+  "The scripted model of a whole task that goes green (seon.agent-test): it writes a proof that
+  passes and registers it; the done rule then passes and the run ends, for root to merge."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [turn]}]
+  (if (zero? turn)
+    (fenced "Write the proof, and register it."
+            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 1)))\n"
+                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
+    "The proof passes."))
+
+(defn whole-red
+  "The scripted model of a whole task whose proof stays red (seon.agent-test): it writes a red
+  proof and registers it, then waits (my.turn/wait), so its run parks with the proof red."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [turn]}]
+  (if (zero? turn)
+    (fenced "Write the proof, red, and register it."
+            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
+                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
+    "(my.turn/wait)"))
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one

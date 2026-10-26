@@ -63,9 +63,11 @@
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
   the proofs): a red test names its failures (a stray one the form that makes it a proof), a contract gap its var, a design step that
   has not improved its plan the call that does, an open problem its work made true what it
-  is (seon.problems/caused)."
-  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map]] [:vector :map]]}
-  [reasons reds]
+  is (seon.problems/caused). defined? says whether the branch defines a test: a stray red it
+  does not is one of main's tests the branch removed, which judges all the same (seon.agent/
+  test-plan's :removed), so it is marked :removed and offered no form that makes it a proof."
+  {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done] [:vector :map] ifn?] [:vector :map]]}
+  [reasons reds defined?]
   (let [rs (remove #(= :proof-red (:reason %)) reasons)
         gaps (vec (keep #(when (= :contract-gap (:reason %)) (:symbol %)) rs))
         unmerged (vec (keep #(when (= :unmerged (:reason %)) (:key %)) rs))
@@ -79,8 +81,11 @@
                                           (seq (filter #(= symbol (:test %)) reds))
                                           (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
-                                          (= :stray-red reason)
-                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol))))
+                                          (and (= :stray-red reason) (defined? symbol))
+                                          (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
+                                          ;; main's test the branch removed: it still judges, from main's definition
+                                          (and (= :stray-red reason) (not (defined? symbol)))
+                                          (assoc :removed true))
                ;; a design made from a request carries none: it registers each it writes
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
@@ -188,7 +193,8 @@
   "What the work on task entity te's plan is likely to need beyond what the plan cites: the
   :seon.config.render/related wiki sections, program functions and schema keys nearest it, each
   kind ranked by the plan's references and by meaning fused by reciprocal rank (seon.vector/rrf):
-  the graph from its citations (the cited vars' callers and callees, the sections naming a cited
+  the graph from its citations (the cited vars' callers and callees, or, when it cites no defined
+  var, those of the functions nearest it by meaning; the sections naming a cited
   var, the sections a cited section references or is referenced by, the schema keys the plan
   names and the cited vars' forms name, :form/keywords) and seon.vector/near on the plan's vector. Fused, they found more of
   what 31 merged tasks changed than either alone (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: functions
@@ -221,8 +227,21 @@
             cap (cfg/value :seon.config.render/related-rarity)
             by-rarity (fn [xs] (mapv peek (sort (for [[x n] (frequencies xs)]
                                                   [(- (/ n (inc (bounded-count cap (d/datoms db :avet :form/refs x))))) (str x) x]))))
-            near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
+            named (fn [f hits] (into [] (comp (keep (comp f first)) (distinct)) hits))
+            n (* k (cfg/value :seon.config.render/related-near))
+            var-of #(some-> (d/entity db %) :var/_form first :var/name)
+            ;; a plan citing no defined var (a user's request in prose; a section or a name of no var
+            ;; alike) seeds the graph with the program functions nearest it by meaning, read past the
+            ;; tests that are nearer still (:seon.config.render/related-seeds-near; task
+            ;; seon.context/a-prose-request-finds-its-functions): one search of the forms serves both,
+            ;; meaning's candidates its first n
+            defined (filterv #(d/entity db [:var/name %]) fns)
+            forms (vector/near db te (if (seq defined) n (max n (cfg/value :seon.config.render/related-seeds-near))) {:of :form/id})
+            meaning {:functions (named var-of (take n forms))
+                     :sections (named #(:seon.section/address (d/entity db %)) (vector/near db te n {:of :seon.section/address}))
+                     :schemas (named #(:schema/key (d/entity db %)) (vector/near db te n {:of :schema/key}))}
+            seeds (if (seq defined) defined (into [] (comp (filter function?) (take k)) (named var-of forms)))
+            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) seeds) (mapcat #(map :var (callees db %)) seeds)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
@@ -230,9 +249,6 @@
                                                    (for [a secs r (:seon.section/_references (d/entity db [:seon.section/address a]))] (:seon.section/address r))))
                    :schemas (by-frequency (filter schema? (concat (filter keyword? (keep :seon.ref/name cites))
                                                                      (mapcat #(:form/keywords (:var/form (d/entity db [:var/name %]))) fns))))}
-            meaning {:functions (near :form/id #(some-> (d/entity db %) :var/_form first :var/name))
-                     :sections (near :seon.section/address #(:seon.section/address (d/entity db %)))
-                     :schemas (near :schema/key #(:schema/key (d/entity db %)))}
             cited {:functions fns :sections secs :schemas #{}}]
         (into {} (for [kind [:sections :functions :schemas]]
                    [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
@@ -394,9 +410,10 @@
   rule refuses (regressions, stray reds, contract gaps), and a test run that failed as a whole;
   the branch's unmerged entries (base, ours, theirs); what its merge will carry to main; the
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
-  left. The messages delivered are the conversation's (`conversation`), not the block's."
+  left; and, for a task that merges itself, whether it can merge now. The messages delivered
+  are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention merge]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -412,7 +429,7 @@
                               (seq fs) (assoc :failures (mapv failure fs))
                               (and src (not= :pass st) (seq (callees db p))) (assoc :calls (callees db p)))))}
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
-      (seq (refused (vec reasons) (vec reds))) (assoc :refused (refused (vec reasons) (vec reds)))
+      (seq (refused (vec reasons) (vec reds) #(some? (docs/source-of db %)))) (assoc :refused (refused (vec reasons) (vec reds) #(some? (docs/source-of db %))))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
@@ -422,6 +439,10 @@
       ;; owner D4: every change the branch's merge carries to main, every turn measured and
       ;; empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
+      ;; a task that merges itself (seon.task/merges?): ready when the done rule passes and
+      ;; merging main would conflict nowhere (seon.agent/merge-readiness); what main changed
+      ;; since the merge base is merged in at the green (seon.turn/work!), so it is shown, never a reason
+      merge (assoc :merge (assoc merge :ready (and (empty? reasons) (empty? (:conflicts merge)))))
       ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the run's end, the process tests run only
       ;; when root asks (DECISIONS, Process tests are not automatic); a run its bound ended leaves

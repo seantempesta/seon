@@ -440,9 +440,11 @@
                        ;; its end refused by the done rule (the agent's own check, or root's facts
                        ;; that its branch did not show): words to the agent, a :verdict entry with
                        ;; what root judged on, which wakes the session; the same verdict twice holds
-                       ;; (start) (design one-derivation 4.1 section 5). A merge's holds, and
-                       ;; an outside agent's: it read the verdict as :done's answer, and no turn loop takes entries
-                       (and (not merge?) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
+                       ;; (start) (design one-derivation 4.1 section 5). A whole task's goes back to
+                       ;; its own session too (it merges itself, so it is told why it could not); a
+                       ;; merge task's holds, and an outside agent's: it read the verdict as :done's
+                       ;; answer, and no turn loop takes entries
+                       (and (not= :merge (:seon.task/kind t)) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
                        {:op :verdict :run aid :task id :reasons rs}
                        :else
                        (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
@@ -637,8 +639,8 @@
 
 ;; ---- the reconciler proc: actions carried out as requests, every answer as data ----------
 ;; Root's executor (R1's proto.agents.root, a thread per run) as one step-fn: main's
-;; commits arrive through a sliding buffer of one (a reconciler reads main's latest db, so a
-;; commit it missed is covered by the next); each action is a flight, a short chain of
+;; commits arrive in order through a blocking buffer (:seon.config.root/reconciler-buf: it reads
+;; every commit's datoms); each action is a flight, a short chain of
 ;; requests to the api (spawn, eval, tests, the writer's reads and writes, kill), each answer
 ;; arriving on :answers keyed by its request id. An action whose run is in flight is not
 ;; started twice.
@@ -691,7 +693,7 @@
                ;; the session's agent continues (design agent-loop section 1); kept on the flight for its run's start
                (one (request (cond-> st k (assoc-in [:flights run :key] k)) run :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task (:task act) :run run} k (assoc :key k))})))
-      :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/reason "root restarted"})))
+      :reap (one (write st run :done (cas-tx run :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost :seon.run/reason "root restarted"})))
       ;; the run parked its session: written once, here; its process stays (design agent-loop section 1)
       :park (one (write st run :done (cas-tx run :ended :parked {})))
       :close (cond-> (one (write st run :done (cas-tx run :ended :closed {})))
@@ -704,7 +706,7 @@
       :kill (let [[st o1] (request st run :ignored {:op :kill :id agent})
                   [st o2] (write st run (if killing? :ignored :done) (cas-tx run (:seon.run/status a :running) :killed
                                                                              (cond-> {:seon.run/reason (name (:reason act))}
-                                                                               (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis)))))]
+                                                                               (= :running (:seon.run/status a)) (assoc :seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :killed))))]
               [st [o1 o2]])
       ;; refused, dead or its merge refused: the task is held for root, with the evidence
       :verdict (let [prev (last-verdict (:db st) run)]
@@ -831,7 +833,7 @@
   exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end."
   {:malli/schema [:=> [:cat :seon.run/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [aid e end]
-  (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis)
+  (cas-tx aid :running :dead {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :dead
                               :seon.run/reason (if (:reason end) (str (:reason end) " (" (:seon.error/message e) ")") (:seon.error/message e))
                               :seon.run/error (cond-> e (:error end) (assoc :cause (:error end)))}))
 
@@ -850,7 +852,7 @@
         ;; the writer refused to read or diff its branch: its agent is stopped and the run
         ;; ends with the reason as its error, not judged on facts nobody measured
         refused (fn [st e] (let [[st o1] (request st aid :ignored {:op :kill :id agent :ended true})
-                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.run/end-ms (System/currentTimeMillis)
+                                 [st o2] (write st aid :done (cas-tx aid :running :ended {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :error
                                                                                           :seon.run/reason (:seon.error/message e) :seon.run/error e}))]
                              [st [o1 o2]]))]
     (case step
@@ -875,7 +877,7 @@
                              [(let [now (System/currentTimeMillis)]
                                 (-> (first (task/run-start-tx aid (:task act) (:boot st) nil (:env act) now
                                                                   (:plan (task/accumulate (get-in st [:idx :tasks]) (:task act)))))
-                                    (assoc :seon.run/status :refused :seon.run/end-ms now
+                                    (assoc :seon.run/status :refused :seon.run/outcome :refused :seon.run/end-ms now
                                            :seon.run/reason (:seon.error/message r) :seon.run/error r)))])))
       ;; an outside agent works this run (seon.server): no turn loop; it hands it back
       :started (cond
@@ -898,7 +900,7 @@
                 ;; view: ended or never there): the run took nothing, so it is lost, not a death, and
                 ;; the task starts again as a spawn, a load of the session (design agent-loop section 4)
                 (and (= :wake (:op act)) (#{:seon.root/ended :seon.root/no-agent} (:seon.error/type r)))
-                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis)
+                (one (write st aid :done (cas-tx aid :running :lost {:seon.run/end-ms (System/currentTimeMillis) :seon.run/outcome :lost
                                                                      :seon.run/reason (str "its parked process was gone: " (:seon.error/message r))})))
                 (contract/error? r) (dead st r)
                 :else
@@ -1032,8 +1034,29 @@
     ;; an action started is work: the quiet spell ends (and a wait waits for it)
     (apply quiet (reduce (fn [[st outs] act] (let [[st o] (start (assoc st :quiet false) act)] [st (into outs o)])) [st []] acts))))
 
+(defn- behind?
+  "Whether answer m is to a write on main that main's commits have not reached yet: the writer
+  answers a write on main ({:ok true :t}, seon.writer/commit-batch: the one answer of that shape
+  this proc asks for; a branch's write is answered otherwise) before its commit reaches this proc
+  on :main, another in, so a step taking the answer would read a db older than its own write.
+  Before main's first commit every such answer is ahead of it."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
+  [st m] (let [{:keys [ok t]} (:r m)] (boolean (and ok (int? t) (or (nil? (:t st)) (< (:t st) t))))))
+
+(defn- take-answer
+  "[st requests] with answer m taken by the flight step that asked it (advance), and the next
+  pass when that ended its flight."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st m]
+  (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
+        [st [aid step]] (step/answered st (:tag m))
+        [st outs] (if aid (advance st aid step (:r m)) [st []])
+        ;; a flight that ended may free its run for the next action
+        [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
+    [st (into outs more)]))
+
 (defn reconciler-proc
-  "The reconciler. In :main (main's commits {:t :ops :db}, a sliding buffer of one) and :answers (the
+  "The reconciler. In :main (main's commits {:t :ops :db}, in order, a blocking buffer) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
   Args: :boot (this root's boot id); in :judge (outside agents' runs handed back).
   Starts deepest-first (finish chains under way)."
@@ -1042,9 +1065,9 @@
                 :judge "outside agents' runs to judge {:op :judge :run :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers"} :outs {:to-api "requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st))
+       :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
                               :quiet (boolean (:quiet st)) :root-causes (count (:root-causes (:quiescent st)))})})
-  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits []
+  ([args] (assoc (dissoc args :judge) :seen 0 :rid 0 :flights {} :pending {} :waits [] :behind []
                  ::flow/in-ports {:judge (:judge args)}))
   ;; a stop answers every wait still held: root stopped, nothing will answer it
   ([st transition]
@@ -1069,7 +1092,11 @@
                  st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
                            :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
-                 [st outs] (pass st)]
+                 [st outs] (pass st)
+                 ;; the answers this commit's t reaches, held for it, taken in the order they came
+                 [st outs] (reduce (fn [[st outs] a] (let [[st more] (take-answer st a)] [st (into outs more)]))
+                                   [(update st :behind (fn [as] (filterv #(behind? st %) as))) outs]
+                                   (remove #(behind? st %) (:behind st)))]
              [(answer-waits st) {:to-api (into [{:op :stat :k :main-seen-us :v (/ (- (profile/now-ns) (:ns m)) 1000.0)}] outs)}])
      ;; a wait on main (:op :quiet): answered now if the reconciler is quiet past its :after,
      ;; else held. Otherwise an outside agent handed its run back: judged as a turn loop's end is
@@ -1080,9 +1107,8 @@
                   st (-> st (assoc-in [:flights run] {:act {:op :spawn :run run :task task :env env} :agent agent}) (assoc :quiet false))
                   [st o] (request st run :tested {:op :judge :id agent})]
               [st {:to-api [o]}]))
-     :answers (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
-                    [st [aid step]] (step/answered st (:tag m))
-                    [st outs] (if aid (advance st aid step (:r m)) [st []])
-                    ;; a flight that ended may free its run for the next action
-                    [st more] (if (and aid (not (get-in st [:flights aid])) (:db st)) (pass st) [st []])]
-                [(answer-waits st) {:to-api (into outs more)}]))))
+     ;; an answer to a write main has not reached waits for main's commit of it (taken by :main)
+     :answers (if (behind? st m)
+                [(update st :behind conj m) {}]
+                (let [[st outs] (take-answer st m)]
+                  [(answer-waits st) {:to-api outs}])))))

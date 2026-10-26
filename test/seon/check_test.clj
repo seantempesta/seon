@@ -270,6 +270,28 @@
   (let [dir (System/getProperty "user.dir")]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
 
+(deftest a-stalled-test-is-named-and-the-run-goes-on
+  ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice"): a test
+  ;; quiet past its own bound is named, never ended (bin/stalls, which bin/test runs beside its
+  ;; shards); its bound is its line in the plan's stall bounds (k times its own last run), the floor
+  ;; otherwise. Two shards' logs each say a test started, and each shard waits on a FIFO the test
+  ;; releases only once one is named: the test whose bound is 200 ms is named, once; the one whose
+  ;; bound is 600 s is not (a healthy slow test), nor is one whose test ended (the shard quiet after
+  ;; it); both go on and end, and the watcher with them
+  (let [root (System/getProperty "user.dir")
+        d (str root "/target/stalls-test-" (random-uuid))
+        _ (.mkdirs (java.io.File. d))
+        script (str "cd " d "; printf 'started seon.x-test/hangs\\n' > a.log; printf 'started seon.x-test/slow\\n' > b.log; printf 'started seon.x-test/done\\nended seon.x-test/done\\n' > c.log\n"
+                    "printf 'seon.x-test/hangs 200\\nseon.x-test/slow 600000\\nseon.x-test/done 200\\n' > bounds; mkfifo ra rb out\n"
+                    "(read x < ra) & pa=$!; (read x < rb) & pb=$!\n"
+                    root "/bin/stalls 100000 bounds a.log:$pa b.log:$pb c.log:$pb > out & s=$!\n"
+                    "line=$(head -1 out)\n"
+                    "echo go > ra; echo go > rb; wait $s; echo \"exit $?\"; echo \"$line\"; grep -c STALLED a.log; grep -c STALLED b.log; grep -c STALLED c.log\n")
+        [ex line na nb nc] (str/split-lines (:out (clojure.java.shell/sh "zsh" "-c" script)))]
+    (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
+    (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
+    (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
+
 (deftest a-heavy-run-waits-while-mains-verification-runs
   ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
   ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
