@@ -49,7 +49,7 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 - **A pin bump is verified** with `git ls-tree HEAD reference-code/<lib>` and `gh api repos/seantempesta/<lib>/commits/<sha>` before it is reported.
 - **Fewer sessions, each with one job** (owner, restart of 2026-10-24, docs/restart.md): at most five working sessions plus merge; no session starts another without root's go; a session is archived once its branches merge (the owner asked first).
 - **An independent audit every 10 merges or once a day,** whichever comes first (restart of 2026-10-24): an agent that has not seen the work reads the merges since the last audit against §3's value rules and §9, and files what to cut; root assigns the cuts.
-- **A merge's verification runs `seon.main-test` by name** (the laws are process tests bin/prove leaves out), and **nothing tracked is edited or committed while it runs** (the binary goes stale and every check reads red). A design the size of a subsystem gets an independent review before it is approved (2026-10-26).
+- **A merge's verification runs `seon.main-test` and `bin/check contracts` by name** (the laws are process tests bin/prove leaves out), and **nothing tracked is edited or committed while it runs** (the binary goes stale and every check reads red). A design the size of a subsystem gets an independent review before it is approved (2026-10-26).
 - **Root merges verified fixes as they come in** (owner, 2026-10-24: "merge fixes as they come in"): a fix whose report carries its numbers, its self-review rating and a green `bin/prove`, when no merge session is running; the merge steps are the merge session's below.
 
 ### Briefing an agent

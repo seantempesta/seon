@@ -104,6 +104,36 @@
       (sh/sh "rm" "-rf" runs)
       {:agents agents :out log :left (if drained left (conj left :not-drained))})))
 
+(deftest a-spawn-after-the-fork-server-is-lost-answers
+  ;; task seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
+  ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;
+  ;; a spawn asked then answers with the error naming it, and root stops. Unfixed, the fork was
+  ;; neither sent nor answered and the spawn (an attach's) waited for good
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "fork-server-lost-" (random-uuid))
+        store (ts/process-store checkout)
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store store :main main :runs runs})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (value-of (:response r)))))
+        _ (eval-root "(def lost-ev (c/events sys))")
+        [_ r] (str/split (str/trim (slurp (str runs "/root.pids"))) #" ")
+        children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
+        fs (first (children r))
+        _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
+        _ (sh/sh "kill" "-9" (str fs))
+        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (if (= :fork-server-lost (:type e)) :lost (recur))))")
+        spawned (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
+        status (eval-root "(get-in (c/state sys) [:fork-server :status])")
+        stopped (ts/stop-root! root)]
+    (ts/drop-main! store main)
+    (sh/sh "rm" "-rf" runs)
+    (is (= :lost lost) "root heard the server is lost")
+    (is (= :seon.agent/failed (first spawned)) (pr-str spawned))
+    (is (re-find #"fork server is lost" (str (second spawned))) (pr-str spawned))
+    (is (= :lost status))
+    (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
+
 (deftest an-agent-ends-when-its-root-is-gone
   ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
   ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
