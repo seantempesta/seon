@@ -30,12 +30,16 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
 - **Takes:** the map from (1). For an agent, by default:
   - `[:task]`: the task, its plan and what it cites;
   - `[:run]`;
-  - `[:screen form]`: one part per form in `:seon.agent/screen`, its newest replayed value;
+  - `[:screen form]`: one part per form in `:seon.agent/screen`, that form's one eval entity;
   - `[:conversation n]`: one part per eval, message and turn in t order, each its record;
   - `[:side]`: root's agents, on root's page and the sidebar.
 
   Root's view and a task's view are view fns of their own entity's schema, each a few lines.
-- **Replay is explicit and already recorded** (root's ruling 3). `:seon.agent/screen` lists the replayed forms (screen.clj:11), and `:seon.eval/by "screen"` marks each eval they make (seon.facts.edn:123). The view puts a replayed form's newest eval in its `[:screen form]` part and leaves the rest in the conversation. **Nothing is added.**
+- **One component kind, the eval, always live** (the owner, 2026-10-26: "evals are evals … keep the ctx updated so we are always rendering the db. The agents context and the users context are always live").
+  - A replayed form (listed in `:seon.agent/screen`, screen.clj:11; its eval marked `:seon.eval/by "screen"`, seon.facts.edn:123) has **one eval entity per form**. Each turn it is re-run and its new value is transacted onto that same entity, replacing the old value; the db's history keeps the old one.
+  - Every other eval is run once, and its value never changes.
+  - So there is no "as recorded" mode and no copy of an old value: every part renders the current db through ctx. Nothing is added to say which evals replay; the facts above already say it.
+  - What changes today: `seon.screen` writes a new eval entity (a new handle) for every screen form every turn. It upserts the form's one entity instead (slice 4).
 - **Replaces:**
   - the agent page's tile gathering, `seon.render.ui/agent` (ui.clj:1012, 70);
   - `chat`'s split into list and tiles (ui.clj:962, 50), `rows` (804, 11), `shown-as` (783, 5) and `tile-id` (841, 9);
@@ -55,7 +59,7 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
 - **Contract:** `[:=> [:cat :map] :string]`. It returns the part's value through its schema's `:seon.render/ai` if declared, else `print/text` of the same selection under the same budget, after a one-line header naming the part's key.
 - **The model reads this,** never the hiccup (ruling 1). An eval part's ai face is the record's existing ai face, `seon.context/eval-messages` (context.clj:372, declared at seon.facts.edn:154); a message's is `message-messages` (405). These stay.
 - **The task part's ai face is the story.** It stays the first part, so the first send is the stable prefix (the agent loop's invariant 2). The stage boundary is a diff of `[:task]` plus root's message as a conversation part, and the earlier stage's request stays a byte-exact prefix.
-- **The debug toggle shows the parts' ai text** as each turn sent it. That is the request as recorded, a list of part keys and the turn's t, read back by `(ai part)` of the parts at that t.
+- **The debug toggle shows the parts' ai text** as each turn sent it: each turn records the part keys it sent and its t, and the debug page reads the parts at that t (`d/as-of`, the history the owner's "we have history" names). This is the one place a past value is read, to show exactly what was sent.
 - **Replaces:**
   - the debug page's own producer: `debug-input` (ui.clj:817, 24), `source` (1204, 14), `sent-parts-html` (1218, 25), `sent-request` (1243, 35), `debug` (1169, 25), `root-context` (1194, 10) and `debug-value` (proc.clj:226, 25), down to one page of parts' ai text (+30);
   - `parts-of` (context.clj:688, 23), `sent-split` (719, 14), `messages-tokens` (711, 8) and `story` (733, 10), down to a read of the recorded keys (+15);
@@ -68,7 +72,10 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
   - A part counts as unchanged for the model only while its last whole send is still readable above. A part the history cut dropped, or folded to its line, is sent whole again.
   - The task's open reasons are always sent whole.
   - A seen-value reference `(:out result/eN)` is used only for a part still readable.
-- **Where the screen's whole lives (the review's §2):** screen parts accrete as conversation entries, as today's screen evals do. The base of a diff is the newest whole send above, never a tail rewritten each request.
+- **Where the screen's whole lives (the review's §2), and the prompt cache:**
+  - The conversation's evals are never replayed, so their values never change and the prefix holds.
+  - The screen parts are last in the request. Each turn's request ends with the screen's diff against the screen as last sent, and that tail stays in the turn the model read; a later request prints earlier turns as they were sent (their parts read at their t).
+  - The base of a diff is the newest whole send still readable above. When the history cut drops it, the screen is sent whole again (rule 7).
 - **The memo is one per part:** `{key [f v out]}`, a hit when both the renderer value f (never its symbol, since a redefined fn re-renders) and the part value v are `identical?` (ruling 2). It is one pointer compare per part; there is no `:changed` set from the patch and no read-set index.
 - **Replaces:**
   - `seon.screen/diff` (screen.clj:25, 23) and `seon.context/as-diff` (446, 8);
@@ -137,10 +144,11 @@ Deletions are measured function sizes on main. Additions are estimates, ±50%.
 | a page as a layout of parts; one eval-part render; the debug page as parts' ai | +140 |
 | the request as the parts' ai, whole then diffs, with keys recorded per turn | +55 |
 | the agent renders its own parts; root forwards them; a gone agent with defaults | +60 |
+| a screen form's eval upserted on its one entity each turn | +10 |
 | `take!` writes the message; `:from` as a ref | +15 |
-| **added** | **≈ +520** |
+| **added** | **≈ +530** |
 
-**Net ≈ −560, within −300 to −820 given the additions' error.**
+**Net ≈ −550, within −290 to −820 given the additions' error.**
 - The review's −50 to −150 was for agent pages only, with revision 1's hiccup-print machinery added and the screen round trip left in.
 - This revision moves every page off the walk (slice 5), drops that machinery, and counts the round trip.
 - The `:ai` faces in `seon.render.ai` are kept (ruling 1), so nothing is claimed there.
