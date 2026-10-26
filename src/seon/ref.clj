@@ -138,9 +138,11 @@
                 (persistent! (word out slash? wq wstart to line))
                 (let [c (.charAt text i)]
                   (case c
-                    \newline (recur (inc i) (inc line) (inc i) false q q (word out slash? wq wstart i line))
+                    ;; a string ends with its line: an unbalanced quote silences no more than the rest of it
+                    \newline (recur (inc i) (inc line) (inc i) false false false (word out slash? wq wstart i line))
                     (\space \tab \return) (recur (inc i) line (inc i) false q q (word out slash? wq wstart i line))
-                    \" (recur (inc i) line wstart slash? (not q) true out)
+                    ;; a word that opens with the string is in it; one that holds a call's quote is not
+                    \" (recur (inc i) line wstart slash? (not q) (or wq (= i wstart)) out)
                     \/ (recur (inc i) line wstart true q wq out)
                     \\ (recur (if (and (< (inc i) to) (punct? (.charAt text (inc i)))) (+ i 2) (inc i)) line wstart slash? q wq out)
                     \` (let [k (run-end i to \`) n (- k i) e (closer k to n)]
@@ -372,11 +374,13 @@
           (assoc c :seon.ref/path (str (when (str/starts-with? joined "/") "/") (str/join "/" parts))))))))
 
 (defn- trim-word
-  "A prose word without the punctuation around it (a var's #' among it), or nil when nothing is left."
+  "A prose word without the punctuation around it (a var's #' before it), or nil when nothing is left."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [^String word]
   (let [n (count word)
-        from (loop [i 0] (if (and (< i n) (str/index-of "([{\"'`*_<#" (str (.charAt word i)))) (recur (inc i)) i))
+        from (loop [i 0] (cond (and (< (inc i) n) (= \# (.charAt word i)) (= \' (.charAt word (inc i)))) (recur (+ i 2))
+                               (and (< i n) (str/index-of "([{\"'`*_<" (str (.charAt word i)))) (recur (inc i))
+                               :else i))
         to (loop [j n] (if (and (> j from) (str/index-of ".,;:!?)]}\"'`*_>" (str (.charAt word (dec j))))) (recur (dec j)) j))]
     (when (< from to) (subs word from to))))
 

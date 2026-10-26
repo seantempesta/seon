@@ -53,12 +53,11 @@
 
 (defn- references-of
   "The :seon.task/references and :seon.task/sections a declaration states: the program's names and
-  the wiki sections its text cites (seon.ref/names, seon.program/program-name?, seon.ref/addresses),
+  the wiki sections its text cites (seon.ref/names, seon.program/program-names, seon.ref/addresses),
   derived and never authored; each absent when it cites none."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
   [db decl]
-  (let [text (cited-text decl) nss (program/program-nss db)
-        ns (into #{} (filter #(program/program-name? db nss %)) (ref/names text)) as (set (ref/addresses text))]
+  (let [text (cited-text decl) ns (set (program/program-names db (ref/names text))) as (set (ref/addresses text))]
     (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems

@@ -1118,6 +1118,14 @@
         (is (some #{'demo/c} fs) (str "a cited var's graph: its caller " (pr-str fs)))
         (is (not-any? #{'demo/h} fs) "and not meaning's seed")))))
 
+(deftest a-pages-cited-vars-are-the-programs
+  ;; audit item 2a: the page's cited vars are the program's; a reproduction's test helper
+  ;; (demo-test is test/'s), library call and handle are not cited, while the program's var is
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c"
+                                              :seon.task/plan "Reproduce: (let [x (demo-test/f-test)] (demo/f (clojure.string/trim x))) answers result/e1."}]))]
+    (is (= '[demo/f] (context/cites db {:seon.task/id "demo/c"})))))
+
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
   ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"

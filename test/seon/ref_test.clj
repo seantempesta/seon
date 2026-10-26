@@ -142,7 +142,11 @@
   (is (= [] (kinds nil "It answers \"docs/flow.md\" and \"seon.ref/parse\".")) "a quoted path or name, as data")
   (is (= '[seon.ref/names] (ref/names "Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo are listed.\") answers [].")) "nor any word of a quoted sentence")
   (is (= '[seon.ref/parse] (ref/names "The owner: \"use `seon.ref/parse` for it\".")) "a code span between quotes is a citation still")
-  (is (= '[seon.ref/parse] (ref/names "Quotes \"closed\" then seon.ref/parse.")) "and a word after the string closes is prose again"))
+  (is (= '[seon.ref/parse] (ref/names "Quotes \"closed\" then seon.ref/parse.")) "and a word after the string closes is prose again")
+  (is (= '[seon.ref/parse seon.ref/names] (ref/names "- seon.ref/parse, then a 5\" stray quote\n- the next item, seon.ref/names"))
+      "an unbalanced quote silences no more than the rest of its line")
+  (is (= '[seon.ref/parse] (ref/names "It answers \"an \\\"escaped\\\" seon.ref/names\" and seon.ref/parse.")) "an escaped quote keeps the string open")
+  (is (= '[seon.ref/parse] (ref/names "Call seon.ref/parse (\"x\") and see.")) "a call is no string, its argument is"))
 
 (deftest a-citation-ending-in-a-wildcard-is-prose
   (is (= [['seon.ref/parse nil nil nil :doc]]
