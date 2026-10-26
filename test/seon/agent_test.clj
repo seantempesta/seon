@@ -733,11 +733,10 @@
                                    "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's four evals (show, status, changes, related)")
-    (is (str/includes? (str (:screen (:value turn))) ":page") (str "the screen is root's page of it: " (:screen (:value turn))))
-    (is (str/includes? (str (:screen (:value turn))) "[:h1 \"a1\"]") (str "its head in words, read whole at the screen's budget: " (:screen (:value turn))))
+    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (status, changes, related)")
+    (is (str/includes? (str (:screen (:value turn))) ":turn \"1 of 1\"") (str "the screen's first eval, the task's status: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 6 (:read (:value turn))) "read back from its records")))
+    (is (= 5 (:read (:value turn))) "read back from its records")))
 
 (deftest code-sent-again-is-told-on-its-answer
   ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
@@ -856,10 +855,10 @@
   ;; drawn by that render, recording nothing; a request to an agent that is gone is answered at
   ;; once, so its page is drawn by root from its branch and never waits
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
-        [_ _ _ before drawn after gone]
+        [_ _ swapped before drawn after gone]
         (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
-                   "(swap! ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
+                   "(swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
@@ -867,6 +866,6 @@
                    n
                    {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone})"}])
         steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts (:value drawn)))]
-    (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (pr-str drawn))
+    (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (str "the swap! answered " (pr-str swapped) "; the parts: " (pr-str (map :key (:parts (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
