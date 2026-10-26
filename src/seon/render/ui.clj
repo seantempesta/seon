@@ -893,8 +893,9 @@
 (defn task-page
   "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
   kind and execution, then the task's data (seon.context/task-data over opts :db, the branch as of
-  the record's t): its plan as prose, then what to prove, the sections and the similar, drawn by
-  the one printer as the data it is. Each var the plan cites is a part of its own (`cited`)."
+  the record's t): its plan as prose, then what to prove, the sections and the similar as a call of
+  the one printer ([#'seon.render/html data opts], expanded when the page is written), so the model
+  reads the data as data. Each var the plan cites is a part of its own (`cited`)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.task/keys [id kind execution] :as task} opts]
   [:section {:class "tile"}
@@ -905,40 +906,40 @@
      (let [data (context/task-data db (task/task db id) false)]
        ;; a cut names the form that answers the whole at the agent's REPL
        (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
-             (render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)}))))])
+             [#'render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)}])))])
 
 (defn cited
   "A var the task's plan cites (the declared html render of :seon.render/cited): its source and
-  callers, seon.context/cited over opts :db, drawn by the one printer."
+  callers, seon.context/cited over opts :db, as a call of the one printer (the model reads the data)."
   {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
   [{:keys [var]} opts]
   [:section {:class "tile"} [:h2 {:class "kicker"} (str "cites " var)]
-   (when-let [db (:db opts)] (render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)
-                                                                   :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}))])
+   (when-let [db (:db opts)] [#'render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)
+                                                                  :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}])])
 
 (defn status
   "What the newest model turn of the task observed (the declared html render of
   :seon.render/status), as (my.task/status) answers it: seon.context/turn-state over the turn's
   recorded basis (seon.context/turn-input, with the turn before it for its last reply) on opts
-  :db, drawn by the one printer."
+  :db, as a call of the one printer (the model reads the data)."
   {:malli/schema [:=> [:cat :seon.render/status :seon.render/opts] :any]}
   [{:keys [task turn last]} opts]
   (when-let [db (:db opts)]
     (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] turn))
           lst (when last (d/pull db [:seon.turn/truncated :seon.turn/calls] last))]
       [:section {:class "tile"} [:h2 {:class "kicker"} "status"]
-       (render/html (context/turn-state db (task/task db task) (context/turn-input db b lst))
-                    {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)})])))
+       [#'render/html (context/turn-state db (task/task db task) (context/turn-input db b lst))
+        {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}]])))
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (the declared html render of
-  :seon.render/related): seon.context/related over opts :db, drawn by the one printer; a line
+  :seon.render/related): seon.context/related over opts :db, as a call of the one printer; a line
   saying so when there is nothing yet."
   {:malli/schema [:=> [:cat :seon.render/related :seon.render/opts] :any]}
   [{:keys [task]} opts]
   (let [r (when-let [db (:db opts)] (context/related db task))]
     [:section {:class "tile"} [:h2 {:class "kicker"} "related"]
-     (if r (render/html r {}) [:p {:class "muted"} "nothing related yet"])]))
+     (if r [#'render/html r {:handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
 
 (defn part-id
   "The element id of an agent page's part by its key ([:eval \"e12\"] -> \"q-eval-e12\")."

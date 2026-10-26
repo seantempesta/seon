@@ -1111,6 +1111,26 @@
     (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
     (is (= parts (r/render-ctx c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
 
+(deftest a-part-returns-its-data-as-a-call-of-the-printer
+  ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
+  ;; printer, [#'seon.render/html value opts], which the page's serializer expands when it writes the
+  ;; page; the model reads the call as returned, its value as data. The page diff by key compares it,
+  ;; so its opts are plain data and an equal value draws an equal call
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
+        task-part #(some (fn [p] (when (= [:task] (:key p)) p)) (r/render-ctx c (seon.context/renders branch)))
+        call-of (fn [h] (some #(when (and (vector? %) (= #'r/html (first %))) %) (tree-seq coll? seq h)))
+        h0 (:html (r/part-faces (task-part)))
+        call (call-of h0)]
+    (is (some? call) "the task's data is a call of the printer")
+    (is (every? #(or (number? %) (symbol? %) (seq? %)) (vals (nth call 2))) "its opts are plain data: no db, no object")
+    (is (= call (call-of (:html (r/part-faces (task-part))))) "drawn again, an equal call: the diff by key sees no change")
+    (let [text (seon.print/text (vary-meta h0 assoc :seon.print/full true))]
+      (is (str/includes? text "#'seon.render/html") "the model reads the call by its var")
+      (is (not (str/includes? text "#object")) "and nothing printed as an object"))
+    (is (str/includes? (h/html h0) "seon-data-panel") "the page writes the call expanded: the printer's panel")))
+
 (deftest a-parts-faces-are-one-selection
   ;; a part is one hiccup, the page's and the model's: the printer's under its budget, cut where it
   ;; says, else the render its schema declares
