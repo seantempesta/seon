@@ -246,7 +246,7 @@
   ;; design one-derivation 4.1 section 5 and root's ruling (2026-10-26): a work run's end the done
   ;; rule refuses is words to the agent, a :verdict entry with the reasons and the facts root
   ;; judged on, which wakes its session; the same reasons again hold the task for root (told
-  ;; the same twice is no news); different reasons wake it again. A merge's refusal holds
+  ;; the same twice is no news); different reasons wake it again. A merge refused by the done rule holds
   (let [rs (fn [db aid] (:reasons (first (filter #(= :verdict (:op %)) (actions-for db)))))
         start (fn [db act] (second (#'r/start {:db db :boot "boot-1" :rid 0 :flights {} :pending {}} act)))
         tx-of (fn [outs] (get-in (first outs) [:req :req :tx-data]))
@@ -277,7 +277,7 @@
       (testing "different reasons: a verdict again, which wakes"
         (let [tx (tx-of (start db2 {:op :verdict :run "demo/a#2" :task "demo/a" :reasons [{:reason :no-proofs}]}))]
           (is (= :verdict (:seon.message/kind (first (filter :seon.message/kind tx))))))))
-    (testing "a merge's refusal holds, as before"
+    (testing "a merge refused by the done rule holds"
       (is (= [:hold] (mapv :op (actions-for (db-of [(assoc (decl "a") :seon.task/kind :merge)] :extra (ended 1)))))))))
 
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn
@@ -586,13 +586,13 @@
                                          [{:seon.task/id "demo/a" :seon.task/plan "Make a true. Design: (defn f [xs] ...) one pass over xs."}]))))))
 
 (defn- told
-  "db with a :verdict entry to run aid giving reasons, as the judge's first refusal of the session wrote it."
+  "db with a :verdict entry to run aid giving reasons, as the judge's first verdict of the session wrote it."
   [db aid reasons] (d/db-with db (task/message-tx (str "v-told-" aid) :verdict "root" aid (sedn/encode {:reasons reasons}))))
 
 (defn- held
   "main db after the hold the reconciler's one action for it writes, and the action (its :problem
   the hold's): a work run's refused end holds when the session was told the same verdict
-  already (start), so the verdict is told first; a death or a merge's refusal holds at once."
+  already (start), so the verdict is told first; a death or a merge refused by the done rule holds at once."
   [db]
   (let [[act :as acts] (actions-for db)]
     (assert (#{[:hold] [:verdict]} (map :op acts)) (pr-str acts))

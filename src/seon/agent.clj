@@ -97,6 +97,13 @@
         (recur))))
   (:inbox @state))
 
+(defn- session-branch
+  "The branch main names this agent's session by: its run's :seon.run/branch, which the store
+  qualifies on a main that is not :db (seon.db/on-main), so (:branch @state) is not it. nil
+  with no run: then no entry is to it."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
+  [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
+
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
   names them) that its branch does not hold yet, in main's order: each {:id :kind :from :to :body}.
@@ -108,12 +115,13 @@
   {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
   []
   (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
-        b (db)]
-    (->> (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
-                :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
-                [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
-                [(get-else $ ?m :seon.message/kind :message) ?kind]]
-              main (:branch @state))
+        b (db)
+        br (session-branch main)]
+    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
+                          :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
+                          [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
+                          [(get-else $ ?m :seon.message/kind :message) ?kind]]
+                        main br))
          (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
          (sort-by first)
          (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
@@ -137,9 +145,10 @@
   []
   (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
         b (db)
-        pattern (into [:seon.run/id] taken-attributes)]
+        pattern (into [:seon.run/id] taken-attributes)
+        br (session-branch main)]
     (vec (concat
-           (for [m (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern (:branch @state))
+           (for [m (when br (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern br))
                  :let [held (d/entity b [:seon.run/id (:seon.run/id m)])
                        new (into {} (remove (fn [[k v]] (= v (get held k)))) m)]
                  :when (and held (seq (dissoc new :seon.run/id)))]

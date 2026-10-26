@@ -392,7 +392,7 @@
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
  :seon.message/body [:string {:seon.render/prose true}]
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
- ;; stage boundary (:stage), the judge's refusal with its reasons (:verdict); each wakes its session
+ ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]

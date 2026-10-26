@@ -434,7 +434,7 @@
                        ;; what root judged on, which wakes the session; the same verdict twice holds
                        ;; (start) (design one-derivation 4.1 section 5). A merge's holds, and
                        ;; an outside agent's: it read the verdict as :done's answer, and no turn loop takes entries
-                       (and (not merge?) (not= "outside" (:seon.run/model a)) (#{:green :red} (:seon.run/outcome a)))
+                       (and (not merge?) (not= "outside" (get-in a [:seon.run/env :model])) (#{:green :red} (:seon.run/outcome a)))
                        {:op :verdict :run aid :task id :reasons rs}
                        :else
                        (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
