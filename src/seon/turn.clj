@@ -420,8 +420,11 @@
           (let [m (branch/merge-main!)]
             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
           (empty? reasons) (end! st :green nil nil)
-          stop (end! st (:outcome stop) (:reason stop) nil)
+          ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
+          ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
+          (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
+          stop (end! st (:outcome stop) (:reason stop) nil)
           :else (let [st' (act! st obs model)]
                   (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
