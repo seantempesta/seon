@@ -998,14 +998,6 @@
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id :string] :seon.host/promise]}
   [sys agent-id body] (request! sys 'message! agent-id {:body body}))
 
-(defn opened!
-  "A reader of agent key's page opened its eval eval-id: the fact on main, on the agent's own
-  entity (:seon.agent/opened: an eval's id names it only within its agent), which its next turn
-  writes on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts), so its
-  context and its page read it from the same data. Never retracted. A promise of the writer's answer."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/key :seon.eval/id] :seon.host/promise]}
-  [sys key eval-id] (transact-main! sys [{:seon.agent/key key :seon.agent/opened #{eval-id}}]))
-
 (defn release!
   "Release the held task task-id (my.root/run!'s one transaction): the reconciler runs its next
   run. A promise of the writer's answer."
@@ -1171,6 +1163,14 @@
                   [:=> [:cat :seon.root/sys :seon.db/tx-data [:maybe :map]] :seon.host/promise]]}
   ([sys tx-data] (transact-main! sys tx-data nil))
   ([sys tx-data {:keys [flush?]}] (write! sys (cond-> {:op :tx :branch :db :tx-data tx-data} flush? (assoc :flush? true)))))
+
+(defn opened!
+  "A reader of agent key's page opened its eval eval-id: the fact on main, on the agent's own
+  entity (:seon.agent/opened: an eval's id names it only within its agent), which its next turn
+  writes on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts), so its
+  context and its page read it from the same data. Never retracted. A promise of the writer's answer."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/key :seon.eval/id] :seon.host/promise]}
+  [sys key eval-id] (transact-main! sys [{:seon.agent/key key :seon.agent/opened #{eval-id}}]))
 
 (defn interrupt!
   "Interrupt the agent's evaluation in progress: SIGUSR1, run by Chez at the agent's next
