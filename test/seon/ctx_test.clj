@@ -315,13 +315,13 @@
   (let [proofs {'app.x-test/t0 {:status :pass}}
         c (with-meta {:t 7 :branch :main/a1 :commit (random-uuid) :seon.render/proofs proofs :evals {"e1" {:seon.eval/id "e1"}}}
             {:seon.render/schema :seon.ctx/ctx})
-        h (render/html c {})
+        h (render/html {} c)
         rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))]
                         [(last (nth x 2)) (last (nth x 3))]))]
     (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil))) "@ctx's value names its block")
     (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
-    (is (= (render/html proofs {:schema :seon.render/proofs}) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
-    (is (= (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil}) (rows ":evals")) "a key with none draws as the printer's structure")))
+    (is (= (render/html {:schema :seon.render/proofs} proofs) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
+    (is (= (render/html {:schema nil} {"e1" {:seon.eval/id "e1"}}) (rows ":evals")) "a key with none draws as the printer's structure")))
 
 (deftest a-change-names-its-eval
   ;; task seon.ctx/a-change-names-its-eval: who made each fact is a query on the tx-meta of its
@@ -339,7 +339,7 @@
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/pid)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
-    (let [h (render/html (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}) {:db db})
+    (let [h (render/html {:db db} (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}))
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
       (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/pid" "merged from :main"}
              (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/pid"]))
@@ -502,7 +502,7 @@
           (is (vector? (get page [:lab.ctx/steps])) "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
-              h (seon.web.html/html (seon.render.ui/evaluation (d/pull db '[*] [:seon.eval/id "e9"]) {:db db}))]
+              h (seon.web.html/html (seon.render.ui/evaluation {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
           (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "the block of the record at t")
           (is (re-find #":lab.ctx/steps" h))))
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
@@ -515,13 +515,13 @@
 
 (defn boom
   "A render that throws, as an agent's unmerged one may."
-  {:malli/schema [:=> [:cat :any :map] :any]}
+  {:malli/schema [:=> [:cat :map :any] :any]}
   [_ _] (throw (ex-info "cannot draw this" {})))
 
 (defn steps
   "A render an agent writes for its datum: the steps, numbered."
-  {:malli/schema [:=> [:cat [:vector :string] :map] :any]}
-  [v _] [:ol (for [s v] [:li s])])
+  {:malli/schema [:=> [:cat :map [:vector :string]] :any]}
+  [_ v] [:ol (for [s v] [:li s])])
 
 (defn- as-agent!
   "f with the agent's state holding db in test mode (transact! applies to the value, as in an agent's
