@@ -308,7 +308,11 @@
   source and the vars it names (:form/refs), and its namespace."
   [defs]
   (vec (mapcat (fn [[v src refs]]
-                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                 ;; its doc and contract, as the import records them from its source
+                 [(let [[_ _ & more] (read-string src) d (when (string? (first more)) (first more))
+                        c (some #(when (map? %) (:malli/schema %)) more)]
+                    (cond-> {:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                      d (assoc :var/doc d) c (assoc :var/contract (pr-str c))))
                   (cond-> {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                            :form/defines [(str v)]}
                     (seq refs) (assoc :form/refs (vec refs)))
