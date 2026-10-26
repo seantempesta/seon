@@ -962,6 +962,36 @@
     (is (nil? (#'r/stage-boundary db "demo/d#1")) "a session's first run opens with none")
     (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
 
+(deftest a-step-reads-the-db-its-own-write-made
+  ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
+  ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
+  ;; read a db without the run start :spawned wrote, found no earlier run on its agent, and wrote
+  ;; no :stage entry. An answer main has not reached waits for main's commit of its t
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
+        env {:branch (task/default-branch "demo/d") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}
+        ;; the session's earlier stage: demo/d's run on the agent the spawn will answer
+        d1 (update (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a1 env 1000 "Make d true.") 0 assoc :seon.run/status :done :seon.run/outcome :green)
+        db (db-of [(decl "d") (decl "i")] :released ["demo/i"] :extra d1)
+        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (reqs outs)))
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:id :a1}})
+        w (first (filter #(= :write (get-in % [:req :op])) (reqs outs2)))
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        ;; the answer first, as the writer sends it, then main's commit
+        [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true :t (:max-tx db2) :datoms (count ops2)}})
+        [st4 outs4] (main st db2 ops2)
+        ;; a commit main's buffer has not brought yet: a later one takes the answer too
+        [db3 ops3] (commit db2 [{:seon.task/id "demo/d" :seon.task/plan "Make d true, again."}])
+        [_ outs5] (main st db3 ops3)
+        stage (fn [outs] (filter #(and (= :message (get-in % [:req :op])) (= :stage (get-in % [:req :kind]))) (reqs outs)))]
+    (is (= "demo/i" (get-in asked [:req :opts :task])) "the next stage's spawn")
+    (is (empty? (reqs outs3)) "its write's answer waits: main has not reached the write")
+    (is (= 1 (count (stage outs4))) "main's commit of it takes the answer: the stage's entry, read off the db holding the run")
+    (is (empty? (:behind st4)) "and holds it no longer")
+    (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well")))
+
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes
   ;; (my.task/update! :seon.task/proofs conj 't); the judge carries them onto main like the plan,
