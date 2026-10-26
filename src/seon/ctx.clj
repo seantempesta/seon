@@ -237,8 +237,7 @@
   :by join's symbols stay, its members beside them under its :as); [m r], r the record's state
   (:seon.ctx/ix: :held {e path}, :at {e #{path}}, :spec {e s}, :watch {[a v] #{[e key]}} and its
   reverse :watching; during a patch :patching, and :relocate when the patch must build anew)
-  gaining it. An
-  entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
+  gaining it. An entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
   first collection's newest member first); any other path holds {:db/id e}. old, e's value
   before, keeps each join no touched datom changed (identical?), its entries in r as they were,
   and each attribute equal to before; a node equal to old in every value is old."
@@ -254,8 +253,8 @@
             m (cond (and old (not (touched e))) (apply dissoc old (map :key (:joins s)))
                     ;; pulled again: an attribute equal to before keeps the object it was
                     old (let [pulled (own db e s)]
-                                          (reduce-kv (fn [m k v] (let [o (get old k ::none)] (if (and (not (identical? o v)) (= o v)) (assoc m k o) m)))
-                                                     pulled pulled))
+                          (reduce-kv (fn [m k v] (let [o (get old k ::none)] (if (and (not (identical? o v)) (= o v)) (assoc m k o) m)))
+                                     pulled pulled))
                     :else (own db e s))
             refs (get (dbi/-rschema db) :db.type/ref #{})
             [n r] (reduce (fn [[n r] j]
@@ -370,8 +369,8 @@
                                     (if (or (nil? o) (stub? o) (not= e (:db/id o)))
                                       [tree r]
                                       (let [[n r] (node db e (get-in r [:spec e]) h (assoc r :patching true) o touched)]
-                                        ;; a rebuild that changed nothing keeps the node it rebuilt (the same object)
-                                        [(if (same-node? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
+                                        ;; a rebuild that changed nothing is the node it was (node): the tree as it was
+                                        [(if (identical? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
                                 [(:tree c) r] sites)]
         (if (or (:relocate r) (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
           (fresh)
