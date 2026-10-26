@@ -155,17 +155,6 @@
   {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
   [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries))
 
-(defn messages
-  "The words to this agent not yet taken, taken: the entries main holds to its session's runs
-  (untaken-entries), written on its branch as a turn takes them (seon.turn/take!), then the
-  inbox's sends (inbox). Its reader is the code that read them."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
-  []
-  (let [es (untaken-entries)]
-    (when (seq es) (transact! (entries-tx es)) (commit!))
-    (inbox)
-    (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
-
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
   takes them once their facts are committed on this branch). nil."
@@ -229,6 +218,17 @@
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
+
+(defn messages
+  "The words to this agent not yet taken, taken: the entries main holds to its session's runs
+  (untaken-entries), written on its branch as a turn takes them (seon.turn/take!), then the
+  inbox's sends (inbox). Its reader is the code that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (untaken-entries)]
+    (when (seq es) (transact! (entries-tx es)) (commit!))
+    (inbox)
+    (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
