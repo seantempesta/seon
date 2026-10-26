@@ -2,7 +2,7 @@
   "Task templates (owner: tasks chain through `:needs`; each step is a new
   agent with improved context).
 
-  Each kind with instructions here (merge, whole) is a default template that overrides
+  Every kind (work, design, implement, test, merge, whole) is a default template that overrides
   a few fields; dependencies are :needs refs only, and a task's plan and proofs accumulate
   along them (seon.task/tasks: :seon.task/accumulated), so each step refines.
   - `with-merge`: each declared work task is followed by its merge task, an ordinary task
@@ -10,8 +10,9 @@
     and proofs inherited). A task that needs another's work needs its merge, so it starts
     from a main that holds that work.
   - `request`: a request (one declaration: what the user asked) becomes one :whole task that
-    one agent works through on its own branch, and `request-tx` writes it released in one
-    transaction (DECISIONS, A
+    one agent works through on its own branch; `stages`, which it replaced, makes design ->
+    implement -> merge on design's branch, so each step holds the last one's work; and
+    `request-tx` writes either set released in one transaction (DECISIONS, A
     request's whole linked task set is one transaction on main, before any agent forks): the
     reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
@@ -34,7 +35,24 @@
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
-  {:merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
+  {:design (str "Your task: turn the plan below into a plan the implement "
+                "step can follow without exploring. You are done when the plan names each function to change, cited with three "
+                "backticks, and the proofs that will show the change are written, registered "
+                "and red for the reason the plan gives. You do it at the REPL, proof first: reproduce what the plan says is wrong "
+                "as a deftest, evaluated in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is "
+                "your branch's program, so you write no file), register it (``(my.task/update! :seon.task/proofs conj "
+                "'ns.x-test/a-proof)``) and run it red. Then read what the change touches (``(clojure.repl/source ns/f)``; "
+                "``(clojure.repl/source ns)`` lists its every definition; ``(my.agent/callers 'ns/f)``). Once the proof is red, write the plan: "
+                "``(my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: \" \"<each function and what it does then>\")``, "
+                "with each new function's defn, its contract and a stub body, each new schema registered, and a cost proof "
+                "(``seon.cost/proof``) for a function whose input grows. Do not try the fix: the implement step makes it, from "
+                "your red proof. Then end your turn with prose.")
+   :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
+                   "included. You do it by redefining the functions the plan cites, in their own namespaces, keeping their "
+                   "contracts, and running the proofs (`(my.task/status)` shows how) until they are green. Never loosen a "
+                   "contract or a proof to make it pass: if the plan is wrong, fail the task with the evidence "
+                   "(``(my.task/fail! \"why\" evidence)``). Then end your turn with prose.")
+   :merge (str "Your task: bring main's work into this branch and keep the proofs green. Main has been merged in "
                "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed. You are done when nothing is "
                "unmerged and every proof passes on the combined program. You do it by redefining each unmerged var with what "
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
@@ -48,7 +66,10 @@
                "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed: redefine each with what both "
                "need, and keep the proofs green. Never loosen a contract or a proof to make it pass. If the plan's premise is "
                "false (what it says is wrong is not), fail the task with the evidence (``(my.task/fail! \"why\" evidence)``) "
-               "rather than saying so in prose.")})
+               "rather than saying so in prose.")
+   :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
+              "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
+              "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
 
 (defn- merge-decl
   "Merge task nm (merge-name of its work's) of work declaration d (id wid), on d's branch,
@@ -84,16 +105,34 @@
   "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the task
   that works it: one task of kind :whole on its own branch, which one agent works through: it
   writes the red proof, makes it green, merges main and keeps it green, and its green branch
-  merges into main (seon.task/merges?). It replaced the same work split into design,
-  implement and merge, an agent each (owner: \"switch to one-go for all tests until we figure
-  out a better solution\")."
+  merges into main (seon.task/merges?). It replaces `stages`, the same work split into design,
+  implement and merge (owner: \"switch to one-go for all tests until we figure out a better
+  solution\")."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
        (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
 
+(defn stages
+  "Request decl as the staged tasks that `request` replaced, each stage an agent of its own.
+  Decl's name is the design step, then <name>-implement needing it, then <name>-merge needing
+  that, all on the design step's branch (so implement holds
+  design's schemas, stubs and red proofs, and merge holds both). The request's proofs are
+  design's and accumulate along :needs (seon.task/accumulate)."
+  {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
+  [decl]
+  (let [tns (:seon.task/ns decl)
+        did (task/task-id tns (:seon.task/name decl))
+        design (-> decl (assoc :seon.task/kind :design :seon.task/instructions (instructions :design))
+                   (update :seon.task/branch #(or % (task/default-branch did))))
+        implement (cond-> (-> (select-keys design [:seon.task/ns :seon.task/branch :seon.task/model :seon.task/config])
+                              (assoc :seon.task/name (str (:seon.task/name decl) "-implement") :seon.task/kind :implement
+                                     :seon.task/plan "" :seon.task/instructions (instructions :implement)
+                                     :seon.task/needs #{did})))]
+    [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
+
 (defn request-tx
-  "The one transaction that writes a request's tasks ds (request's) on main,
+  "The one transaction that writes a request's tasks ds (request's, or stages') on main,
   released: the reconciler sees the whole set at once and forks its first agent only once it
   is committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]

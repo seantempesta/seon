@@ -109,7 +109,7 @@ Owner, 2026-10-25: chose "Diffs between turns". `(seon.screen/show {:since t})` 
 Owner, 2026-10-25: "873 lines isn't that much if you think it's good lets merge to main. ... I want to see the web work too so if merging to main makes that easier lets do it". Stated in: this entry.
 
 ### One go for every request
-Owner, 2026-10-26: "switch to one-go for all tests until we figure out a better solution". A request is one task one agent works whole, writing its red proof, making it green and keeping it green on main's merged program; the design → implement → merge template it replaced is deleted (git keeps it). Measured first on the same ten requests, thinking off: 2/10 merged at $0.073 and 92.4% cached, against the stages' 2/10 at $0.145 and 86.3% (jolt/one-go's commits). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
+Owner, 2026-10-26: "switch to one-go for all tests until we figure out a better solution". A request is one task one agent works whole, writing its red proof, making it green and keeping it green on main's merged program; the design → implement → merge stages are kept as what it replaced. Measured first on the same ten requests, thinking off: 2/10 merged at $0.073 and 92.4% cached, against the stages' 2/10 at $0.145 and 86.3% (jolt/one-go's commits). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
 
 ## 2026-10-24 rulings
 

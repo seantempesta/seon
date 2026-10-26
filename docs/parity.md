@@ -57,7 +57,7 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 |---|---|---|
 | tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
 | ``chain!`` and ``:seon.task/next`` | `:needs` only | dropped |
-| step templates (design, prove, implement, merge) | `seon.template/request`: one task one agent works whole, one transaction ([tasks](tasks.md#a-request-is-one-transaction)) | present |
+| step templates (design, prove, implement, merge) | `seon.template/request`: one task one agent works whole, one transaction; the stages it replaced, design → implement → merge on one branch, are `seon.template/stages` ([tasks](tasks.md#a-request-is-one-transaction)) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
