@@ -55,9 +55,9 @@
 (defn runs
   "The input of size n: a vector of n runs (each a value whose schema declares a render),
   printed by the default render under a budget that shows them all."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
-  [n] [(vec (for [i (range n)] {:seon.run/id (str "t/x#" i) :seon.run/status :done :seon.run/outcome :green}))
-       {:budget 200000}])
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  [n] [{:budget 200000}
+       (vec (for [i (range n)] {:seon.run/id (str "t/x#" i) :seon.run/status :done :seon.run/outcome :green}))])
 
 (deftest the-printer-renders-nested-values-in-one-pass
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
@@ -144,10 +144,10 @@
 (defn paged-of
   "The input of size n: agent a1's page walk (seon.render/walk) with n evaluations of a1, none in a
   turn (each its own row), and the layout's opts: the first page of rows."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [[dbs eid] (agent-of n)]
-    [(seon.render/walk dbs eid) {:shown (seon.config/value :seon.config.render.list/history) :view "a1"}]))
+    [{:shown (seon.config/value :seon.config.render.list/history) :view "a1"} (seon.render/walk dbs eid)]))
 
 (deftest a-page-renders-only-its-first-rows
   (cost/proof
@@ -356,15 +356,15 @@
   the db through, as a map lookup each (the db's own cost is theirs, not the view's)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
-  [{:tree {:t n :branch :b
+  [(let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
+     {:db (ts/test-db) :cites (constantly []) :task-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})
+   {:tree {:t n :branch :b
     :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
                     :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
                     :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
     :evals (into {} (for [i (range n) :let [id (str "e" i)]]
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
-   (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
-     {:db (ts/test-db) :cites (constantly []) :task-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
+                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its

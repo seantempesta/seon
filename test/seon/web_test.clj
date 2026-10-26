@@ -115,10 +115,10 @@
       (finally (.close taken)))))
 
 (deftest a-vector-headed-by-a-function-is-a-call
-  ;; Reagent's call form: [f value opts] writes what (f value opts) answers, expanded the same
+  ;; Reagent's call form: [f opts value] writes what (f opts value) answers, expanded the same
   ;; way; a keyword head stays an element (Jolt answers fn? true for a keyword)
-  (let [row (fn [v opts] [:li {:class (name (:as opts :block))} (str v) (when (pos? v) [(fn [w _] [:b (str "inner " w)]) (dec v) {}])])]
-    (is (= "<ul><li class=\"inline\">1<b>inner 0</b></li></ul>" (seon.web.html/html [:ul [row 1 {:as :inline}]])))
+  (let [row (fn [opts v] [:li {:class (name (:as opts :block))} (str v) (when (pos? v) [(fn [_ w] [:b (str "inner " w)]) {} (dec v)])])]
+    (is (= "<ul><li class=\"inline\">1<b>inner 0</b></li></ul>" (seon.web.html/html [:ul [row {:as :inline} 1]])))
     (is (= "<a href=\"/\">x</a>" (seon.web.html/html [:a {:href "/"} "x"])) "a keyword head is an element")))
 
 (deftest an-unread-cut-form-never-reaches-the-render-proc

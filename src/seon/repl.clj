@@ -477,7 +477,7 @@
   [m p]
   (try (render/drawn m p)
        (catch Throwable e (let [err (agent/error-map e)]
-                            [m {:html (render/html err {}) :inline (render/html err {:as :inline})}]))))
+                            [m {:html (render/html {} err) :inline (render/html {:as :inline} err)}]))))
 
 (defn- drawn-parts
   "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
@@ -488,7 +488,7 @@
   (with-branch-schemas
     #(let [c (ctx/record)
            [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
-                              [(:drawn @agent/state {}) []] (render/html c (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx)))]
+                              [(:drawn @agent/state {}) []] (render/html (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx) c))]
        ;; the memo holds the parts this page has now, none it dropped
        (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
        {:t (get-in c [:tree :t] 0) :parts out})))

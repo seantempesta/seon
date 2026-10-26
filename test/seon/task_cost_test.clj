@@ -69,7 +69,7 @@
         old (#'task/run-value (d/pull db explicit-run-pull [:seon.run/id "demo/t#1"]))
         new (task/run db "demo/t#1")]
     (is (contains? new :seon.run/error) "the wildcard brings the problem members")
-    (is (= (ui/run-row old {}) (ui/run-row new {})))))
+    (is (= (ui/run-row {} old) (ui/run-row {} new)))))
 
 (deftest reading-every-run-costs-what-its-datoms-cost
   (cost/proof

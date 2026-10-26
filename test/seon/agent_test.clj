@@ -901,7 +901,7 @@
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
         [_ _ swapped before drawn after gone]
         (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
-                   "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
+                   "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
                    "(swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
                    n
                    {:op :eval :agent "root"
