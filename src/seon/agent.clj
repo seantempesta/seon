@@ -19,8 +19,8 @@
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
-;; :embedded-from (the db embed-written! last read the branch's writes up to) :vectors-t (the transaction of its last vector write)
-;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them) :related (my.task/related's sections nearest the plan, seon.context/related-at)
+;; :embedded-from (the db embed-written! last read the branch's writes up to)
+;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -311,8 +311,7 @@
            (= :seon.vector/encode-failed (:seon.error/type r)) (do (swap! state update :unembeddable (fnil into #{}) (map first ask)) r)
            (contract/error? r) r
            :else (let [{:keys [model vectors tokens]} (:value r)
-                       w (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
-                   (swap! state assoc :vectors-t (:t w))
+                       _ (transact! (vector/tx-data (map first ask) (map peek ask) vectors tokens model))]
                    (when (= (count ask) (count due)) (swap! state assoc :embedded-from (db)))
                    (count ask))))))))
 

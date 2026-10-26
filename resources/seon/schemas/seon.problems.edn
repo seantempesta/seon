@@ -13,6 +13,7 @@
  :seon.db/types-differ [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/types-differ]]
                                                 [:seon.db/attributes [:map-of :qualified-keyword [:map [:stored :keyword] [:declared :keyword]]]]]]
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
+ :seon.db/store-unplaced [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/store-unplaced]] [:path :string] [:errno :int]]]
  :seon.vector/model-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/model-unopened]] [:path :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
@@ -197,9 +198,9 @@
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
                        :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :test-red :dead-citation :unnamed-site :stale-pin :unrun
                        :stale-section :orphan-page :leadless-section :uncited-task :problem-unlinked]
- :seon.problems/row [:map {:seon.render/ai seon.render.ai/problem-row :seon.render/html seon.render.ui/problem-row}
+ :seon.problems/row [:map {:seon.render/html seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
                      [:at-ms [:maybe :int]]]
- :seon.problems/report [:map {:seon.render/ai seon.render.ai/report :seon.render/html seon.render.ui/problems} [:t :int]
+ :seon.problems/report [:map {:seon.render/html seon.render.ui/problems} [:t :int]
                         [:classes [:map-of :seon.problems/class [:map [:n nat-int?] [:rows [:vector :seon.problems/row]]]]]]}

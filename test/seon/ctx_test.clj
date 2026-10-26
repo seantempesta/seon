@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -41,7 +41,8 @@
   [n]
   (let [db (:db-after (d/with (ts/test-db) (into [{:seon.agent/key k :seon.agent/id :a1}
                                                    {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                                    :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}}]
+                                                    :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
+                                                    :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                                   (run-tx "lab/ctx#1" 0))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
@@ -62,7 +63,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 13)
+    (case (.nextInt r 15)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -75,8 +76,11 @@
       9 (if (seq turns) [[:db/add [:seon.turn/id (nth turns (.nextInt r (count turns)))] :seon.turn/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
       10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
       12 [{:seon.task/id (str "lab/other" i) :seon.task/ns 'app.y :seon.task/name (str "other" i) :seon.task/plan "Another."
-           :seon.task/kind :work}
+           :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
           [:db/add [:seon.run/id run] :seon.run/task [:seon.task/id (str "lab/other" i)]]]
+      ;; what a run's derived members read: the plan's vector written, a program form written
+      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] [10] "m")
+      14 [{:db/id "f" :form/id (str "app.x/g" i) :form/src (str "(defn g" i " [])")} {:var/name (symbol "app.x" (str "g" i)) :var/form "f"}]
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
@@ -93,25 +97,20 @@
         (is (= #{'app.x-test/t0} (get-in t [:runs "lab/ctx#1" :task :seon.task/proofs])))
         (is (= 20 (count (get-in t [:runs "lab/ctx#1" :turns]))))
         (is (= #{"m20" "m40" "m60"} (set (keys (get-in t [:runs "lab/ctx#1" :messages])))))))
-    (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] misordered [] checked 0]
+    (loop [db (seeded 60) c (ctx/build db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 150)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
             (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
-            (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared)))
-            (is (empty? misordered) (str "a unit not in the order its members were first written: " (first misordered))))
+            (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build db' (aid db') :b)
               ;; every member path held before and after that is not at, under or above a changed path
               related? (fn [p q] (let [n (min (count p) (count q))] (= (subvec p 0 n) (subvec q 0 n))))
               kept (for [[_ ps] (:ix c) [p _] ps :when (and (seq p) (not-any? #(related? p %) (:changed c'))
-                                                           (some? (get-in (:tree c') p)))] p)
-              ;; the first transaction of each eval, read from the facts
-              born (into {} (for [[id tx] (d/q '[:find ?id ?tx :where [?e :seon.eval/id ?id ?tx]] db')] [id tx]))
-              evals (ctx/order c' [:evals])]
+                                                           (some? (get-in (:tree c') p)))] p)]
           (recur db' c' (inc i)
                  (cond-> bad (not= (dissoc c' :changed) (dissoc b :changed)) (conj [i tx]))
                  (into unshared (for [p kept :when (not (identical? (get-in (:tree c) p) (get-in (:tree c') p)))] [i p]))
-                 (cond-> misordered (not= evals (vec (sort-by (juxt born identity) (keys (:evals (:tree c')))))) (conj [i evals]))
                  (+ checked (count kept))))))
     (testing "a build answers the root path changed: a memo misses once, everywhere"
       (let [db (seeded 5)] (is (= #{[]} (:changed (ctx/build db (aid db) :b))))))))
@@ -172,12 +171,11 @@
      :n "evals in the session's record"
      :work (str "one eval's three datoms (its id, its agent, its record): the id's entity is new, so its "
                 "ref to the agent, a known entity, joins it, read whole (one pull) and keyed by its id (one "
-                "datom seek); its first transaction (one more seek of the same datom); the environment's t, "
-                "branch and commit set. Nothing per eval already held. Eight contracted calls: patch, join, "
-                "node, own (the pull), key-of (the seek), held-in and born (the joined entity's first t), "
-                "environment")
+                "datom seek); the environment's t, "
+                "branch and commit set. Nothing per eval already held, nothing derived. Six contracted calls: "
+                "patch, join, node, own (the pull), key-of (the seek), environment")
      :growth :constant
-     :fixed {:calls 8}
+     :fixed {:calls 6}
      :sizes [100 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
@@ -190,7 +188,7 @@
         h (render/html c {})
         rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))]
                         [(last (nth x 2)) (last (nth x 3))]))]
-    (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil) :html)) "@ctx's value names its block")
+    (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil))) "@ctx's value names its block")
     (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
     (is (= (render/html proofs {:schema :seon.render/proofs}) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
     (is (= (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil}) (rows ":evals")) "a key with none draws as the printer's structure")))
@@ -203,19 +201,96 @@
   (let [w (fn [db branch more tx] (:db-after (d/with db tx (pdb/tx-meta branch more))))
         db (-> (ts/test-db)
                (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
-               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/screen ["(seon.screen/show)"]}])
+               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/description "Works the screen."}])
                (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/answered-t 3}]))
         e (:db/id (d/entity db [:seon.agent/key k]))
         by (fn [a] (dissoc (ctx/made-by db e a) :t))]
-    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/screen)) "written by an eval: that eval, on the agent's branch")
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/description)) "written by an eval: that eval, on the agent's branch")
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/answered-t)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
     (let [h (render/html (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}) {:db db})
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
-      (is (= {":seon.agent/screen" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
-             (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
+      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
+             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/answered-t"]))
           "the page names who made each key"))))
+
+(defn- replay
+  "Tree t with diff d applied: each path's new value set, a gone one taken out (shorter paths first,
+  as a member joins before its attributes)."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [t d]
+  (reduce (fn [t [p [_ n]]] (cond (empty? p) n
+                                  (nil? n) (update-in t (pop p) dissoc (peek p))
+                                  :else (assoc-in t p n)))
+          t (sort-by (comp count key) d)))
+
+(deftest a-turns-diff-is-what-changed-between-its-ts
+  ;; one derivation, revision 4.2: what changed of the record over a turn is a pure function of the
+  ;; record at its start and end t (seon.ctx/diff), bounded by the paths its transactions changed,
+  ;; read from the db as their net change (seon.ctx/advance); equal paths dropped
+  (let [r (java.util.Random. 42)
+        env #(apply dissoc % [:t :branch :commit])]
+    (dotimes [turn 12]
+      (let [db0 (seeded 30)
+            ;; a turn: a few transactions of a session's kinds
+            db1 (reduce (fn [db i] (:db-after (d/with db (change db i r)))) db0 (range (inc (.nextInt r 5))))
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)
+            d (ctx/diff c0 c1)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)) "advanced, the record is the end t's")
+        (is (= (env (:tree c1)) (env (replay (:tree c0) d))) "the start's record with the diff applied is the end's")
+        (is (every? (fn [[_ [o n]]] (not= o n)) d) "no path whose value is equal at both ends")))
+    (testing "a member retracted and made again under its key within the turn: the end's"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "(again)" :response {:value 1}}}]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)))
+        (is (= "(again)" (get-in (:tree c1) [:evals "e7" :seon.eval/record :code])))
+        (is (contains? (ctx/diff c0 c1) [:evals "e7"]))))
+    (testing "a change undone within the turn is no change"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :done]]) :db-after
+                    (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :running]]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)]
+        (is (= {} (ctx/diff c0 (ctx/advance c0 db0 db1 :b))))))
+    (testing "an eval added: its member, old nil"
+      (let [db0 (seeded 30) db1 (:db-after (d/with db0 (eval-tx 31))) c0 (ctx/build db0 (aid db0) :b)
+            d (ctx/diff c0 (ctx/advance c0 db0 db1 :b))]
+        (is (= [[:evals "e31"]] (keys d)))
+        (is (nil? (first (val (first d)))))))))
+
+(defn one-eval-diff
+  "The input of size n: a session of n evals at a turn's start, and its record advanced by one eval:
+  [c0 c1], diff's."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [db0 (seeded n) db1 (:db-after (d/with db0 (eval-tx (inc n)))) c0 (ctx/build db0 (aid db0) :b)]
+    [c0 (ctx/advance c0 db0 db1 :b)]))
+
+(deftest a-turns-diff-costs-its-changed-paths-not-the-record
+  (cost/proof
+    {:of 'seon.ctx/diff :input 'seon.ctx-test/one-eval-diff
+     :n "evals in the session's record"
+     :work "one changed path (the eval's member): its value read at each end and compared; nothing of the evals already held"
+     :growth :constant
+     :fixed {:calls 1}
+     :sizes [100 1000 3000]}))
+
+(deftest a-redefined-vars-record-holds-its-new-form
+  ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
+  ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
+        e (:db/id (d/entity db [:var/name 'demo/f]))
+        c (ctx/build db e :b)
+        rep (d/with db [{:db/id "g" :form/id "demo/f-2" :form/src "(defn f [] 2)"} [:db/add e :var/form "g"]])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (= "(defn f [] 1)" (get-in (:tree c) [:form :form/src])) "built: the var with its form")
+    (is (= "(defn f [] 2)" (get-in (:tree c') [:form :form/src])) "patched: the new form, whole")
+    (is (contains? (:changed c') [:form]))
+    (is (= (dissoc c' :changed) (dissoc (ctx/build (:db-after rep) e :b) :changed)) "as a build holds it")))
 
 (declare steps)
 
@@ -244,6 +319,13 @@
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
       (is (= "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:html steps))
           "the agent draws its key, a part of its page, by the render its branch names, recording nothing")
+      (testing "the page the model reads (seon.repl/page, the screen) is the page the user sees (seon.repl/parts), hiccup for html"
+        (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/parts) (seon.repl/page)]
+                                (finally (reset! seon.agent/state nil)))
+              shown (remove (comp #{:eval :turn :message} first :key) (:parts parts))]
+          (is (= (map :key shown) (keys page)) "every part but the conversation's, in the page's order")
+          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each part's hiccup is the html the page shows, byte for byte")
+          (is (vector? (get page [:lab.ctx/steps])) "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
               h (seon.web.html/html (seon.render.ui/evaluation (d/pull db '[*] [:seon.eval/id "e9"]) {:db db}))]

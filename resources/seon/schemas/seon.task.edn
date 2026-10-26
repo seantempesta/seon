@@ -17,7 +17,7 @@
  :seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
-                    ;; the functions near its plan its story lists (seon.context/similar: off by default, on to measure it)
+                    ;; the functions near its plan its task data lists (seon.context/similar: off by default, on to measure it)
                     [:seon.config.render/similar {:optional true} :seon.config.render/similar]]
  :seon.task/need-ids [:set :seon.task/id]
  :seon.task/declaration [:map {:closed true}
@@ -45,11 +45,11 @@
                  [:seon.task/references {:optional true} :seon.task/references]
                  [:seon.task/failure {:optional true} :seon.task/failure]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
- :seon.task/task [:and {:seon.render/html seon.render.ui/task-box :seon.render/ai seon.render.ai/task} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
+ :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment a run runs in; desired (the task's) = observed (the run's), or restart
  :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
- :seon.run/run [:map {:seon.render/html seon.render.ui/run-row :seon.render/ai seon.render.ai/run}
+ :seon.run/run [:map {:seon.render/html seon.render.ui/run-row}
                         [:seon.run/id :seon.run/id] [:seon.run/task :seon.task/id]
                         [:seon.run/status :seon.run/status] [:seon.run/boot :string]
                         [:seon.run/agent {:optional true} :keyword] [:seon.run/start-ms :int]

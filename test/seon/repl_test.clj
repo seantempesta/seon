@@ -100,7 +100,7 @@
               ["(:seon.task/id (with-meta (my.task/current) nil))" :text "\"demo/t\""]
               ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
               ;; update! answers the member it changed, as swap! answers the new value, never the
-              ;; whole task (live agents, 2026-10-25: its instructions and story were most of each answer)
+              ;; whole task (live agents, 2026-10-25: its instructions and task data were most of each answer)
               ["(my.task/update! :seon.task/plan str \" Then more.\")" :text "Then more.\""]
               ["(string? (my.task/update! :seon.task/plan str \"\"))" :text "true"]
               ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
@@ -371,10 +371,10 @@
   ;; when located cannot move a position into the form's terms (no :seon.error/at), the
   ;; request's own is printed rather than none; with :seon.error/at it is hidden
   (let [em (contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :jolt.error/line 4 :jolt.error/column 6})]
-    (is (str/includes? (render/ai em {}) ":jolt.error/line 4") (render/ai em {}))
-    (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
+    (is (str/includes? (h/html (render/html em {})) ":jolt.error/line 4") (h/html (render/html em {})))
+    (let [r (h/html (render/html (assoc em :seon.error/at {:line 3 :column 6}) {}))]
       (is (not (str/includes? r ":jolt.error/line")) r)
-      (is (str/includes? r ":at {:line 3, :column 6}") r))))
+      (is (str/includes? r "at line 3:6") r))))
 
 (def evals-run
   "How many times the ticks proof's form ran."
@@ -407,3 +407,29 @@
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
     (is (not (contains? r :value)) "an exception is the response: no value")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
+
+(deftest an-uncontracted-definition-is-told-on-its-answer
+  ;; the one derivation's review (2026-10-26): instrument computed the uncontracted-definition
+  ;; warning per form and seon.repl/response dropped it, so the agent never read it. The answer
+  ;; carries it, naming every uncontracted definition so far and how to fix it; a contracted one is
+  ;; armed and warns nothing
+  (let [old @agent/state
+        ev (fn [st code] (try (reset! agent/state st) [(repl/eval-string code {}) @agent/state] (finally (reset! agent/state old))))
+        st0 {:n 0 :ns (create-ns 'seon.repl-test.warned)}
+        [r st1] (ev st0 "(defn warned-f [x] x)")
+        [r2 _] (ev st1 "(defn warned-g [x] x) (defn armed-h {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+        [r3 _] (ev st0 "(defn armed-k {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+        w (first (:warnings r))]
+    (is (= :uncontracted-definition (:seon.repl/finding w)) (pr-str r))
+    (is (= ['seon.repl-test.warned/warned-f] (:uncontracted w)))
+    (is (str/includes? (:seon.repl/fix w) ":malli/schema") "and how to fix it")
+    (is (str/includes? (:text r) ":uncontracted-definition") "printed in the text the agent reads")
+    (is (= ['seon.repl-test.warned/warned-f 'seon.repl-test.warned/warned-g] (:uncontracted (first (:warnings r2))))
+        "the next names every uncontracted definition so far, once")
+    (is (not (contains? r3 :warnings)) "a contracted definition warns nothing")
+    (let [[r4 _] (ev st0 "(defn warned-m [x] x) (defn warned-m {:malli/schema [:=> [:cat :int] :int]} [x] x)")]
+      (is (not (contains? r4 :warnings)) "one defined uncontracted, then armed in the same eval: the warning is the eval's end, none left"))
+    (let [[r5 _] (ev st0 "(defn bad-n {:malli/schema [:=> [:cat :no.such/schema] :int]} [x] x)")
+          f (first (:warnings r5))]
+      (is (= :invalid-contract (:seon.repl/finding f)) (pr-str r5))
+      (is (= 'seon.repl-test.warned/bad-n (:var f)) "naming the definition whose contract could not be armed"))))

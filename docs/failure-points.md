@@ -22,6 +22,7 @@ The failure points whose edge function catches, each with the one variant it dec
 | The model's HTTP call (connect, TLS, the socket dying mid-stream), made by root's `:model` effect workers; streamed over SSE with no clock (a reasoning reply streams for minutes) | `seon.model/http-post` | `:seon.model/transport` (the connection failed or dropped); a non-200 is `:seon.model/provider-error` with the whole body, or `:seon.model/rate-limited` for HTTP 429 with its Retry-After (`seon.model/complete`) | the `:model` owner answers it to the asking agent (a 429 is kept and retried after its wait); `seon.turn/act!` returns it; `seon.turn/work!` ends the run `:error` with its message |
 | A model's eval call carries arguments that are not JSON with code text (a reply cut mid-call at its token limit) | `seon.model/call-code` | none: the arguments as they came are the call's code | `seon.turn/act!` evaluates them like any code; the reader repairs what it can and the call's result shows what they held |
 | An agent's authored contract does not compile | `seon.contract/arm!` | `:seon.contract/invalid` | `seon.repl/instrument` puts it on the reply item (`:contract-error`); `seon.program/load-form!` reports it as a load error |
+| A new store's rename into its path finds something there that is no store (a file, a directory holding no data file): its sibling directory cannot take the path | `seon.db/make!` | `:seon.db/store-unplaced` (`:path :errno`) | thrown at open (`seon.db/open!`), the made store removed; a store found there is a creator's that won the rename, and is opened |
 | The OS refuses the store's ids page (the file `ids` beside `data.mdb` cannot be opened, sized or mapped) | `seon.db/ids!` | `:seon.db/ids-unopened` (`:path :errno`) | thrown at open (`seon.db/open!`): root does not boot on a store whose ids it cannot issue once; [storage](storage.md#ids) |
 | Program code from the db does not load (a form that throws: a missing require target, a reference to a var main does not hold) | `seon.program/load-form!` | `:seon.program/error` (`{:ns :message}`) | root and the fork server put load errors in their view and events; an agent's `:load-errors` |
 | The filesystem refuses a write-back (`:file` effect) | `seon.fx/write-file` | `:seon.fx/io-error` | the asker's `my.fx/call` answer, recorded as `:seon.fx/*` on its branch |
@@ -222,15 +223,14 @@ close removes it. See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner 
 uses is taken by the next opener whose key reaches it, so the left sets stay about a tenth of the
 key space (6,400 measured after 23 days, before the fork); the bound is `sysctl kern.sysv.semmns`
 (87,381 semaphores, 14,563 sets at six a set), and at it an open fails in `semget` (ENOSPC).
-Upstream's two-semaphore sets left before the fork are never taken (not of this layout) and stay
-until removed. Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
+Upstream's two-semaphore sets are never taken (not of this layout); those left before the fork
+were removed on 2026-10-26, except the ones a process still on upstream's build used
+(notes/archive/lmdb-leftover-sets-2026-10-26.md). Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
 makes a new one at the next open.
 
 Each env a process has open holds one SEM_UNDO entry of the process's `kern.sysv.semume` (10 on
 macOS), and each lock held (a writer's, a reader registering) one more while held, so one process
 has room for eight envs open with a writer and a reader locking at once (measured: nine open and
 written one at a time, the tenth's first write fails).
-Seon's processes have one store open each (13 live roots, agents and test runners, `lsof`,
-2026-10-26). Past the limit the open or the lock fails with `MDB_SEM_UNDO_FULL` (named in its
-message), never EINVAL.
+Production code opens one store per process (root's, which its agents and fork server branch: `seon.root/start!`, `seon.agent`, `seon.fork-server`; 13 live processes, `lsof`, 2026-10-26). A process that runs tests (a `bin/test` shard, an agent's test fork) holds what its tests open, so a test's own store ends with the test: the 2026-10-26 full run's shard kept nine of `seon.proofs-test`'s scratch stores open (`test-runner/program-db` keeps its branch's connection for the process) and its next opens failed (`seon.proofs-test/a-process-plans-on-more-scratch-stores-than-its-undo-entries`, twelve in turn). Past the limit the open or the lock fails with `MDB_SEM_UNDO_FULL` (named in its message), never EINVAL. A store is made whole or not at all (```seon.db/open!```, task `seon.db/a-store-is-made-whole-or-not-at-all`): it is built in a sibling directory and renamed to its path, so a create that fails or is killed leaves only that directory (`<path>.making-<uuid>`, garbage), never a data file holding no database, which every later open read as "Database does not exist" (`seon.db-test/a-create-that-fails-leaves-no-store`).
 

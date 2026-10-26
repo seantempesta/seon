@@ -9,8 +9,9 @@
  ;; the coarse level: the first :seon.config.vector/coarse-dims dims renormalized, as int8, then
  ;; the float scale that maps them back (seon.vector/pack)
  :seon.vector/coarse bytes?
- ;; the transaction of the text it embeds: a text written since makes it due again
- :seon.vector/text-t :int
+ ;; the transaction of the text it embeds: a text written since makes it due again; indexed, so the
+ ;; newest vector written is one seek (seon.context/related-key)
+ :seon.vector/text-t [:and {:seon.db/index true} :int]
  ;; the text's whole token count; past :seon.config.vector/max-tokens its first were embedded
  :seon.vector/tokens :int
  :seon.vector/fact [:map {:seon.db/attributes true}

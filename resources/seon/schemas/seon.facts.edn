@@ -90,7 +90,7 @@
                       [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
- :seon.db/var-fact [:map {:seon.db/attributes true}
+ :seon.db/var-fact [:map {:seon.db/attributes true :seon.render/units [:var/form]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
                      [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
@@ -148,16 +148,13 @@
  :seon.agent/mem-mb :double
  :seon.agent/running :string
  :seon.agent/description [:string {:seon.render/prose true}]
- ;; the forms the agent's screen evaluates before each model request, as the agent set them
- ;; (swap! of @ctx); absent, the platform's (seon.screen/forms)
- :seon.agent/screen [:vector [:string {:min 1}]]
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
  :seon.agent/answered-t :int
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set :string]
- :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation :seon.render/ai seon.context/eval-messages}
+ :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
@@ -168,7 +165,6 @@
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
                        [:seon.agent/mem-mb {:optional true} :seon.agent/mem-mb] [:seon.agent/running {:optional true} :seon.agent/running]
                        [:seon.agent/description {:optional true} :seon.agent/description]
-                       [:seon.agent/screen {:optional true} :seon.agent/screen]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/answered-t {:optional true} :seon.agent/answered-t] [:seon.agent/opened {:optional true} :seon.agent/opened]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
@@ -202,10 +198,6 @@
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
- ;; what the work on the plan is likely to need beyond what it cites (seon.context/related's
- ;; answer), written on the agent's branch by its turn's observe when the plan's vectors move
- ;; (seon.turn/related!), so a view reads it as a fact and never computes it
- :seon.task/related [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]]
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
  :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/proofs] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -219,7 +211,6 @@
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
-                          [:seon.task/related {:optional true} :seon.task/related]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
                           [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]]
@@ -279,11 +270,6 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
- ;; the stage's story: the task's run sections as data (seon.context/run-state: the task and its
- ;; accumulated plan, the write set with sources and callers, how to run each proof, the cited
- ;; sections, what is similar), the same every turn of the run, so written once as the run begins
- ;; on the agent's branch (seon.turn/begin!) and read by a view as a fact
- :seon.run/story [:map [:task :map] [:write-set [:vector :any]] [:to-prove [:map-of :qualified-symbol :any]]]
  :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
@@ -301,7 +287,6 @@
                              [:seon.run/conflicts {:optional true} :seon.run/conflicts]
                              [:seon.run/unmerged {:optional true} :seon.run/unmerged]
                              [:seon.run/changed {:optional true} :seon.run/changed]
-                             [:seon.run/story {:optional true} :seon.run/story]
                              [:seon.run/deferred {:optional true} :seon.run/deferred]
                              [:seon.run/deferred-results {:optional true} :seon.run/deferred-results]
                              [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
@@ -356,6 +341,11 @@
                    ;; the last batch that loaded: each kind with the first record that made it
                    [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
+ ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
+ ;; the refused read's message. A refused read's error names it as its subject
+ ;; and is written in the same transaction, so it stays open until a good read writes another value
+ ;; (seon.problems/closed?); the same outcome again writes no datom
+ :seon.root/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
@@ -366,6 +356,7 @@
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]
                           [:seon.root/source {:optional true} :seon.root/source]
                           [:seon.root/watch {:optional true} :seon.root/watch]
+                          [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
                           [:seon.root/collected {:optional true} :seon.root/collected]
                           [:seon.config.agent/max-running {:optional true} :seon.config.agent/max-running]
@@ -404,7 +395,7 @@
  ;; stage boundary (:stage), the judge's refusal with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
- :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message :seon.render/ai seon.context/message-messages} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
+ :seon.message/fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
                      [:seon.message/kind {:optional true} :seon.message/kind]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
@@ -448,8 +439,6 @@
  :seon.turn/basis [:map [:commit :uuid] [:task :seon.task/id] [:run :seon.run/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.turn/origin] [:observed :map]
                    [:merge? {:optional true} :boolean]
-                   ;; the screen evals run before the request (their ids), whose responses end it
-                   [:screen {:optional true} [:vector :string]]
                    ;; the agent whose record the request renders (its key)
                    [:agent {:optional true} :string]]
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs

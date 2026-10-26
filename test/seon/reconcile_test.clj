@@ -900,7 +900,7 @@
 
 (deftest a-sessions-next-stage-opens-with-roots-message
   ;; live finding A1 (2026-10-25): a session's next stage (another task, the same agent) opens
-  ;; with root's message naming the new task and its story; a wake of the same task opens with none
+  ;; with root's message naming the new task and its task data; a wake of the same task opens with none
   (let [on (fn [run task] {:seon.run/id run :seon.run/task [:seon.task/id (str "demo/" task)] :seon.run/agent {:seon.agent/key "b/a1"}})
         db (db-of [(decl "d") (decl "i" :needs ["d"])] :extra [(on "demo/d#1" "d")])
         db (d/db-with db [(on "demo/i#1" "i")])

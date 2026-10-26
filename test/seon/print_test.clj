@@ -285,7 +285,7 @@
         (is (str/includes? text "\"x\"") text)))))
 
 (deftest rows-reserve-the-cut-they-print
-  ;; root's report through its render (seon.render.ai/report-data), 2026-10-25: at 13 budgets
+  ;; root's report as data (a render's ordered value), 2026-10-25: at 13 budgets
   ;; between 2,000 and 9,000 tokens it printed 347, :stale-section's 177 rows one placeholder.
   ;; fill-rows reserved a cut without its form's path, overran its room, and the map's growth
   ;; then kept the rows at their least. A value with room left prints most of its budget.

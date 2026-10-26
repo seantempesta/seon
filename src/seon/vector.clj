@@ -12,7 +12,7 @@
   (native/vector.c)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg]
-            [seon.step :as step] [jolt.ffi :as ffi] [datahike.api :as d] [clojure.string :as str]))
+            [seon.step :as step] [jolt.ffi :as ffi] [datahike.api :as d] [clojure.string :as str] [seon.error :as err]))
 
 ;; ---- the pyramid (native/vector.c, in libprobe: no threads, every process loads it) ------
 
@@ -106,7 +106,7 @@
   "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
   over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
   Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
-  screen's related lists fuse their reference graph with meaning by it (seon.context/related)."
+  page's related part fuses their reference graph with meaning by it (seon.context/related)."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
   (let [k (cfg/value :seon.config.vector/rrf-k)
@@ -124,7 +124,7 @@
   "Each embedded kind: the attribute holding its text, and the text the model reads."
   {:form/src (fn [src] (str document-prompt src))
    :seon.section/text (fn [text] (str document-prompt text))
-   ;; a schema's form, so the screen's related schema keys are found by meaning too
+   ;; a schema's form, so the related part's schema keys are found by meaning too
    ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
    :schema/form (fn [form] (str document-prompt form))
    :seon.task/plan (fn [plan] (str query-prompt plan))})
@@ -245,7 +245,7 @@
   (let [due (take (:texts st) (remove (comp (:unembeddable st) first) (due db (:model st))))]
     (if (empty? due)
       [(assoc st :running false) []]
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due)]]
+      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) db]]
                              {:op :fx :kind :embed :req {:texts (mapv second due)}})]
         [(assoc st :running true) [m]]))))
 
@@ -255,8 +255,9 @@
   :seon.config.vector/texts at a time, and their vectors are written to main; that commit's notice
   starts the next round, so a backlog is embedded round by round and an idle main asks nothing.
   One round at a time: a notice during one is kept, and the round after the write reads the
-  latest notice at or after it. A failed embedding is root's problem (seon.fx/outcome) and the
-  next notice tries again, except texts llama.cpp could not encode (:seon.vector/encode-failed):
+  latest notice at or after it. A failed embedding is recorded on main by this proc, its
+  :effect row naming :seon.vector/model (seon.error/asked-tx), and the next notice after that
+  write tries again, except texts llama.cpp could not encode (:seon.vector/encode-failed):
   those are kept out of later rounds (:unembeddable, shown in its ping), so they never hold back
   the texts due after them."
   {:malli/schema :seon.step/step-fn}
@@ -276,11 +277,17 @@
                    (round (dissoc st :latest) (:db m)))
            :answers (let [[st [step es]] (step/answered st (:tag m)) r (:r m)]
                       (case step
-                        :embedded (let [[es ts] es]
+                        :embedded (let [[es ts db] es]
                                     (if (contract/error? r)
-                                      [(cond-> (assoc st :running false)
-                                         (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
-                                       []]
+                                      ;; the failure is recorded here (seon.error/asked-tx), closed by the next
+                                      ;; vectors written (:seon.vector/model)
+                                      (let [st (cond-> st (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
+                                            ;; the newest main it holds, so the row's count reads what is stored
+                                            tx (err/asked-tx (or (:db (:latest st)) db) r :seon.vector/model [])]
+                                        (if (seq tx)
+                                          (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
+                                            [st [w]])
+                                          [(assoc st :running false) []]))
                                       (let [{:keys [model vectors tokens]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
                                                              {:op :write :req {:op :tx :branch :db :tx-data (tx-data es ts vectors tokens model)}})]
@@ -291,5 +298,12 @@
                                    (if (and l (>= (:t l) (:written-t st)))
                                      (round (dissoc st :latest) (:db l))
                                      [st []]))
+                        ;; the failure's own commit starts no round (it would ask again and fail again,
+                        ;; on an idle main): the next round reads a commit after it
+                        :recorded (let [st (cond-> (assoc st :running false) (not (contract/error? r)) (assoc :written-t (inc (:t r))))
+                                        l (:latest st)]
+                                    (if (and l (>= (:t l) (:written-t st)))
+                                      (round (dissoc st :latest) (:db l))
+                                      [st []]))
                         [st []])))]
      [st (if (seq outs) {:to-api outs} {})])))

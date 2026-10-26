@@ -528,18 +528,19 @@
   [o dest r]
   (step/out! o :out {:dest dest :r r}))
 
-;; root counts every failed effect across agents (seon.error, class :effect); the asker records
-;; its own outcome on its branch
+;; an agent's failed effect is root's to count (seon.error, class :effect): the agent's facts of it
+;; are on its branch, which health does not read; root code records its own (seon.error/asked-tx)
 (defn- outcome
   "The owner at one request's outcome r (a worker frees once per work item, before this): its
-  asker is answered, a failure is root's problem, and its request is charged. A rate-limited
+  asker is answered, an agent's failure is root's problem (root code records its own), and its
+  request is charged. A rate-limited
   request is not answered: it goes back on the queue, and the bucket is emptied."
   {:malli/schema [:=> [:cat :map :seon.host/volatile :map] :map]}
   [st o r]
   (let [limited? (= :seon.model/rate-limited (:seon.error/type (:outcome r)))]
     (when-not limited? (reply! o (:dest r) (:outcome r)))
-    (when (contract/error? (:outcome r))
-      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome r) :seon.fx/us :seon.fx/queue-us)
+    (when (and (contract/error? (:outcome r)) (get-in r [:dest :agent]))
+      (step/out! o :out {:op :problem :class :effect :error (dissoc (:outcome r) :seon.fx/us :seon.fx/queue-us :seon.fx/at-ms)
                          :agent (get-in r [:dest :agent])}))
     (let [st (charge st r)]
       (if (and limited? (:request r))
@@ -672,8 +673,10 @@
            t1 (profile/now-ns)
            done (mapv (fn [m r]
                         (cond-> {:dest (:dest m) :request m :budget-key (:budget-key m) :est (:est m 0)
-                                 :outcome (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
-                                                 :seon.fx/us (quot (- t1 t0) 1000))}
+                                 :outcome (cond-> (assoc r :seon.fx/kind (:kind st) :seon.fx/queue-us (quot (- (:taken-ns m) (:in-ns m)) 1000)
+                                                         :seon.fx/us (quot (- t1 t0) 1000))
+                                            ;; when it failed, as its asker records it (seon.error/asked-tx)
+                                            (contract/error? r) (assoc :seon.fx/at-ms (System/currentTimeMillis)))}
                           (:cost r) (assoc :cost (:cost r))))
                       ms rs)]
        [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}]))))
