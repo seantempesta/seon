@@ -23,18 +23,21 @@
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
 (defn request!
-  "Work request decl (seon.template/request: one task one agent works whole, on its own
-  branch), written released in one transaction on main (seon.template/request-tx), so no
+  "Work request decl as the tasks template makes of it (seon.template/request, the default: its
+  design-build task and its merge; seon.template/whole or seon.template/stages for an
+  experiment), written released in one transaction on main (seon.template/request-tx), so no
   agent forks before every task of it is set. Answers the writer's answer with the tasks'
   ids, or the error."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
-  [sys decl]
-  (let [ds (tpl/request decl)
-        tx (tpl/request-tx @(:conn sys) ds)]
-    (if (contract/error? tx)
-      tx
-      (assoc @(root/transact-main! sys tx)
-             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds)))))
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/declaration] :map]
+                  [:=> [:cat :seon.root/sys :seon.task/declaration ifn?] :map]]}
+  ([sys decl] (request! sys decl tpl/request))
+  ([sys decl template]
+   (let [ds (template decl)
+         tx (tpl/request-tx @(:conn sys) ds)]
+     (if (contract/error? tx)
+       tx
+       (assoc @(root/transact-main! sys tx)
+              :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,

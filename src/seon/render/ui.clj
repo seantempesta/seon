@@ -804,7 +804,7 @@
     :else
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own nil)
-        units (:seon.render/units (contract/properties schema))
+        units (render/units schema)
         nd {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
             :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}]
     (case as

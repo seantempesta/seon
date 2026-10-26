@@ -120,7 +120,7 @@
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :idle})
                     (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1" :seon.agent/id :a1} (str "e" %) "a1"
-                                                           {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}} nil))
+                                                           {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3}}))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
 
@@ -211,9 +211,10 @@
                 "~6 KB a row (was 49.5 KB, every row pulled whole: a-page-walks-each-db-once)")
      :growth :linear
      ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations; 65 at 100
-     ;; with the agent's catch-ups a unit (task seon.ctx/one-derivation): its index read, empty here
+     ;; with the agent's catch-ups a unit (task seon.ctx/one-derivation): its index read, empty here;
+     ;; 67 with the units read from the schema's pattern (seon.render/units)
      :per-n {:bytes 6100}
-     :fixed {:calls 65 :bytes 2650000}
+     :fixed {:calls 67 :bytes 2650000}
      :sizes [100 1000 4000]}))
 
 (defn- watching
@@ -266,7 +267,7 @@
         db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1" :call-id (str "c-" %) :call 0} nil)) ["e1" "e2"])
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1" :call-id (str "c-" %) :call 0})) ["e1" "e2"])
                     [{:db/id "run" :seon.run/id "t/x#1"}]
                     (mapv turn (range n))])
         view [:debug :a1]
@@ -313,7 +314,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
-        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"} more) nil))
+        ev (fn [id by more] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} id by (merge {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"} more)))
         db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
@@ -379,7 +380,8 @@
      :growth :linear
      ;; measured: 4 calls and 244 KB at 100 evals before the tiles; each eval now asks once whether its
      ;; value has a render of its own (its tile: render-of, own-key, schema-of, declared), 404 calls and
-     ;; 372 KB at 100
+     ;; 372 KB at 100; 407 with the task's part made from its own attributes (own-values,
+     ;; own-attributes: its joins' members left out)
      :per-n {:calls 4 :bytes 3700}
-     :fixed {:calls 4 :bytes 10000}
+     :fixed {:calls 7 :bytes 10000}
      :sizes [100 1000 4000]}))

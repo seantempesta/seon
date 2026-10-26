@@ -4,7 +4,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 ## Now (2026-10-26)
 
-Pins (docs/forks.md): Chez fa6a4c73, Jolt 5cc7458e (main carrier, load's own `*ns*`, suggestions-for public, a timer's throw reaches its owner), Datahike 872bfa03 (a report carries a card-one replacement's retraction; an opt-in newest-first pull option), http-client e866277d (a fiber-aware read). Paid runs: ~$1.2 of the owner's $30 for 2026-10-25/26. Standing root on 7888/7777 (`runs/store`, test data).
+Pins (docs/forks.md): Chez fa6a4c73, Jolt f561902a (main carrier, load's own `*ns*`, suggestions-for public, a timer's throw reaches its owner, IAtom/IRef/Sorted dispatch on deftype and reify), Datahike e5a55664 (as-of reads keep index order; a report carries a card-one replacement's retraction; an opt-in newest-first pull option), http-client e866277d (a fiber-aware read). Paid runs: ~$1.2 of the owner's $30 for 2026-10-25/26. Standing root on 7888/7777 (`runs/store`, test data).
 
 **Where it stands.** Agents work each request as one whole task (design, implement and merge in one run) on main. Measured on 2026-10-26 (notes/live-baselines-2026-10-26.md): implement turns 84-92% cached (was 24-31%); designs 7/10 green with thinking off, 2/3 on the long design after "plan after the red proof"; repeats near zero with the repeat rule deleted for its causes; an agent spawns in ~37 ms; the full suite runs in ~8 min with no hang.
 **The direction.** One derivation: the agent's record is pulled once as `@ctx`, and the page and the agent's context are both renders of it, re-derivable byte for byte from the db at given t's (notes/one-derivation-2026-10-26.md; the approved design notes/one-derivation-joint-design.md, built in slices).

@@ -750,7 +750,7 @@
         detail (print/text r)]
     (when form
       (let [rec (repl/record-details (:main-db st) form (if err {:ex r} {:value r}) {} nil)]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
 

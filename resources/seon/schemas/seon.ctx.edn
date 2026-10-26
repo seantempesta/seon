@@ -1,6 +1,6 @@
 {
  ;; the agent's record as one map, @ctx (seon.ctx): its environment, its own attributes and its
- ;; units by their short keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
+ ;; pattern's joins by their keys; the page draws it as a block (seon.render.ui/ctx), the model reads it
  ;; through the one printer (no :ai render)
  :seon.ctx/ctx [:map {:seon.render/html seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
  ;; a swap! of @ctx refused, nothing written (seon.ctx/write!): a value its schema refuses, or a key
@@ -14,4 +14,18 @@
  ;; the swap!'s function ran, or the function wrote one of them, which are the environment's), it is
  ;; no map (a reset! of the atom), or there is no record yet (:held empty)
  :seon.ctx/basis [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/basis]]
-                                         [:held :map] [:swapped :map]]]}
+                                         [:held :map] [:swapped :map]]]
+ ;; a pattern the walk cannot read (seon.ctx/spec): no vector, an option neither pull's nor :by, a
+ ;; join naming no attribute or with no pattern; the clause it stopped at
+ :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]
+ ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, and its joins,
+ ;; each with its own pattern under :sub
+ :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]]
+                 [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
+                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:sub :map]]]]]
+ ;; the walk's state beside a record's map (seon.ctx/node): where each entity is held (its one path),
+ ;; every path it sits at ({:db/id e} at all but one), its pattern, what each join [e key] watches
+ ;; ([attribute value] keys, :watch) and its reverse (:watching); each a map checked shallowly: a contract
+ ;; checked on every call of the walk must not cost what the walk is proven not to (the record's size)
+ :seon.ctx/ix [:map [:held {:optional true} :map] [:at {:optional true} :map] [:spec {:optional true} :map]
+               [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]]}
