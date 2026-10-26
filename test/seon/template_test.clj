@@ -50,6 +50,12 @@
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
     (is (not (str/includes? (:whole tpl/instructions) "end your turn")) "no closing-prose step")
     (is (str/includes? (:whole tpl/instructions) "(my.task/fail! ") "a false premise is a failed task")
+    ;; the design findings of 2026-10-25/26, now the whole task's: a proof is evaluated in its
+    ;; test namespace and registered, and it comes first: reproduce, register, run red, then the change
+    (let [t (:whole tpl/instructions)
+          steps ["reproduce what the plan says is wrong" "(in-ns 'ns.x-test)" "register it" "run it red" "make it pass"]]
+      (is (every? #(str/includes? t %) steps) "each step is in the whole instructions")
+      (is (= steps (sort-by #(or (str/index-of t %) -1) steps)) "proof first"))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 (deftest each-steps-instructions-are-its-task-briefly-prose-first
@@ -71,7 +77,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}
                                               :seon.task/needs #{"demo/workouts"}}]))]
     (is (= "boot-1/a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
-    (is (= "boot-1/a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
+    (is (= "boot-1/a1" (task/session-key db "demo/workouts-implement-merge")) "merge too, through implement")
     (is (nil? (task/session-key db "demo/other")) "a task on another branch is not the session of a task it needs")
     (let [db (d/db-with db (task/run-start-tx "demo/workouts-implement#1" "demo/workouts-implement" "boot-2" :a4 {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2 "p"
                                               (task/session-key db "demo/workouts-implement")))]

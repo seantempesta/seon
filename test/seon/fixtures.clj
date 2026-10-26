@@ -266,19 +266,16 @@
 (defn stage-decls
   "Request decl as the staged tasks a request once was, for the tests of what reads them
   (seon.task/session-key, seon.reconcile/stage-boundary): decl as the design step, then
-  <name>-implement needing it, then <name>-merge needing that, all on design's branch. A
+  <name>-implement needing it, then its merge (seon.template/with-merge), all on design's branch. A
   request is one :whole task now (seon.template/request)."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   (let [tns (:seon.task/ns decl) nm (:seon.task/name decl)
-        did (task/task-id tns nm) iid (task/task-id tns (str nm "-implement"))
+        did (task/task-id tns nm)
         b (or (:seon.task/branch decl) (task/default-branch did))]
-    [(assoc decl :seon.task/kind :design :seon.task/branch b :seon.task/instructions "Write the proof red, and the plan.")
-     {:seon.task/ns tns :seon.task/name (str nm "-implement") :seon.task/kind :implement :seon.task/branch b
-      :seon.task/plan "" :seon.task/instructions "Make the proofs pass." :seon.task/needs #{did}}
-     {:seon.task/ns tns :seon.task/name (tpl/merge-name nm) :seon.task/kind :merge :seon.task/branch b
-      :seon.task/plan (str "Merge the work of task " iid " into main.") :seon.task/instructions (tpl/instructions :merge)
-      :seon.task/needs #{iid}}]))
+    (into [(assoc decl :seon.task/kind :design :seon.task/branch b :seon.task/instructions "Write the proof red, and the plan.")]
+          (tpl/with-merge [{:seon.task/ns tns :seon.task/name (str nm "-implement") :seon.task/kind :implement :seon.task/branch b
+                            :seon.task/plan "" :seon.task/instructions "Make the proofs pass." :seon.task/needs #{did}}]))))
 
 (defn stages
   "The scripted model of a request's stages on one session (seon.agent-test): the design writes
