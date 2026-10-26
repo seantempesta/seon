@@ -120,7 +120,8 @@
   (if (= :inline (:as opts))
     [:code {:class "seon-inline"} (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))]
     (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup} :render nested-html))]
-      (or (:html r) [:span {:class "seon-print-refused"} (str (:seon.error/message r))]))))
+      ;; the value it drew rides on the hiccup, so the model's page reads the value itself (project)
+      (if-let [h (:html r)] (with-meta h {::value v}) [:span {:class "seon-print-refused"} (str (:seon.error/message r))]))))
 
 (defn print-ai
   "The one value printer as the default :ai render: v's text under opts' budget ({:text
@@ -406,3 +407,57 @@
                                  (sort-by first)
                                  (mapv second))})
       (contract/error :seon.render/no-entity #'seon.render/walk (str "no entity " eid " on these dbs") {:seon.render/eid eid})))))
+
+;;; --- the model's page: the page's hiccup, projected to its meaning -------------------------------
+
+(def semantic-classes
+  "The classes the stylesheet defines by name (resources/public/css/input.css under
+  :seon.config.web/public-dir): what a class in a render means. Any other class is a utility the
+  model's page leaves out (project)."
+  (into #{} (map second) (re-seq #"\.([a-z][a-z0-9-]*)" (slurp (str (config/value :seon.config.web/public-dir) "/css/input.css")))))
+
+(def theme
+  "The stylesheet's rules for its named classes, each selector beside its declarations, one per
+  line: what each semantic class draws, sent to the model once (the owner, 2026-10-26: \"if we
+  remove the styling and don't show the removal how do agents easily update it?\")."
+  (let [css (slurp (str (config/value :seon.config.web/public-dir) "/css/input.css"))]
+    (str/join "\n" (for [[_ sel body] (re-seq #"(?m)^\s*([.][^{@/]*)\{([^}]*)\}" css)]
+                     (str (str/trim sel) " {" (str/replace (str/trim body) #"\s+" " ") "}")))))
+
+(defn- text-of
+  "Every string in hiccup x, joined: a value the printer drew (its own classes), as the text it reads."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [x]
+  (cond (string? x) x
+        (h/raw? x) (str/replace (:seon.web.html/raw x) #"<[^>]*>" "")
+        (number? x) (str x)
+        (vector? x) (apply str (map text-of (if (map? (second x)) (drop 2 x) (rest x))))
+        (seq? x) (apply str (map text-of x))
+        :else ""))
+
+(defn project
+  "Hiccup x as the model reads it: each element its tag, its semantic classes (semantic-classes) and
+  its text, a link its href; a value the printer drew as the value itself (print-html's ::value),
+  which the one printer prints as its structure; any other printer hiccup as its text; a div or span that only lays out
+  (no semantic class) its children in its place; utility classes, ids, data-* and on* attributes
+  left out (the full hiccup is the part's, one form away). Answers a seq of nodes."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
+  [x]
+  (cond (contains? (meta x) ::value) (list (::value (meta x)))
+        (string? x) (if (str/blank? x) () (list x))
+        (number? x) (list x)
+        (h/raw? x) (project (text-of x))
+        (and (vector? x) (keyword? (first x)))
+        (let [[tag & more] x
+              attrs (when (and (map? (first more)) (not (h/raw? (first more)))) (first more))
+              kids (if attrs (rest more) more)
+              classes (filter semantic-classes (str/split (str (:class attrs)) #"\s+"))]
+          (if (some #(str/starts-with? % "seon-print") classes)
+            (project (text-of x))
+            (let [ks (mapcat project kids)
+                  tag (keyword (str/join "." (cons (name tag) (remove #(str/starts-with? % "seon-print") classes))))]
+              (if (and (#{"div" "span"} (first (str/split (name tag) #"\."))) (empty? classes) (not (:href attrs)))
+                ks
+                (list (into (cond-> [tag] (:href attrs) (conj {:href (:href attrs)})) ks))))))
+        (sequential? x) (mapcat project x)
+        :else ()))
