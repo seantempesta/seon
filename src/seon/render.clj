@@ -64,14 +64,6 @@
                  a (map-keys form) :when (identity-attr? a)]
              [a k])))
 
-(defn- keyed
-  "Map v's value at keyword k, nil when v is a collection keyed by something else: a sorted map
-  keyed by ids (a pulled tree's join), whose comparator cannot compare a keyword to its keys, holds no
-  value's own keys."
-  {:malli/schema [:=> [:cat :map :keyword] :any]}
-  [v k]
-  (when-not (and (sorted? v) (seq v) (not (keyword? (key (first v))))) (get v k)))
-
 (defn schema-of
   "The named schema of v: hint (its producer's), the one its metadata names, an error map's
   variant (its registered :seon.error/type, else :seon.error/base), or the schema its
@@ -80,7 +72,7 @@
   [v hint]
   (or hint (:seon.render/schema (meta v))
       (when (map? v)
-        (if-let [t (keyed v :seon.error/type)]
+        (if-let [t (:seon.error/type v)]
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
@@ -126,7 +118,7 @@
 (defn- own-key
   "v's own override for face: in the map, else in its metadata."
   {:malli/schema [:=> [:cat :any :keyword] :any]}
-  [v k] (or (when (map? v) (keyed v k)) (get (meta v) k)))
+  [v k] (or (when (map? v) (get v k)) (get (meta v) k)))
 
 (defn render-of
   "The render function v takes: its own override (a symbol), else its schema's declared one (opts :schema, else seon.render/schema-of: one metadata read or one map lookup

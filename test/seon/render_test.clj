@@ -52,14 +52,6 @@
       (is (= "calc/add#1" (:seon.run/id (nth call 2))) "the value its child"))
     (is (str/includes? (h/html [:div [r/html {:schema :seon.task/task} task]]) "task · calc/add") "[f opts v] in hiccup")))
 
-(deftest a-collection-keyed-by-id-prints
-  ;; a sorted map keyed by entity ids (a pulled tree's collection) holds no override key and no error
-  ;; type: asking it for a keyword threw (its comparator cannot compare a keyword to an id)
-  (let [refs (sorted-map 5 {:var/name 'a/b} 7 {:var/name 'a/c})]
-    (is (vector? (r/print-html {} {:seon.task/id "t/x" :seon.task/references refs})) "nested in a value")
-    (is (vector? (r/html {} refs)) "as the value itself")
-    (is (nil? (r/schema-of refs nil)))))
-
 (defn- context-text
   "Root's context as the render proc prints it: the system's value by the one printer at budget."
   [s budget] (seon.print/print-value (system/system-data s) {:budget budget}))
@@ -1259,3 +1251,16 @@
     (is (not (str/includes? (str tile) "closed")) (str "not main's status: " tile))
     (is (str/includes? (str tile) (name (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"])))) "the branch's")))
 
+(deftest a-collection-keyed-by-id-prints
+  ;; a collection of ctx (a join's members, keyed by their ids, newest first) holds no override key and no
+  ;; error type: its order is total over any key (seon.ctx's newest-first), so a keyword lookup answers nil
+  ;; and every value holding one prints (a sorted map ordered by compare throws on that lookup instead)
+  (let [[_ branch _] (paged-dbs)
+        evals (:evals (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))]
+    (is (seq evals) "the agent's evals")
+    (is (sorted? evals) "a collection, sorted by id")
+    (is (every? int? (keys evals)))
+    (is (nil? (get evals :seon.render/html)) "a keyword lookup answers nil")
+    (is (vector? (r/print-html {} {:seon.task/id "t/x" :evals evals})) "nested in a value")
+    (is (vector? (r/html {} evals)) "as the value itself")
+    (is (nil? (r/schema-of evals nil)))))
