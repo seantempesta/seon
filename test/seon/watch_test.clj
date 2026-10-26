@@ -143,7 +143,7 @@
   ;; found on the standing root 2026-10-25: a past boot's :seon.watch/died stayed open while this
   ;; boot's watcher ran (task seon.problems/a-platform-error-closes-when-its-cause-is-gone)
   (let [db0 (ts/test-db)
-        e (contract/error :seon.watch/died 'seon.watch/start! "its batch handler threw: docs/references.md (No such file or directory): root no longer watches the checkout"
+        e (contract/error :seon.watch/died 'seon.watch/start! "its batch handler threw: docs/references.md (No such file or directory): root no longer watches what its loaders read"
                           {:bin "/c/target/watch" :roots ["/c"] :exit 143 :stderr ""})
         fresh {:roots ["/c"] :boot "b2" :batches 0 :paths 0 :rescans 0}
         died #(d/db-with % (mr/watch-died-tx % (assoc fresh :boot "b1") e 1000))

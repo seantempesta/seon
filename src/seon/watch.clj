@@ -1,5 +1,5 @@
 (ns seon.watch
-  "Root watches the checkout (docs/health.md#every-writer-root-loads-what-changed): every
+  "Root watches what its loaders read (docs/health.md#every-writer-root-loads-what-changed): every
   writer, a Claude session, a Seon agent, the owner's editor or git, changes files, and the
   OS reports it. target/watch (native/watch.c, FSEvents) is an OS child printing one record
   per change, its kind letter then the absolute path, ended by NUL; this namespace starts it
@@ -75,10 +75,10 @@
                                         ;; (the failure point docs/failure-points.md names): never a silent thread end
                                         (if-let [t (try (on-batch b) nil (catch Throwable t t))]
                                           (do (.destroy p)
-                                              (on-exit (died p (str "its batch handler threw: " (.getMessage ^Throwable t) ": root no longer watches the checkout"))))
+                                              (on-exit (died p (str "its batch handler threw: " (.getMessage ^Throwable t) ": root no longer watches what its loaders read"))))
                                           (recur))
                                         (when-not (realized? stopped)
-                                          (on-exit (died p (str bin " ended: root no longer watches the checkout")))))))
+                                          (on-exit (died p (str bin " ended: root no longer watches what its loaders read")))))))
                                   "seon.watch")
                      (.setDaemon true)
                      (.start))})))))

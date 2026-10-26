@@ -254,8 +254,11 @@
         {:seon.root/id :root :seon.root/watch (assoc held :error (:seon.error/message e))}))
 
 (defn watch!
-  "Root watches its checkout and its repository's refs (seon.watch, FSEvents: every writer,
-  a Claude session, an agent, the owner's editor, git), and loads on its own branch's ref only
+  "Root watches what its loaders read, loader-dirs (the wiki, the task files, the source dirs),
+  and its repository's refs (seon.watch, FSEvents: every writer, a Claude session, an agent, the
+  owner's editor, git), never the whole checkout: that holds builds (target/), root's own store
+  (runs/) and, in the main tree, every worktree, whose churn no loader reads and which kept
+  fseventsd saturated. It loads on its own branch's ref only
   (watch-loads: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
   (seon.root/import-source!), and here the task files, once the watcher is ready (a fresh or
@@ -270,7 +273,7 @@
   (let [co (config/checkout)
         refs (fx/git-refs co)
         own (fx/head-ref co)
-        roots (vec (remove nil? [co refs]))
+        roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
