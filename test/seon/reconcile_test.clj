@@ -422,13 +422,27 @@
   )
 
 (deftest a-whole-task-works-in-parallel-and-its-green-merges
-  ;; owner, 2026-10-26 (seon.template/request): a whole task's runs start as work does, not one at a
+  ;; owner, 2026-10-26 (seon.template/whole): a whole task's runs start as work does, not one at a
   ;; time as merges do; its green run merges into main as a merge run's does; out of turns, it parks
   (let [whole (fn [nm] (assoc (decl nm) :seon.task/kind :whole))]
     (is (= [(spawn "a" 1) (spawn "b" 1)] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")
     (is (= [{:op :octopus-merge :run "demo/a#1" :members [{:run "demo/a#1" :task "demo/a"}]}]
            (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass})))))
     (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))))
+
+(deftest a-requests-green-work-is-merged-by-its-merge-task
+  ;; owner, 2026-10-26: "design-build and merge": the green design-build task is done, not merged
+  ;; by itself; its merge task then runs on the branch, and its green run is the octopus merge
+  (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/request (decl "a"))]
+                             (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))]
+    (is (= [(spawn "a" 1)] (actions-for (db-req []))) "the work task forks first, alone")
+    (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
+           (actions-for (db-req (run "a" 1 :ended :outcome :green :results {(t "a") :pass}))))
+        "its green run is accepted, and merges nothing")
+    (is (= [(mspawn "a-merge" 1)] (actions-for (db-req (run "a" 1 :done)))) "once it is done, its merge task runs")
+    (is (= [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]
+           (actions-for (db-req (concat (run "a" 1 :done) (run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass})))))
+        "and the merge task's green run is the merge")))
 
 (deftest a-merge-with-deferred-tests-is-gated-only-when-root-asks
   ;; root's rulings (2026-10-22/23) and the owner's (2026-10-23: process tests never run

@@ -53,21 +53,35 @@
     (is (< (count (:seon.task/plan d)) 300) (str "a short description: " (:seon.task/name d)))
     (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
 
-(deftest a-request-is-one-task-one-agent-works-whole
-  ;; owner, 2026-10-26: "build a do everything in one go task", then "switch to one-go for all
-  ;; tests until we figure out a better solution": a request is one task of kind :whole on its
-  ;; own branch, with the whole instructions, where the stages it replaced make three
+(deftest a-request-is-its-design-build-task-and-its-merge
+  ;; owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge": the
+  ;; design-build task (kind :work, the :work instructions: red proof, then green, no merge of
+  ;; its own) and its merge task, needing it, on its branch; whole and stages stay choices
   (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
-        [w :as ws] (tpl/request d)]
+        [w m :as ds] (tpl/request d)]
+    (is (= [["w" :work] ["w-merge" :merge]] (mapv (juxt :seon.task/name :seon.task/kind) ds)) "exactly two tasks")
+    (is (= #{"demo/w"} (:seon.task/needs m)) "the merge needs the work")
+    (is (= [:task-demo-w :task-demo-w] (mapv :seon.task/branch ds)) "on one branch")
+    (is (= [(:work tpl/instructions) (:merge tpl/instructions)] (mapv :seon.task/instructions ds)))
+    (is (not (task/merges? (:seon.task/kind w))) "the work task does not merge itself")
+    (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
+    (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
+    (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
+
+(deftest a-whole-request-is-one-task-one-agent-works-whole
+  ;; owner, 2026-10-26: "build a do everything in one go task": an experiment's choice, one task
+  ;; of kind :whole on its own branch, with the whole instructions
+  (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
+        [w :as ws] (tpl/whole d)]
     (is (= 1 (count ws)))
     (is (= [:whole :task-demo-w] [(:seon.task/kind w) (:seon.task/branch w)]))
     (is (= (:whole tpl/instructions) (:seon.task/instructions w)))
     (is (str/includes? (:whole tpl/instructions) "main's work merged in") "done on main's merged program")
-    (is (= 3 (count (tpl/stages d))) "the stages it replaced")
     ;; agent loop's park findings: a green run ends before its closing prose, so "end your turn
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
-    (is (not (str/includes? (:whole tpl/instructions) "end your turn")) "no closing-prose step")
-    (is (str/includes? (:whole tpl/instructions) "(my.task/fail! ") "a false premise is a failed task")
+    (doseq [k [:whole :work]]
+      (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
+      (is (str/includes? (k tpl/instructions) "(my.task/fail! ") (str k ": a false premise is a failed task")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
 
 (deftest each-steps-instructions-are-its-task-briefly-prose-first
