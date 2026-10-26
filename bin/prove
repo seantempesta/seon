@@ -7,7 +7,7 @@
 # through bin/check's own bodies (bin/check --steps target/prove), on target/seon built from this tree first
 # (bin/test builds it only when a selected test or step reaches the binary: the plan's out/binary).
 # With no namespace named, the tests and steps that reach a process of their own (a root, an
-# agent, a shell, a fork: seon.program/reach-index's :process?) are left out; they run when
+# agent, a fork, the binary: seon.program/reach-index's :process?) are left out; they run when
 # named (bin/test NS, bin/check MODE) or in the full run (docs/merging.md).
 # Ends on PROVE OK / PROVE FAILED and its exit status. The full runs are explicit:
 # bin/test --all, bin/check 100.
