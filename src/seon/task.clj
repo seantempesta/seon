@@ -8,7 +8,7 @@
   them) and the one reader (pull shapes for the reconciler and the agent). From sessions R1
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))
 
 ;; ---- identity --------------------------------------------------------------------
@@ -309,7 +309,7 @@
   the three dbs, read once."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
   [base branch main]
-  (let [many (fn [a] (= :db.cardinality/many (get-in (d/schema main) [a :db/cardinality])))
+  (let [many (fn [a] (dbu/multival? main a))
         ;; each member's value: a set member's values as a set, a single member's value
         vs (fn [db] (reduce (fn [m [k v]] (if (many (second k)) (update m k (fnil conj #{}) v) (assoc m k v))) {}
                             (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
