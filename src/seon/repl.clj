@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -489,10 +489,10 @@
   {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
   []
   (with-branch-schemas
-    ;; the held record: @ctx with each member's first transaction, what the conversation is ordered by
+    ;; the held record (@ctx), drawn with the renders that read the branch's db
     #(let [c (ctx/record)
            [memo out] (reduce (fn [[m acc] p] (let [[m d] (draw-part m p)] [m (conj acc d)]))
-                              [(:drawn @agent/state {}) []] (render/view c))]
+                              [(:drawn @agent/state {}) []] (render/view c (context/renders (agent/db))))]
        ;; the memo holds the parts this page has now, none it dropped
        (swap! agent/state assoc :drawn (select-keys memo (map :key out)))
        {:t (get-in c [:tree :t] 0) :parts out})))

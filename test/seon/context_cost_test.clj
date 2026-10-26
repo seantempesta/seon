@@ -119,3 +119,31 @@
      :per-n {:ticks 240.0 :bytes 1600.0 :calls 0.0}
      :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
      :sizes [100 1000 10000]}))
+
+(defn story-key-of
+  "seon.context/story-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
+  [n] (let [[db te] (related-of-changed n)] [db {:seon.task/id "demo/r" :db/id te}]))
+
+(deftest a-storys-key-costs-what-the-plan-names
+  ;; the story's memo key reads the task, its plan's references and a seek per entity they name:
+  ;; nothing of the wiki or program it does not cite, so it is flat in their size
+  (cost/proof {:of 'seon.context/story-key :input 'seon.context-cost-test/story-key-of
+               :n "wiki sections with vectors"
+               :work "the task read with its accumulated plan (task/task), the plan's references parsed (seon.ref), a seek per entity they name (none here): fourteen contracted calls, flat in the wiki"
+               :growth :constant
+               :fixed {:calls 14}
+               :sizes [10 100 1000]}))
+
+(defn first-t-of
+  "seon.context/first-t's arguments at n wiki sections: the task demo/r's entity."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
+  [n] (related-of-changed n))
+
+(deftest an-entitys-first-transaction-is-one-seek
+  (cost/proof {:of 'seon.context/first-t :input 'seon.context-cost-test/first-t-of
+               :n "wiki sections with vectors"
+               :work "one seek of the entity's datoms, their least transaction"
+               :growth :constant
+               :fixed {:calls 1}
+               :sizes [10 100 1000]}))

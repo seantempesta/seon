@@ -354,18 +354,20 @@
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
 
 (defn ctx-of
-  "The input of size n: an agent's held record (seon.ctx/build's shape, each member's first t) of one run, its task with one proof,
-  one turn, and n evals, each a record of a short form and its value."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  "The input of size n: an agent's held record (seon.ctx/build's shape) of one run, its task with one proof,
+  one turn, and n evals, each a record of a short form and its value; and the renders a view reads
+  the db through, as a map lookup each (the db's own cost is theirs, not the view's)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
-  [{:born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))
-    :tree {:t n :branch :b
+  [{:tree {:t n :branch :b
     :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
                     :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
                     :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
     :evals (into {} (for [i (range n) :let [id (str "e" i)]]
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}])
+                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
+   (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
+     {:story #(dissoc % :db/id) :related (constantly nil) :first-t born})])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its

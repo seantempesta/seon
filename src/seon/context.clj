@@ -274,19 +274,6 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
   [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce min)))
 
-(def ^:private story-nss
-  "The attribute namespaces run-state and related read: a task (its plan, proofs, :needs,
-  config), the program's forms, vars and namespaces, a wiki section, a schema, a vector."
-  #{"seon.task" "seon.config.render" "var" "form" "ns" "seon.section" "schema" "seon.vector"})
-
-(defn story-reads?
-  "Can a transaction of datoms change what the story (run-state) or related read: does one name a
-  task, the program, the wiki, a schema, a vector, or a run's task? A memo of either keeps its
-  value while every transaction since answers false. Not tracked: what run-state reads beside the
-  db (a cited file's text on disk, a namespace's meta in the process)."
-  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
-  [datoms] (boolean (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? story-nss (namespace a)))) datoms)))
-
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
@@ -322,6 +309,46 @@
                                     (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
       (seq sections) (assoc :sections sections)
       near (assoc :similar near))))
+
+(defn- latest-t
+  "The newest transaction of entity e's datoms on db, or nil when it has none: what moves when
+  anything of e changes. One seek of e."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
+  [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce max)))
+
+(defn story
+  "Task m's story on db (m as ctx holds a task: its :seon.task/id), the task's :ai face as of the
+  db's t: its run sections (run-state), its plan as it accumulated along :needs. A render, never
+  held: a view memoizes it by story-key."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db m] (run-state db (task/task db (:seon.task/id m))))
+
+(defn story-key
+  "What task m's story reads on db, as a value: its accumulated plan, instructions and proofs, and
+  the newest transaction of each entity it reads beside them (each var the plan cites with the
+  forms that name it, its callers; each proof's var; each section cited; the tasks along :needs,
+  in the accumulated plan). Equal keys, an equal story, so a view's memo of it is a key compare.
+  Not read: what run-state reads beside the db (a cited file's text on disk, a namespace's meta in
+  the process). Work: the plan's references parsed, a seek per entity it names and its callers'."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :any]}
+  [db m]
+  (let [t (task/task db (:seon.task/id m))
+        {:keys [plan proofs]} (:seon.task/accumulated t)
+        cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
+        vars (into (set proofs) (comp (keep :seon.ref/name) (filter qualified-symbol?)) cites)
+        es (concat (for [v vars :let [e (pdb/eid db :var/name v)] :when e
+                         x (cons e (concat (some-> (d/entity db e) :var/form :db/id vector)
+                                           (map :e (d/datoms db :avet :form/refs v)) (map :e (d/datoms db :avet :form/quoted v))))]
+                     x)
+                   (for [c cites :let [a (:seon.ref/address c) e (when a (pdb/eid db :seon.section/address a))] :when e] e))]
+    [(:seon.task/accumulated t) (:seon.task/instructions t)
+     (into (sorted-map) (for [e (distinct es)] [e (latest-t db e)]))]))
+
+(defn renders
+  "The renders a view reads db through (seon.render/view's fs), over db: the story of a task,
+  the related of a task entity, the first transaction of an entity."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:story :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]]}
+  [db] {:story #(story db %) :related #(related db %) :first-t #(first-t db %)})
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from
@@ -687,7 +714,7 @@
             db run n)
        (sort-by second) (mapv (fn [[e _ tx]] (assoc (turn-record db e) :tx tx)))))
 
-(declare render story)
+(declare render printed-story)
 
 (defn- session-first-run
   "Agent entity a's first run (the one whose :seon.run/agent was written first), or nil."
@@ -698,7 +725,7 @@
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), the task's run sections as of its t
-  (story), an eval by its :seon.render/ai render with the fold its ref names (what it showed of an
+  (printed-story), an eval by its :seon.render/ai render with the fold its ref names (what it showed of an
   earlier record, as the form that reads it there; a screen eval's {:since handle}, its diff from that
   one, `as-diff`) or collapsed ([:line id]), a message by its
   render, the history note by its count: what the request sent, the same bytes. No request is built again: the same records, rendered."
@@ -708,7 +735,7 @@
     (mapv (fn [[kind x t :as ref]]
             [ref (case kind
                    :section [{:role "system" :content (system-text (d/as-of db t))}]
-                   :task [{:role "user" :content (story db x t)}]
+                   :task [{:role "user" :content (printed-story db x t)}]
                    ;; a screen eval sent as its diff names the one it was taken from (:since)
                    :eval (if-let [h (:since t)]
                            (ai-messages (as-diff (ev x) {:handle h :value (get-in (ev (name h)) [:seon.eval/record :response :value])}) :seon.db/eval-fact)
@@ -740,7 +767,7 @@
     (merge {:system 0 :story 0 :conversation 0 :screen 0}
            (update-vals (group-by (comp part first) parts) #(messages-tokens (into [] (mapcat second) %))))))
 
-(defn- story
+(defn- printed-story
   "The task story: task entity e's run sections as of t on db (run-state, printed by
   run-message), what every turn of a session sends after the system prompt, as its first turn
   read them; a later stage's arrives as root's message at its boundary
@@ -788,7 +815,7 @@
         task-e (if (identical? prev0 prev) (pdb/eid db :seon.task/id task) (:db/id (:seon.run/task (d/entity db [:seon.run/id first-run]))))
         run-ref [:task task-e story-t]
         ;; the story is the same each turn of a session: printed once, by its ref
-        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (story db task-e story-t)))
+        story-text (when (seq prev0) (or (get-in printed [:story run-ref]) (printed-story db task-e story-t)))
         r (request a {:db db :basis basis :block block :help (system-text db) :run story-text :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]
                       :run-ref run-ref})]
