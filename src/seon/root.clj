@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.turn] [my.branch] [my.docs] [clojure.core.async.flow :as flow] [clojure.test]
@@ -218,6 +218,24 @@
         ;; the agents with an eval in flight: the stall check's set
         (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
     st))
+
+(defn- stall-task
+  "Root's task to deal with agent id's stall s, when it works a run (seon.template/stall: one per
+  agent and run, so a later stall of the same run writes none): written to main, held, worked by
+  a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
+  can give root\"). A refused write is the agent's problem, as its facts' are."
+  {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
+  [st o id s]
+  (let [{:keys [run pid]} (get-in st [:view :agents id])
+        db (some-> (:conn st) deref)]
+    (if (and run db (not (:writer-closed st)))
+      (let [decl (tpl/stall id run (assoc s :pid pid))
+            tx (when-not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl)))
+                 (task/create-tx db [decl]))]
+        (cond (nil? tx) st
+              (contract/error? tx) (problem st (err/occurrence tx :agent {:agent id :task (:task (get-in st [:view :agents id]))} (System/currentTimeMillis)))
+              :else (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}}) st)))
+      st)))
 
 (defn- to-agent
   "Send m to agent id's proc: an output of this step to [id :in] (seon.step/out! on o; the
@@ -526,8 +544,8 @@
       ;; an agent's proc observed it stalled (seon.agent-proc :stall?): a fact on the agent, what it
       ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
       ;; frame (:spoke) or its end retracts it
-      :stalled (set-agent st o (:agent m) {:stalled (cond-> {:quiet-ms (:quiet-ms (:error m))}
-                                                       (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))})
+      :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
+                 (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s)))
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]

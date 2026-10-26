@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -703,6 +703,36 @@
          (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
          (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest a-stall-task-closes-when-its-conditions-hold
+  ;; owner, 2026-10-26: root's stall task (seon.template/stall) is done when its boundary
+  ;; conditions hold, which are its proofs (seon.stall-proofs): red while the agent is stalled and
+  ;; no cause is recorded; green once main retracts the stall and the worker records the cause
+  ;; with its evidence and decides it is no bug, through my.task/update!
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [k (task/agent-key "boot-1" :a1)
+           stall (tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})
+           _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Work." :seon.task/proofs #{}} stall]))
+           _ (d/transact conn (task/run-start-tx "demo/t#1" "demo/t" "boot-1" :a1 {:branch :task-demo-t :model nil :max-turns 4} 1000 "Work."))
+           _ (d/transact conn [{:seon.agent/key k :seon.agent/stalled {:quiet-ms 4000}}])
+           ab (pdb/on-main (:branch cfg) :stall-task)
+           _ (d/branch! conn (:branch cfg) ab)
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state
+           proofs (fn [] (let [reps (atom [])]
+                           (binding [clojure.test/report (fn [m] (swap! reps conj (:type m)))]
+                             (doseq [v (sort tpl/stall-proofs)] ((:test (meta (resolve v))))))
+                           (frequencies @reps)))]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t-1" :db @store-conn})
+         (is (pos? (:fail (proofs) 0)) "red: the agent is stalled, no cause is recorded")
+         (d/transact conn [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/stalled]])
+         (my.task/update! :seon.task/cause merge {:what "a test child parked on a pipe nobody wrote" :evidence {:sample "..." :lsof "..."} :bug? false})
+         (agent/commit!)
+         (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime

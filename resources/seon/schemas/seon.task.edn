@@ -30,7 +30,8 @@
                          [:seon.task/model {:optional true} :seon.task/model]
                          [:seon.task/config {:optional true} :seon.task/config]
                          [:seon.task/kind {:optional true} :seon.task/kind]
-                         [:seon.task/evidence {:optional true} :seon.task/evidence]]
+                         [:seon.task/evidence {:optional true} :seon.task/evidence]
+                         [:seon.task/cause {:optional true} :seon.task/cause]]
  ;; a task as the reconciler reads it (needs as ids)
  :seon.task/own [:map
                  [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]

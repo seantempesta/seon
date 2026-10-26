@@ -322,7 +322,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:sequential :any]]
                   [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]

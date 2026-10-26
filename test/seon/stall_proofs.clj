@@ -1,0 +1,31 @@
+(ns seon.stall-proofs
+  "A stall task's proofs, its boundary conditions (seon.template/stall-proofs): each reads the task
+  the agent works (my.task/current) and its :seon.task/cause. Not a *_test namespace: bin/test
+  never selects them; they run as a stall task's proofs, in the agent that works it."
+  (:require [clojure.test :refer [deftest is]] [clojure.string :as str] [datahike.api :as d]
+            [seon.agent :as agent] [seon.db :as pdb] [my.task]))
+
+(defn- cause [] (:seon.task/cause (my.task/current)))
+
+(defn- main [] (pdb/head (:store-conn @agent/state) (pdb/main-branch (:cfg @agent/state))))
+
+(deftest the-stall-ended
+  ;; the stalled agent spoke or ended: main holds no :seon.agent/stalled on the agent of its run
+  (let [{:keys [run agent]} (:stall (cause))
+        a (:seon.run/agent (d/entity (main) [:seon.run/id run]))]
+    (is (some? a) (str "main holds run " run " and its agent " agent))
+    (is (nil? (:seon.agent/stalled a)) (str "agent " agent " is still stalled: " (pr-str (:seon.agent/stalled a))))))
+
+(deftest its-cause-is-recorded
+  ;; what the stall was, with the evidence captured while it was stuck (sample, lsof, ps)
+  (let [{:keys [what evidence]} (cause)]
+    (is (not (str/blank? what)) "the cause: (my.task/update! :seon.task/cause merge {:what ..})")
+    (is (seq evidence) "its evidence: {:sample .. :lsof .. :ps ..}")))
+
+(deftest a-bug-is-filed
+  ;; whether the cause is a bug is decided, and a bug's defect task is filed (on main or this branch)
+  (let [{:keys [bug? defect]} (cause)]
+    (is (boolean? bug?) "decided: :bug? true or false")
+    (when bug?
+      (is (and defect (or (d/entity (main) [:seon.task/id defect]) (d/entity (agent/db) [:seon.task/id defect])))
+          (str "a bug's defect task is filed and named (:defect): " (pr-str defect))))))

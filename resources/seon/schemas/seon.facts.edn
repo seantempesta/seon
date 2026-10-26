@@ -200,6 +200,14 @@
  ;; whose merge was refused (seon.reconcile/hold-tx: why, the run), or marked failed
  ;; (my.task/fail!, root or a check: why, the value that shows it, the run); root's judge
  ;; carries a run's own onto main (state :failed), where it stays as a record after a release
+ ;; a stall task's subject and finding (seon.template/stall): the stall root observed (the agent, its run,
+ ;; what it waited on, how long, its pid), written with the task; then the cause its worker records
+ ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
+ ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
+ :seon.task/cause [:map [:stall [:map [:agent :keyword] [:run :seon.run/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
+                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                   [:what {:optional true} :string] [:evidence {:optional true} :map]
+                   [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
@@ -215,6 +223,7 @@
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
+                          [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/declared {:optional true} :seon.task/declared]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
