@@ -22,8 +22,8 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [datahike.db.utils :as dbu] [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+            [clojure.string :as str] [datahike.api :as d] [datahike.db.utils :as dbu] [seon.web.html :as h]))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
