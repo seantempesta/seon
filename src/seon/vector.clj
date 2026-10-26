@@ -282,7 +282,8 @@
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
                                       (let [st (cond-> st (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
-                                            tx (err/asked-tx db r :seon.vector/model [])]
+                                            ;; the newest main it holds, so the row's count reads what is stored
+                                            tx (err/asked-tx (or (:db (:latest st)) db) r :seon.vector/model [])]
                                         (if (seq tx)
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])
