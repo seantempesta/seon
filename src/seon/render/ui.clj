@@ -912,7 +912,7 @@
   "A part of an agent's page as its agent drew it (the declared html render of
   :seon.render/part-html; seon.repl/parts): an eval of the conversation folded to its one line (its
   html :inline), its whole as drawn when opened; a model turn or a message as drawn; any other part a tile under its
-  key's name. input {:key :html :inline}."
+  key's name when its render does not name itself. input {:key :html :inline}."
   {:malli/schema [:=> [:cat :seon.render/part-html :seon.render/opts] :any]}
   [{:keys [key html inline]} opts]
   (case (first key)
@@ -925,7 +925,8 @@
     ;; whose drawing the page is: a unit, so the line goes when the agent's own parts arrive
     :caption [:p {:id (:unit opts) :class "text-2xs text-text-500"} (h/raw html)]
     [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-     [:h2 {:class "kicker"} (str/join " " (map kname key))]
+     ;; a key the agent added, or the verdict, is named; the task's, the proofs' and the run's renders name themselves
+     (when (or (qualified-keyword? (first key)) (= [:verdict] key)) [:h2 {:class "kicker"} (str/join " " (map kname key))])
      (h/raw html)]))
 
 (defn parts-page
