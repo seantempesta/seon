@@ -1,6 +1,6 @@
 # One derivation, revision 4: the request from the db, a simple REPL, the wire, the hiccup
 
-Agent view. Revision 4.1 folds in the independent review (`notes/one-derivation-design-rev4-review.md`: approve with changes). For root's approval before any code (AGENTS §2). It keeps revision 3's five functions (`notes/one-derivation-joint-design.md`): `(ctx db e)`, `(view ctx)`, `(html part)`, `(ai part)`, `(diff prev next)`. Slices 1 and 2 are built (jolt/ctx-atom; jolt/view-parts, reported ready). It replaces revision 3's request assembly, its wire and its "told" changes with the owner's rulings of 2026-10-26:
+Agent view. Revision 4.1, approved by root on 2026-10-26 with its rulings on (a) and (c) folded in. It folds in the independent review (`notes/one-derivation-design-rev4-review.md`: approve with changes). For root's approval before any code (AGENTS §2). It keeps revision 3's five functions (`notes/one-derivation-joint-design.md`): `(ctx db e)`, `(view ctx)`, `(html part)`, `(ai part)`, `(diff prev next)`. Slices 1 and 2 are built (jolt/ctx-atom; jolt/view-parts, reported ready). It replaces revision 3's request assembly, its wire and its "told" changes with the owner's rulings of 2026-10-26:
 - the request is a pure function of the db at the session's turn points;
 - the REPL only evaluates and records;
 - the tool answer carries an eval's ripple effects;
@@ -26,6 +26,7 @@ request(n) = system(t0) ++ start(t0) ++ Σ i<n [ assistant(i) ++ tool(i) ++ worl
   - The history cut (`kept`, context.clj:527) jumps once when its budget fills, by design. At that turn the prefix changes, once (revision 3's point 8, measured: cache breaks 23 → 1).
 - **Across a process (a resume, a new generation, the debug view): drift is detected, not prevented.**
   - `:seon.turn/sent` keeps each term's key, mode (whole, line, entry), t and **the digest of its bytes as sent**. It never keeps the text.
+  - Each turn also records the **digests of its inputs**: the config in force (already an input digest, `seon.program`'s test inputs) and the code that drew it (the printer's and the render's definitions, by their content digests in the program db). A drifted term then names its cause: the config, printer code, or agent code (root's approval, 2026-10-26: close the gap at its causes, not with a guard).
   - A re-derivation renders each term with today's code and compares digests. Where they differ (a render, the printer or config changed), the debug view shows the term as re-rendered and says it drifted.
   - A resumed session's first request is a new starting page (its prefix starts again, a deliberate break, as at a stage boundary).
   - There is no loading of old code: running an old render against today's printer would not give the old bytes anyway, and root would run old agent-written code. The review's finding, and the reason the earlier "renders resolve as of t" is withdrawn.
@@ -137,12 +138,12 @@ redefined: seon.render.ui/top-bar docstring changed · contract [:=> [:cat :any]
 
 ## 5. The world message: entries taken, and ctx's diff (slice 6′, the agent loop's)
 - **One rule, no exception.** The world message of turn i holds:
-  - the **entries** turn i took: words addressed to the agent, from a person (`:message`) or from root at a stage boundary (`:stage`);
+  - the **entries** turn i took: words addressed to the agent, from a person (`:message`), from root at a stage boundary (`:stage`), or from the judge when it sends the task back (`:verdict`: red, with the done rule's reasons; root's ruling, 2026-10-26);
   - ctx's **diff since turn i-1** (`seon.ctx/patch`'s `:changed` paths and their values, read as of turn i's t), less what the turn's own evals caused (told in their tool answers, §3). That covers proof results, a verdict, main moving, and anything else that changed in ctx.
   - Every change reaches the agent exactly once, by the same differ.
-- **An entry carries facts, never a stored diff.** It is a message fact: `:seon.message/kind` (`:message`, `:stage`), `:from` (a ref, which needs a store erase at root's moment), `:body` (required, as today). Its diff is computed when it is taken, by the patch, as for everything else. Verdicts and merges are not entries: they are facts that already reach ctx (the review), so they arrive in the diff.
+- **An entry carries facts, never a stored diff.** It is a message fact: `:seon.message/kind` (`:message`, `:stage`, `:verdict`), `:from` (a ref, which needs a store erase at root's moment), `:body` (required, as today). Its diff is computed when it is taken, by the patch, as for everything else. A green verdict that ends the run and main moving are not entries: they are facts that reach ctx, so they arrive in the diff. A red verdict that sends the task back is an entry: the agent must hear why its done was refused, or a parked agent stays stuck (root, 2026-10-26).
 - **`take!`** takes the entries at the turn's start (invariant 1) and writes each on the branch in the taking turn, upserted by id, so the conversation orders it by that t.
-- **Wake:** a parked session wakes on an entry: `:message` or `:stage`. Main counts the waking entries, and so does `:seon.run/taken`, with a kind filter in both wake counts (reconcile.clj:114-119 and 714-723), like with like. A verdict or main moving waits for the next turn.
+- **Wake:** a parked session wakes on an entry: `:message`, `:stage` or a red `:verdict`. Main counts the waking entries, and so does `:seon.run/taken`, with a kind filter in both wake counts (reconcile.clj:114-119 and 714-723), like with like. A green verdict and main moving wake nothing.
 - **The stage boundary** is today a request (reconcile.clj:832). Under this design it becomes a `:stage` entry, a fact, placed after the earlier stages' entries (invariant 2).
 - **Agreed with the agent loop (2026-10-26):**
   - the diff is the patch's `:changed` paths with their values after the producer's transaction, with no second differ;
@@ -160,6 +161,6 @@ redefined: seon.render.ui/top-bar docstring changed · contract [:=> [:cat :any]
 8. **Slice 5, agent view:** every other page off the walk.
 
 ## 7. Open, for root
-- **(a) Byte stability across processes.** The owner asked for the request to be byte-stable from the db's t. Within a session it is, by construction, except at the cut's jumps. Across a resume or a new generation, today's code renders, and drift is detected by digest and shown, not prevented. Loading old code cannot make it stable (§1). The owner should know this is the honest form of the guarantee.
-- **(b)** Whether a red verdict wakes a parked session (§5). Under this revision only entries wake, so a verdict does not.
+- **(a) Byte stability across processes** (approved: drift detected and shown, each turn's input digests naming its cause). The owner asked for the request to be byte-stable from the db's t. Within a session it is, by construction, except at the cut's jumps. Across a resume or a new generation, today's code renders, and drift is detected by digest and shown, not prevented. Loading old code cannot make it stable (§1). The owner should know this is the honest form of the guarantee.
+- **(b)** Ruled (root, 2026-10-26): a red verdict that sends the task back is a `:verdict` entry and wakes; a green one ends the run and wakes nothing.
 - **(c)** The dropped `:contract`/`:warnings` (§2), filed as a task.
