@@ -254,9 +254,9 @@
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-change
      :n "evals in the session's record"
-     :work "the plan's datoms set on the task (two datoms, one held entity); the story and related derived again for the session's one run (run-state over the task: its plan's references, its proofs; related answers none without vectors); nothing per eval"
+     :work "the plan's datoms set on the task (two datoms, one held entity); the session's newest run found (its runs ordered by first transaction, before and after); the story and related derived again for that one run (run-state over the task: its plan's references, its proofs; related answers none without vectors); nothing per eval"
      :growth :constant
-     :fixed {:calls 39}
+     :fixed {:calls 44}
      :sizes [100 1000 3000]}))
 
 (declare steps)

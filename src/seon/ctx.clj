@@ -289,15 +289,19 @@
   datom, then the live nodes' members' own (one run's, as their computation costs)."
   {:malli/schema [:=> [:cat :map :map :seon.host/db [:sequential :any]] :map]}
   [c0 c db datoms]
-  (let [was (set (live c0)) now (live c)
-        read? (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? read-nss (namespace a)))) datoms)
-        ;; an earlier stage's run: its members gone
-        c (reduce (fn [c p] (let [m (get-in (:tree c) p) ks (filter #(contains? m %) (map first (get derived (schema-at c p))))]
-                              (if (and m (seq ks) (not (some #{p} now)))
-                                (-> c (assoc-in (into [:tree] p) (apply dissoc m ks)) (update :changed into (map #(conj p %) ks)))
-                                c)))
-                  c was)]
-    (reduce (fn [c p] (if (or read? (not (contains? was p))) (derive-at c db p) c)) c now)))
+  (let [read? (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? read-nss (namespace a)))) datoms)
+        ;; the newest run moves only when a run joins or leaves
+        runs? (some #(and (= 2 (count %)) (= :runs (first %))) (:changed c))]
+    (if-not (or read? runs?)
+      c
+      (let [was (set (live c0)) now (live c)
+            ;; an earlier stage's run: its members gone
+            c (reduce (fn [c p] (let [m (get-in (:tree c) p) ks (filter #(contains? m %) (map first (get derived (schema-at c p))))]
+                                  (if (and m (seq ks) (not (some #{p} now)))
+                                    (-> c (assoc-in (into [:tree] p) (apply dissoc m ks)) (update :changed into (map #(conj p %) ks)))
+                                    c)))
+                      c was)]
+        (reduce (fn [c p] (if (or read? (not (contains? was p))) (derive-at c db p) c)) c now)))))
 
 (defn patch
   "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied on
