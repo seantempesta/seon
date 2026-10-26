@@ -17,7 +17,20 @@
  :seon.cost/dim [:enum :ticks :ns :bytes :calls]
  ;; one unit operation of the unit table (seon.cost/units): its measured cost on this runtime
  :seon.cost/unit [:map {:closed true} [:ticks {:optional true} [:double {:min 0.0}]] [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]
- :seon.cost/estimate [:map {:closed true}
+ ;; an estimate: sized (stated per unit of W(n), measured at sizes of a built input), or
+ ;; generated (the function's contract's bound, on cases drawn from a generator)
+ :seon.cost/estimate [:or :seon.cost/sized :seon.cost/generated]
+ :seon.cost/generated [:map {:closed true}
+                       ;; the function measured: its contract carries :seon.cost/bound (seon.cost/bound)
+                       [:of :qualified-symbol]
+                       [:n :string]
+                       [:work :string]
+                       ;; how many cases, and the var of a test.check generator of argument vectors
+                       ;; (none: the contract's input, by malli's generator)
+                       [:cases pos-int?]
+                       [:gen {:optional true} :qualified-symbol]
+                       [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
+ :seon.cost/sized [:map {:closed true}
                       ;; the function measured, and the function of n answering its argument vector
                       [:of :qualified-symbol]
                       [:input :qualified-symbol]
@@ -37,7 +50,8 @@
                       ;; the largest size measured when it was filed; red again past ratchet x that
                       [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
  ;; one size measured: n, what it cost, what the estimate allows there
- :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims]]
+ ;; (a generated case: n its place, :args the arguments that reproduce it)
+ :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector :any]]]
  :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
  ;; how a measured dimension grew over the sizes, against what the estimate's growth allows
  :seon.cost/fit [:map {:closed true} [:dim :seon.cost/dim] [:exponent :double] [:allowed :double]]

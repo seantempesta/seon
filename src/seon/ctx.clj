@@ -568,6 +568,37 @@
 (defn- tree-of "A record's map ({:tree t}), or the map itself." {:malli/schema [:=> [:cat :map] :map]}
   [c] (if (contains? c :tree) (:tree c) c))
 
+(defn- walk-of
+  "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :keys, the keys
+  of both sides of each entity or collection pair that is not the same object; :eq, the elements
+  compared by = where neither is walked into; :changes, what it answers."
+  {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
+  [a b]
+  (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
+        size (fn size [x] (cond (map? x) (reduce-kv (fn [n k v] (+ n 1 (size k) (size v))) 0 x)
+                                (coll? x) (reduce (fn [n v] (+ n 1 (size v))) 0 x)
+                                :else 1))
+        go (fn go [acc a b]
+             (cond (identical? a b) acc
+                   (or (nil? a) (nil? b)) (update acc :changes inc)
+                   (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
+                   (reduce (fn [acc k] (go acc (get a k) (get b k))) (update acc :keys + (count a) (count b)) (distinct (concat (keys a) (keys b))))
+                   :else (cond-> (update acc :eq + (min (size a) (size b))) (not= a b) (update :changes inc))))]
+    (go {:keys 0 :eq 0 :changes 0} a b)))
+
+(defn- changes-bound
+  "What one call of changes may cost on c0 and c1: its fixed part, and each step of its walk
+  (walk-of) at that step's cost, each measured once on a case that isolates it (docs/cost.md#a-bound-in-the-contract): a key 927 ticks and 2,980 B (sorted gets through
+  the members' comparator, the members? scan, distinct over concat), an element compared 1 tick, a
+  change 3,788 ticks and 30.8 KB (its tuple, and its path printed for the sort). :out, how many changes."
+  {:malli/schema [:=> [:cat :map :map] [:map [:ticks number?] [:bytes number?] [:out [:map [:changes nat-int?]]]]]}
+  [c0 c1]
+  (let [{:keys [keys eq changes]} (walk-of (tree-of c0) (tree-of c1))]
+    {:ticks (+ 148.0 (* 927.0 keys) (* 1.0 eq) (* 3788.0 changes))
+     :bytes (+ 1008.0 (* 2980.0 keys) (* 30810.0 changes))
+     :out {:changes changes}}))
+
 (defn changes
   "What changed from record (or map) c0 to c1, as data in the record's own shape: [[op path value]
   …], op :add (value the new one), :remove (value nil) or :replace (value the new one), in the
@@ -578,7 +609,8 @@
   every subtree it did not reach the same object, so the walk costs what changed, never the
   record. The environment (:t :branch :commit) is the record's basis, not its data: left out.
   The one diff of ctx: a turn's (diff), and what a view or the model's request redraws."
-  {:malli/schema [:=> [:cat :map :map] [:vector [:tuple [:enum :add :remove :replace] [:vector :any] :any]]]}
+  {:malli/schema [:=> [:cat :map :map] [:vector [:tuple [:enum :add :remove :replace] [:vector :any] :any]]]
+   :seon.cost/bound (fn [c0 c1] (changes-bound c0 c1))}
   [c0 c1]
   (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
         members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
