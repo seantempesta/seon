@@ -280,7 +280,7 @@
   ;; a path it read, and on no other
   (let [runs (running)
         tree {:db/id 1 :x 0 :task {:db/id 2 :plan "p" :n 1}
-              :evals (into (sorted-map-by @#'seon.ctx/newest-first) {10 {:db/id 10 :v 1} 11 {:db/id 11 :v 2}})}
+              :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}] [11 {:db/id 11 :v 2}]])}
         a (rv/atom tree)
         v #(rv/ref-view a ctx/changes)
         plan (rv/atom 0) n-evals (rv/atom 0) e10 (rv/atom 0)
@@ -316,7 +316,7 @@
 
 (deftest a-view-is-a-map
   ;; the view passes as the value it views wherever a map is read, and the printer takes the real one
-  (let [a (rv/atom {:db/id 1 :task {:db/id 2 :plan "p"} :evals (into (sorted-map-by @#'seon.ctx/newest-first) {10 {:db/id 10 :v 1}})})
+  (let [a (rv/atom {:db/id 1 :task {:db/id 2 :plan "p"} :evals (#'seon.ctx/members-map [[10 {:db/id 10 :v 1}]])})
         v (rv/ref-view a ctx/changes)]
     (is (map? v))
     (is (= @a v) "= from the map's side")

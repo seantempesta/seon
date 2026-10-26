@@ -548,12 +548,12 @@
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
   seon.render/draw), each component's hiccup exactly as its render returned it, by its element id,
-  in order: the same hiccup the person's page shows (seon.repl/page draws it through this
+  in order: the same hiccup the person's page shows (seon.repl/render-ctx-hiccup draws it through this
   process's walk)."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/page-hiccup w "#p-task")))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w "#p-task")))
          (finally (render/dispose-walk! w)))))
 
 (defn- told?

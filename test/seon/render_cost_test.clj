@@ -334,7 +334,7 @@
   [n]
   (let [[st v] (growing-debug n)
         [st _] (#'seon.render.proc/pass-view st v)
-        html (seon.render.proc/page-html st v)]
+        html (seon.render.proc/view-html st v)]
     {:bytes (count html) :nodes (count (re-seq #"<[a-z]" html))}))
 
 (deftest a-transaction-renders-what-it-touched
@@ -358,7 +358,7 @@
   patch does, the eval's component queued by its reaction): what frame! draws."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
   [n]
-  (let [evals (into (sorted-map-by @#'seon.ctx/newest-first)
+  (let [evals (#'seon.ctx/members-map
                     (for [i (range n) :let [id (str "e" i)]]
                       [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
                                  :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))

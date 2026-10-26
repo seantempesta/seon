@@ -99,8 +99,8 @@
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
- ;; an agent's page: its ctx as components (seon.render.ui/agent-page, drawn by the walk), which a branch may override
- :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/agent-page}]
+ ;; an agent's page: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
+ :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page

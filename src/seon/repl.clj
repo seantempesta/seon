@@ -469,13 +469,13 @@
           (finally (swap! agent/state assoc :eval outer))))))
 
 (defn- layout
-  "The layout this branch draws its page with: the var :seon.render/render-ctx declares, an agent's own
+  "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
   when its branch defines one."
   {:malli/schema [:=> [:cat] :any]}
   [] (render/declared-var :seon.render/render-ctx))
 
 (defn- the-walk
-  "This agent's walk of its page (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
+  "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
   branch's db), made once and held in its state: the one cache of its components."
   {:malli/schema [:=> [:cat] :map]}
   []
@@ -496,21 +496,22 @@
        (swap! agent/state assoc :walk-db db)
        w)))
 
-(defn parts
-  "This agent's page as its components' html (root's render proc asks, its {:op :render}:
+(defn render-ctx
+  "This agent's render of ctx as its components' html (root's render proc asks, its {:op :render}:
   seon.render.proc/ask-parts): {:t its ctx's t :units [{:id :container :rev :html}]}, each
   component in the list it is placed in, its revision moved only when its output changed. Records
-  nothing."
+  nothing (the :render op takes the facts main holds of its own entities first)."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:units [:vector :map]]]]}
   []
-  {:t (or (:t @ctx/ctx) 0) :units (render/page-units (framed))})
+  {:t (or (:t @ctx/ctx) 0) :units (render/placed-units (framed))})
 
-(defn page
-  "This agent's page as the model reads it: its task's list, each component's hiccup exactly as its
-  render returned it, by its element id, in the page's order, the same hiccup the page shows
-  (`parts`); the conversation and the tiles left out, which the transcript carries."
+(defn render-ctx-hiccup
+  "This agent's render of ctx as the user sees it: every component of its three lists (its task's,
+  its conversation, each eval its one line until opened, and its tiles), each one's hiccup exactly
+  as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
+  from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (apply array-map (mapcat identity (render/page-hiccup (framed) "#p-task"))))
+  [] (let [w (framed)] (apply array-map (mapcat #(mapcat identity (render/placed-hiccup w %)) ["#p-task" "#c-rows" "#p-tiles"]))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
@@ -533,7 +534,7 @@
      (= :render (:op m))
      ;; the facts main holds of its own entities taken first (an eval a reader opened): what it draws is them
      [st {:sock [{:op :reply :id (:id m) :response (do (when-let [tx (seq (agent/untaken-facts))] (agent/transact! (vec tx)) (agent/commit!))
-                                                       (parts))}]}]
+                                                       (render-ctx))}]}]
      (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began

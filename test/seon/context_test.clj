@@ -364,7 +364,7 @@
         (is (every? #(re-find % (:content (second r0))) [#"\{:page" #"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+" #"1 of 4"]) "the page whole, by component key: the turn's status too")
         (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
-        (is (not (re-find #"task-page-\d+" (:content (peek r1)))) "a component that did not change is not told again")
+        (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
         (is (str/includes? (:content (peek r1)) "2 of 4") "the turn's status, what changed of it")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
@@ -773,7 +773,7 @@
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"status-\d+" (:content (peek r1))) "a turn taken: the status, the turn of how many")
-        (is (not-any? #(re-find % (:content (peek r1))) [#"task-page-\d+" #"related-\d+" #"run-head-\d+"]) "the status alone")
+        (is (not-any? #(re-find % (:content (peek r1))) [#"task-data-\d+" #"related-\d+" #"run-head-\d+"]) "the status alone")
         (is (str/includes? (:content (peek r1)) "2 of 4"))
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
@@ -981,13 +981,13 @@
   "Transaction tx-data on walked's db: ctx patched by its datoms, the walk framed. Answers the units
   whose html changed, by id."
   [[w a cell c] tx-data]
-  (let [u0 (into {} (map (juxt :id :html)) (render/page-units w))
+  (let [u0 (into {} (map (juxt :id :html)) (render/placed-units w))
         r (d/with @cell tx-data)]
     (vreset! cell (:db-after r))
     (vswap! c ctx/patch (:db-after r) (:tx-data r) :b)
     (reset! a (:tree @c))
     (render/frame! w (:tx-data r))
-    (let [u1 (into {} (map (juxt :id :html)) (render/page-units w))]
+    (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
       (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
@@ -997,13 +997,13 @@
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w _ _ _ rid :as walk] (walked db)
         cited (str "cited-" rid "-demo_2Fg")
-        html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/page-units w)))]
+        html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/placed-units w)))]
     (is (some? (html cited)) "the cited var, a component of its own")
     (is (not (str/includes? (html cited) ":redefined")))
     (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
       (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
       (is (some #{cited} changed) "the edit's page diff holds that var's component")
-      (is (not-any? #(str/starts-with? % "task-page-") changed) "and not the task's, which cites it"))
+      (is (not-any? #(str/starts-with? % "task-data-") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
 (deftest the-task-draws-what-it-needs
@@ -1014,9 +1014,9 @@
         db (d/db-with db [{:db/id "t" :form/id "demo-test/g-test" :form/src "(deftest g-test (is (= :one (g))))"}
                           {:var/name 'demo-test/g-test :var/form "t"} [:db/add te :seon.task/proofs 'demo-test/g-test]])
         [w _ _ _ rid] (walked db)
-        units (render/page-units w)
+        units (render/placed-units w)
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
-        task (html "task-page-")]
+        task (html "task-data-")]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
     (is (str/includes? task "(deftest g-test (is (= :one (g))))") "D1: the proof written, its source")
     (is (str/includes? (html (str "cited-" rid "-demo_2Fg")) "(defn g [])") "D2: the cited var's source, its own component")
@@ -1029,8 +1029,8 @@
   (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
         [w :as walk] (walked db)
         ran #(do (vreset! (:ledger w) {}) (step! walk %) (into #{} (for [[f c] (render/ledger w) :when (or (:miss c) (:same c))] (name f))))]
-    (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task-page")) "an agent written: nothing the task's data reads")
-    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task-page") "the plan rewritten: the task's data runs again")
+    (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task-data")) "an agent written: nothing the task's data reads")
+    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task-data") "the plan rewritten: the task's data runs again")
     (render/dispose-walk! w)))
 
 (deftest a-vars-arglists-are-its-recorded-sources

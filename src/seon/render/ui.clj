@@ -654,7 +654,7 @@
   environment on a line, then a row per key, each value by the render its key's schema declares
   (render/html with :schema the key), else the one printer's structure. Drawn where its renders
   are: in the agent, under its branch's schemas, so a render the branch defines draws its key
-  (seon.repl/parts); anywhere else, by main's. Beside each attribute, who made it as of t
+  (seon.repl/render-ctx); anywhere else, by main's. Beside each attribute, who made it as of t
   (seon.ctx/made-by): the eval whose code wrote it, else the branch it came from when not this one,
   and a catch-up's merge from main."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.ctx/ctx] :any]}
@@ -890,7 +890,7 @@
                                    {:id (tile-id t) :comp [(:seon.render/db t 0) (:seon.render/eid t) :tile] :container "#p-tiles"}
                                    {:id (tile-id t) :input t :schema :seon.render/page-tile :container "#p-tiles"}))))}))
 
-;;; --- an agent's page: components over its ctx (docs/render.md#components) ----------------------
+;;; --- render-ctx: an agent's ctx as components (docs/render.md#components) ----------------------
 
 (defn- relevant
   "Entity m as its schema s shows it: its declared relevant keys (:seon.render/keys), else every
@@ -907,7 +907,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe [:tuple :int :map]]]}
   [c] (when-let [rs (:runs c)] (when-let [[rid run] (first rs)] [rid run])))
 
-(defn task-page
+(defn task-data
   "The task its run works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its plan as prose, then what to prove,
   each written proof with its source from ctx, the sections cited with their text and the similar
@@ -1039,10 +1039,10 @@
   [:section {:class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
    (render/html {} (ratom/realize (get-in c [:evals eid :seon.eval/record :response :value])))])
 
-(defn agent-page
-  "An agent's page (the declared html render of :seon.render/render-ctx, which an agent overrides
-  on its branch like any render): its ctx, read through the view, as components placed in the
-  page's three lists, each keyed by what it shows (an eid, a var, a key). The task's list (p-task):
+(defn render-ctx
+  "The render of an agent's ctx, its layout (the declared html render of :seon.render/render-ctx,
+  which an agent overrides on its branch like any render): its ctx, read through the view, as components placed in the
+  render's three lists, each keyed by what it shows (an eid, a var, a key). The task's list (p-task):
   the newest run's task, each var its plan cites, what is related, what its newest turn observed,
   the run, then each key the agent added to its ctx. The conversation (c-rows): its evals, the run's
   turns and its messages, in the order they were written (eids are issued in that order). The
@@ -1062,9 +1062,9 @@
                                        (map #(born :seon.message/id %) (keys (:messages run))))))
         ev? (set (keys evals))
         tu? (set (keys (:turns run)))]
-    [:div {:id "agent-page"}
+    [:div {:id "render-ctx"}
      [:div {:id "p-task"}
-      (when task (list [#'task-page {} rid]
+      (when task (list [#'task-data {} rid]
                        ;; each var the plan cites beside its proofs (the proofs are the task's data)
                        (let [proved (set (map :var/name (vals (:proved task))))]
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} rid n]))
@@ -1078,8 +1078,8 @@
       (for [[id e] evals :let [v (get-in e [:seon.eval/record :response :value])] :when (and (some? v) (render/render-of (ratom/realize v) nil))]
         [#'eval-tile {} id])]]))
 
-(defn agent-chrome
-  "Agent id's page around what it drew (seon.render/page-units of its walk; for an agent with no
+(defn render-ctx-chrome
+  "Agent id's render of ctx, in root's chrome, as it drew it (seon.render/placed-units of its walk; for an agent with no
   process, root drew it from its branch: caption): the sidebar, root's agents (sides, each a
   component read on main: page chrome, never the agent's); its head; its task's list, its
   conversation and its tiles, each the agent's components in the order it placed them; its input.

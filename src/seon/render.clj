@@ -146,7 +146,7 @@
       own
       ((or (render-of v (:schema opts)) print-html) opts v))))
 
-;;; --- the walk: a page of components (docs/render.md#components) -------------------------------
+;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
 (defn- opts-form
   "The opts schema form of render var v's contract (its first argument), or nil."
@@ -193,7 +193,7 @@
          (for [c (rest k)] (str "-" (id-safe (if (keyword? c) (str (namespace c) (when (namespace c) "/") (name c)) (str c)))))))
 
 (defn walker
-  "A page's walk: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
+  "A walk of a render of ctx: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
   one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
   root call. Holds, in this process, the one cache: each component's reaction, args, output and
   db reads ({key entry}), its render queue (the keys a change reached), mount counter and ledger
@@ -267,7 +267,7 @@
         (vswap! (:queue w) disj k)
         (doseq [c (:children prev) :when (not (some #{c} children))] (unmount! w c))
         (led! w f (if same? :same :miss) nil bytes)
-        ;; merged: its written html (page-units) stays while its revision does
+        ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
                                     :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
                                     :reads (some-> @reads seq d/reads-index)})
@@ -340,8 +340,8 @@
   {:malli/schema [:=> [:cat :map [:vector :any]] :int]}
   [w k] (let [c (get @(:cache w) k)] (hash (into [(:rev c)] (map #(tree-rev w %)) (:children c)))))
 
-(defn page-units
-  "Walk w's page as the units root's render proc lays out (seon.render.proc's agent page): each
+(defn placed-units
+  "Walk w's render as the units root's render proc lays out (seon.render.proc/agent-view): each
   component placed directly in a container of the root's output (an element with an id: its list),
   in order, {:id :container :rev :html}: its element id, its container's selector, its revision
   with its children's (moved only when its output, or one below it, changed) and its html (seon.web.html, its children's resolved)."
@@ -356,13 +356,13 @@
                           (:out root))
     (vec (for [[sel k] @found :let [c (get @(:cache w) k)]]
            (let [r (tree-rev w k)
-                 ;; its html written once a revision (a page of 15 units re-written each frame cost
+                 ;; its html written once a revision (a render of 15 units re-written each frame cost
                  ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
                  html (if (= r (:unit-rev c)) (:unit-html c)
                           (let [h (h/html (resolved w k))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
              {:id (:id c) :container sel :rev r :html html})))))
 
-(defn page-hiccup
+(defn placed-hiccup
   "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as
   [[id hiccup]]: each one's output with its children's resolved, exactly as its render returned it
   (a call of the printer kept as the call: the model reads the data)."
@@ -380,7 +380,7 @@
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
   diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
-  (page-units, page-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
+  (placed-units, placed-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
   model's page at a commit."
   {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]}
   [t changes db root-var]

@@ -264,7 +264,7 @@
   [st id] (let [a (when id (get-in st [:view :agents id]))] (boolean (and a (not (gone (:status a)))))))
 
 (defn- ask-parts
-  "Ask each live agent a watched view shows for its page's parts ({:op :render}, seon.repl/parts)
+  "Ask each live agent a watched view shows for its page's parts ({:op :render}, seon.repl/render-ctx)
   when its branch moved since it was last asked (that view's branch read's t), one ask in flight an
   agent, held by its id, so every view of it shows one answer: the agent draws its own page, by its
   own renders."
@@ -278,13 +278,13 @@
                 st)))
           st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))))
 
-(defn- agent-page
+(defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
-  them (ask-parts, seon.repl/parts: the units of its walk), else, with no process to ask or none
+  them (ask-parts, seon.repl/render-ctx: the units of its walk), else, with no process to ask or none
   that answered, as root draws them from its branch (seon.ctx/build, drawn once by the same walk
   and layout: seon.render/draw) with main's renders, the page saying so. Everything the page shows
   of the agent is its ctx: its run's status and verdict reach its branch by take!, never read here
-  on main. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/agent-chrome)."
+  on main. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/render-ctx-chrome)."
   {:malli/schema [:=> [:cat :map :any :seon.host/db pos-int?] :map]}
   [st view db eid]
   (let [[e id] (agent-of db view)
@@ -302,14 +302,14 @@
                                   t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                   w (binding [datahike.index.interface/*reads* nil]
                                       (render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
-                              (try (render/page-units w) (finally (render/dispose-walk! w)))))
+                              (try (render/placed-units w) (finally (render/dispose-walk! w)))))
         units (if own?
                 (:units held)
                 (cond bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         root (:db/id (d/entity db [:seon.root/id :root]))]
-    (ui/agent-chrome {:units (or units []) :view (ui/view-param view) :head [0 eid]
+    (ui/render-ctx-chrome {:units (or units []) :view (ui/view-param view) :head [0 eid]
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when-not own?
                                  (str "drawn by root from its branch with main's renders: "
@@ -339,7 +339,7 @@
         eid (when db (location db view))]
     (cond
      (and eid (vector? view)) (debug-value st view)
-     (and eid (agent-of db view)) (agent-page st view db eid)
+     (and eid (agent-of db view)) (agent-view st view db eid)
      (and db (nil? eid))
      (contract/error :seon.render/no-location #'seon.render.proc/page-value
                      (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (task/boot-of db)) (ui/kname view))
@@ -593,7 +593,7 @@
                                          :reads (:reads held) :extra (extra-of st view-id)}))
          nil]))))
 
-(defn page-html
+(defn view-html
   "The composed document of view-id from its retained fragments (renders nothing)."
   {:malli/schema [:=> [:cat :map :any] [:maybe :string]]}
   [st view-id]
@@ -654,8 +654,8 @@
       (when (not= idx (:index st)) (step/out! o :to-web {:op :index :agents idx}))
       ;; a page or keyframe is answered once its view is whole (ready?); one asked before main or its
       ;; branch was read waits for the pass that read's answer brings
-      (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (page-html st v)}))
-      (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (page-html st v)}))
+      (doseq [[k v] (:waiting st) :when (ready? st v)] (step/out! o :to-web {:op :page :k k :view v :html (view-html st v)}))
+      (doseq [v (:kf-wanted st) :when (ready? st v)] (step/out! o :to-web {:op :keyframe :view v :html (view-html st v)}))
       (-> st
           (assoc :index idx
                     :waiting (into {} (remove (fn [[_ v]] (ready? st v))) (:waiting st))
@@ -850,10 +850,10 @@
                           ;; a UI call root refused before it became a request: answered as root's are
                           :refused (web-answered st o (:tag m) (:r m))
                           :page (if (and (get-in st [:views (:view m)]) (contains? (:watch st) (:view m)))
-                                  (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (page-html st (:view m))}) st)
+                                  (do (step/out! o :to-web {:op :page :k (:k m) :view (:view m) :html (view-html st (:view m))}) st)
                                   (ask-state (assoc-in st [:waiting (:k m)] (:view m)) o))
                           :keyframe (if (ready? st (:view m))
-                                      (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
+                                      (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
                           :context (do (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered

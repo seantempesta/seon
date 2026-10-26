@@ -544,10 +544,10 @@
           seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx))))
 
 (defn- drawn-parts
-  "a3's page's units as its process draws them (seon.repl/parts), drawn here from branch: what the
+  "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  (let [w (a3-walk branch)] (try {:units (r/page-units w)} (finally (r/dispose-walk! w)))))
+  (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
 
 (defn- conversation-rows
   "The ids of view's conversation components st holds."
@@ -592,7 +592,7 @@
           (is (= :seon.render/no-location (:seon.error/type e)) "and its id in this boot names no entity: the page says so, never nothing")
           (is (str/includes? (:seon.error/message e) "no agent a3 in root's boot b2"))
           (testing "the pass answers it as that page"
-            (is (str/includes? (p/page-html (first (#'p/pass-view st2 :a3)) :a3) "no agent a3 in root's boot b2"))))))))
+            (is (str/includes? (p/view-html (first (#'p/pass-view st2 :a3)) :a3) "no agent a3 in root's boot b2"))))))))
 
 (deftest a-run-is-part-of-its-agents-page
   (let [[main branch eid] (paged-dbs)
@@ -716,8 +716,8 @@
         st2 (#'p/answered st1 o [:branch :task-demo-f] err)
         branch' (d/db-with branch [{:seon.turn/id "demo/f#1/0" :seon.turn/tokens 4321}])
         st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
-    (is (not (str/includes? (p/page-html st1 :a3) "4,321 tokens")))
-    (is (str/includes? (p/page-html st3 :a3) "4,321 tokens") "the turn's tokens, written while its branch was unread")))
+    (is (not (str/includes? (p/view-html st1 :a3) "4,321 tokens")))
+    (is (str/includes? (p/view-html st3 :a3) "4,321 tokens") "the turn's tokens, written while its branch was unread")))
 
 (deftest a-component-on-two-pages-renders-once
   ;; /agent/a3 and /walk/<its eid> are two pages showing the same rows: each row renders once, for both
@@ -738,7 +738,7 @@
   (let [[main branch eid] (paged-dbs)
         st (comp-state main branch eid)
         [st1 _] (#'p/pass-view st :a3)
-        html (p/page-html st1 :a3)
+        html (p/view-html st1 :a3)
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
     (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
@@ -756,8 +756,8 @@
         [st1 _] (#'p/pass-view st :a3)
         side (filter #(= "#c-side" (:container %)) (vals (get-in st1 [:views :a3 :units])))]
     (is (= [[:main root :side] [:main eid :side]] (sort-by #(not= root (second %)) (map #(get-in % [:input :comp]) side))) "root, and its one agent, a3")
-    (is (str/includes? (p/page-html st1 :a3) "href=\"/\"") "root's line links to its page")
-    (is (str/includes? (p/page-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")
+    (is (str/includes? (p/view-html st1 :a3) "href=\"/\"") "root's line links to its page")
+    (is (str/includes? (p/view-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [r (d/with main (seon.task/agent-tx "b1" :a4 {:status :busy}))
             ds (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r))
@@ -845,7 +845,7 @@
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
                   st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
-              (is (not (str/includes? (p/page-html st3 :a3) "has not answered yet")) "its own parts replace them")
+              (is (not (str/includes? (p/view-html st3 :a3) "has not answered yet")) "its own parts replace them")
               (is (some #(= "p-caption" (first %)) (mapcat :frags (filter #(= :patch (:op %)) (:to-web @o))))
                   "and the open tab is sent the line that said whose drawing it was"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
@@ -883,7 +883,7 @@
             body #(seon.model/request-body provider {:messages % :task "demo/f" :turn 1})
             messages (fn [parts] (vec (mapcat second parts)))
             [st' _] (#'p/pass-view st [:debug :a1])
-            html (p/page-html st' [:debug :a1])]
+            html (p/view-html st' [:debug :a1])]
         (is (= ["d-" "d-"] (mapv #(subs (:id %) 0 2) units)) "one row a model turn")
         (is (= [1 0] (mapv #(get-in % [:input :turn]) units)) "newest first")
         (is (= [:eval :page] (mapv ffirst (get-in units [0 :input :added]))) "turn 1 adds its call's eval and what changed of its page")
@@ -903,7 +903,7 @@
                               [{:db/id e0 :seon.turn/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                             :seon.error/message "no model provider"}}])
                 [st'' _] (#'p/pass-view (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) [:debug :a1])
-                html (p/page-html st'' [:debug :a1])]
+                html (p/view-html st'' [:debug :a1])]
             (is (str/includes? html "no model provider") "its error, by the error's render")
             (is (str/includes? html "the page whole") "beside what it sent")))))))
 
@@ -1102,21 +1102,21 @@
         rid (seon.db/eid branch :seon.run/id "demo/f#1")
         draw #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                (try (r/page-units w) (finally (r/dispose-walk! w))))
+                (try (r/placed-units w) (finally (r/dispose-walk! w))))
         units (draw)
         task (filterv #(= "#p-task" (:container %)) units)
         conv (filterv #(= "#c-rows" (:container %)) units)
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-page-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) "ctx-keys"] (mapv :id task))
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) "ctx-keys"] (mapv :id task))
         "the task, what is related, what its newest turn observed, the run, then the keys the agent added: each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
       (is (str/includes? h ":fail"))
       (is (str/includes? h "2 of 8") "the turn of how many"))
-    (let [h (:html (unit-of task "task-page-"))]
-      (is (str/includes? h "demo/f") "drawn by task-page")
+    (let [h (:html (unit-of task "task-data-"))]
+      (is (str/includes? h "demo/f") "drawn by task-data")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
     (is (str/includes? (:html (unit-of task "related-")) "nothing related yet") "related, drawn from the db: none yet here")
     (is (= [(str "message-item-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
@@ -1137,7 +1137,7 @@
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
                                                      :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
         w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx)))
-        status (try (unit-of (r/page-units w) "status-") (finally (r/dispose-walk! w)))
+        status (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html status)]
     (is (some? status) "the status, from the outside read")
     (is (str/includes? h ":pass") (str "what it observed: " h))
@@ -1152,7 +1152,7 @@
         k (seon.task/agent-key "b1" :a3)
         task-hiccup #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                                      (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                       (try (second (first (r/page-hiccup w "#p-task"))) (finally (r/dispose-walk! w))))
+                       (try (second (first (r/placed-hiccup w "#p-task"))) (finally (r/dispose-walk! w))))
         call-of (fn [h] (some #(when (and (vector? %) (= #'r/html (first %))) %) (tree-seq coll? seq h)))
         h0 (task-hiccup)
         call (call-of h0)]
@@ -1198,7 +1198,7 @@
   ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)
   ;; changing moves the unit's revision with it, so the render proc sends the unit
   (let [[w a _] (live-walk)
-        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (r/page-units w))]
+        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (r/placed-units w))]
     (swap! a assoc :lab.x/k "one")
     (r/frame! w nil)
     (let [u0 (unit)]
@@ -1249,7 +1249,7 @@
         k (seon.task/agent-key "b1" :a3)
         units #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
                                (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                 (try (r/page-units w) (finally (r/dispose-walk! w))))
+                 (try (r/placed-units w) (finally (r/dispose-walk! w))))
         e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
         closed (:html (some #(when (= e1 (:id %)) %) (units branch)))
         opened (:html (some #(when (= e1 (:id %)) %) (units (d/db-with branch [{:seon.eval/id "e1" :seon.eval/opened true}]))))]
@@ -1265,7 +1265,7 @@
   ;; task's and /walk/<eid> still lay out the walk until slice 5 moves them. The two producers
   ;; coexist only there, named here, so the list can only shrink: a new caller is red
   (let [forms (seon.program/live-forms (src-program))]
-    (is (= '[seon.render/walk seon.render.proc/agent-page seon.render.proc/page-value]
+    (is (= '[seon.render/walk seon.render.proc/agent-view seon.render.proc/page-value]
            (vec (sites forms #{'seon.render/walk} (constantly true))))
         "the walk's callers: itself (a unit's members), root's sidebar for an agent's page, and every page that is not an agent's")))
 
@@ -1283,12 +1283,12 @@
     (testing "its process ended: root's view says so, its parts are dropped, and the page says it is not running"
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
-        (is (str/includes? (p/page-html st2 :a3) "its process is not running"))
-        (is (str/includes? (p/page-html st2 :a3) "(f 2)") "its parts, drawn by root from its branch")))
+        (is (str/includes? (p/view-html st2 :a3) "its process is not running"))
+        (is (str/includes? (p/view-html st2 :a3) "(f 2)") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
-        (is (str/includes? (p/page-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
+        (is (str/includes? (p/view-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
 
 (deftest an-agents-run-tile-is-its-ctxs
   ;; the owner, 2026-10-26: "any changes you want updated in the agents context and html should go
