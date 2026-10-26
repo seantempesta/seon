@@ -50,6 +50,14 @@ long e13_kq_watch(int kq, int pid) {
   if (kevent(kq, &ev, 1, NULL, 0, NULL) == 0) return 0;
   return errno == ESRCH ? -1 : -2; // -1: already gone, the caller waitpids it; -2: an error
 }
+// fd watched for input on kq (EVFILT_READ, level-triggered), so a wait on kq's own descriptor (a
+// fiber's park in the io poller, seon.agent/read-to-exit) wakes for it as for a watched child's exit;
+// e13_wait then answers which, at once. 0, or -2 on an error.
+long e13_kq_watch_fd(int kq, int fd) {
+  struct kevent ev;
+  EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+  return kevent(kq, &ev, 1, NULL, 0, NULL) == 0 ? 0 : -2;
+}
 long e13_wait(int kq, int fd) {
   struct kevent ch, ev;
   EV_SET(&ch, fd, EVFILT_READ, EV_ADD, 0, 0, NULL); // level-triggered: unread input fires again
