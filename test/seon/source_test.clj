@@ -97,6 +97,16 @@
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
     [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
 
+(deftest a-change-to-a-namespace-with-no-file-is-named-never-dropped
+  ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
+  ;; so a merge of source with nowhere to write it records that (seon.reconcile :octopus-merged)
+  (let [main (main-with-file)
+        [main2 ours] (merged main 'app.pt-src "(defn twice [x] (* 2 x))")
+        [main3 ours3] (merged main 'app.no-file "(defn probe [] 1)")]
+    (is (= {} (source/unfiled-forms main2 ours)) "a filed namespace's change has its file")
+    (is (= [] (source/changed-files main3 ours3)))
+    (is (= {'app.no-file [[:var 'app.no-file/probe]]} (source/unfiled-forms main3 ours3)))))
+
 (deftest a-merged-change-rewrites-only-its-form
   (let [main (main-with-file)]
     (is (= {"src/app/pt_src.clj" pt-text} (source/files main ["src/app/pt_src.clj"])))
@@ -258,6 +268,10 @@
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
         red (volatile! false)
+        ;; bin/root start truncates runs/root.log: each boot's log is copied to its own file
+        ;; (runs/boot-N.log) before the next boot, so a red keeps every boot's
+        boots (volatile! 0)
+        keep-boot! (fn [] (sh/sh "cp" (str dir "/runs/root.log") (str dir "/runs/boot-" (vswap! boots inc) ".log")))
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
                                                        "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
@@ -277,6 +291,7 @@
                  "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out]]) @(:conn sys))))"))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
+        (keep-boot!)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
         ;; does): main still holds the old one, which load-all! runs at boot (and another test
         ;; namespace's require marks it loaded), and the import must still apply the new
@@ -291,6 +306,7 @@
           (is (= [2 [1 2]] (ask "[(seon.generation/generation) (seon.generation/generations)]"))
               "the binary older than both merges runs both, caught up at boot on the same main"))
         (let [g (ask "(my.root/build! sys)")
+              _ (keep-boot!)
               nxt (reset! root (ts/next-root! @root))]
           (is (nil? (:error g)) (str "the generation built: " (pr-str g)))
           (is (some? (:port nxt)) (str "the next generation started: " (slurp (str dir "/runs/root.log"))))
@@ -298,12 +314,14 @@
               "the new generation runs both, resumed on main holding its generation")))
       (finally
         (ts/stop-root! @root)
-        ;; a red keeps its root's log (target/restart-test-<n>.log, named in the failure), the evidence a
-        ;; deleted scratch dir took with it
+        (keep-boot!)
+        ;; a red keeps every boot's log (target/restart-test-<uuid>/boot-N.log, named in the
+        ;; failure), the evidence a deleted scratch dir took with it
         (when @red
-          (let [kept (str here "/target/restart-test-" (random-uuid) ".log")]
-            (sh/sh "cp" (str dir "/runs/root.log") kept)
-            (println "the restart test's root.log kept at" kept)))
+          (let [kept (str here "/target/restart-test-" (random-uuid))]
+            (.mkdirs (java.io.File. kept))
+            (doseq [n (range 1 (inc @boots))] (sh/sh "cp" (str dir "/runs/boot-" n ".log") kept))
+            (println "the restart test's boot logs kept in" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))

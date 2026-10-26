@@ -525,6 +525,19 @@
                              :when p]
                          p)))))
 
+(defn unfiled-forms
+  "The definitions of the forms a merge's changes (seon.merge/three-way's :ours) add, change
+  or remove whose namespace has no :ns/file on db (after them), by namespace: source a
+  write-back cannot put in any file (changed-files leaves them out)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map-of :symbol [:vector :any]]]}
+  [db changes]
+  (reduce (fn [m f] (update m (:ns f) (fnil into []) (:defines f)))
+          (sorted-map)
+          (for [[[k] [a b]] changes
+                :let [f (or b a)]
+                :when (and (= :form k) (nil? (:ns/file (d/entity db [:ns/name (:ns f)]))))]
+            f)))
+
 (defn commit-message
   "The merges commit's message, from the facts of what merged: each member's task and
   run."

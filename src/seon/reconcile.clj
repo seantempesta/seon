@@ -936,7 +936,13 @@
                            (vec (mapcat (fn [{:keys [run]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
-                                              (:merged? r) (cas-tx run :ended :merged {:seon.run/merged-t (long (:tx r))})
+                                              (:merged? r) (cas-tx run :ended :merged
+                                                                    (cond-> {:seon.run/merged-t (long (:tx r))}
+                                                                      ;; source it changed that names no file: no write-back records it, so this does
+                                                                      (and (:source st) (empty? (:files r)) (seq (:unfiled r)))
+                                                                      (assoc :seon.run/commit-error
+                                                                             (str "merged at t " (:tx r) " but its changed forms name no source file to write back: "
+                                                                                  (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (pr-str ds))))))))
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r)
                                                                                                                           :seon.run/error r})
                                               :else (conj (hold-tx (task/run (:db st) run) problem)

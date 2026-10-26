@@ -684,6 +684,25 @@
       (is (= :closed (:seon.run/status (task/run db' "demo/add-merge#1"))))
       (is (= reason (:seon.run/error (task/run db' "demo/add-merge#1"))) "the writer's reason, on the run"))))
 
+(deftest a-merge-of-source-with-no-file-records-why-it-wrote-none-back
+  ;; a merged member whose changed forms name no source file: no write-back runs, so its run
+  ;; holds a commit-error naming them, never silence; one that changed no source stays silent
+  (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+        st (assoc st :source {:branch "jolt/seon-merges"})
+        asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
+        answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
+                               tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))]
+                           (task/run (d/db-with db tx) "demo/add-merge#1")))
+        unfiled (answered {:merged? true :tx 9 :keys 2 :files [] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})
+        data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})]
+    (is (some? asked))
+    (is (= :merged (:seon.run/status unfiled)))
+    (is (= "merged at t 9 but its changed forms name no source file to write back: app.no-file [[:var app.no-file/probe]]"
+           (:seon.run/commit-error unfiled)))
+    (is (= :merged (:seon.run/status data)))
+    (is (nil? (:seon.run/commit-error data)) "a change of no source names no file, and says nothing")))
+
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail})))
         [row & more] (get-in (problems/report db') [:classes :failed :rows])]
