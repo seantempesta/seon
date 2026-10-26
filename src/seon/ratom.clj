@@ -5,7 +5,7 @@
   reaction; each deref inside it registers what it read; a change re-runs only the reactions
   that read what changed, and a reaction whose new value is = to its old signals nothing on.
 
-  One change, the owner's (2026-10-26: \"I'd rather infer the cursor than require it\"): the
+  One change, the owner's (\"I'd rather infer the cursor than require it\"; docs/decisions.md): the
   cursor is inferred. A render reads ctx through a tracking view (`view`), a map that delegates
   to the real value and records each path it looks up, as Vue 3's reactive proxy and MobX's
   observable map do. A reset! of the atom behind it dirties a reaction only when a changed path
