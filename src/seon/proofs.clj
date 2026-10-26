@@ -84,7 +84,7 @@
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer."
-  '{"laws" :tree "health" :caused "lmdb-kill" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -96,9 +96,9 @@
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
 
 (def binary-free
-  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files) and lmdb-kill
-  (a binary of its own)."
-  #{"laws" "lmdb-kill"})
+  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
+  and lmdb-sem (each a binary of its own)."
+  #{"laws" "lmdb-kill" "lmdb-sem"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step

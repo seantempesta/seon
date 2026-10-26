@@ -61,7 +61,7 @@ SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
 # NEEDS: does this run use the binary? Yes, unless its plan says none: a selected run whose
-# DIR/steps-binary is there and empty (laws, lmdb-kill: bin/prove's plan writes it) seeds no store,
+# DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-sem: bin/prove's plan writes it) seeds no store,
 # starts no root and wants no build. No steps-binary is unknown, never none: the run seeds and uses
 # the binary (a steps file written by hand ran durable on an empty store: task
 # seon.check/a-steps-run-without-its-plan-seeds)
@@ -164,6 +164,12 @@ u-lmdb-kill() {
   step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
   is-green lmdb-kill && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 }
+# lmdb-sem, below Datahike too, on envs of its own under one directory, deleted when green
+u-lmdb-sem() {
+  echo "== lmdb-sem (two envs whose lock files share a key, a set gone under a holder, 16 processes opening one env: each env's semaphore set is its own)"
+  step lmdb-sem "" "$ROOT/target/lmdb-sem" "$OUT/lmdb-sem"
+  is-green lmdb-sem && rm -rf "$OUT/lmdb-sem"
+}
 u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" run health }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
 u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
@@ -260,7 +266,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill lmdb-sem health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

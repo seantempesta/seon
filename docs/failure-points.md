@@ -198,14 +198,39 @@ robust from `reference-code/lmdb` (stamped with its commit), `bin/env` points `J
 at it, and `bin/check`'s `lmdb-kill` step proves it. Every process on a store must load the
 same build: the lock scheme is part of the lock file's format.
 
-The robust build uses SysV semaphores, which outlive their processes: each store path keeps
-one semaphore set (two semaphores, keyed by the lock file) after its last process exits.
-See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you); one is reused when the
-same store opens again. Every store directory ever opened leaves one set behind (check and
-test stores included); the bound reached first is `sysctl kern.sysv.semmns` (87,381
-semaphores, about 43,690 sets at two a set), and at it a new store's open fails in `semget`.
-LMDB keys the set by `ftok(lock.mdb,'M')`, which keeps only the inode's low 16 bits, so two
-live stores can share a key, and the second one's open resets the first one's writer lock
-(`semctl SETALL`, `mdb.c` around line 6100). Removing a set (`ipcrm -s ID`) while no process has its store open
-is safe; LMDB makes a new one at the next open.
+The robust build uses SysV semaphores, one set per env, from our fork (``jolt/sysv-sem-identity``,
+[forks](forks.md#lmdb)). A set has six semaphores: the reader and writer locks, a count of the
+processes using it (each counted with SEM_UNDO, so the kernel takes back a dead process's count),
+one held while a process takes the set (a joiner waits for none of it and joins no set being
+taken), and two values naming the lock file it belongs to. LMDB finds it from `ftok(lock.mdb,'M')`, which
+keeps only the inode's low 16 bits, so two stores can have one key; an opener takes the first set,
+from its key on, that no process uses, so two stores never share one. Upstream's build shared it:
+one store's first open reset the other's writer lock (two writers at once), and one store's last
+close removed the set the other still used, whose next open failed with `lmdb env_open: Invalid
+argument` (rc 22). The last close also raced a process waiting for the lock file, which then joined
+the removed set (rc 22 again: the deaths of test roots under load, 2026-10-23 and 2026-10-26). The
+last close now marks the lock file's set gone before removing it, and a joiner that finds its set
+gone or not its own makes a new one. `bin/check`'s `lmdb-sem` step (`target/lmdb-sem`,
+`native/lmdb_sem.c`) proves it in four cases: two stores sharing a key (the holder's set stays and
+its writer lock stays held), a set gone under a holder, 16 processes opening one store and adding
+under its writer lock (no open fails, no addition lost), and the undo limit (below). On upstream's
+build the first two are red every run, the third by a count (a few EINVALs in 3,200 opens, not
+every run) and the fourth reaches no limit.
+
+A set outlives its processes only when the last one died without closing (a SIGKILL); a clean last
+close removes it. See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you). A set nobody
+uses is taken by the next opener whose key reaches it, so the left sets stay about a tenth of the
+key space (6,400 measured after 23 days, before the fork); the bound is `sysctl kern.sysv.semmns`
+(87,381 semaphores, 14,563 sets at six a set), and at it an open fails in `semget` (ENOSPC).
+Upstream's two-semaphore sets left before the fork are never taken (not of this layout) and stay
+until removed. Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
+makes a new one at the next open.
+
+Each env a process has open holds one SEM_UNDO entry of the process's `kern.sysv.semume` (10 on
+macOS), and each lock held (a writer's, a reader registering) one more while held, so one process
+has room for eight envs open with a writer and a reader locking at once (measured: nine open and
+written one at a time, the tenth's first write fails).
+Seon's processes have one store open each (13 live roots, agents and test runners, `lsof`,
+2026-10-26). Past the limit the open or the lock fails with `MDB_SEM_UNDO_FULL` (named in its
+message), never EINVAL.
 
