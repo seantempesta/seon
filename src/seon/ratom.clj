@@ -234,8 +234,9 @@
 
 (defn view
   "Map m, the value at path of source src ({:ref r :changes f}: the reference read, and the
-  diff that names what a reset! of it changed, [[op path ...] ...]), as a tracking view."
-  {:malli/schema [:=> [:cat :map :map [:vector :any]] :map]}
+  diff that names what a reset! of it changed, [[op path ...] ...]), as a tracking view; m nil (no
+  value there) a view of nothing, every lookup nil."
+  {:malli/schema [:=> [:cat :map [:maybe :map] [:vector :any]] :map]}
   [src m path] (View. src m path))
 
 (defn sorted-view
@@ -249,7 +250,7 @@
   {:malli/schema [:=> [:cat :seon.host/deref :seon.host/fn] :map]}
   [r changes]
   ;; the value now, not a read: the view's lookups are the reads
-  (let [v (binding [*ratom-context* nil] @r)] (view {:ref r :changes changes} (if (map? v) v {}) [])))
+  (let [v (binding [*ratom-context* nil] @r)] (view {:ref r :changes changes} v [])))
 
 (defn view=
   "Are a and b equal as a render's args: two views of the same source at the same path (Reagent
@@ -267,7 +268,7 @@
   [x]
   (if (view? x)
     (let [src (.-src x) p (.-path x) v (get-in (binding [*ratom-context* nil] @(:ref src)) p)]
-      (if (and (map? v) (sorted? v)) (sorted-view src v p) (view src (or v {}) p)))
+      (if (and (map? v) (sorted? v)) (sorted-view src v p) (view src v p)))
     x))
 
 ;;; --- queueing ------------------------------------------------------------------------------

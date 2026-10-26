@@ -130,6 +130,12 @@
     (when-let [sym (if (symbol? own) own (when (nil? own) (declared (schema-of v hint))))]
       @(requiring-resolve sym))))
 
+(defn declared-var
+  "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws
+  is a component, and its var's contract says what it reads."
+  {:malli/schema [:=> [:cat :qualified-keyword] :any]}
+  [k] (some-> (declared k) requiring-resolve))
+
 (defn html
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-html); a value's own key holding hiccup answers that hiccup."
@@ -150,16 +156,11 @@
     (let [s (:malli/schema (meta v)) arity (if (= :function (first s)) (second s) s)]
       (when (vector? arity) (second (second arity))))))
 
-(defn declares?
-  "Does render var v's opts contract name key k (:seon.ctx/ctx, :seon.db/db)? A render that
-  declares either is a component: the walk keeps it in its cache and fills that key in."
-  {:malli/schema [:=> [:cat :any :qualified-keyword] :boolean]}
-  [v k] (boolean (some #{k} (tree-seq vector? seq (opts-form v)))))
-
-(defn component?
-  "Is call head f a component (a render var declaring :seon.ctx/ctx or :seon.db/db)?"
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [f] (or (declares? f :seon.ctx/ctx) (declares? f :seon.db/db)))
+(defn reads
+  "What render var v's opts contract declares it reads, of :seon.ctx/ctx and :seon.db/db: a render
+  that declares either is a component, kept in the walk's cache, those keys filled in."
+  {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
+  [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db}) (tree-seq vector? seq (opts-form v))))
 
 (defn- child-key
   "A child as its component's key names it: a view by its path, an entity by its id, a name or
@@ -176,13 +177,20 @@
   {:malli/schema [:=> [:cat :any [:sequential :any]] [:vector :any]]}
   [f children] (into [(symbol f)] (map child-key) children))
 
+(defn- id-safe
+  "Text s as part of an element id, one to one: letters, digits, . and - as themselves, every other
+  character _ and its code in hex (a.b/c -> a.b_2Fc, a_b -> a_5Fb)."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \. %) (= \- %)) % (format "_%02X" (int %))) s)))
+
 (defn key-id
-  "Key k as its component's root element id: its render's name and its children's keys, DOM-safe
-  (seon.render.ui/eval-item over eid 1753 -> \"eval-item-1753\")."
+  "Key k as its component's root element id, one to one: its render's name and its children's
+  keys (seon.render.ui/eval-item over eid 1753 -> \"eval-item-1753\"; a var cited,
+  seon.render.ui/cited over run 9 and demo/g -> \"cited-9-demo_2Fg\")."
   {:malli/schema [:=> [:cat [:vector :any]] :string]}
   [k]
-  (apply str (name (first k))
-         (for [c (rest k)] (str "-" (str/replace (if (keyword? c) (str (namespace c) (when (namespace c) "/") (name c)) (str c)) #"[^A-Za-z0-9_-]" "_")))))
+  (apply str (id-safe (name (first k)))
+         (for [c (rest k)] (str "-" (id-safe (if (keyword? c) (str (namespace c) (when (namespace c) "/") (name c)) (str c)))))))
 
 (defn walker
   "A page's walk: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
@@ -225,7 +233,7 @@
   render in its place (docs/failure-points.md: a component's render); every other component draws."
   {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
   [w f opts children env]
-  (let [k (comp-key f children) prev (get @(:cache w) k)]
+  (let [k (comp-key f children) prev (get @(:cache w) k) ks (reads f)]
     (vswap! (:children env) conj k)
     (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
              (every? true? (map ratom/view= children (:args prev)))
@@ -233,9 +241,9 @@
              (not (and (:reads prev) (seq (:datoms env)) (d/reads-touched? (:reads prev) (:datoms env)))))
       (do (led! w f :hit nil nil) [::child k])
       (let [args (mapv ratom/fresh children)
-            db? (declares? f :seon.db/db)
+            db? (contains? ks :seon.db/db)
             o (cond-> opts
-                (declares? f :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
+                (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
                 db? (assoc :seon.db/db ((:db w))))
             order (or (:order prev) (vswap! (:mounts w) inc))
             kids (volatile! [])
@@ -291,7 +299,7 @@
     (and (vector? x) (keyword? (first x)))
     (let [[tag & more] x attrs (when (map? (first more)) (first more)) kids (if attrs (rest more) more)]
       (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids))
-    (and (vector? x) (component? (first x))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
+    (and (vector? x) (seq (reads (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
 
@@ -324,11 +332,17 @@
         (vreset! (:out w) k)
         k))))
 
+(defn- tree-rev
+  "Component k's revision with its children's, below it: what moves when anything it shows changed
+  (a child's own output changes the child's revision, not its parent's)."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :int]}
+  [w k] (let [c (get @(:cache w) k)] (hash (into [(:rev c)] (map #(tree-rev w %)) (:children c)))))
+
 (defn page-units
   "Walk w's page as the units root's render proc lays out (seon.render.proc's agent page): each
   component placed directly in a container of the root's output (an element with an id: its list),
   in order, {:id :container :rev :html}: its element id, its container's selector, its revision
-  (moved only when its output changed) and its html (seon.web.html, its children's resolved)."
+  with its children's (moved only when its output, or one below it, changed) and its html (seon.web.html, its children's resolved)."
   {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:rev :int] [:html :string]]]]}
   [w]
   (let [root (get @(:cache w) @(:out w))
@@ -339,7 +353,7 @@
                             x)
                           (:out root))
     (vec (for [[sel k] @found :let [c (get @(:cache w) k)]]
-           {:id (:id c) :container sel :rev (:rev c) :html (h/html (resolved w k))}))))
+           {:id (:id c) :container sel :rev (tree-rev w k) :html (h/html (resolved w k))}))))
 
 (defn page-hiccup
   "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as

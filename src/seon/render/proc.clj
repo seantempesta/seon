@@ -294,10 +294,15 @@
         bdb (get-in st [:branches view :db])
         ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
         ;; when root reads it (take-read), and the branch's reads are not main's
-        branch-units (fn [] (binding [datahike.index.interface/*reads* nil]
-                              (let [w (render/draw (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)))
-                                                   ctx/changes bdb (requiring-resolve (render/declared :seon.render/render-ctx)))]
-                                (try (render/page-units w) (finally (render/dispose-walk! w))))))
+        ;; the evals a reader opened (main's :seon.agent/opened, read here, so its commit passes the
+        ;; page again): drawn opened, as the agent draws them once it takes the fact
+        opened (set (:seon.agent/opened e))
+        branch-units (fn [] (let [t (binding [datahike.index.interface/*reads* nil]
+                                      (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
+                                  t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
+                                  w (binding [datahike.index.interface/*reads* nil]
+                                      (render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
+                              (try (render/page-units w) (finally (render/dispose-walk! w)))))
         units (if own?
                 (:units held)
                 (cond bdb (branch-units)

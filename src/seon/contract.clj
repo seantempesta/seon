@@ -283,12 +283,14 @@
             :armed))))))
 
 (defn function-var?
-  "Is v a var holding a function that needs a contract: not a macro, a test, or a
-  dynamic setting?"
+  "Is v a var holding a function that needs a contract: not a macro, a test, a dynamic
+  setting, a protocol's method (it dispatches to the types that implement it: :protocol) or a
+  type's positional factory (->T, beside its type T)?"
   {:malli/schema [:=> [:cat :seon.host/var] :boolean]}
   [v]
-  (let [mt (meta v)]
-    (and (bound? v) (fn? @v) (not (:macro mt)) (not (:test mt)) (not (:dynamic mt)))))
+  (let [mt (meta v) n (str (:name mt))]
+    (and (bound? v) (fn? @v) (not (:macro mt)) (not (:test mt)) (not (:dynamic mt)) (not (:protocol mt))
+         (not (and (str/starts-with? n "->") (class? (ns-resolve (:ns mt) (symbol (subs n 2)))))))))
 
 (defn uncontracted
   "The function vars of namespaces nss that declare no contract, as sorted symbols."

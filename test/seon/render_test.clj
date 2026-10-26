@@ -1194,6 +1194,37 @@
     (is (= {} (ran)) "the same value again: nothing runs")
     (r/dispose-walk! w)))
 
+(deftest a-change-below-a-unit-moves-its-revision
+  ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)
+  ;; changing moves the unit's revision with it, so the render proc sends the unit
+  (let [[w a _] (live-walk)
+        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (r/page-units w))]
+    (swap! a assoc :lab.x/k "one")
+    (r/frame! w nil)
+    (let [u0 (unit)]
+      (swap! a assoc :lab.x/k "two")
+      (r/frame! w nil)
+      (let [u1 (unit)]
+        (is (str/includes? (:html u1) "two") "the new value drawn")
+        (is (not= (:rev u0) (:rev u1)) "and the unit's revision moved, its own output unchanged")))
+    (r/dispose-walk! w)))
+
+(deftest a-key-is-its-id-one-to-one
+  ;; an element id names one component: two keys never write one id
+  (is (= "x-a.b_2Fc" (r/key-id ['x 'a.b/c])))
+  (is (not= (r/key-id ['x 'a.b/c]) (r/key-id ['x 'a_b/c]) (r/key-id ['x "a.b/c"]))))
+
+(deftest a-dead-agents-eval-opens
+  ;; an agent with no process is drawn by root from its branch: an eval a reader opened (main's
+  ;; :seon.agent/opened, which the agent would take) is drawn open
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        main (d/db-with main [{:seon.agent/key k :seon.agent/opened #{"e1"}}])
+        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
+        e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
+        html (get-in st [:views :a3 :units e1 :html])]
+    (is (re-find #"<details[^>]* open" html) (str "drawn open: " html))))
+
 (deftest a-new-member-is-an-append
   ;; a keyed component new in its list, its parent's output otherwise unchanged, is sent as an append
   ;; into that list (Datastar's mode append), never the list redrawn

@@ -361,8 +361,8 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(re-find % (:content (second r0))) [#"\{:page" #"cited-\d+-demo_f" #"Doubles\." #"status-\d+" #"1 of 4"]) "the page whole, by component key: the turn's status too")
-        (is (re-find #"cited-\d+-demo_f" (:content (peek r1))) "the cited var's edit: its component, by its key")
+        (is (every? #(re-find % (:content (second r0))) [#"\{:page" #"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+" #"1 of 4"]) "the page whole, by component key: the turn's status too")
+        (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"task-page-\d+" (:content (peek r1)))) "a component that did not change is not told again")
         (is (str/includes? (:content (peek r1)) "2 of 4") "the turn's status, what changed of it")
@@ -996,7 +996,7 @@
   ;; the db, so the edit runs that var's component again (its db reads touched) and the task's not
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w _ _ _ rid :as walk] (walked db)
-        cited (str "cited-" rid "-demo_g")
+        cited (str "cited-" rid "-demo_2Fg")
         html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/page-units w)))]
     (is (some? (html cited)) "the cited var, a component of its own")
     (is (not (str/includes? (html cited) ":redefined")))
@@ -1019,7 +1019,7 @@
         task (html "task-page-")]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
     (is (str/includes? task "(deftest g-test (is (= :one (g))))") "D1: the proof written, its source")
-    (is (str/includes? (html (str "cited-" rid "-demo_g")) "(defn g [])") "D2: the cited var's source, its own component")
+    (is (str/includes? (html (str "cited-" rid "-demo_2Fg")) "(defn g [])") "D2: the cited var's source, its own component")
     (is (str/includes? task "Section 1 says one thing.") "D3: the cited section's text, not its address")
     (render/dispose-walk! w)))
 

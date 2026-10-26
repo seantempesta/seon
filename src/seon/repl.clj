@@ -472,7 +472,7 @@
   "The layout this branch draws its page with: the var :seon.render/render-ctx declares, an agent's own
   when its branch defines one."
   {:malli/schema [:=> [:cat] :any]}
-  [] (requiring-resolve (render/declared :seon.render/render-ctx)))
+  [] (render/declared-var :seon.render/render-ctx))
 
 (defn- the-walk
   "This agent's walk of its page (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
