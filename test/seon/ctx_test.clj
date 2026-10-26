@@ -81,7 +81,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 20)
+    (case (.nextInt r 22)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -112,6 +112,14 @@
            (if (.nextBoolean r)
              '[* {[:seon.eval/_agent :as :evals :limit 5 :reverse true] [*]} {[:seon.run/_agent :as :runs :limit 5 :reverse true] :seon.run/run-fact}]
              (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact)))]]
+      ;; a window's moves in one transaction: several evals join while one it holds leaves; a member's
+      ;; ref retracted and asserted again (it leaves and comes back)
+      20 (into (vec (mapcat #(eval-tx (+ 70000 (* 10 i) %)) (range 3)))
+               (when (seq evals) [[:db/retractEntity [:seon.eval/id (peek evals)]]]))
+      21 (if (seq evals)
+           (let [e (nth evals (.nextInt r (count evals)))]
+             [[:db/retract [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]] [:db/add [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]]])
+           (eval-tx (+ 80000 i)))
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
@@ -260,7 +268,7 @@
   (let [[c db tx b] (eval-in-window 30) c' (ctx/patch c db tx b)]
     (is (= c' (ctx/build db (aid db) b)) "as a build holds it")
     (is (= 30 (count (:evals (:tree c')))) "the window's size, the oldest gone")
-    (is (= (str "e" 31) (:seon.eval/id (val (first (:evals (:tree c'))))))) "the new eval first")
+    (is (= (str "e" 31) (:seon.eval/id (val (first (:evals (:tree c')))))) "the new eval first"))
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/eval-in-window
      :n "members of the window (the agent's pattern's :limit)"

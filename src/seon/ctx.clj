@@ -21,8 +21,8 @@
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
 (def ^:private identities
-  "{entity-schema identity}: the upsert key each entity schema names (whether its ids are issued in
-  time order: in-time-order?)."
+  "{entity-schema identity}: the upsert key each entity schema names: whether its ids are issued in
+  time order (in-time-order?), and the attribute a new member's value names it by (edits)."
   (into {} (for [[a s] render/entity-schemas :when (:seon.db/identity (contract/properties a))] [s a])))
 
 (defn- pattern-of
@@ -151,22 +151,29 @@
 
 (defn- window-moves
   "Join j's new members (r: the record's state) from moves, the datoms that touched it, when j is a
-  window of ids issued in time order (rseek's newest first) and old holds its members: [v r], each
-  member that joined assoc'd (built), each that left dissoc'd (forgotten), the oldest past its limit
-  dropped, a window left short by one that left filled from below its oldest by rseek; nil when
-  moves are not the join's own ref datoms (its full read answers then). Work: the moves, and a seek
-  per member they bring, never the window."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map [:vector :any] :map :seon.ctx/ix [:sequential :any] :any] [:maybe [:tuple :map :seon.ctx/ix]]]}
+  window of ids issued in time order (rseek's newest first) and old holds its members: [v r
+  entered], each member a retraction names and no assertion brings back dissoc'd (forgotten), each
+  an assertion names that it does not hold assoc'd (built), the oldest past its
+  limit dropped, a window left short by one that left filled from below its oldest by rseek, and
+  the ids it built; nil when moves are not the join's own ref datoms (its full read answers then).
+  Work: the moves, and a pull per member they bring, never the window."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map [:vector :any] :map :seon.ctx/ix [:sequential :any] [:map-of :any [:vector :any]]]
+                  [:maybe [:tuple :map :seon.ctx/ix [:set :int]]]]}
   [db e j p old r moves touched]
   (when (and (:rev? j) (not (:by j)) (:reverse? j) (in-time-order? j) (seq old)
              (every? #(and (= (:attr j) (:a %)) (= e (:v %))) moves))
     (let [full? (and (:limit j) (= (:limit j) (count old)))
-          gone (into #{} (comp (remove :added) (map :e) (filter #(contains? old %))) moves)
-          come (sort > (into #{} (comp (filter :added) (map :e) (remove #(contains? old %))) moves))
+          asserted (into #{} (comp (filter :added) (map :e)) moves)
+          ;; a member a retraction names and no assertion brings back (one that leaves and comes back
+          ;; in one transaction stays, the same object)
+          gone (into #{} (comp (remove :added) (map :e) (filter #(contains? old %)) (remove asserted)) moves)
           leave (fn [[v r] x] [(dissoc v x) (forget r (get v x) (conj p x))])
           enter (fn [[v r] x] (let [[n r] (node db x (:sub j) (conj p x) r nil touched)] [(assoc v x n) r]))
           [v r] (reduce leave [old r] gone)
-          [v r] (reduce enter [v r] (if (and full? (seq v)) (filter #(> % (key (first (rseq v)))) come) come))
+          ;; every member an assertion names that the window does not hold
+          come (sort > (remove #(contains? v %) asserted))
+          come (if (and full? (seq v)) (filter #(> % (key (first (rseq v)))) come) come)
+          [v r] (reduce enter [v r] come)
           ;; past the limit: the oldest leave
           [v r] (if-let [n (:limit j)] (reduce leave [v r] (map key (take (max 0 (- (count v) n)) (rseq v)))) [v r])
           ;; short of it by one that left, and older ones were never held: filled from below the oldest
@@ -175,8 +182,9 @@
                   (let [below (if (seq v) (dec (key (first (rseq v)))) Long/MAX_VALUE)]
                     (->> (d/rseek-datoms db :avet (:attr j) e below)
                          (take-while #(and (= (:attr j) (:a %)) (= e (:v %))))
-                         (map :e) (remove #(contains? v %)) (take need))))]
-      (reduce enter [v r] older))))
+                         (map :e) (remove #(contains? v %)) (take need))))
+          [v r] (reduce enter [v r] older)]
+      [v r (into (set come) older)])))
 
 (defn- join
   "Join j of entity e (m, its own attributes) at path p: [value r], value its members' nodes (a
@@ -185,15 +193,15 @@
   time order changes by the datoms that touched it (window-moves); any other collection is read
   again, keeping every member still in it that nothing touched (the same object) and changing only
   the members that joined, left or were touched; a member that left is forgotten (forget)."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map [:vector :any] :any :seon.ctx/ix :any] [:tuple :any :seon.ctx/ix]]}
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map [:vector :any] :any :seon.ctx/ix [:map-of :any [:vector :any]]] [:tuple :any :seon.ctx/ix]]}
   [db e m j p old r touched]
   (let [r (watch r [e (:key j)] (watched e m j))
         old-map (if (map? old) old {})
         moves (when (map? touched) (get touched [e (:key j)]))]
     (if (many? db j)
-      (if-let [[v r] (when (seq moves) (window-moves db e j p old-map r moves touched))]
-        ;; members a datom touched as entities (their own attributes) built again in place
-        (reduce (fn [[v r] x] (if (and (contains? v x) (touched x))
+      (if-let [[v r entered] (when (seq moves) (window-moves db e j p old-map r moves touched))]
+        ;; members a datom touched as entities (their own attributes), not just built, built again in place
+        (reduce (fn [[v r] x] (if (and (contains? v x) (not (entered x)) (touched x))
                                 (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x n) r])
                                 [v r]))
                 [v r] (filter integer? (keys touched)))
@@ -228,7 +236,7 @@
   entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
   first collection's newest member first); any other path holds {:db/id e}. old, e's value
   before, keeps each join no touched datom changed (identical?), its entries in r as they were."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] :any] [:tuple :map :seon.ctx/ix]]}
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
   (let [r (update-in r [:at e] (fnil conj #{}) p)
         h (get-in r [:held e])]
@@ -332,8 +340,8 @@
   "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied
   on db, the db after them: each held entity they touch (touched-by) rebuilt where it is held,
   shortest path first, as node builds it, keeping each join and member nothing touched
-  (identical?), the path above it copied; a member that joins a window is read, the oldest
-  leaves. Work: the touched entities and the members their changed joins read, never the record.
+  (identical?), the path above it copied; a window of ids issued in time order moves by its own
+  datoms (window-moves), any other collection is read again. Work: the touched entities and the members their changed joins read, never the record.
   Every path the change did not reach holds the same object it held before, so what changed is
   read off the two values (changes) in the work of what differs. A change of the pattern itself,
   or one moving where an entity is held (a new path reaching a held one, its holder leaving),
@@ -453,6 +461,8 @@
                                   (or (stub? o) (stub? m)) (refuse acc (conj path k) "held at another path: change it there")
                                   ;; a new member, under any key a swap! names it by: written from its value,
                                                   ;; which holds its own identity, under a tempid unique in the transaction
+                                  (and (nil? o) (some-> (identities (render/entity-schemas attr)) (#(nil? (get m %)))))
+                                  (refuse acc (conj path k) (str "a new member names its identity: " (identities (render/entity-schemas attr))))
                                   (nil? o) (let [t (str "ctx" (count (:tx acc)))]
                                              (-> (edits db sub {} m t (conj path k) acc)
                                                  (update :tx conj [:db/add t attr e])
