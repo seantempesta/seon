@@ -524,11 +524,11 @@
            stopped (assoc :run (:seon.run/id stopped))))))
 
 (defn- unfiled-error
-  "The commit-error of a merged member r (seon.writer/octopus-merge's result) whose changed forms
-  name no source file: each namespace and the definitions it changed."
+  "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
+  that name no source file (:unfiled): each namespace and the definitions it changed."
   {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of :symbol [:vector :seon.merge/def-key]]]]] :string]}
   [r]
-  (str "merged at t " (:tx r) " but its changed forms name no source file to write back: "
+  (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
        (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
 
 (defn- cas-tx
@@ -946,8 +946,9 @@
                                             (cond
                                               (:merged? r) (cas-tx run :ended :merged
                                                                     (cond-> {:seon.run/merged-t (long (:tx r))}
-                                                                      ;; source it changed that names no file: no write-back records it, so this does
-                                                                      (and (:source st) (empty? (:files r)) (seq (:unfiled r)))
+                                                                      ;; source it changed that names no file: no write-back writes it, so this
+                                                                      ;; names it (beside the sha of what one wrote, when it wrote some)
+                                                                      (and (:source st) (seq (:unfiled r)))
                                                                       (assoc :seon.run/commit-error (unfiled-error r))))
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r)
                                                                                                                           :seon.run/error r})

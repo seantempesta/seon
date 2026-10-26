@@ -709,7 +709,7 @@
       (is (= :closed (:seon.run/status (task/run db' "demo/add-merge#1"))))
       (is (= reason (:seon.run/error (task/run db' "demo/add-merge#1"))) "the writer's reason, on the run"))))
 
-(deftest a-merge-of-source-with-no-file-records-why-it-wrote-none-back
+(deftest a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
   ;; a merged member whose changed forms name no source file: no write-back runs, so its run
   ;; holds a commit-error naming them, never silence; one that changed no source stays silent
   (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
@@ -721,15 +721,18 @@
                            (task/run (d/db-with db tx) "demo/add-merge#1")))
         unfiled (answered {:merged? true :tx 9 :keys 2 :files [] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})
         data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})
-        ;; filed and unfiled: its write-back records the sha of what it wrote, never an error beside it
+        ;; filed and unfiled: its write-back records the sha of what it wrote, and the error beside it
+        ;; names what no file holds
         mixed (answered {:merged? true :tx 9 :keys 3 :files ["src/app/m.clj"] :unfiled {'app.no-file [[:var 'app.no-file/probe]]}})]
     (is (some? asked))
     (is (= :merged (:seon.run/status unfiled)))
-    (is (= "merged at t 9 but its changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
+    (is (= "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
            (:seon.run/commit-error unfiled)))
     (is (= :merged (:seon.run/status data)))
     (is (nil? (:seon.run/commit-error data)) "a change of no source names no file, and says nothing")
-    (is (nil? (:seon.run/commit-error mixed)) "a member with files is its write-back's to record")
+    (is (= "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
+           (:seon.run/commit-error mixed))
+        "a member that wrote some files names the forms no file holds: none is dropped without a word")
     (testing "a write-back whose files main holds no text for: no commit, and each member's run says so"
       (let [step (fn [st tag r] (r/reconciler-proc st :answers {:tag tag :r r}))
             write-of (fn [outs] (first (filter #(= :write (get-in % [:req :op])) (:to-api outs))))
