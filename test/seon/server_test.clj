@@ -81,7 +81,7 @@
     (clojure.test/is (= [:held nil 0] (:value seen)) "and wrote nothing: demo/u is still held, with no env and no run")))
 
 (deftest an-attached-agent-holds-its-run
-  ;; agent view's browser check, 2026-10-26: an agent attached from outside (seon.server/attach!
+  ;; agent view's browser check: an agent attached from outside (seon.server/attach!
   ;; spawns it before it writes the run on main, so its branch is cut without the run) held no
   ;; :runs in @ctx, and its page no task, until a turn or a context read began the run. Forked for
   ;; a run, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
