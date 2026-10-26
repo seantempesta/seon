@@ -468,8 +468,9 @@
                    'app.pt-res-test "(deftest ns-test (is (= 1 ((ns-resolve 'app.pt-res 'f)))))"
                    'app.pt-res-test "(deftest req-test (is (= 1 ((requiring-resolve 'app.pt-res/f)))))"
                    'app.pt-res-test "(deftest later-test (is (= 2 ((resolve 'app.pt-res/g)))))"
-                   'app.pt-res-test "(deftest plain-test (is (= 1 1)))")
-        ts '#{app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test app.pt-res-test/later-test app.pt-res-test/plain-test}
+                   'app.pt-res-test "(deftest plain-test (is (= 1 1)))"
+                   'app.pt-res-test "(deftest data-test (is (= 'app.pt-res/f (first (list 'app.pt-res/f)))))")
+        ts '#{app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test app.pt-res-test/later-test app.pt-res-test/plain-test app.pt-res-test/data-test}
         dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts))
         before (dg db)
         changed (dg (record db 'app.pt-res "(defn f [] 3)"))
@@ -480,7 +481,8 @@
         "the var it resolves came to exist: its digest moved")
     (is (= (before 'app.pt-res-test/plain-test) (changed 'app.pt-res-test/plain-test) (defined 'app.pt-res-test/plain-test))
         "a test resolving nothing kept its digest")
-    (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")))
+    (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")
+    (is (= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name passed to no resolver is data: no reference")))
 
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))

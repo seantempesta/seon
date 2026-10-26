@@ -67,13 +67,15 @@
   [n] (case (:op n) :const (:val n) :quote (:form n) ::expr))
 
 (def ^:private resolvers
-  "The clojure.core functions that look a var up by its name at run time: a constant symbol
-  passed to one is a reference, as a symbol in code is."
+  "The clojure.core functions that look a var up by its name at run time: a literal symbol
+  passed to one is a reference, as a symbol in code is (any other quoted name is data, :quoted)."
   '#{clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve})
 
 (defn- resolved
   "The var a call of resolver f names with its literal arguments args (datum): the qualified
-  symbol it is passed, or ns-resolve's namespace and name; nil when they are no literal names."
+  symbol it is passed, or ns-resolve's namespace and name; nil when they are no literal names
+  (a namespace object, a local) or the name is unqualified (resolve reads *ns* at run time). An
+  aliased name (str/join) names no var of the program, so it reaches nothing."
   {:malli/schema [:=> [:cat :qualified-symbol [:sequential :any]] [:maybe :qualified-symbol]]}
   [f args]
   (let [s (last args) n (first args)]
@@ -164,7 +166,8 @@
   identity: the vars it defines at its top (:defs, each def-info) and inside a function body
   (:inline-defs), its multimethod methods ({:multi sym-as-written :dispatch value}) and
   protocol extensions ({:protocol sym :type name}), the multimethods it sets up, the vars and
-  host statics (Class/member) it references (:refs; in a macro, also the names its template
+  host statics (Class/member) it references (:refs, with each var a literal name passed to
+  resolve, ns-resolve or requiring-resolve looks up; in a macro, also the names its template
   quotes, which its expansion calls), the qualified names its quoted data holds (:quoted:
   quoted-names, data, not references), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references, the
