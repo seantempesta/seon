@@ -266,7 +266,11 @@
         tree (str dir "/tree")
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
+        ;; and its own results directory: a proof that resolves its var at run time
+        ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
+        ;; stored there closed its task with no turn and merged nothing
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+               :env {"SEON_TEST_RESULTS" (str dir "/test-results")}}
         red (volatile! false)
         ;; bin/root start truncates runs/root.log: each boot's log is copied to its own file
         ;; (runs/boot-N.log) before the next boot, so a red keeps every boot's
@@ -288,7 +292,7 @@
         (when-not (= 2 (count (:commits t2))) (vreset! red true))
         (is (= 2 (count (:commits t2)))
             (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
-                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out]]) @(:conn sys))))"))))
+                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out ?turns :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out] [(get-else $ ?r :seon.run/turns :none) ?turns]]) @(:conn sys))))"))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
         (keep-boot!)

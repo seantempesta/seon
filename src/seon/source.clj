@@ -511,6 +511,12 @@
               :when text]
           [p text])))
 
+(defn ns-file
+  "The file namespace n is written in, as db holds it (its :ns/file), or nil: a namespace made at
+  the REPL and never written to a file."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]]}
+  [db n] (:ns/file (d/entity db [:ns/name n])))
+
 (defn changed-files
   "The files a merge's changes (seon.merge/three-way's :ours) touch, as db (after them) holds
   them: the file of each namespace whose forms they add, change or remove, and the resource of
@@ -519,7 +525,7 @@
   [db changes]
   (vec (sort (distinct (for [[[k] [a b]] changes
                              :let [p (case k
-                                       :form (:ns/file (d/entity db [:ns/name (:ns (or b a))]))
+                                       :form (ns-file db (:ns (or b a)))
                                        :schema (:file (or b a))
                                        nil)]
                              :when p]
@@ -529,13 +535,13 @@
   "The definitions of the forms a merge's changes (seon.merge/three-way's :ours) add, change
   or remove whose namespace has no :ns/file on db (after them), by namespace: source a
   write-back cannot put in any file (changed-files leaves them out)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map-of :symbol [:vector :any]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map-of :symbol [:vector :seon.merge/def-key]]]}
   [db changes]
   (reduce (fn [m f] (update m (:ns f) (fnil into []) (:defines f)))
           (sorted-map)
           (for [[[k] [a b]] changes
                 :let [f (or b a)]
-                :when (and (= :form k) (nil? (:ns/file (d/entity db [:ns/name (:ns f)]))))]
+                :when (and (= :form k) (nil? (ns-file db (:ns f))))]
             f)))
 
 (defn commit-message
