@@ -36,9 +36,6 @@
  ;; what a node is: an entity, or a value of the walked entity; what a citation reached
  ;; (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
  :seon.render/kind [:enum :entity :value :var :namespace :task :section :file :unresolved]
- ;; an entity schema's units (a schema property): the attributes a view of its entity shows, in
- ;; pull's syntax, a leading _ the reverse ref
- :seon.render/units [:vector :keyword]
  ;; an entity schema's units whose entities are part of its page (a schema property): their units
  ;; are walked one hop more and join the page's (an agent's run: its task, turns and messages)
  :seon.render/parts [:vector :keyword]

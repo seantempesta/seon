@@ -148,6 +148,21 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
+(defn- own-attributes
+  "Entity node m without its joins' members (an entity, or a collection of them, under a join's
+  key): its own attributes, what a part drawn from m alone shows and is made from, so a member's
+  change leaves the part's memo as it was."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [m]
+  (let [entity? #(and (map? %) (contains? % :db/id))
+        join? #(or (entity? %) (and (map? %) (seq %) (every? entity? (vals %))))]
+    (into {} (remove (comp join? val)) m)))
+
+(defn- own-values
+  "Entity node m's own attribute values (own-attributes), by key in order: a part's :from."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [m] (let [o (own-attributes m)] (mapv o (sort-by str (keys o)))))
+
 (defn render-ctx
   "The agent page's layout (the declared html render of :seon.render/render-ctx, which an agent
   overrides on its branch like any render, drawn through `html`): an agent's held record
@@ -191,7 +206,7 @@
         tk (when task ((:task-key fs) task))
         cks (when task (into (array-map) (for [v ((:cites fs) task)] [v ((:cited-key fs) v)])))]
     (-> []
-        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs)) :region :task
+        (cond-> task (conj {:key [:task] :from (own-values task) :value (relevant-of :seon.task/task-fact (own-attributes task)) :region :task
                             :schema :seon.render/task-page :read tk :db (:db fs)})
                 task (into (for [[v ck] cks]
                              {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ck :db (:db fs)}))
@@ -271,6 +286,13 @@
   {:malli/schema [:=> [:cat :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
   [e via] (or (some identity-schemas (keys e)) (get entity-schemas via)))
 
+(defn units
+  "Entity schema s's joins as the attributes they read, in pull's syntax (a leading _ the reverse
+  ref): the joins of the pattern it declares (:seon.ctx/pattern, the one declaration of what its
+  entity's record holds)."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :keyword]]}
+  [s] (vec (for [c (some-> s contract/properties :seon.ctx/pattern) :when (map? c) [k _] c] (if (vector? k) (first k) k))))
+
 (defn- forward
   "Attribute a read forward: a reverse ref (:ns/_name, pull's syntax) as its own attribute (:ns/name)."
   {:malli/schema [:=> [:cat :keyword] :keyword]}
@@ -287,7 +309,7 @@
 
 (defn- one
   "Entity eid on db as a page lists it: its node (its relevant attributes, less its units) and one
-  node per unit its entity schema declares (:seon.render/units, pull's attributes, a leading _ the
+  node per join its entity schema's pattern declares (units: pull's attributes, a leading _ the
   reverse ref), one hop: a neighbour entity ({:kind :entity :eid}, its relevant attributes as
   :value, and :tx, the transaction of the datom that links it: the order it was written) or the
   entity's own value of a non-ref unit ({:kind :value}), each saying the attribute it came by
@@ -299,7 +321,7 @@
   [db eid limit]
   (when-let [own (d/pull db '[*] eid)]
     (let [schema (entity-schema own nil)
-          units (:seon.render/units (contract/properties schema))
+          units (units schema)
           types (d/schema db)
           ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in types [a :db/valueType]))))
           ;; each ref unit's linking datoms, with the transaction that wrote each, newest first: a

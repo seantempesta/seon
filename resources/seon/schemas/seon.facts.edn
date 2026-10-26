@@ -90,7 +90,7 @@
                       [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
- :seon.db/var-fact [:map {:seon.db/attributes true :seon.render/units [:var/form]}
+ :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:var/form :as :form] [*]}]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
                      [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
@@ -147,20 +147,20 @@
  :seon.agent/description [:string {:seon.render/prose true}]
  :seon.agent/forked-ms :double
  :seon.agent/ended-ms :int
- :seon.agent/answered-t :int
+ :seon.ctx/pattern [:vector :any]
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/as :row :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/record :seon.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent :seon.catch-up/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
                        [:seon.agent/mem-mb {:optional true} :seon.agent/mem-mb] [:seon.agent/running {:optional true} :seon.agent/running]
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
-                       [:seon.agent/answered-t {:optional true} :seon.agent/answered-t]]
+                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]
@@ -193,7 +193,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/proofs] :seon.render/html seon.render.ui/task}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -264,7 +264,7 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
- :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to] :seon.render/html seon.render.ui/run}
+ :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.ctx/pattern [* {[:seon.run/task :as :task] :seon.task/task-fact} {[:seon.turn/_run :as :turns :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.message/_to :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
                              [:seon.run/agent {:optional true} :seon.run/agent] [:seon.run/start-ms :seon.run/start-ms]
@@ -343,7 +343,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.render/units [:seon.agent/_root :seon.eval/_agent] :seon.render/html seon.render.ui/root}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] :seon.db/agent-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]

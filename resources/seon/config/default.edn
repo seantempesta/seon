@@ -562,6 +562,14 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: members. The newest members of each collection a record holds (an agent's evals, runs,
+ ;; turns and messages; root's agents), read newest first by Datahike's :reverse pull option and
+ ;; stopping there, so a record costs its window, not its history. Older members are on the
+ ;; branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
+ :seon.config.ctx/window 100
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds: a hot var
+ ;; (clojure.core/let) is named by thousands.
+ :seon.config.ctx/callers 5
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
