@@ -236,7 +236,7 @@
 
 (defn record
   "This agent's held record, {:tree :ix :changed}: @ctx (its :tree), its index, and the paths its
-  last transaction changed (what a part's memo is invalidated by, seon.render/view); nil before it is
+  last transaction changed (what a part's memo is invalidated by, seon.render/render-ctx); nil before it is
   built."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   [] @held)

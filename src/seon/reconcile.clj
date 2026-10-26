@@ -694,9 +694,9 @@
 (defn- stage-boundary
   "The message that opens run aid's stage of its session, or nil: when the session's agent ran
   another task before (its newest earlier run, by the transaction that started it), the new
-  task's plan and proofs, said once at the boundary (its whole story is (my.task/story): the
-  story's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
-  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's story put at
+  task's plan and proofs, said once at the boundary (its whole task data is (my.task/data): the
+  task data's render reaches the related search, a process, which no reconciler test may), so the conversation above stays as it was
+  sent (design agent-loop section 1a; the live agents' finding A1: the new stage's task data put at
   the top cached 1% of 33k tokens, and the agent took the design for its task)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :string]]}
   [db aid]
@@ -709,7 +709,7 @@
       (let [{:keys [plan proofs]} (:seon.task/accumulated (task/task db id))]
         (str prev-task " is done. Your task now is " id ", in this same session: what you did so far stays above.\n\n"
              "Its plan: " plan "\n\nIts proofs: " (str/join " " (sort (map str proofs)))
-             "\n\nIts whole story (what it cites, its write set): (my.task/story)")))))
+             "\n\nIts whole task as data (what it cites, its write set): (my.task/data)")))))
 
 (defn- taken-messages
   "How many messages to the runs on run aid's branch (as main names them) branch db holds:

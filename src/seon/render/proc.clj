@@ -281,7 +281,7 @@
 (defn- agent-page
   "View's page when it names an agent (entity eid on main db): its parts as its process drew them
   (ask-parts), else, with no process to ask or none that answered, as root draws them from its
-  branch (seon.ctx/build, render-ctx: seon.render/layout) with main's renders, the page saying so.
+  branch (seon.ctx/build, render-ctx: seon.render/render-ctx) with main's renders, the page saying so.
   Everything the page shows of the agent is its ctx: its run's status and verdict reach its branch
   by take!, never read here on main. An eval the person opened in this tab (its unit in :open) that
   ctx does not hold opened yet is drawn here from the branch, the tab's own state, until take!
@@ -297,7 +297,7 @@
         ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
         ;; when root reads it (take-read), and the branch's reads are not main's
         branch-parts (fn [] (binding [datahike.index.interface/*reads* nil]
-                              (render/layout (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (context/renders bdb))))
+                              (render/html (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (assoc (context/renders bdb) :schema :seon.render/render-ctx))))
         drawn (fn [p] (render/part-html p (render/part-faces p)))
         parts (if own?
                 (:parts held)

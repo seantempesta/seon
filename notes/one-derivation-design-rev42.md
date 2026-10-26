@@ -22,11 +22,11 @@ The owner, after approval, 2026-10-26: "don't leave anything out I want the agen
 
 ## 3. Renders memoised by value; order computed in view
 - **`(view c db)`:** the record and the agent's branch db as of its t. The conversation's order is each member's first transaction, `seon.context/first-t` (jolt/ctx-atom), one seek per member. It is not memoised: the review cut the cache as more mechanism than the lookup it saves.
-- **The cited vars as their own sub-parts** (root, 2026-10-26): `task-page` draws each var the plan cites as its own part, `[:task :cites sym]`, so a cited edit's page diff is that var's part alone, not the whole story.
-- **The task part's render, `seon.render.ui/task-page`.** It is run-state (context.clj:280) over the task and the db as of t, drawn as hiccup with what the task cites, what to prove and its write set. It lives in seon.render.ui, which already requires seon.context (ui.clj:19). Declared on `:seon.task/task`, it replaces `task-box` (ui.clj:357) wherever a task is drawn.
+- **The cited vars as their own sub-parts** (root, 2026-10-26): `task-page` draws each var the plan cites as its own part, `[:task :cites sym]`, so a cited edit's page diff is that var's part alone, not the whole task data.
+- **The task part's render, `seon.render.ui/task-page`.** It is task-data (context.clj:280) over the task and the db as of t, drawn as hiccup with what the task cites, what to prove and its write set. It lives in seon.render.ui, which already requires seon.context (ui.clj:19). Declared on `:seon.task/task`, it replaces `task-box` (ui.clj:357) wherever a task is drawn.
 - **The related part's render, `seon.render.ui/related`:** over the plan's vectors.
 - **One memo, by value:** `{part-key [fns value read-t hiccup]}`, a hit when the fns and the value are identical and `read-t` is the same.
-  - `read-t` is the t of the newest transaction for which `seon.context/story-reads?` is true, for the task and related parts. It is nil for the others.
+  - `read-t` is the t of the newest transaction for which `seon.context/task data-reads?` is true, for the task and related parts. It is nil for the others.
   - Not tracked (ctx-atom's docstring): files on disk, namespace metadata, config. A change to one of them shows as drift by digest (4.1 §1), never as a stale byte inside a session.
 
 ## 4. The wire: each change told once
@@ -55,15 +55,15 @@ The owner, after approval, 2026-10-26: "don't leave anything out I want the agen
 | 14 test references to `:ai` faces | tests | rewritten with their slices |
 
 ## 6. Measure first (the review's order; live-agents before and after)
-1. **a1's parts printed as projected hiccup by the real printer**, against today's starting request (system + story + screen: 6,043 tokens past the system prompt).
+1. **a1's parts printed as projected hiccup by the real printer**, against today's starting request (system + task data + screen: 6,043 tokens past the system prompt).
 2. **One recorded a-map turn's world message** (`[page]` + `[ctx]`), with and without the agent's own parts, against today's 25,979 tokens a turn.
-3. **How often `story-reads?` fires on the agent's own `defn`s** (each fire redraws the task part).
+3. **How often `task data-reads?` fires on the agent's own `defn`s** (each fire redraws the task part).
 
 ## 7. The prefix proof
 `seon.context-test/the-prefix-stays-byte-identical-across-turns` holds: system, the page at t0, then per turn the calls, their answers and the world message. Within a session each request is a byte prefix of the next, except at the history cut's jumps; across a process, drift is detected by digest (4.1 §1).
 
 ## 8. Split with ctx-atom
-- **ctx-atom (done on jolt/ctx-atom):** derived members, `:born` and `order` deleted; `first-t` and `story-reads?` added.
+- **ctx-atom (done on jolt/ctx-atom):** derived members, `:born` and `order` deleted; `first-t` and `task data-reads?` added.
 - **Agent view, on a branch built on jolt/ctx-atom, merged with it:**
   - `(view c db)`;
   - `task-page` and `related` in seon.render.ui;

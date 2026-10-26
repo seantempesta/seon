@@ -96,7 +96,7 @@
     (is (contract/error? none) "no live agent a9: refused, as root refuses")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
-  ;; dogfood 2026-10-25: an outside agent read the story and turn sections only, not the system
+  ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
   ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
   ;; Its context read is its turn: the screen's forms run as a model turn's do, and the read
   ;; answers the request's text, system prompt first, screen last

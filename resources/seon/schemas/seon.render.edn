@@ -59,7 +59,7 @@
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
                      [:seon.render/db {:optional true} :seon.render/db]]
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
- ;; part (seon.render/view)
+ ;; part (seon.render/render-ctx)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
  ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
@@ -91,22 +91,22 @@
  :seon.render/sent-request [:map {:seon.render/html seon.render.ui/sent-request} [:turn :int] [:run :string] [:view :string] [:refs :int]
                             [:added [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:same {:optional true} [:map [:turn :int] [:parts :int]]]
-                            [:split {:optional true} [:map [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]]
+                            [:split {:optional true} [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
- ;; a ctx as the page and the model are drawn from it (seon.render/view, faces, drawn)
+ ;; a ctx as the page and the model are drawn from it (seon.render/render-ctx, faces, drawn)
  :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]
                     ;; a part that reads the db: what its memo compares, and the db its render draws on
                     [:read {:optional true} :any] [:db {:optional true} :seon.host/db]
-                    ;; its region of the page (seon.render/view), and, for an eval, whether ctx holds it opened
+                    ;; its region of the page (seon.render/render-ctx), and, for an eval, whether ctx holds it opened
                     [:region {:optional true} [:enum :task :chat :tiles]] [:opened {:optional true} :boolean]]
- ;; render-ctx: the agent page's layout, a render of the record (seon.render/view), which a branch may override
- :seon.render/ctx-page [:map {:seon.render/html seon.render/view} [:tree :map]]
- ;; the task, drawn as the stage's story (seon.context/story over the db), and its related
+ ;; render-ctx: the agent page's layout, a render of the record (seon.render/render-ctx), which a branch may override
+ :seon.render/render-ctx [:map {:seon.render/html seon.render/render-ctx} [:tree :map]]
+ ;; the task, drawn as the task's data (seon.context/task-data over the db), and its related
  :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
  :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
  ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)

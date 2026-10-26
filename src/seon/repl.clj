@@ -370,7 +370,7 @@
   request, seon.turn), else the agent itself (its model's turn)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
   [origin]
-  (case origin :ui "user" :outside "outside" :context "context" :screen "screen" (name (or (:id @agent/state) :root))))
+  (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
@@ -463,8 +463,7 @@
                                   (answered))))
                 recorded (into [] (mapcat :recorded) @answers)]
             (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-            ;; the screen's responses are replaced each request: no later response reads them
-            (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
+            (swap! agent/state update :seen print/seen r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
             (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -482,7 +481,7 @@
                             [m {:html (render/html err {}) :inline (render/html err {:as :inline})}]))))
 
 (defn- drawn-parts
-  "This agent's page as [part faces] in the page's order (seon.render/view of the held record,
+  "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
   @ctx, with the renders that read the branch's db), drawn here under its branch's schemas, each
   through the part memo this process holds (:drawn)."
   {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector [:tuple :seon.render/part :seon.render/faces]]]]]}
@@ -490,7 +489,7 @@
   (with-branch-schemas
     #(let [c (ctx/record)
            [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
-                              [(:drawn @agent/state {}) []] (render/layout c (context/renders (agent/db))))]
+                              [(:drawn @agent/state {}) []] (render/html c (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx)))]
        ;; the memo holds the parts this page has now, none it dropped
        (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
        {:t (get-in c [:tree :t] 0) :parts out})))
@@ -504,10 +503,10 @@
   (let [{:keys [t parts]} (drawn-parts)] {:t t :parts (mapv (fn [[p f]] (render/part-html p f)) parts)}))
 
 (defn page
-  "This agent's page as the model reads it: its :task region (seon.render/view), each part's hiccup
+  "This agent's page as the model reads it: its :task region (seon.render/render-ctx), each part's hiccup
   exactly as its render returned it, by part key, in the page's order, the same hiccup the page
-  shows (`parts`); the chat and the tiles left out, which the transcript carries. The screen's one
-  form (seon.screen/forms): the first turn reads it whole, each later one its diff."
+  shows (`parts`); the chat and the tiles left out, which the transcript carries. What the model's
+  request holds is the same page re-derived at each turn's commit (seon.context/page, world)."
   {:malli/schema [:=> [:cat] :map]}
   []
   (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])

@@ -3,19 +3,19 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
   {:malli/schema [:=> [:cat] [:maybe :seon.task/task]]}
   [] (some->> (turn/current-task) (task/task (agent/db))))
 
-(defn story
-  "This agent's task story as data (seon.context/run-state): its task and plan, its write set (each
+(defn data
+  "This agent's task as data (seon.context/task-data): its task and plan, its write set (each
   var the plan cites, its source and callers), how to run each proof, the sections it cites; what
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (some->> (current) (context/run-state (agent/db))))
+  [] (some->> (current) (context/task-data (agent/db))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
@@ -23,7 +23,7 @@
   red proof it writes with `(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)`), written
   on its branch (seon.task/member-tx) and carried to main at the run's end. Answers the member's
   value after the update, as clojure.core/swap! answers the new value (the whole task, its
-  instructions and story, was most of each answer: the live agents' rounds), or
+  instructions and task data was most of each answer: the live agents' rounds), or
   :seon.task/invalid-member, writing nothing, for a value the member's schema does not admit."
   {:malli/schema [:=> [:cat [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:* :any]] [:or :string :seon.task/proofs :seon.task/invalid-member]]}
   [member f & args]
@@ -53,7 +53,7 @@
   read) has observed the task in this process: :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (if-let [{:keys [input]} (screen/input)]
+  (if-let [{:keys [input]} (turn/input)]
     (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
     (contract/error :seon.turn/not-observed #'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
 

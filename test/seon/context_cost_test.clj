@@ -120,15 +120,15 @@
      :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
      :sizes [100 1000 10000]}))
 
-(defn story-key-of
-  "seon.context/story-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."
+(defn task-key-of
+  "seon.context/task-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
   [n] (let [[db te] (related-of-changed n)] [db {:seon.task/id "demo/r" :db/id te}]))
 
-(deftest a-storys-key-costs-what-the-plan-names
-  ;; the story's memo key reads the task, its plan's references and a seek per entity they name:
+(deftest a-task-key-costs-what-the-plan-names
+  ;; the task data's memo key reads the task, its plan's references and a seek per entity they name:
   ;; nothing of the wiki or program it does not cite, so it is flat in their size
-  (cost/proof {:of 'seon.context/story-key :input 'seon.context-cost-test/story-key-of
+  (cost/proof {:of 'seon.context/task-key :input 'seon.context-cost-test/task-key-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan (task/task), the plan's references parsed (seon.ref), a seek per entity they name (none here): fourteen contracted calls, flat in the wiki"
                :growth :constant
@@ -148,20 +148,26 @@
                :fixed {:calls 1}
                :sizes [10 100 1000]}))
 
-(deftest related-key-is-one-seek-beside-the-storys
-  ;; related's memo key: the story's key, the count, and the newest vector by one seek of the
+(deftest related-key-is-one-seek-beside-the-tasks
+  ;; related's memo key: the task data's key, the count, and the newest vector by one seek of the
   ;; indexed :seon.vector/text-t, flat in how many vectors there are
   (cost/proof {:of 'seon.context/related-key :input 'seon.context-cost-test/first-t-of
                :n "wiki sections with vectors"
-               :work "the story's key (the plan's references and a seek per entity they name), the count through the resolver, one reverse seek of the vectors' text transactions: sixteen contracted calls, the story key's fourteen among them, flat in the vectors"
+               :work "the task data's key (the plan's references and a seek per entity they name), the count through the resolver, one reverse seek of the vectors' text transactions: sixteen contracted calls, the task's data key's fourteen among them, flat in the vectors"
                :growth :constant
                :fixed {:calls 16}
                :sizes [10 100 1000]}))
 
-(deftest a-story-costs-what-the-plan-names
-  ;; the story rendered (run-state over the task as of t), as the task part draws it when its story
-  ;; key moves (seon.render/drawn): what the plan cites read and resolved, flat in the wiki's size
-  (cost/proof {:of 'seon.context/story :input 'seon.context-cost-test/story-key-of
+(defn task-data-of
+  "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
+  without its write set, as the task part draws it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :boolean]]}
+  [n] (let [[db _] (related-of-changed n)] [db (seon.task/task db "demo/r") false]))
+
+(deftest task-data-costs-what-the-plan-names
+  ;; the task's data (task-data over the task as of t), as the task part draws it when its key moves
+  ;; (seon.render/drawn): what the plan cites read and resolved, flat in the wiki's size
+  (cost/proof {:of 'seon.context/task-data :input 'seon.context-cost-test/task-data-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
                :growth :constant

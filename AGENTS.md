@@ -240,6 +240,7 @@ A note (`notes/`) is a working paper. Once its content is filed in one of the ho
 | admit, guarantees | instrument | Malli `malli.instrument` |
 | refusal | invalid, explained (a contract's); a reason (the done rule's); refused (a merge's) | Malli `m/explain` |
 | attempt | run (one agent's try at a task); a clojure.test run is a "test run", a whole root's is "root's run" | owner, 2026-10-23: "I don't like the attempt name. Call it agentic loop or run" |
+| story, run-state, task story | the task's render (a render is a function and the data it renders): task-page over the task's data; the layout is render-ctx | owner, 2026-10-26: "A render is just a function and the data being rendered. No story" |
 
 Library words stay: proc, step-fn, transact, branch, merge, schema, registry, contract (a Malli function schema), flusher, group commit, fork server, lease, generation. **Waste** stays our word for the turns and tokens a run spent past what its work needed (`:seon.run/waste`; owner, 2026-10-23). A stored keyword is renamed by erasing the store, never by a migration (DECISIONS).
 

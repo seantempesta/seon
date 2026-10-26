@@ -201,18 +201,18 @@
   (let [w (fn [db branch more tx] (:db-after (d/with db tx (pdb/tx-meta branch more))))
         db (-> (ts/test-db)
                (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
-               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/screen ["(seon.screen/show)"]}])
+               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/description "Works the screen."}])
                (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/answered-t 3}]))
         e (:db/id (d/entity db [:seon.agent/key k]))
         by (fn [a] (dissoc (ctx/made-by db e a) :t))]
-    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/screen)) "written by an eval: that eval, on the agent's branch")
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/description)) "written by an eval: that eval, on the agent's branch")
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/answered-t)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
     (let [h (render/html (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}) {:db db})
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
-      (is (= {":seon.agent/screen" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
-             (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
+      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
+             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/answered-t"]))
           "the page names who made each key"))))
 
 (defn- replay

@@ -442,7 +442,7 @@
         branch (reduce d/db-with main0
                        [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3"
                                              ;; its prose's citations as the record holds them (seon.repl/record-details):
-                                             ;; what the screen shows is read from here, never parsed from the prose again
+                                             ;; what the page shows is read from here, never parsed from the prose again
                                              {:code "(f 2)" :prose "f doubles?" :run "demo/f#1"
                                               :cites (seon.ref/references main0 "`seon.docs/source-of`")
                                               :response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}} nil)
@@ -520,7 +520,7 @@
   "a3's page's parts as its process draws them (seon.repl/parts), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f) (seon.context/renders branch)))})
+  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/render-ctx (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f) (seon.context/renders branch)))})
 
 (defn- conversation-rows
   "The ids of view's conversation parts st holds."
@@ -873,8 +873,8 @@
             html (p/page-html st' [:debug :a1])]
         (is (= ["d-" "d-"] (mapv #(subs (:id %) 0 2) units)) "one row a model turn")
         (is (= [1 0] (mapv #(get-in % [:input :turn]) units)) "newest first")
-        (is (= [[:eval "e2"] [:eval "e3"]] (mapv first (get-in units [0 :input :added]))) "turn 1 adds its call's eval and its screen eval")
-        (is (= {:turn 0 :parts 2} (get-in units [0 :input :same])) "and sends the help page and turn 0's screen as turn 0 did (the screen stays: sent as diffs)")
+        (is (= [:eval :page] (mapv ffirst (get-in units [0 :input :added]))) "turn 1 adds its call's eval and what changed of its page")
+        (is (= {:turn 0 :parts 2} (get-in units [0 :input :same])) "and sends the help page and turn 0's page as turn 0 did")
         (is (nil? (get-in units [0 :input :whole])) "its whole request is not read back until it is opened")
         (is (= r1 (messages (get-in opened [0 :input :whole]))) "opened: turn 1's messages as it sent them")
         (is (= r0 (messages (get-in opened [1 :input :whole]))))
@@ -902,7 +902,7 @@
             [st1 _] (#'p/pass-view st [:debug :a1])
             db (get-in st1 [:branches [:debug :a1] :db])
             b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
-               :observed {:results {} :test-run-errors [] :reds [] :reasons []} :screen ["e3"] :agent "b/a1"}
+               :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"}
             db' (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 2 :seon.turn/origin :model
                                 :seon.turn/basis b :seon.turn/sent (:sent (seon.context/render db b))
                                 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
@@ -935,30 +935,15 @@
     (is (= 1 (count (re-seq #"<details" nested))) "only the vector of maps folds")
     (is (str/includes? nested "vector 2 items"))))
 
-(deftest a-turns-screen-folds-into-it-and-an-eval-collapses-to-its-value
-  ;; root, 2026-10-24: the screen's evals are the system's, folded into their turn's header (they
-  ;; stay recorded, and on the debug page as sent); a collapsed eval is code ⇒ value · ms
+(deftest an-eval-collapses-to-its-value
+  ;; root, 2026-10-24: a collapsed eval is code ⇒ value · ms
   (let [[main branch eid] (paged-dbs)
         k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
-        branch (reduce d/db-with branch
-                       [(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "s1" "screen"
-                                             {:code "(seon.screen/show)" :text "{:handle result/s1, :value {:page []}}" :line "{:page []}"
-                                              :response {:handle 'result/s1 :ms 3.0}} nil)
-                        [{:seon.turn/id "demo/f#1/0" :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1"
-                                                                      :turn 0 :max-turns 8 :origin :model :observed {} :screen ["s1"]}}]
-                        (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e9" "a3"
-                                             {:code "(+ 2 2)" :text "{:handle result/e9, :ms 0.2, :ticks 900, :value 4}" :line "4"
-                                              :response {:handle 'result/e9 :ms 0.2 :ticks 900}} nil)])
-        st (proc-state main branch)
-        l (#'p/page-value st :a3)
-        rows (for [u (:seon.render/units l) :when (= "#c-rows" (:container u))] (:comp u))
+        branch (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e9" "a3"
+                                                      {:code "(+ 2 2)" :text "{:handle result/e9, :ms 0.2, :ticks 900, :value 4}" :line "4"
+                                                       :response {:handle 'result/e9 :ms 0.2 :ticks 900}} nil))
         html-of (fn [e as] (h/html (ui/component branch e as)))
-        e-of #(:db/id (d/entity branch [:seon.eval/id %]))
-        turn (:db/id (d/entity branch [:seon.turn/id "demo/f#1/0"]))]
-    (is (not-any? #(= (e-of "s1") (second %)) rows) "the screen's eval is no part of the conversation")
-    (is (str/includes? (html-of turn [:chat false]) ">screen<") "its turn says it had a screen")
-    (is (not (str/includes? (html-of turn [:chat false]) "seon.screen/show")) "rendered only while open")
-    (is (str/includes? (html-of turn [:chat true]) "seon.screen/show") "open: the screen eval as it ran")
+        e-of #(:db/id (d/entity branch [:seon.eval/id %]))]
     (let [closed (html-of (e-of "e9") [:chat false])]
       (is (str/includes? closed ">4<") "collapsed: its value in one line")
       (is (str/includes? closed "0.20 ms") closed)
@@ -1049,7 +1034,7 @@
   ;; root, 2026-10-26: a [:line id] part (an eval sent collapsed, seon.context/request) had no clause
   ;; in the debug page's source line, so every pass of the render proc threw and no page answered;
   ;; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:line "e5"] [:message "m1"] [:history 12]]]
+  (doseq [ref [[:section 397 536870918] [:page 12 nil #uuid "00000000-0000-0000-0000-000000000001"] [:page 12 #uuid "00000000-0000-0000-0000-000000000001" #uuid "00000000-0000-0000-0000-000000000002"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:line "e5"] [:message "m1"] [:history 12]]]
     (is (string? (#'ui/source ref)) (pr-str ref)))
   (is (= "eval e5, sent as its one line" (#'ui/source [:line "e5"]))))
 
@@ -1097,7 +1082,7 @@
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons ["demo/f-test is red"]}}}])
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
-        parts (r/view c (seon.context/renders branch))
+        parts (r/render-ctx c (seon.context/renders branch))
         ks (mapv :key parts)]
     (is (= [[:task] [:related] [:proofs] [:verdict] [:run]] (subvec ks 0 5)) "the task, what is related, its proofs, the verdict, the run, first")
     (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (nth parts 2)))
@@ -1105,9 +1090,9 @@
     (is (= ["demo/f-test is red"] (:value (nth parts 3))))
     (let [task (first parts) h (h/html (:html (r/part-faces task)))]
       (is (= "demo/f" (:seon.task/id (:value task))) "the task part's value is the task: nothing derived is stored in a part")
-      (is (some? (:read task)) "and it carries its story's key, what its memo compares")
+      (is (some? (:read task)) "and it carries its task data's key, what its memo compares")
       (is (str/includes? h "demo/f") "drawn by task-page")
-      (is (str/includes? h "to-prove") "as the stage's story, drawn from the db when it is drawn"))
+      (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
     (is (str/includes? (h/html (:html (r/part-faces (second parts)))) "nothing related yet") "related, drawn from the db: none yet here")
     (is (= 2 (:turns-taken (:value (nth parts 4)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
@@ -1116,7 +1101,7 @@
     (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq (map :value parts)))
         "no entity ids, no counters")
     (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
-    (is (= parts (r/view c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
+    (is (= parts (r/render-ctx c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
 
 (deftest a-parts-faces-are-one-selection
   ;; a part is one hiccup, the page's and the model's: the printer's under its budget, cut where it
@@ -1135,12 +1120,12 @@
   ;; members a part was made from (:from), which ctx's patch leaves identical when unchanged
   (let [[main branch _] (paged-dbs)
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)
-        draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/view c (seon.context/renders branch))))
+        draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/render-ctx c (seon.context/renders branch))))
         [m1 fs1] (draw {})
         [_ fs2] (draw m1)
         c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
-        [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2 (seon.context/renders branch)))]
-    ;; the task's part reads the db (its story), compared by its story key: the same db, from the memo
+        [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/render-ctx c2 (seon.context/renders branch)))]
+    ;; the task's part reads the db (its task data), compared by its task key: the same db, from the memo
     (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
     (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))
 

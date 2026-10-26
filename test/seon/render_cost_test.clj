@@ -285,8 +285,8 @@
      :work (str "the new turn's row, a component (seon.render.ui/component, as [:debug ...]), read back from its "
                 "records (its two evals, each by seon.context/eval-messages), its request sized from those parts "
                 "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
-                "flat in the turns held. A real turn also reads back its help page and its task story as of their t "
-                "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the story's run "
+                "flat in the turns held. A real turn also reads back its help page and its task data as of their t "
+                "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the task data's run "
                 "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
                 "query of every turn's id, its place in the sort and its slot, no render")
      :growth :linear
@@ -364,13 +364,13 @@
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
                            :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
    (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
-     {:db (ts/test-db) :cites (constantly []) :story-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
+     {:db (ts/test-db) :cites (constantly []) :task-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its
   ;; members, the conversation sorted once
   (cost/proof
-    {:of 'seon.render/view :input 'seon.render-cost-test/ctx-of
+    {:of 'seon.render/render-ctx :input 'seon.render-cost-test/ctx-of
      :n "evals in the agent's ctx"
      :work (str "one pass over ctx's members: the task's, the proofs' and the run's parts (a few contracted calls, "
                 "fixed), then a part per eval, each its record less its id, and the conversation sorted by entity "

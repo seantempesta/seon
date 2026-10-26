@@ -148,15 +148,15 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
-(defn view
-  "render-ctx, the agent page's layout (the declared html render of :seon.render/ctx-page, which an
-  agent overrides on its branch like any render; `layout` resolves it): an agent's held record
+(defn render-ctx
+  "The agent page's layout (the declared html render of :seon.render/render-ctx, which an agent
+  overrides on its branch like any render, drawn through `html`): an agent's held record
   ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its parts, each a keyed call of a
   sub-render over its slice of ctx, in order, each in its region of the page (:region): :task, the
   task and what it works with, which the model reads too (seon.repl/page); :chat, the conversation;
   :tiles, each eval whose value has a render of its own, newest first. With what reads the db beside it (fs, seon.context/renders over the branch's db
-  as of the record's t): [:task], the task, drawn by seon.render.ui/task-page as the stage's story
-  (seon.context/story over the db) less the vars it cites, compared in the memo by its story key;
+  as of the record's t): [:task], the task, drawn by seon.render.ui/task-page as the task's data
+  (seon.context/task-data over the db) less the vars it cites, compared in the memo by its task key;
   [:task :cites sym] for each var its plan cites (seon.context/cites), drawn by
   seon.render.ui/cited, compared by its own key, so a cited var's edit is that part's change
   alone; [:related], drawn by
@@ -173,7 +173,7 @@
   computed here: a part that reads the db carries its key (:read) and the db its render draws on,
   and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
   on (ids, the turns' bases but the newest's observation, the agent's own counters)."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:story-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
+  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
   [{c :tree} fs]
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
@@ -186,7 +186,7 @@
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
         (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs)) :region :task
-                            :schema :seon.render/task-page :read ((:story-key fs) task) :db (:db fs)})
+                            :schema :seon.render/task-page :read ((:task-key fs) task) :db (:db fs)})
                 task (into (for [v ((:cites fs) task)]
                              {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ((:cited-key fs) v) :db (:db fs)}))
                 task (conj {:key [:related] :from [task] :value {:task (:db/id task)} :region :task
@@ -210,12 +210,6 @@
                     :let [v (get-in e [:seon.eval/record :response :value])]
                     :when (and (some? v) (render-of v nil))]
                 {:key [:tile (:seon.eval/id e)] :from [e] :value v :region :tiles})))))
-
-(defn layout
-  "The agent page's parts: render-ctx, the render :seon.render/ctx-page declares under the schemas
-  in force (an agent's branch's, which may override it, or main's), of record c over fs (`view`'s)."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] :map] [:vector :seon.render/part]]}
-  [c fs] ((or (render-of c :seon.render/ctx-page) view) c fs))
 
 (defn part-faces
   "Part p's faces, {:html hiccup :inline hiccup}: its hiccup by the render its value's schema

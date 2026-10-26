@@ -17,7 +17,7 @@ What each working session is doing now and takes next; every session is linked t
 | Session | Now | Next |
 |---|---|---|
 | **Agent view** | revision 4.2 (jolt/design-rev42); stopped from building a projection the owner ruled out; measuring the unprojected page against 6,043 tokens | after root's go: delete `:seon.render/ai` and the ai faces; the request reads the page and the two diffs |
-| **ctx-atom** | jolt/ctx-atom (WIP): derived members deleted, ctx is the pull patched; story, related and first-t as renders' keys; `:seon.vector/text-t` indexed in place | the turn's ctx diff as a pure (diff ctx0 ctx1) |
+| **ctx-atom** | jolt/ctx-atom (WIP): derived members deleted, ctx is the pull patched; task data, related and first-t as renders' keys; `:seon.vector/text-t` indexed in place | the turn's ctx diff as a pure (diff ctx0 ctx1) |
 | **Agent loop** | slice 6′: a person's messages and root's stages as entries read from main; a red verdict wakes on new reasons; tests running | the busy-with-no-process defect (filed to it) |
 | **Root as one system** (stability lead), top priority | zygote piece 1 on jolt/zygote-one-mode (Jolt 3f58bd5e on main's 5cc7458e): final checks running | one mode for forking processes |
 | **full-run-reds** | jolt/an-asker-records-its-effects-error-once: each root asker records its outcome and error in one transaction | the next full run on a clean main |

@@ -675,8 +675,8 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; story in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
-  ;; the reconciler, the implement's first turn, on the design's session, sends the design's story
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
@@ -690,7 +690,7 @@
         {:keys [design implement boundary]} (:value r)
         last-design (peek design) first-implement (first implement)]
     (is (and (seq design) (seq implement) boundary) (pr-str r))
-    (is (= (second (first design)) (second first-implement)) "the design's story, in the same place")
+    (is (= (second (first design)) (second first-implement)) "the design's task data, in the same place")
     (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
     (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
 
@@ -733,7 +733,7 @@
                                    "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (status, changes, related)")
+    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task's data, the screen's three evals (status, changes, related)")
     (is (str/includes? (str (:screen (:value turn))) ":turn \"1 of 1\"") (str "the screen's first eval, the task's status: " (:screen (:value turn))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
     (is (= 5 (:read (:value turn))) "read back from its records")))

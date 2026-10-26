@@ -168,13 +168,13 @@
 
 (deftest a-turn-whose-cache-misses-its-prefix-is-a-problem
   ;; the shape of the recorded requests (2026-10-25, 94 turn pairs of 6 runs on DeepSeek): the
-  ;; system prompt, the task story, the turn's evals, then the screen, evaluated fresh each turn;
+  ;; system prompt, the task's data, the turn's evals, then the screen, evaluated fresh each turn;
   ;; the provider counts its cache hit in blocks of 128. Each message is 1,000 tokens to the
   ;; sizer (640 words), so every number below is stated, not recomputed
   (let [m (fn [w] {:role "user" :content (subs (str w " " (apply str (repeat 640 "word "))) 0 3200)})
-        [system story e1 e2 e3] (map m ["system" "story" "e1" "e2" "e3"])
-        t1 [system story e1 e2 (m "screen-a")]
-        t2 [system story e1 e2 e3 (m "screen-b")]
+        [system page e1 e2 e3] (map m ["system" "page" "e1" "e2" "e3"])
+        t1 [system page e1 e2 (m "screen-a")]
+        t2 [system page e1 e2 e3 (m "screen-b")]
         miss? (fn [prev cur prompt hit] (turn/cache-miss prev cur {:prompt-tokens prompt :cache-hit-tokens hit} 128))]
     (is (= 1000 (seon.context/messages-tokens [system])) "the fixture's unit: a message is 1,000 tokens")
     (testing "t2 shares four of its six messages: 4,000 of 6,000 tokens, 3,968 in whole blocks"
@@ -187,10 +187,10 @@
       (is (nil? (miss? t1 t2 9000 5760)))
       (is (= 6000 (:expected (miss? t1 t2 9000 5759)))))
     (testing "the prefix ends at the first message that differs"
-      (is (= {:shared 2 :expected 2000} (select-keys (miss? [system story (m "e1'") e2] t2 6000 0) [:shared :expected])))
+      (is (= {:shared 2 :expected 2000} (select-keys (miss? [system page (m "e1'") e2] t2 6000 0) [:shared :expected])))
       (is (nil? (miss? [(m "another system")] t2 6000 0)) "nothing shared: no prefix to serve"))
-    (testing "turn 1 shares the system prompt and the story only (turn 0's request after them is all screen)"
-      (is (nil? (miss? [system story (m "screen-0")] t1 5000 1920))))
+    (testing "turn 1 shares the system prompt and the page only (turn 0's request after them is all screen)"
+      (is (nil? (miss? [system page (m "screen-0")] t1 5000 1920))))
     (testing "misses of other sizes are one cause: the agent folds them under one signature, as :effect"
       (let [fold (-> nil (seon.error/note (miss? t1 t2 6000 128) :effect "demo/f#1/2" 1)
                      (seon.error/note (miss? t1 t2 6000 256) :effect "demo/f#1/3" 2))
