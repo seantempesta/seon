@@ -546,7 +546,7 @@
   "a3's page's parts as its process draws them (seon.repl/parts), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))})
+  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f) (seon.context/renders branch)))})
 
 (defn- conversation-rows
   "The ids of view's conversation parts st holds."
@@ -1120,14 +1120,14 @@
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons ["demo/f-test is red"]}}}])
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
-        parts (r/view c)
+        parts (r/view c (seon.context/renders branch))
         ks (mapv :key parts)]
     (is (= [[:task] [:proofs] [:verdict] [:run]] (subvec ks 0 4)) "the task, its proofs, the verdict, the run, first")
     (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (second parts)))
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
     (let [task (first parts)]
-      (is (contains? (:value task) :to-prove) "the model reads the stage's story (the run's derived :story)")
+      (is (contains? (:value task) :to-prove) "the model reads the stage's story (seon.context/story)")
       (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
       (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render")
       (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the story's"))
@@ -1139,7 +1139,7 @@
     (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq (map :value parts)))
         "no entity ids, no counters")
     (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
-    (is (= parts (r/view c)) "pure: the same ctx, the same parts")))
+    (is (= parts (r/view c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
 
 (deftest a-parts-faces-are-one-selection
   ;; one selection of the one printer serves both faces, so the page and the model cut alike; a
@@ -1159,11 +1159,11 @@
   ;; members a part was made from (:from), which ctx's patch leaves identical when unchanged
   (let [[main branch _] (paged-dbs)
         c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)
-        draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/view c)))
+        draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/view c (seon.context/renders branch))))
         [m1 fs1] (draw {})
         [_ fs2] (draw m1)
         c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
-        [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2))]
+        [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2 (seon.context/renders branch)))]
     (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
     (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))
 

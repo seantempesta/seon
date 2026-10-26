@@ -214,8 +214,9 @@
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
         (cond-> task (conj (let [story ((:story fs) task)]
-                             ;; the model reads the stage's story; the page draws the task, by its own render
-                             {:key [:task] :from [story task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
+                             ;; the model reads the stage's story; the page draws the task, by its own render.
+                             ;; Made from the task node: the story's memo by story-key is the view's next change
+                             {:key [:task] :from [task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
         (as-> ps (if-let [rel (and task ((:related fs) (:db/id task)))] (conj ps {:key [:related] :from [rel] :value rel}) ps))
         (cond-> (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))

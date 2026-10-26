@@ -987,6 +987,19 @@
       (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (context/related s te)))
           "a section embedded on the branch with the plan unchanged is in the next answer"))))
 
+(deftest related-key-moves-with-a-vector-written
+  ;; related is memoized by related-key: the same while nothing it reads is written, moved when a
+  ;; text is embedded (the indexed :seon.vector/text-t's newest) or the plan changes
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        k0 (context/related-key db te)
+        unrelated (d/db-with db [{:seon.agent/key "demo/a1"}])
+        s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
+        se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
+        embedded (d/db-with s (vector/tx-data [se] [(:max-tx s)] [(dir 1.0 0.5)] [10] "m"))]
+    (is (= k0 (context/related-key unrelated te)) "an agent written: the same key")
+    (is (not= k0 (context/related-key embedded te)) "a section embedded: a new key")
+    (is (not= k0 (context/related-key (d/db-with db [[:db/add te :seon.task/plan "Say another thing."]]) te)) "the plan rewritten: a new key")))
+
 (deftest the-storys-key-moves-with-what-it-reads
   ;; the story is a render (seon.context/story), memoized by what it read (story-key): the key is
   ;; the same while nothing it reads is written, and moves when the plan, or a var it cites, does
