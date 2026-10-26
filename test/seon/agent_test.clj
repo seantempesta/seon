@@ -642,7 +642,8 @@
    (fn [cfg conn]
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
            ab (pdb/on-main (:branch cfg) :agent-entries)
-           env {:branch ab :model nil :max-turns 4}
+           ;; main names a run's branch as it is; the store qualifies it on a test's main
+           env {:branch :agent-entries :model nil :max-turns 4}
            _ (d/transact conn (into (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 env 1000 "Wait.")
                                     (task/run-start-tx "demo/w#2" "demo/w" "boot-1" :a2 env 1000 "Wait.")))
            ;; the session's branch, then on main: a verdict to its earlier run, a message to another session's run
@@ -654,7 +655,7 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#2" :db @store-conn})
          (is (= [{:id "m-v" :kind :verdict :from "root" :to "demo/w#1" :body "red: demo-test/w is red"}]
                 (agent/untaken-entries))
              "the session takes what main holds to its earlier run, and nothing of another session's")
@@ -673,7 +674,7 @@
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
            ab (pdb/on-main (:branch cfg) :agent-taken)
            k (task/agent-key "boot-1" :a1)
-           _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch ab :model nil :max-turns 4} 1000 "Wait."))
+           _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch :agent-taken :model nil :max-turns 4} 1000 "Wait."))
            _ (d/branch! conn (:branch cfg) ab)
            store-conn (d/connect (assoc cfg :branch ab))
            _ (d/transact store-conn [{:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
@@ -683,7 +684,7 @@
            [a b] (sock/socketpair)
            old @agent/state]
        (try
-         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key k :db @store-conn})
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
          (is (= :running (get-in @seon.ctx/ctx [:runs "demo/w#1" :seon.run/status])) "before the take, the branch's own")
          (is (= [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
@@ -819,6 +820,17 @@
     (is (= (range (nth (first runs) 5)) (numbers "demo/w#1")) "the parked run's turns, numbered from 0")
     (is (= (range (nth (second runs) 5)) (numbers "demo/w#2")) "the wake's, numbered from its own 0, none over the parked run's")
     (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
+
+(deftest a-run-at-its-cap-is-recorded-cap-never-waiting
+  ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
+  ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
+  ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
+  (let [outcome (fn [script max-turns]
+                  (:outcome (:value (first (in-agent [(str "(seon.turn/work! {:task \"demo/t\" :run \"demo/t#cap\" :max-turns " max-turns "})")]
+                                                     {:sets [(str ":seon.config.ai/script=seon.fixtures/" script)]})))))]
+    (is (= :cap (outcome "wait-call" 1)) "a wait on the last turn: the budget spent")
+    (is (= :waiting (outcome "wait-call" 2)) "a wait with turns left: waiting")
+    (is (= :failed (outcome "fail-call" 1)) "fail! on the last turn: the agent's verdict")))
 
 (deftest a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (written as the
