@@ -23,7 +23,7 @@
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
+            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
@@ -509,8 +509,7 @@
   (when-let [own (d/pull db '[*] eid)]
     (let [schema (entity-schema own nil)
           units (units schema)
-          types (d/schema db)
-          ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in types [a :db/valueType]))))
+          ref? (fn [a] (or (not= a (forward a)) (dbu/ref? db a)))
           ;; each ref unit's linking datoms, with the transaction that wrote each, newest first: a
           ;; reverse ref's from its index (one read for every row: a ref is in :avet)
           linked (fn [a] (let [f (forward a)]

@@ -39,14 +39,6 @@
 (defn- busy {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (seq (:inflight st)) :busy :idle))
 
-(def stall-ms
-  "Silence, ms, after which a busy agent is observed stalled once (a recorded fact, never an
-  end; session D2). A guessed tolerance (GUARDS finding 5) and a clock (DECISIONS, If nothing has
-  changed, we do nothing; no clock or timer decides), so not a config key; it goes with
-  seon.root/a-stall-is-past-the-requests-own-bound. root's start! takes :stall-ms (the
-  problems check provokes a stall at 1,000). 0: no check."
-  30000)
-
 (def stop-bound-ms
   "How long an agent may take to exit after :stop before it is SIGKILLed. A guard, not a
   config key (GUARDS finding 3: a clock standing in for the exit event); it goes with
@@ -125,6 +117,9 @@
   [st o m]
   (let [id (:id st)]
     (case (:op m)
+      ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a
+      ;; stall names
+      :testing (assoc st :last-op {:kind :tests :form (:test m)})
       :hello (do (when (:cloned-from m)
                    ;; a clone: its pid arrives here (the fork server never saw it)
                    (when (:kill? st) (lib/c-kill (:pid m) 9))
@@ -269,7 +264,8 @@
      :in (agent-in st m)
      ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 ;; any frame is progress (the stall check reads it)
+                 ;; any frame is progress (the stall check reads it); the first after a stall ends it
+                 _ (when (and (:stall-seen st) (some? m)) (step/out! o :to-api {:op :spoke :agent (:id st)}))
                  st (agent-frame (assoc st :last-frame-ms (System/currentTimeMillis) :stall-seen false) o (if (nil? m) {:op :dead} m))]
              [st @o])
      [st nil])))
