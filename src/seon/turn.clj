@@ -166,13 +166,9 @@
   {:malli/schema [:=> [:cat :boolean] :map]}
   [take?]
   (let [sends (agent/inbox)
-        entries (agent/untaken-entries)]
-    (when take?
-      (let [tx (into (agent/untaken-facts) (agent/entries-tx entries))]
-        (when (seq tx) (agent/transact! tx)))
-      (agent/commit!)
-      ;; taken once their facts are committed: a refused write leaves them for the next turn
-      (agent/taken! (count sends)))
+        entries (if take? (agent/take-main!) (agent/untaken-entries))]
+    ;; taken once their facts are committed: a refused write leaves them for the next turn
+    (when take? (agent/taken! (count sends)))
     (cond-> {}
       (and take? (seq entries)) (assoc :message-ids (mapv :id entries))
       ;; an observer's read: the entries as they are, unwritten

@@ -106,7 +106,7 @@
 
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
-  names them) that its branch does not hold yet, in main's order: each {:id :kind :from :to :body}.
+  names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
   Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
   process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
   ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
@@ -123,7 +123,7 @@
                           [(get-else $ ?m :seon.message/kind :message) ?kind]]
                         main br))
          (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
-         (sort-by first)
+         (sort-by (juxt first second))
          (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
 
 (def taken-attributes
@@ -230,14 +230,24 @@
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
+(defn take-main!
+  "Take what main holds for this agent onto its branch, committed: its entries
+  (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
+  (seon.turn/take!) and its code's (messages). Answers the entries taken."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (untaken-entries)
+        tx (into (untaken-facts) (entries-tx es))]
+    (when (seq tx) (transact! tx))
+    (commit!)
+    es))
+
 (defn messages
-  "The words to this agent not yet taken, taken: the entries main holds to its session's runs
-  (untaken-entries), written on its branch as a turn takes them (seon.turn/take!), then the
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them), then the
   inbox's sends (inbox). Its reader is the code that read them."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (untaken-entries)]
-    (when (seq es) (transact! (entries-tx es)) (commit!))
+  (let [es (take-main!)]
     (inbox)
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 

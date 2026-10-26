@@ -151,6 +151,12 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
+(defn- outside?
+  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
+  drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [env] (= "outside" (:model env)))
+
 (defn- idle
   "Task id's parked run whose process is idle now: parked in this boot, by an agent. A wake
   reuses it; a cancel, a hold or a new branch for its task stops it (classify: its process
@@ -436,7 +442,7 @@
                        ;; what root judged on, which wakes the session; the same verdict twice holds
                        ;; (start) (design one-derivation 4.1 section 5). A merge's holds, and
                        ;; an outside agent's: it read the verdict as :done's answer, and no turn loop takes entries
-                       (and (not merge?) (not= "outside" (get-in a [:seon.run/env :model])) (#{:green :red} (:seon.run/outcome a)))
+                       (and (not merge?) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
                        {:op :verdict :run aid :task id :reasons rs}
                        :else
                        (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
@@ -874,7 +880,7 @@
       ;; an outside agent works this run (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))
-                 (= "outside" (get-in act [:env :model]))
+                 (outside? (:env act))
                  (done st)
                  :else
                  ;; a session's next stage: the boundary is a :stage entry, root's, a fact on main to this

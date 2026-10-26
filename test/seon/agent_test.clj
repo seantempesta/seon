@@ -694,8 +694,7 @@
                  {:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
-         (agent/transact! (agent/untaken-facts))
-         (agent/commit!)
+         (is (= [] (agent/take-main!)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
          (is (= [nil :waiting "waiting for a message"]
                 (mapv #(get-in @seon.ctx/ctx [:runs "demo/w#1" %]) [:seon.run/status :seon.run/outcome :seon.run/reason]))
              "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
