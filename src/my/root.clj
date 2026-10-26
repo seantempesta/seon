@@ -23,17 +23,21 @@
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
 (defn request!
-  "Work request decl (seon.template/request: design -> implement -> merge on one branch):
-  the linked set written released in one transaction on main (seon.template/request-tx),
-  so no agent forks before every task of it is set. Answers the writer's answer with the
-  set's ids, or the error."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/declaration] :map]}
-  [sys decl]
-  (let [tx (tpl/request-tx @(:conn sys) decl)]
-    (if (contract/error? tx)
-      tx
-      (assoc @(root/transact-main! sys tx)
-             :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) (tpl/request decl))))))
+  "Work request decl as the tasks template makes of it (seon.template/request, the default: its
+  design-build task and its merge; seon.template/whole or seon.template/stages for an
+  experiment), written released in one transaction on main (seon.template/request-tx), so no
+  agent forks before every task of it is set. Answers the writer's answer with the tasks'
+  ids, or the error."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/declaration] :map]
+                  [:=> [:cat :seon.root/sys :seon.task/declaration ifn?] :map]]}
+  ([sys decl] (request! sys decl tpl/request))
+  ([sys decl template]
+   (let [ds (template decl)
+         tx (tpl/request-tx @(:conn sys) ds)]
+     (if (contract/error? tx)
+       tx
+       (assoc @(root/transact-main! sys tx)
+              :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
@@ -254,8 +258,10 @@
   a Claude session, an agent, the owner's editor, git), and loads on its own branch's ref only
   (watch-loads: the repository is shared by every worktree, whose commits are not this root's). What changed while root was down is
   boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
-  (seon.root/import-source!); task files are loaded on their change, or by load-tasks!, never
-  at boot. Then each batch loads what it makes root load (watch-loads),
+  (seon.root/import-source!), and here the task files, once the watcher is ready (a fresh or
+  erased store holds none, and a file changed while root was down is read; an unchanged read
+  writes nothing). The boot's load and the batches' run one at a time, so a change after ready
+  is read by the boot's load, a batch's, or both, in order. Then each batch loads what it makes root load (watch-loads),
   and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact. A
   watcher that cannot start or dies is a :platform error on main (seon.root/platform-tx), and
   root goes on unwatched: nothing falls back to a poll. Answers the watcher, or the error."
@@ -269,6 +275,17 @@
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
         died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
+        ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
+        ;; the load made true are shown by health. One load at a time: a load writes what it read
+        ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
+        ;; one written after a newer one would undo it, and its event is spent)
+        one (Object.)
+        load! (fn [ks]
+                (locking one
+                  (let [r (load-kinds! sys ks)]
+                    (doseq [e (load-errors (:loaded r))]
+                      @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
+                    r)))
         w (watch/start! roots
                         (fn [batch]
                           (let [why (watch-loads co refs own batch)
@@ -277,17 +294,14 @@
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
                             (when (seq ks)
-                              (let [{:keys [loaded opened]} (load-kinds! sys ks)]
-                                ;; a loader's typed error (a refused task file) is a recorded :platform error; the
-                                ;; problems the load made true are shown by health, and the last are kept in the fact
-                                (doseq [e (load-errors loaded)]
-                                  @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
+                              ;; the problems the load made true, the last kept in the fact
+                              (let [{:keys [opened]} (load! ks)]
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]
     (if (contract/error? w)
-      (do (died w) w)
-      (do @(fact fresh) w))))
+      (do (died w) (load! #{:tasks}) w)
+      (do @(fact fresh) (load! #{:tasks}) w))))
 
 (defn union
   "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union

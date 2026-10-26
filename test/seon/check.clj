@@ -944,7 +944,14 @@
        :timeout (in-child-bounded (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
        :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
-                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})})
+                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
+   "child-throws"
+   ;; a child whose code throws: unwound out of lib/fork! it would run this case's catch in the
+   ;; child (exit 7); it ends at fork!, exit 1. One whose code returns exits 0
+   #(vector (try (lib/fork! {:child (fn [] (throw (ex-info "out of the child" {})))
+                             :refused (fn [n] {:refused n}) :parent lib/wait-status})
+                 (catch clojure.lang.ExceptionInfo _ (lib/c-exit 7)))
+            (lib/fork! {:child (fn [] :returned) :refused (fn [n] {:refused n}) :parent lib/wait-status}))})
 
 (defn forks
   "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."

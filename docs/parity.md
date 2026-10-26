@@ -57,7 +57,7 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 |---|---|---|
 | tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
 | ``chain!`` and ``:seon.task/next`` | `:needs` only | dropped |
-| step templates (design, prove, implement, merge) | `seon.template/request`: design → implement → merge on one branch, one transaction ([tasks](tasks.md#a-request-is-one-transaction)) | present |
+| step templates (design, prove, implement, merge) | `seon.template/request`: design-build, then merge, one transaction; for experiments, `seon.template/whole` (one task that merges itself) and `seon.template/stages` (design → implement → merge on one branch) ([tasks](tasks.md#a-request-is-one-transaction)) | present |
 | three-way program merge, conflicts as entries, forward merge | `seon.merge`, `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm row: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
@@ -76,7 +76,7 @@ Each v1 capability for building and printing the model's context, and where it s
 |---|---|---|
 | generated task context; one reference rule (`seon.ref`); forgiving reader | `seon.context`, `seon.ref`, `seon.reader/forgive` | present |
 | `(help)` checked against the program | [agent](agent.md), the system message; `my.agent/help`; every form on it run in an agent by `seon.repl-test/the-help-page-runs` | present |
-| context: stable run sections, cached; small turn sections; must-reads capped | `seon.context/messages` (the help, the run sections, the scrollback, the turn); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
+| context: stable run sections, cached; small turn sections; must-reads capped | ```seon.context/request``` (the help, the session's records, and the page at each model turn, whole then what changed: ```seon.context/world```); vars at their citation's depth, cut only by the printer at the context's budget; cache hits on each turn | present |
 | one printer with a budget and runnable continuations; renders on schemas | `seon.print`, `seon.render` | present |
 | wiki sections in the context | `seon.docs` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |

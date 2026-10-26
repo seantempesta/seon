@@ -182,6 +182,8 @@
             (or (map-classes c) (set-classes c) (vector-classes c))
             (some (fn [[v form]] (when (identical? v x) form)) (get colls (System/identityHashCode x)))))))
 
+(declare show)
+
 (defn- classify
   "One row of the permitted-operation table: exact classes for scalars, maps and sets; seqs and
   other sequentials by interface, stepped to the context's `:max-children`; anything else is its
@@ -192,11 +194,21 @@
   (let [c (class x) limit (:max-children context)
         ;; a nested map whose schema declares a render shows as that render, one line, in its place
         rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
+        ;; a call ([#'f opts value], a vector headed by a var, as seon.web.html expands it, whose opts
+        ;; carry a budget): its value printed at that budget and handle, so a reader sees the cut the page shows
+        ;; and the form that reads the rest. Its budget is its own, beside the enclosing value's, as the
+        ;; page's writer gives it; a plain vector headed by a var, with no budgeted opts, prints as data
+        call (when (and (vector? x) (var? (first x)) (pos-int? (:budget (nth x 1 nil)))) x)
         ;; a value an earlier response showed is the form that reads it again (seen-form); a
         ;; print given no earlier responses looks nothing up
         again (when (:seen context) (seen-form x c context))]
     (cond
       again (scalar :seon.print/rendered x (pr-str again))
+      call (let [[f o v] call
+                 r (show v (cond-> {:handle (:handle o) :budget (:budget o) :max-depth (:max-depth context)
+                                    :width (:width context) :outputs #{:text}}
+                             (:render context) (assoc :render (:render context))))]
+             (scalar :seon.print/rendered x (str "[" (pr-str f) " " (pr-str o) " " (or (:text r) (:seon.error/message r)) "]")))
       rendered (assoc (scalar :seon.print/rendered x (:text rendered)) :seon.print/html (:html rendered))
       (nil? x) (scalar :seon.print/nil nil "nil")
       (identical? c Boolean) (scalar :seon.print/boolean x (str x))

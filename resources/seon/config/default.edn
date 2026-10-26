@@ -385,6 +385,11 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
+ ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
+ ;; a-contract-carries-its-cost-bound 2026-10-26 (test.check's sample sizes, 0 to 100). At the bound:
+ ;; no case is drawn larger; a bound must hold past it on its own terms, which its :gen can draw.
+ :seon.config.proofs/case-sizes 101
  ;; Unit: engine ticks. What one measure of a call's ticks may be off by, whatever the load: Chez
  ;; feeds the timer in chunks of 1,000 ticks, and some calls are charged one whole chunk more
  ;; than others on the same input, plus up to ~50 ticks. Provenance: worktree session store,
@@ -562,6 +567,16 @@
  ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
  ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
  :seon.config.render/history-budget 32000
+ ;; Unit: members. The newest members of each collection a record holds (an agent's evals, runs,
+ ;; turns and messages; root's agents), read newest first and stopping there, so a record costs its
+ ;; window, not its history. 100: a session's evals measured on live agents run 20-80 a task
+ ;; (render-workload-a1: 63 evals over 4 runs), so a working session's conversation fits whole.
+ ;; Older members stay on the branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
+ :seon.config.ctx/window 100
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds. 5: what a
+ ;; cited var's part shows of its callers; a hot var (clojure.core/let) is named by 1,600 forms, which
+ ;; are read and ordered by when each was written (a form's id is its content's, not in time order).
+ :seon.config.ctx/callers 5
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the

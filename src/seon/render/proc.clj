@@ -145,7 +145,7 @@
   [{:keys [id input schema html hiccup]}]
   (if html
     [hiccup html]
-    (let [hc (render/html input {:schema schema :unit id})] [hc (h/html hc)])))
+    (let [hc (render/html {:schema schema :unit id} input)] [hc (h/html hc)])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -297,13 +297,13 @@
         ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
         ;; when root reads it (take-read), and the branch's reads are not main's
         branch-parts (fn [] (binding [datahike.index.interface/*reads* nil]
-                              (render/html (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (assoc (context/renders bdb) :schema :seon.render/render-ctx))))
+                              (render/html (assoc (context/renders bdb) :schema :seon.render/render-ctx) (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)))))
         drawn (fn [p] (render/part-html p (render/part-faces p)))
         parts (if own?
                 (:parts held)
                 (cond bdb (mapv drawn (branch-parts))
                       ;; a branch that could not be read: its error, by the error's render
-                      berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} f))]))
+                      berr [(let [f {:html (render/html {} berr) :inline (render/html {:as :inline} berr)}] (render/part-html {:key [:branch] :value berr} f))]))
         ;; the evals this tab opened that are drawn closed: drawn opened from the branch
         unopened (into #{} (keep #(when (and (= :eval (first (:key %))) (nil? (:html %)) (open (ui/part-id (:key %)))) (:key %))) parts)
         parts (if (and (seq unopened) bdb)
@@ -311,8 +311,7 @@
                   (mapv #(get opened (:key %) %) parts))
                 parts)
         root (:db/id (d/entity db [:seon.root/id :root]))]
-    (ui/parts-page (:seon.agent/id e)
-                   {:parts (or parts []) :shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :head [0 eid]
+    (ui/parts-page {:parts (or parts []) :shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :head [0 eid]
                     ;; never a wait: drawn from its branch until its process answers, the page says so
                     :caption (when-not own?
                                (str "drawn by root from its branch with main's renders: "
@@ -326,7 +325,8 @@
                     ;; root, then its agents: page chrome, read on main
                     :sides (vec (when root (cons {:eid root :db 0}
                                                  (for [nd (:seon.render/nodes (render/walk [db] root)) :when (= :seon.db/agent-fact (:seon.render/schema nd))]
-                                                   {:eid (:seon.render/eid nd) :db 0}))))})))
+                                                   {:eid (:seon.render/eid nd) :db 0}))))}
+                   (:seon.agent/id e))))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
@@ -366,8 +366,8 @@
                       :agents (get-in st [:view :agents] {}) :recorded (:recorded st)}
                 {:seon.render/keys [value schema]} (:seon.render/root w)
                 own (when (render/declared schema)
-                      (render/html value {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))}))]
-            (if (and (map? own) (:seon.render/units own)) own (ui/page w opts))))))))
+                      (render/html {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))} value))]
+            (if (and (map? own) (:seon.render/units own)) own (ui/page opts w))))))))
 
 (defn- ready?
   "Is view's page whole to answer: rendered, and, when its entity is an agent with a branch, that
@@ -547,7 +547,7 @@
     ;; main not read yet: nothing held, nothing indexed; the next pass walks it
     (nil? out) [st nil]
     ;; a location naming no entity: its page is that error, by its render
-    (:seon.error/type out) [(let [hc (render/html out {})] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
+    (:seon.error/type out) [(let [hc (render/html {} out)] (hold st {:skeleton (h/html hc) :layout hc :units {}})) nil]
     :else
     (let [dbs (into [(:main-db st)] (keep identity) [(get-in st [:branches view-id :db])])
           ;; each component's html from the cache (rendered there when missing); its input names
@@ -586,7 +586,7 @@
             e (contract/error :seon.render/view-defect #'pass-view (str "the page " named " threw rendering: " (step/error-msg ex))
                               (cond-> {:view named :class (.getName (class ex))}
                                 (:clojure.error/symbol d) (assoc :seon.error/in (:clojure.error/symbol d))))
-            hc (render/html e {})]
+            hc (render/html {} e)]
         (when-not (= e (:error held))
           (step/out! o :to-api {:op :error :pid :render :message (:seon.error/message e) :data e}))
         [(-> st (update :dirty disj view-id)
@@ -750,7 +750,7 @@
         detail (print/text r)]
     (when form
       (let [rec (repl/record-details (:main-db st) form (if err {:ex r} {:value r}) {} nil)]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail}) o)))
 

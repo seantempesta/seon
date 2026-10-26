@@ -374,12 +374,12 @@
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
   (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
-  apart): `record-details`; and the agent's answered t. Who is the one upsert, by its identity: an
+  apart): `record-details`. Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root})."
-  {:malli/schema [:=> [:cat :map :string :string :map [:maybe :int]] :seon.db/tx-data]}
-  [who id by details t-basis]
+  {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
+  [who id by details]
   [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
-   (cond-> (assoc who :db/id "agent") t-basis (assoc :seon.agent/answered-t t-basis))])
+   (assoc who :db/id "agent")])
 
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
@@ -428,8 +428,7 @@
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run]))
-                                                 (:max-tx (agent/db)))))
+                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
           (assoc r :record id))
       r)))
 
@@ -477,7 +476,7 @@
   [m p]
   (try (render/drawn m p)
        (catch Throwable e (let [err (agent/error-map e)]
-                            [m {:html (render/html err {}) :inline (render/html err {:as :inline})}]))))
+                            [m {:html (render/html {} err) :inline (render/html {:as :inline} err)}]))))
 
 (defn- drawn-parts
   "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
@@ -488,7 +487,7 @@
   (with-branch-schemas
     #(let [c (ctx/record)
            [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
-                              [(:drawn @agent/state {}) []] (render/html c (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx)))]
+                              [(:drawn @agent/state {}) []] (render/html (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx) c))]
        ;; the memo holds the parts this page has now, none it dropped
        (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
        {:t (get-in c [:tree :t] 0) :parts out})))

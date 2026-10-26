@@ -50,6 +50,14 @@
   (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k :dir "target")]
     (if (zero? exit) (edn/read-string (last (str/split-lines out))) {:exit exit :err err})))
 
+(deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent
+  ;; the child holds a copy of every frame its parent forked from: a throw out of (child) that
+  ;; unwound out of lib/fork! ran the parent's code in the child (in an agent's test child, the
+  ;; agent's own serve! loop, which died as the agent, exit 70, or went on reading root's socket
+  ;; as a second agent). The child ends at fork!, exit 1, saying what threw; one that returns
+  ;; exits 0 (seon.check/fork-cases "child-throws")
+  (is (= [{:exit 1} {:exit 0}] (fork-case "child-throws"))))
+
 (deftest a-wait-for-a-line-parks-the-fiber
   ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
   ;; on the main carrier (the agent's one thread) a poll(2) of the pipe held every other fiber

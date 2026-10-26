@@ -80,6 +80,14 @@
     (clojure.test/is (clojure.string/includes? (pr-str refused) "is held by live agent") "the attach is refused: demo/t's agent holds the branch")
     (clojure.test/is (= [:held nil 0] (:value seen)) "and wrote nothing: demo/u is still held, with no env and no run")))
 
+(deftest an-attached-agent-holds-its-run
+  ;; agent view's browser check: an agent attached from outside (seon.server/attach!
+  ;; spawns it before it writes the run on main, so its branch is cut without the run) held no
+  ;; :runs in @ctx, and its page no task, until a turn or a context read began the run. Forked for
+  ;; a run, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
+  (let [[held] (at/in-agent ["(let [t @seon.ctx/ctx r (val (first (:runs t)))] [(count (:runs t)) (:seon.run/id r) (get-in r [:task :seon.task/id])])"])]
+    (is (= [1 "demo/t#1" "demo/t"] (:value held)) "its run, with its task, in its record")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message
@@ -89,7 +97,7 @@
                                         "(my.agent/messages)"
                                         {:op :message :agent "a9" :body "hello?"}])]
     (is (true? (:ok sent)) "answered when its fact is on main")
-    (is (re-find #":from :owner" (:text taken)) (:text taken))
+    (is (re-find #":from \"owner\"" (:text taken)) (:text taken))
     (is (re-find #":body \"use demo/g\"" (:text taken)))
     (is (re-find #":to \"demo/t#1\"" (:text taken)) "to the run the agent works")
     (is (re-find #":id \"m-" (:text taken)) "the fact's id, which the agent writes on its branch")

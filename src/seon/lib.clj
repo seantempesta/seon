@@ -5,7 +5,7 @@
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
-            [seon.contract :refer [defn defn- defchecked]] [seon.config :as config]))
+            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -59,7 +59,38 @@
     (ffi/read b :uint64 0)))
 (defc kq-new "e13_kq_new" [] :long)
 (defc kq-watch "e13_kq_watch" [:int :int] :long)
+(defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
+
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
+
+(defn wait-fd-or-exit
+  "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
+  watching both (EVFILT_READ, and NOTE_EXIT, the fact the fork server reaps by), parked on as a
+  fiber parks on any descriptor (jolt.io-poller: on a main carrier the process's other fibers run).
+  Answers {:wait (a fn that parks until either comes and answers :input or :exited; once the child
+  has exited, :exited at once) :close (frees the kqueue)}. A child gone before it was watched has
+  exited already. A kernel that will not watch either, or a wait it fails, is :seon.lib/unwatched,
+  answered as data (the watch's, or :wait's)."
+  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:wait :seon.host/fn] [:close :seon.host/fn]] :seon.lib/unwatched]]}
+  [fd pid]
+  (let [kq (kq-new)
+        fd-watch (kq-watch-fd kq fd)
+        ;; -1: the child is gone already; -2: the kernel refused
+        pid-watch (kq-watch kq pid)
+        unwatched #(contract/error :seon.lib/unwatched #'seon.lib/wait-fd-or-exit
+                                   (str "fd " fd " and process " pid " could not be watched (kqueue): " %) {:fd fd :pid pid})]
+    (if (or (neg? fd-watch) (= -2 pid-watch))
+      (do (c-close kq) (unwatched "the kernel refused the watch"))
+      (let [exited (volatile! (= -1 pid-watch))]
+        {:wait (fn [] (if @exited
+                        :exited
+                        (do (poller/wait-ready kq :read)
+                            ;; kq is readable, so e13_wait answers at once: 0 for fd's input, the pid at its exit
+                            (let [r (kq-wait kq fd)]
+                              (cond (pos? r) (do (vreset! exited true) :exited)
+                                    (zero? r) :input
+                                    :else (unwatched "the wait failed"))))))
+         :close (fn [] (poller/forget! kq) (c-close kq))}))))
 (defc mp-probe* "mp_probe" [:pointer :long] :long)
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
@@ -197,15 +228,24 @@
 (defn fork!
   "The one spawning skeleton (AGENTS section 2): fork only while this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child), checked once. Then
-  (child) in the child, exiting 0 if it returns; (refused n) here, n the active threads (1:
-  the OS refused); or (parent pid) here, whose answer is this fn's. fd, the child's own, is
-  closed here. double? forks the child again and reaps the middle: a clone is nobody's child."
+  (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
+  stderr; a raise or an escape no catch takes): the child holds a copy of the parent's frames,
+  and unwinding into them would run the parent's code in the child; (refused n) here, n the
+  active threads (1: the OS refused); or (parent pid) here, whose answer is this fn's. fd, the
+  child's own, is closed here. double? forks the child again and reaps the middle: a clone is
+  nobody's child."
   {:malli/schema [:=> [:cat [:map [:child :seon.host/fn] [:refused :seon.host/fn] [:parent :seon.host/fn]
                              [:fd {:optional true} :seon.lib/fd] [:double? {:optional true} :boolean]]] :any]}
   [{:keys [child refused parent fd double?]}]
   (let [pid (fork-alone*)]
     (if (zero? pid)
-      (do (when (or (not double?) (zero? (c-fork))) (child)) (c-exit 0))
+      (let [status (volatile! 1)]
+        (try (when (or (not double?) (zero? (c-fork))) (child))
+             (vreset! status 0)
+             (catch Throwable e
+               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (pr-str (ex-data e))) (flush)))
+             ;; a finally is a winder, run on any exit from the try (a fiber's park drops it)
+             (finally (c-exit @status))))
       (do (some-> fd c-close)
           (if (neg? pid) (refused (active-threads)) (do (when double? (wait-status pid)) (parent pid)))))))
 

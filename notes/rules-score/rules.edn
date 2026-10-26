@@ -1,0 +1,103 @@
+;; Lab rule table for scoring merges and live runs against AGENTS.md (notes/rules-score/README.md).
+;; Two lists. :enforced rules are gates: a merge that breaks one is refused outright, so they
+;; carry no weight (a gate counted as points could be traded against other points).
+;; :scored rules are weights over facts read from git, the files and the run records.
+;; :measure names the fact score.clj computes; :unit is what one point of the measure is;
+;; :cap bounds |points| of one rule so no single rule can carry a merge. No score is stored anywhere.
+{:enforced
+ [{:id :gate/main-tests-green
+   :sentence "No regressions get through. The merge runs bin/prove, the process tests the change reaches, and the cost proofs on any pin bump"
+   :why "Owner, 2026-10-26: main's old tests run against the merged tree, so deleting a test does not stop it running. Removing a proof is caught here, not scored."
+   :measure :merge-log/prove-verdict}
+  {:id :gate/laws
+   :sentence "bin/laws catch lists every catch and is red on one the page does not name"
+   :why "bin/laws catch, clocks and resolution are red in bin/prove on an unnamed site; a named one is allowed. Counted in the score only as a growth fact, never as the verdict."
+   :measure :diff/catch-and-clock-sites}
+  {:id :gate/contracts-generate
+   :sentence "Contracts (Malli function schemas) on every function, instrumented at definition, and every contract must generate (mg/check in bin/check)."
+   :why "A bin/check step; red refuses the merge."
+   :measure :not-computed}
+  {:id :gate/cost-proofs
+   :sentence "Estimates are proofs. ... An overrun, or growth steeper than the work needs, is red"
+   :why "A cost proof is a test; it is inside the prove gate."
+   :measure :not-computed}
+  {:id :gate/pins-verified
+   :sentence "A pin bump is verified with git ls-tree HEAD reference-code/<lib> and gh api ..."
+   :why "The merge session refuses an unpushed pin."
+   :measure :not-computed}]
+
+ :scored
+ [;; outcomes: the largest weights
+  {:id :outcome/merged-green
+   :sentence "its proofs go green, its branch merges to main, and main runs the result."
+   :measure :merge/merged-with-green-prove :weight 30 :unit "merge" :cap 30}
+  {:id :outcome/reverted
+   :sentence "A red merged tree is reverted on main and sent back to the session with its log."
+   :measure :git/reverted-on-main :weight -40 :unit "revert" :cap 40}
+  {:id :outcome/added-forms-survive
+   :sentence "the good changes accrete into one program that gets smaller, faster and more certain as it grows"
+   :measure :git/fraction-of-added-defs-alive-on-main :weight 30 :unit "fraction, centred: 30*(2s-1)" :cap 30
+   :note "Retrospective: a merge from the last hour has had no time to be deleted; reads 1.0."}
+  {:id :outcome/deletions-stick
+   :sentence "Prefer deleting to adding"
+   :measure :git/deleted-defs-still-absent-on-main :weight 1 :unit "def deleted and still gone" :cap 15}
+  ;; reuse and improvement
+  {:id :reuse/calls-existing-vars
+   :sentence "a change reuses and improves the core rather than adding a one-off beside it"
+   :measure :diff/distinct-preexisting-seon-vars-referenced-by-added-lines :weight 0.5 :unit "var" :cap 15
+   :note "Read by token match, not the compiler: qualified alias/name tokens whose name is a def in the parent tree, and bare tokens naming a def of the same file. Over-counts a shared name (run, status)."}
+  {:id :reuse/improve-not-add
+   :sentence "new work reuses what is there and improves the core part it needs ... A one-off helper, render or wrapper beside an existing mechanism is the mistake to avoid"
+   :measure :diff/changed-defs-minus-new-defs :weight 0.5 :unit "def" :cap 15}
+  ;; growth
+  {:id :growth/net-src-lines
+   :sentence "a merge that grows src names what it replaces"
+   :measure :diff/net-src-lines :weight -0.05 :unit "line" :cap 20}
+  {:id :growth/new-namespaces
+   :sentence "adds a namespace, a config key, a schema attribute ... waits for root's gate"
+   :measure :diff/net-src-files :weight -5 :unit "namespace" :cap 20}
+  {:id :growth/new-config-keys
+   :sentence "Only documented config ... adds ... a config key ... waits for root's gate"
+   :measure :diff/net-config-keys :weight -2 :unit "key" :cap 10}
+  {:id :growth/new-schema-attrs
+   :sentence "adds ... a schema attribute ... waits for root's gate"
+   :measure :diff/net-schema-attributes :weight -1 :unit "attribute" :cap 10}
+  {:id :growth/names-what-it-replaces
+   :sentence "A branch's report states ... what it replaces or deletes, its src line delta and its measured value"
+   :measure :msg/grows-without-naming-a-deletion :weight -8 :unit "merge" :cap 8}
+  ;; proofs and tests
+  {:id :proofs/added-with-change
+   :sentence "write the proofs and watch them fail for the right reason"
+   :measure :diff/new-deftests :weight 2 :unit "deftest" :cap 12}
+  {:id :tests/merged-with-a-red
+   :sentence "A red on main gets an owner and a task within the hour, and nothing touching its area merges until it is green."
+   :measure :merge-log/red-recorded-at-merge :weight -10 :unit "merge" :cap 10}
+  ;; laws as growth (the gate decides; the score prices new sites)
+  {:id :laws/new-catch
+   :sentence "No guards. ... Nothing else catches"
+   :measure :diff/net-catch :weight -3 :unit "catch" :cap 12}
+  {:id :laws/new-clock
+   :sentence "No clock or timer decides anything."
+   :measure :diff/net-clock-reads :weight -3 :unit "site" :cap 12}
+  {:id :laws/dates-in-src
+   :sentence "the wiki ... current truth rather than a dated log (and the session rule: no dates in docstrings)"
+   :measure :diff/net-dated-src-lines :weight -1 :unit "line" :cap 5}
+  {:id :laws/fix-in-dependency
+   :sentence "a cause in a dependency (Chez, Jolt, Datahike, konserve) is fixed there, on a jolt/<topic> branch"
+   :measure :diff/pin-bumps :weight 3 :unit "pin" :cap 6}
+  ;; live runs
+  {:id :run/green
+   :sentence "Progress is measured as turns to green and tasks merged"
+   :measure :run/outcome-green-or-merged :weight 30 :unit "run" :cap 30 :scope :run}
+  {:id :run/turns-to-green
+   :sentence "the target is one task in about 20 turns; a capped run is a context failure (plan, 2026-10-26)"
+   :measure :run/target-20-minus-turns :weight 1 :unit "turn" :cap 20 :scope :run}
+  {:id :run/capped
+   :sentence "a capped run is a context failure"
+   :measure :run/outcome-cap-or-waiting :weight -10 :unit "run" :cap 10 :scope :run}
+  {:id :run/repeats
+   :sentence "Waste ... the turns and tokens a run spent past what its work needed"
+   :measure :run/repeated-call-turns :weight -2 :unit "repeat" :cap 10 :scope :run}
+  {:id :run/errors
+   :sentence "Waste ..."
+   :measure :run/errors-in-turns :weight -1 :unit "error" :cap 10 :scope :run}]}

@@ -1,89 +1,271 @@
 (ns seon.ctx
-  "The agent's record as one map, `@ctx` (docs/ctx.md): its
-  agent entity whole, and the units its entity schemas declare (:seon.render/units), each a
-  nested map: a reverse-ref unit a map of its members by their identity under the unit's short
-  key (:seon.eval/_agent is :evals, :seon.run/_agent :runs, :seon.turn/_run :turns,
-  :seon.message/_to :messages), a forward-ref unit its entity under the attribute's name
-  (:seon.run/task is :task). Beside them its environment, :t :branch :commit.
+  "The agent's record as one map, `@ctx` (docs/ctx.md): its agent entity pulled by a pattern,
+  Datahike's pull syntax held as data (:seon.ctx/pattern: the agent's own edit, else its entity
+  schema's), each join's members under the join's key (its :as: :evals, :runs, a run's :task,
+  :turns and :messages), a collection a map of its members by their ids, newest first; a window newest
+  first (:limit with :reverse); a symbol joined by lookup (:by); every entity held once. Beside
+  them its environment, :t :branch :commit.
 
   Built once from the branch's db when the agent's state first holds it (init, resume, a clone),
-  then kept by a patch from each transaction's datoms: the work of the change, never of the
-  session (seon.ctx-test/the-patch-costs-the-change-not-the-session). Nothing is built on a read:
+  then kept by a patch from each transaction's datoms: the touched entities rebuilt, every other
+  subtree the same object, the work of the change, never of the session
+  (seon.ctx-test/the-patch-costs-the-change-not-the-session). Nothing is built on a read:
   `@ctx` is a deref. The value carries {:seon.render/schema :seon.ctx/ctx} as metadata: the
   model reads it through the one printer as any value, and the page draws it as a block
   (:seon.ctx/ctx's declared html render). A swap! of it is written to the branch as one checked
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent]
-            [seon.schema.datahike :as sd] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
+            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]))
 
-;; ---- the shape, derived once from the registry -----------------------------------------------
-
-(defn- forward
-  "Attribute a read forward: pull's reverse ref :ns/_name as :ns/name."
-  {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]}
-  [a] (if (str/starts-with? (name a) "_") (keyword (namespace a) (subs (name a) 1)) a))
-
-(defn- short-key
-  "A unit's key in the map: a reverse ref is the plural of the thing that holds it
-  (:seon.eval/_agent, :evals), a forward one its attribute's name (:seon.run/task, :task)."
-  {:malli/schema [:=> [:cat :qualified-keyword] :keyword]}
-  [u] (if (= u (forward u)) (keyword (name u)) (keyword (str (last (str/split (namespace u) #"\.")) "s"))))
+;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
 (def ^:private identities
-  "{entity-schema identity}: the upsert key each entity schema names (its members' key in their
-  unit's map)."
+  "{entity-schema identity}: the upsert key each entity schema names: whether its ids are issued in
+  time order (in-time-order?), and the attribute a new member's value names it by (edits)."
   (into {} (for [[a s] render/entity-schemas :when (:seon.db/identity (contract/properties a))] [s a])))
 
-(def units
-  "{entity-schema [unit]}: each ref unit its schema declares, as {:attr (forward) :key :rev?
-  :schema (a reverse unit's members' schema) :id (their identity)}. A unit holding no ref
-  (:seon.task/proofs) is the entity's own attribute and stays one."
-  (into {} (for [[s _] contract/forms
-                 :let [us (:seon.render/units (contract/properties s))]
-                 :when (and (:seon.db/attributes (contract/properties s)) (seq us))]
-             [s (vec (for [u us :let [f (forward u) rev? (not= u f)]
-                           :when (or rev? (= :db.type/ref (:db/valueType (sd/declaration contract/registry f))))]
-                       (cond-> {:attr f :key (short-key u) :rev? rev?}
-                         rev? (assoc :schema (render/entity-schemas f) :id (identities (render/entity-schemas f))))))])))
+(defn- pattern-of
+  "The pattern ctx holds of entity m (pulled, on db): its own :seon.ctx/pattern (the agent's
+  edit), else the one its entity schema declares (:seon.ctx/pattern), else its own attributes."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [m] (or (:seon.ctx/pattern m) (some-> (render/entity-schema m nil) contract/properties :seon.ctx/pattern) '[*]))
 
 ;; ---- db -> map ---------------------------------------------------------------------------
 
 (defn- own
-  "Entity e on db, every attribute it holds: a cardinality-many one as a set (pull answers a
-  vector), a ref as {:db/id}."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] :map]}
-  [db e]
-  (let [many (get (dbi/-rschema db) :db.cardinality/many #{}) m (d/pull db '[*] e)]
-    (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m)))
+  "Entity e on db, every attribute it holds (or, under pattern spec s that names its attributes,
+  those and the ones its joins read: a forward join's attribute, a reverse lookup's name): a
+  cardinality-many one as a set (pull answers a vector), a ref as {:db/id}; {:db/id e} alone when
+  db holds none of it."
+  {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
+  ([db e] (own db e nil))
+  ([db e s]
+  (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
+        p (if (or (nil? s) (:star? s))
+            '[*]
+            (vec (into #{:db/id} (concat (:attrs s) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))))
+        m (or (d/pull db p e) {:db/id e})]
+    (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m))))
 
-(defn- key-of
-  "Member e's key in its unit's map: the value of its identity id on db."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? :qualified-keyword] :any]}
-  [db e id] (:v (first (d/datoms db :eavt e id))))
+(defn- many?
+  "Does join j hold a collection (a reverse ref, or a cardinality-many attribute)?"
+  {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
+  [db j] (boolean (or (:rev? j) (contains? (get (dbi/-rschema db) :db.cardinality/many #{}) (:attr j)))))
+
+(defn- watched
+  "The [attribute value] whose datoms change join j's members of entity e (m, its own
+  attributes), each a key of the record's :watch: a reverse join's [attr e] (or [attr e's :by
+  value]); a forward :by join's [by v] per symbol it holds (a var defined later joins). A forward
+  join's own datoms are e's."
+  {:malli/schema [:=> [:cat pos-int? :map :map] [:sequential :any]]}
+  [e m j]
+  (cond (and (:rev? j) (:by j)) (when-some [v (get m (:by j))] [[(:attr j) v]])
+        (:rev? j) [[(:attr j) e]]
+        (:by j) (let [v (get m (:attr j))] (for [x (if (coll? v) v [v]) :when (some? x)] [(:by j) x]))
+        :else []))
+
+(defn- in-time-order?
+  "Do the ids of the entities reverse join j reaches grow with time: issued by the store's counter,
+  not derived from their content (:seon.db/content-id on their identity)? Then their ids' order is
+  the order they were written."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [j] (not (some-> (identities (render/entity-schemas (:attr j))) contract/properties :seon.db/content-id)))
+
+(defn- members
+  "The entities join j holds of entity e (m, its own attributes), in the order ctx holds them: a
+  reverse join's by when each joined, newest first with :reverse, its :limit the newest n (ids
+  issued in time order are read by rseek and stop there, docs/forks.md :reverse; content-derived
+  ids are read whole and ordered by the transaction that wrote each ref); a forward one's by its
+  values, a :by join's each symbol as [by v] (a symbol naming no entity joins nothing)."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map] [:sequential pos-int?]]}
+  [db e m j]
+  (let [{:keys [attr by limit reverse?]} j
+        cap (fn [xs] (if limit (take limit xs) xs))]
+    (if (:rev? j)
+      (when-some [v (if by (get m by) e)]
+        (cap (cond (not reverse?) (map :e (d/datoms db :avet attr v))
+                   (in-time-order? j) (map :e (take-while #(and (= attr (:a %)) (= v (:v %))) (d/rseek-datoms db :avet attr v)))
+                   :else (map :e (sort-by (juxt :tx :e) #(compare %2 %1) (d/datoms db :avet attr v))))))
+      (let [v (get m attr) vs (if (set? v) (sort-by #(if (map? %) (:db/id %) %) v) (if (some? v) [v] []))]
+        (cap (keep (fn [x] (if by (pdb/eid db by x) (:db/id x))) vs))))))
+
+(defn- members-map
+  "Pairs [[id node] …] as a collection: a map sorted by its members' ids, greatest (newest, for ids
+  issued in time order) first; a key that is no id (a new member a swap! names) after them, by its
+  printed name. Fixed, and a function of the keys alone, so a member joins or leaves by one assoc or
+  dissoc."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :any :map]]] :map]}
+  [pairs]
+  (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b)))))
+        pairs))
+
+(defn- stub?
+  "Is x the {:db/id e} an entity held at another path is held as?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [x] (and (map? x) (= [:db/id] (keys x))))
+
+(defn- under?
+  "Is path p at or below path q?"
+  {:malli/schema [:=> [:cat [:vector :any] [:vector :any]] :boolean]}
+  [p q] (and (<= (count q) (count p)) (= q (subvec p 0 (count q)))))
+
+(defn- unwatch
+  "r without join [e k]'s watch keys (:watching, the reverse of :watch)."
+  {:malli/schema [:=> [:cat :seon.ctx/ix :any] :seon.ctx/ix]}
+  [r ek]
+  (let [drop-key (fn [r k x] (let [m (dissoc (get r k) x)] (if (seq m) (assoc r k m) (dissoc r k))))]
+    (if-let [ws (get-in r [:watching ek])]
+      (-> (reduce (fn [r w] (let [x (disj (get-in r [:watch w]) ek)] (if (seq x) (assoc-in r [:watch w] x) (drop-key r :watch w))))
+                  r ws)
+          (drop-key :watching ek))
+      r)))
+
+(defn- watch
+  "r with join [e k] watching keys ws (unwatched first: a join re-done watches what it reads now)."
+  {:malli/schema [:=> [:cat :seon.ctx/ix :any [:sequential :any]] :seon.ctx/ix]}
+  [r ek ws]
+  (let [r (unwatch r ek)]
+    (if (seq ws)
+      (-> (reduce (fn [r w] (update-in r [:watch w] (fnil conj #{}) ek)) r ws) (assoc-in [:watching ek] (set ws)))
+      r)))
+
+(defn- forget
+  "Record state r without subtree t at path q: each entity's paths at or below q, and its holding
+  there. An entity still held as {:db/id} elsewhere moves its holding (:relocate: the patch builds
+  the record anew, as that is a fresh build's placement)."
+  {:malli/schema [:=> [:cat :seon.ctx/ix :any [:vector :any]] :seon.ctx/ix]}
+  [r t q]
+  (reduce (fn [r e]
+            (let [at (into #{} (remove #(under? % q)) (get-in r [:at e]))
+                  r (if (seq at) (assoc-in r [:at e] at) (update r :at dissoc e))]
+              (if (some-> (get-in r [:held e]) (under? q))
+                (cond-> (-> (reduce (fn [r j] (unwatch r [e (:key j)])) r (:joins (get-in r [:spec e])))
+                            (update :held dissoc e) (update :spec dissoc e))
+                  (seq at) (assoc :relocate true))
+                r)))
+          r (distinct (keep #(when (map? %) (:db/id %)) (tree-seq coll? #(if (map? %) (vals %) (seq %)) t)))))
+
+(declare node)
+
+(defn- window-moves
+  "Join j's new members (r: the record's state) from moves, the datoms that touched it, when j is a
+  window of ids issued in time order (rseek's newest first) and old holds its members: [v r
+  entered], each member a retraction names and no assertion brings back dissoc'd (forgotten), each
+  an assertion names that it does not hold assoc'd (built), the oldest past its
+  limit dropped, a window left short by one that left filled from below its oldest by rseek, and
+  the ids it built; nil when moves are not the join's own ref datoms (its full read answers then).
+  Work: the moves, and a pull per member they bring, never the window."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map [:vector :any] :map :seon.ctx/ix [:sequential :any] [:map-of :any [:vector :any]]]
+                  [:maybe [:tuple :map :seon.ctx/ix [:set :int]]]]}
+  [db e j p old r moves touched]
+  (when (and (:rev? j) (not (:by j)) (:reverse? j) (in-time-order? j) (seq old)
+             (every? #(and (= (:attr j) (:a %)) (= e (:v %))) moves))
+    (let [full? (and (:limit j) (= (:limit j) (count old)))
+          asserted (into #{} (comp (filter :added) (map :e)) moves)
+          ;; a member a retraction names and no assertion brings back (one that leaves and comes back
+          ;; in one transaction stays, the same object)
+          gone (into #{} (comp (remove :added) (map :e) (filter #(contains? old %)) (remove asserted)) moves)
+          leave (fn [[v r] x] [(dissoc v x) (forget r (get v x) (conj p x))])
+          enter (fn [[v r] x] (let [[n r] (node db x (:sub j) (conj p x) r nil touched)] [(assoc v x n) r]))
+          [v r] (reduce leave [old r] gone)
+          ;; every member an assertion names that the window does not hold
+          come (sort > (remove #(contains? v %) asserted))
+          come (if (and full? (seq v)) (filter #(> % (key (first (rseq v)))) come) come)
+          [v r] (reduce enter [v r] come)
+          ;; past the limit: the oldest leave
+          [v r] (if-let [n (:limit j)] (reduce leave [v r] (map key (take (max 0 (- (count v) n)) (rseq v)))) [v r])
+          ;; short of it by one that left, and older ones were never held: filled from below the oldest
+          need (if (and full? (:limit j)) (- (:limit j) (count v)) 0)
+          older (when (pos? need)
+                  (let [below (if (seq v) (dec (key (first (rseq v)))) Long/MAX_VALUE)]
+                    (->> (d/rseek-datoms db :avet (:attr j) e below)
+                         (take-while #(and (= (:attr j) (:a %)) (= e (:v %))))
+                         (map :e) (remove #(contains? v %)) (take need))))
+          [v r] (reduce enter [v r] older)]
+      [v r (into (set come) older)])))
+
+(defn- join
+  "Join j of entity e (m, its own attributes) at path p: [value r], value its members' nodes (a
+  collection: a map by their ids, newest first; else the one node), r the record's state gaining
+  their paths and the join's watch keys. old, the join's value before: a window of ids issued in
+  time order changes by the datoms that touched it (window-moves); any other collection is read
+  again, keeping every member still in it that nothing touched (the same object) and changing only
+  the members that joined, left or were touched; a member that left is forgotten (forget)."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map :map [:vector :any] :any :seon.ctx/ix [:map-of :any [:vector :any]]] [:tuple :any :seon.ctx/ix]]}
+  [db e m j p old r touched]
+  (let [r (watch r [e (:key j)] (watched e m j))
+        old-map (if (map? old) old {})
+        moves (when (map? touched) (get touched [e (:key j)]))]
+    (if (many? db j)
+      (if-let [[v r entered] (when (seq moves) (window-moves db e j p old-map r moves touched))]
+        ;; members a datom touched as entities (their own attributes), not just built, built again in place
+        (reduce (fn [[v r] x] (if (and (contains? v x) (not (entered x)) (touched x))
+                                (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x n) r])
+                                [v r]))
+                [v r] (filter integer? (keys touched)))
+        (let [es (members db e m j)
+              now (set es)
+              ;; members that left: their subtrees forgotten
+              r (reduce (fn [r [x o]] (if (now x) r (forget r o (conj p x)))) r old-map)
+              [pairs r] (reduce (fn [[ps r] x]
+                                  (let [o (get old-map x)]
+                                    (if (and o (not (touched x)))
+                                      [(conj ps [x o]) r]
+                                      (let [[n r] (node db x (:sub j) (conj p x) r o touched)] [(conj ps [x n]) r]))))
+                                [[] r] es)]
+          ;; the same members, each the same object: the map as it was
+          [(if (and (= (count pairs) (count old-map)) (every? (fn [[x n]] (identical? n (get old-map x))) pairs))
+             old-map
+             (members-map pairs))
+           r]))
+      (let [es (members db e m j) x (first es) o (when (and (map? old) (= x (:db/id old))) old)]
+        (cond
+          (nil? x) [nil (if (map? old) (forget r old p) r)]
+          (and o (not (touched x))) [o r]
+          :else (let [r (if (and (map? old) (not o)) (forget r old p) r)] (node db x (:sub j) p r o touched)))))))
+
+(defn- same-node?
+  "Does rebuilt node n hold what o held, every key's value the same object (identical?)?"
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :boolean]}
+  [o n] (and (map? o) (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)))
 
 (defn- node
-  "Entity e as ctx holds it, schema s (else the one its identity names), with its units nested;
-  and ix, {eid #{[path schema]}} (one entity can sit at several paths: each run of a task holds
-  the task), gaining every entity it holds under path p."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :qualified-keyword] [:vector :any] :map] [:tuple :map :map]]}
-  [db e s p ix]
-  (let [m (own db e)
-        s (or s (render/entity-schema m nil))
-        ix (update ix e (fnil conj #{}) [p s])
-        [m ix] (reduce (fn [[m ix] {:keys [attr key rev? schema id]}]
-                       (if rev?
-                         (let [es (map :e (d/datoms db :avet attr e))]
-                           (if (empty? es)
-                             [m ix]
-                             (reduce (fn [[m ix] me] (let [k (key-of db me id) [sub ix] (node db me schema (conj p key k) ix)]
-                                                       [(assoc-in m [key k] sub) ix]))
-                                     [m ix] es)))
-                         (if-let [v (:db/id (get m attr))]
-                           (let [[sub ix] (node db v nil (conj p key) ix)] [(-> m (dissoc attr) (assoc key sub)) ix])
-                           [m ix])))
-                       [m ix] (get units s))]
-    [m ix]))
+  "Entity e as ctx holds it under pattern spec s at path p: its own attributes, and each join's
+  members (join) under the join's key (a ref attribute's value, {:db/id}, gives way to them; a
+  :by join's symbols stay, its members beside them under its :as); [m r], r the record's state
+  (:seon.ctx/ix: :held {e path}, :at {e #{path}}, :spec {e s}, :watch {[a v] #{[e key]}} and its
+  reverse :watching; during a patch :patching, and :relocate when the patch must build anew)
+  gaining it. An entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
+  first collection's newest member first); any other path holds {:db/id e}. old, e's value
+  before, keeps each join no touched datom changed (identical?), its entries in r as they were,
+  and each attribute equal to before; a node equal to old in every value is old."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
+  [db e s p r old touched]
+  (let [r (update-in r [:at e] (fnil conj #{}) p)
+        h (get-in r [:held e])]
+    (if (and h (not= h p))
+      ;; a patch reaching a held entity by a new path: a fresh build places it (:relocate)
+      [{:db/id e} (cond-> r (:patching r) (assoc :relocate true))]
+      (let [old (when-not (stub? old) old)
+            r (-> r (assoc-in [:held e] p) (assoc-in [:spec e] s))
+            m (cond (and old (not (touched e))) (apply dissoc old (map :key (:joins s)))
+                    ;; pulled again: an attribute equal to before keeps the object it was
+                    old (let [pulled (own db e s)]
+                          (reduce-kv (fn [m k v] (let [o (get old k ::none)] (if (and (not (identical? o v)) (= o v)) (assoc m k o) m)))
+                                     pulled pulled))
+                    :else (own db e s))
+            refs (get (dbi/-rschema db) :db.type/ref #{})
+            [n r] (reduce (fn [[n r] j]
+                            (let [k (:key j)
+                                  [v r] (if (and old (not (touched [e k])))
+                                          [(get old k) r]
+                                          (join db e m j (conj p k) (get old k) r touched))
+                                  n (if (or (= k (:attr j)) (contains? refs (:attr j))) (dissoc n (:attr j)) n)]
+                              [(if (or (nil? v) (and (map? v) (empty? v) (many? db j))) (dissoc n k) (assoc n k v)) r]))
+                          [m r] (:joins s))]
+        ;; a node holding what it held, every value the same object, is the node it was
+        [(if (same-node? old n) old n) r]))))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
@@ -95,17 +277,24 @@
 
 ;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance) --------------------------
 
+(defn- with-environment
+  "Map t with db's environment on branch in place of the one it held (environment-keys)."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any] :map]}
+  [t db branch] (merge (apply dissoc t environment-keys) (environment db branch)))
+
 (defn build
-  "The record of entity e on db as ctx's value {:tree :ix :changed}: e and its units, and its
-  environment on branch, the db's data only (nothing derived from it is held here: a render
-  derives what it needs, memoized by what it read); :changed #{[]}, the root path, since every
-  value is new (a memo of a part misses once, everywhere). Any entity an entity schema names: an
-  agent's (its @ctx), root's, the user's, a task's. With no e (an agent whose entity its branch
-  does not hold yet), its environment alone. O(the record)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
+  "The record of entity e on db as ctx's value {:tree :ix}: e pulled by its pattern
+  (pattern-of: the agent's own edit, else its entity schema's), and its environment on branch,
+  the db's data only (nothing derived from it is held here: a render derives what it needs);
+  :ix the walk's state (node: where each entity is held, its pattern, what each join watches).
+  Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no
+  e (an agent whose entity its branch does not hold yet), its environment alone. O(the entities
+  the pattern reaches)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
   [db e branch]
-  (let [[tree ix] (if e (node db e nil [] {}) [{} {}])]
-    {:tree (merge tree (environment db branch)) :ix ix :changed #{[]}}))
+  (let [m (when e (own db e))
+        [tree ix] (if (and m (< 1 (count m))) (node db e (render/pattern (pattern-of m)) [] {} nil {}) [{} {}])]
+    {:tree (with-environment tree db branch) :ix ix}))
 
 (defn made-by
   "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest
@@ -121,129 +310,79 @@
 
 ;; ---- datoms -> patch ---------------------------------------------------------------------
 
-(defn- under?
-  "Is path p at or below path q?"
-  {:malli/schema [:=> [:cat [:vector :any] [:vector :any]] :boolean]}
-  [p q] (and (<= (count q) (count p)) (= q (subvec p 0 (count q)))))
+(defn- touched-by
+  "What datoms change of the record's state r, each to the datoms that touch it: each held entity
+  a datom is of (its own attributes), each [e key] whose join's members a datom adds, drops or
+  renames (a forward join of e's attribute; a :watch key, [a v], a reverse join's or a :by
+  join's). A map: (touched x) answers whether x was touched, and with what."
+  {:malli/schema [:=> [:cat :seon.ctx/ix [:sequential :any]] [:map-of :any [:vector :any]]]}
+  [r datoms]
+  (let [add (fn [t x d] (update t x (fnil conj []) d))]
+    (reduce (fn [t {:keys [e a v] :as d}]
+              (let [s (get-in r [:spec e])
+                    t (reduce #(add %1 %2 d) t (get-in r [:watch [a v]]))
+                    t (if (and s (or (:star? s) (contains? (:attrs s) a) (some #(= a (:attr %)) (:joins s)))) (add t e d) t)]
+                (if s (reduce #(add %1 %2 d) t (for [j (:joins s) :when (and (not (:rev? j)) (= a (:attr j)))] [e (:key j)])) t)))
+            {} datoms)))
 
-(defn- held-in
-  "The entities subtree t holds (and the refs it names), each once."
-  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
-  [t] (distinct (keep :db/id (tree-seq map? vals t))))
-
-(defn- unit-of
-  "The unit of schema s whose attribute is a, or nil."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :keyword] [:maybe :map]]}
-  [s a] (some #(when (= a (:attr %)) %) (get units s)))
-
-(defn- without
-  "Tree t without key a (an attribute, a unit, a member's id) of the map at path p (the record's
-  own entity at [])."
-  {:malli/schema [:=> [:cat :map [:vector :any] :any] :map]}
-  [t p a] (if (seq p) (update-in t p dissoc a) (dissoc t a)))
-
-(defn- forget
-  "c's index without subtree t at path q: each entity's paths at or below q."
-  {:malli/schema [:=> [:cat :map :any [:vector :any]] :map]}
-  [c t q]
-  (assoc c :ix (reduce (fn [ix e] (let [r (into #{} (remove #(under? (first %) q)) (get ix e))] (if (seq r) (assoc ix e r) (dissoc ix e))))
-                       (:ix c) (held-in t))))
-
-(defn- leave
-  "c without the member (or forward unit) at path p; a unit it empties goes with it."
-  {:malli/schema [:=> [:cat :map [:vector :any]] :map]}
-  [{:keys [tree] :as c} p]
-  (let [unit (pop p) t (without tree unit (peek p))
-        ;; a unit emptied is no key, as a build holds it: the unit's path changed too
-        emptied? (and (seq unit) (empty? (get-in t unit)))
-        t (if emptied? (without t (pop unit) (peek unit)) t)]
-    (-> (forget c (get-in tree p) p) (assoc :tree t :changed (cond-> (conj (:changed c) p) emptied? (conj unit))))))
-
-(defn- join
-  "c with entity e of schema s added at path p, whole as db holds it."
-  {:malli/schema [:=> [:cat :map :seon.host/db pos-int? [:maybe :qualified-keyword] [:vector :any]] :map]}
-  [{:keys [tree ix] :as c} db e s p]
-  (let [[sub ix'] (node db e s p ix)]
-    (assoc c :tree (assoc-in tree p sub) :ix ix' :changed (conj (:changed c) p))))
-
-(defn- step
-  "c with one datom dt of known entity e (at path p, schema s) applied: a ref unit's entity set
-  or gone, a member gone with its identity, else the attribute set or retracted."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:vector :any] [:maybe :qualified-keyword] :any] :map]}
-  [c db p s {:keys [a v added]}]
-  (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
-        ref? (contains? (get (dbi/-rschema db) :db.type/ref #{}) a)
-        u (unit-of s a)
-        path (conj p a)]
-    (cond
-      (and u (not (:rev? u))) (if added
-                                (let [q (conj p (:key u))] (join (forget c (get-in (:tree c) q) q) db v nil q))
-                                (if (= v (get-in (:tree c) (conj p (:key u) :db/id))) (leave c (conj p (:key u))) c))
-      (and (seq p) (not added) (= a (identities s))) (leave c p)
-      ;; the record's own entity gone (a task or run retracted): its environment alone, as a build of no entity
-      (and (not added) (= a (identities s))) (assoc c :tree {} :ix {} :changed (conj (:changed c) []))
-      :else
-      (let [v (if ref? {:db/id v} v) cur (get-in (:tree c) path)]
-        (assoc c :changed (conj (:changed c) path) :tree
-               (cond (contains? many a) (if added
-                                          (assoc-in (:tree c) path (conj (or cur #{}) v))
-                                          (let [r (disj (or cur #{}) v)] (if (seq r) (assoc-in (:tree c) path r) (without (:tree c) p a))))
-                     added (assoc-in (:tree c) path v)
-                     (= v cur) (without (:tree c) p a)
-                     :else (:tree c)))))))
+(defn- share
+  "Map n with every subtree equal to old's at its path old's object (identical?): a fresh build
+  shares what it did not change with the record it replaces, children first, so a node whose
+  children all come back the same is old's node. Work: n's size, once."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [o n]
+  (cond (identical? o n) o
+        (and (map? o) (map? n))
+        (let [n (reduce-kv (fn [m k v] (let [x (share (get o k) v)] (if (identical? x v) m (assoc m k x)))) n n)]
+          (if (and (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)) o n))
+        (= o n) o
+        :else n))
 
 (defn patch
-  "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied on
-  db, the db after them: each datom of an entity c holds sets or removes its attribute
-  (retractions first: a change is a retraction and an assertion), and a datom whose ref links an
-  entity to one c holds, by a reverse unit's attribute, joins it to that unit, read whole, or takes
-  it out. Entities are taken in any order: one that joins is read from db, so a child read before
-  its parent is read again, whole, when the parent joins. Work: a map lookup and an assoc-in per
-  datom, and the read of each entity that joins. An identity never changes (an upsert key).
-  Answers :changed, the paths this transaction changed (an attribute's, a member's that joined
-  or left): every path not at, under or above one of them holds the value it held before, the
-  same object (identical?), so a part's memo is a pointer test. The environment (:t :branch
-  :commit) is the root map's, new each transaction, and no path of :changed."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
+  "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied
+  on db, the db after them: each held entity they touch (touched-by) rebuilt where it is held,
+  shortest path first, as node builds it, keeping each join and member nothing touched
+  (identical?), the path above it copied; a window of ids issued in time order moves by its own
+  datoms (window-moves), any other collection is read again. Work: the touched entities and the members their changed joins read, never the record.
+  Every path the change did not reach holds the same object it held before, so what changed is
+  read off the two values (changes) in the work of what differs. A change of the pattern itself,
+  or one moving where an entity is held (a new path reaching a held one, its holder leaving),
+  builds the record anew, as a fresh build places it, sharing every subtree it did not change
+  (share). The environment (:t :branch :commit) is the
+  root map's, new each transaction."
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
   [c db datoms branch]
-  (let [by (group-by :e datoms)
-        ;; one pass over every entity's datoms of one kind: retractions first across all of them
-        ;; (a change is a retraction and an assertion, and a member retracted and made again under
-        ;; its key, a new entity, must leave before it joins), then assertions
-        pass (fn [c added?]
-          (reduce
-               (fn [c [e ds]]
-                 (let [own (fn [at] (fn [c dt] (reduce (fn [c [p s]] (if (contains? (get (:ix c) e) [p s]) (step c db p s dt) c)) c at)))
-                       ;; a datom whose ref names a held entity by one of its reverse units' attribute links e
-                       ;; into that unit (added) or out of it (retracted), at each path the held one sits at
-                       link (fn [c {:keys [a v added]}]
-                              (let [at (get (:ix c) v)]
-                                (if-let [{:keys [key schema id]} (when (seq at) (some #(when (and (:rev? %) (= a (:attr %))) %) (get units (second (first at)))))]
-                                  (let [k (key-of db e id)]
-                                    (reduce (fn [c [pp _]] (let [q (conj pp key k)]
-                                                             (cond (and added (not (contains? (get (:ix c) e) [q schema]))) (join c db e schema q)
-                                                                   (and (not added) (contains? (get (:ix c) e) [q schema])) (leave c q)
-                                                                   :else c)))
-                                            c at))
-                                  c)))
-                       gone (remove :added ds) put (filter :added ds)]
-                   ;; where e joins it is read whole from db, so its assertions set it only at the paths it
-                   ;; held before
-                   (if added?
-                     (let [held (get (:ix c) e)] (reduce (own held) (reduce link c put) put))
-                     (reduce link (reduce (own (get (:ix c) e)) c gone) gone))))
-               c by))]
-    (-> (assoc c :changed #{}) (pass false) (pass true)
-        (update :tree #(merge (apply dissoc % environment-keys) (environment db branch))))))
+  (let [r (:ix c) root (get-in c [:tree :db/id])
+        touched (touched-by r datoms)
+        ;; a fresh build shares every subtree it did not change with the record before (share)
+        fresh #(update (build db root branch) :tree (fn [t] (merge (share (apply dissoc (:tree c) environment-keys) (apply dissoc t environment-keys)) (select-keys t environment-keys))))]
+    (cond
+      (nil? root) (fresh)
+      (some #(and (= root (:e %)) (= :seon.ctx/pattern (:a %))) datoms) (fresh)
+      (empty? touched) (update c :tree with-environment db branch)
+      :else
+      (let [sites (sort-by (comp count first)
+                           (distinct (for [x (keys touched) :let [e (if (vector? x) (first x) x) h (get-in r [:held e])] :when h] [h e])))
+            [tree r] (reduce (fn [[tree r] [h e]]
+                                  (let [o (if (empty? h) tree (get-in tree h))]
+                                    (if (or (nil? o) (stub? o) (not= e (:db/id o)))
+                                      [tree r]
+                                      (let [[n r] (node db e (get-in r [:spec e]) h (assoc r :patching true) o touched)]
+                                        ;; a rebuild that changed nothing is the node it was (node): the tree as it was
+                                        [(if (identical? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
+                                [(:tree c) r] sites)]
+        (if (or (:relocate r) (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
+          (fresh)
+          {:tree (with-environment tree db branch)
+           :ix (dissoc r :patching :relocate)})))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
 (defonce ^:private held (volatile! nil))
 
 (defn record
-  "This agent's held record, {:tree :ix :changed}: @ctx (its :tree), its index, and the paths its
-  last transaction changed (what a part's memo is invalidated by, seon.render/render-ctx); nil before it is
-  built."
+  "This agent's held record, {:tree :ix}: @ctx (its :tree) and its index (the walk's state); nil
+  before it is built."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   [] @held)
 
@@ -254,8 +393,8 @@
   readers receive them (seon.writer; the render proc's :main): ops, explicit-id tx-data
   (seon.db/report->tx), as the datoms patch takes. Root's, the user's and a task's record follow
   main this way, as an agent's follows its own transactions (on-state)."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] [:map [:t :int] [:ops [:sequential :any]] [:db :seon.host/db]] :any]
-                  [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] [:map [:t :int] [:ops [:sequential :any]] [:db :seon.host/db]] :any]
+                  [:map [:tree :map] [:ix :seon.ctx/ix]]]}
   [c {:keys [t ops db]} branch]
   (patch c db (for [[op e a v] ops] {:e e :a a :v v :tx t :added (= op :db/add)}) branch))
 
@@ -278,22 +417,24 @@
 
 (defn- edits
   "acc with the change from old to new of the entity e (an id, or a new entity's tempid) at path p,
-  schema s, as transaction data (:tx), what its schemas refuse (:invalid) and the paths it writes
-  (:paths): each attribute set, retracted or, cardinality many, each member added or retracted;
-  each unit's member new (its attributes and its own units, the same way from nothing, naming its
-  parent by the unit's ref and keyed by its identity), gone (retracted whole) or changed (the same,
-  one level down). A unit identical to its old self is skipped by one identical?; one that differs
-  is walked member by member, each identical member skipped the same way (a changed eval of n:
-  n identical? tests, and the work of the one that differs)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :qualified-keyword] :map :map [:or pos-int? :string] [:vector :any] :map] :map]}
+  pattern spec s, as transaction data (:tx), what its schemas refuse (:invalid) and the paths it
+  writes (:paths): each attribute set, retracted or, cardinality many, each member added or
+  retracted; each reverse join's member new (its attributes and its own joins, the same way from
+  nothing, naming its parent by the join's ref, its identity in its value), gone (retracted whole)
+  or changed (the same, one level down); a forward join's entity changed in place. A join
+  identical to its old self is skipped by one identical?; one that differs is walked member by
+  member, each identical member skipped the same way. A member a lookup (:by) holds follows the
+  attribute it reads, and one held at another path ({:db/id e}) is changed there: either is
+  refused here."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map :map [:or pos-int? :string] [:vector :any] :map] :map]}
   [db s old new e p acc]
   (if (identical? old new)
     acc
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
-          us (get units s)
-          unit-keys (set (map :key us))
-          skip (cond-> (conj unit-keys :db/id) (empty? p) (into environment-keys))
+          js (:joins s)
+          skip (cond-> (into #{:db/id} (map :key) js) (empty? p) (into environment-keys))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
+          refuse (fn [acc path w] (update acc :invalid conj {:path path :why w}))
           acc (reduce
                (fn [acc a]
                  (let [o (get old a) n (get new a) path (conj p a)]
@@ -308,29 +449,41 @@
                      :else (-> acc (bad path a n) (update :tx conj [:db/add e a (ref-of n)]) (update :paths conj path)))))
                acc (remove skip (distinct (concat (keys old) (keys new)))))]
       (reduce
-       (fn [acc {:keys [attr key rev? schema id]}]
+       (fn [acc {:keys [attr key rev? by sub] :as j}]
          (let [om (get old key) nm (get new key) path (conj p key)]
            (cond
              (identical? om nm) acc
-             rev?
+             by (refuse acc path (str "a lookup's members follow " attr ": change it"))
+             (and rev? (many? db j))
              (as-> acc acc
-               (reduce-kv (fn [acc k m]
-                            (let [o (get om k)]
-                              (cond
-                                (nil? o) (let [t (str "ctx" (count (:tx acc)))] ; unique: each new member writes its identity first
-                                           ;; its identity is its key in the unit, written here: no path the
-                                           ;; swap!'s map says anything at
-                                           (-> (edits db schema {} (assoc m id k) t (conj path k) acc)
-                                               (update :paths (fn [ps] (filterv #(not= (conj path k id) %) ps)))
-                                               (update :tx conj [:db/add t attr e])))
-                                :else (edits db schema o m (:db/id o) (conj path k) acc))))
-                          acc (or nm {}))
-               (reduce-kv (fn [acc k o] (if (contains? nm k) acc (-> acc (update :tx conj [:db/retractEntity (:db/id o)]) (update :paths conj (conj path k)))))
-                          acc (or om {})))
-             (and (map? om) (map? nm) (= (:db/id om) (:db/id nm))) (edits db (render/entity-schema nm nil) om nm (:db/id om) path acc)
-             (nil? nm) (-> acc (update :tx conj [:db/retract e attr (:db/id om)]) (update :paths conj path))
-             :else (update acc :invalid conj {:path path :why "a ref's entity: set it by the ref" :ref attr}))))
-       acc us))))
+                 (reduce-kv (fn [acc k m]
+                              (let [o (get om k)]
+                                (cond
+                                  (identical? o m) acc
+                                  (or (stub? o) (stub? m)) (refuse acc (conj path k) "held at another path: change it there")
+                                  ;; a new member, under any key a swap! names it by: written from its value,
+                                                  ;; which holds its own identity, under a tempid unique in the transaction
+                                  (and (nil? o) (some-> (identities (render/entity-schemas attr)) (#(nil? (get m %)))))
+                                  (refuse acc (conj path k) (str "a new member names its identity: " (identities (render/entity-schemas attr))))
+                                  (nil? o) (let [t (str "ctx" (count (:tx acc)))]
+                                             (-> (edits db sub {} m t (conj path k) acc)
+                                                 (update :tx conj [:db/add t attr e])
+                                                 ;; its path names it by the swap!'s key: the record holds it by its id
+                                                 (update :named assoc (conj path k) t)))
+                                  :else (edits db sub o m (:db/id o) (conj path k) acc))))
+                            acc (or nm {}))
+                 (reduce-kv (fn [acc k o] (if (contains? nm k) acc (-> acc (update :tx conj [:db/retractEntity (:db/id o)]) (update :paths conj (conj path k)))))
+                            acc (or om {})))
+             (many? db j)
+             (reduce (fn [acc k] (let [o (get om k) m (get nm k)]
+                                   (cond (identical? o m) acc
+                                         (and (map? o) (map? m) (not (stub? o)) (= (:db/id o) (:db/id m))) (edits db sub o m (:db/id o) (conj path k) acc)
+                                         :else (refuse acc (conj path k) "a ref's entity: set it by the ref"))))
+                     acc (distinct (concat (keys om) (keys nm))))
+             (and (map? om) (map? nm) (not (stub? om)) (= (:db/id om) (:db/id nm))) (edits db sub om nm (:db/id om) path acc)
+             (and (nil? nm) (map? om)) (-> acc (update :tx conj [:db/retract e attr (:db/id om)]) (update :paths conj path))
+             :else (refuse acc path "a ref's entity: set it by the ref"))))
+       acc js))))
 
 (defn- strip "x without its :db/ids, at every depth." {:malli/schema [:=> [:cat :any] :any]}
   [x] (cond (map? x) (into {} (for [[k v] (dissoc x :db/id)] [k (strip v)])) (set? x) (into #{} (map strip) x) :else x))
@@ -353,7 +506,9 @@
       (throw (ex-info "ctx: the map is not of the record's basis"
                       (contract/error :seon.ctx/basis #'write! "the map is not of the record's basis: the db moved while the swap!'s function ran (write with the swap!, not inside its function), or the function wrote :t, :branch or :commit, which are the environment's; nothing written"
                                       {:held (select-keys cur environment-keys) :swapped (if (map? nv) (select-keys nv environment-keys) {:value nv})}))))
-    (let [{:keys [tx invalid paths]} (edits db :seon.db/agent-fact cur nv (:db/id cur) [] {:tx [] :invalid [] :paths []})]
+    ;; a pattern the walk cannot read is refused before anything is written (seon.render/pattern throws why)
+    (when (and (map? nv) (not= (:seon.ctx/pattern nv) (:seon.ctx/pattern cur)) (some? (:seon.ctx/pattern nv))) (render/pattern (:seon.ctx/pattern nv)))
+    (let [{:keys [tx invalid paths named]} (edits db (get-in c [:ix :spec (:db/id cur)] {:joins []}) cur nv (:db/id cur) [] {:tx [] :invalid [] :paths [] :named {}})]
       (cond
         ;; nothing to write: the record stays the db's (the swap!'s map gives way to it as it ends)
         (empty? tx) (if (seq invalid)
@@ -367,7 +522,12 @@
                                      ;; cardinality many: held as a set, whatever collection the swap! wrote
                                      (set? h) (= (set (map strip w)) (strip h))
                                      :else (= (strip w) (strip h))))
-              unheld (vec (remove #(holds? (get-in nv %) (get-in held' %)) paths))]
+              ;; a path through a member the swap! named: read in the record at the id the transaction gave it
+              by-id (fn [p] (reduce (fn [p' [q t]] (if (and (<= (count q) (count p)) (= q (subvec p 0 (count q))))
+                                                     (assoc p' (dec (count q)) (get (:tempids rep) t))
+                                                     p'))
+                                    p named))
+              unheld (vec (remove #(holds? (get-in nv %) (get-in held' (by-id %))) paths))]
           (when (seq unheld)
             (throw (ex-info "ctx: the db would not hold what the swap! says, nothing written"
                             (contract/error :seon.ctx/not-held #'write! "the db would not hold what the swap! says at these paths (it would hold :held), nothing written" {:paths unheld :held (mapv #(get-in held' %) unheld)}))))
@@ -383,7 +543,7 @@
   "c as the atom's value: the tree, marked as ctx for its renders and with its basis (the branch
   and t it is the record of: what an eval of it records, seon.repl/record-details); the index
   held beside it."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]]] :nil]}
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]]] :nil]}
   [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx :seon.render/basis (select-keys (:tree c) [:t :branch])}))) nil)
 
 (defn- moved
@@ -399,27 +559,91 @@
 (defn advance
   "c0, the record as of db0, as of db1 (the same branch, later): patched by the datoms the two
   values differ by, the net change of every transaction in between (a turn's, from its start t to
-  its end t), so its :changed holds every path one of them changed and nothing else. Read from the
-  db alone, so a turn recorded is advanced again to the same record. Work: the patch's, of the net
-  datoms."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] :seon.host/db :seon.host/db :any] [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
+  its end t). Read from the db alone, so a turn recorded is advanced again to the same record.
+  Work: the patch's, of the net datoms."
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db :seon.host/db :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
   [c0 db0 db1 branch] (patch c0 db1 (moved db0 db1 nil) branch))
 
-(defn diff
-  "What changed of the record from c0 to c1 (c1 advanced from c0, its :changed bounding where they
-  are compared), as data in the record's own shape: {path [old new]} for each changed path whose
-  value differs at the two ends, old nil for a member that joined, new nil for one that went; a
-  path that changed and came back is equal, and dropped, and so is one under another the diff holds
-  (a member that joined holds its attributes; a unit's last member that left is the unit gone,
-  its first that joined the member alone). c1's :changed must be one advance's from c0 (patch
-  sets it anew each call). A build's #{[]} compares the record whole. Pure in the two values.
-  Work: two reads and a compare per changed path, and a look at its prefixes, never the record
-  (advance's own is the patch of the net datoms)."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:tree :map] [:changed [:set [:vector :any]]]]] [:map-of [:vector :any] [:tuple :any :any]]]}
+(defn- tree-of "A record's map ({:tree t}), or the map itself." {:malli/schema [:=> [:cat :map] :map]}
+  [c] (if (contains? c :tree) (:tree c) c))
+
+(defn- walk-of
+  "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :keys, the keys
+  of both sides of each entity or collection pair that is not the same object (the root's
+  environment left out, as changes leaves it); :eq, the elements compared by = where neither is
+  walked into; :changes, what it answers. It restates changes' walk on purpose: a bound is the
+  algorithm sketched beside it, and the walk's predicates stay local to it (a contracted helper
+  would add an armed call to every key it visits)."
+  {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
+  [a b]
+  (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
+        size (fn size [x] (cond (map? x) (reduce-kv (fn [n k v] (+ n 1 (size k) (size v))) 0 x)
+                                (coll? x) (reduce (fn [n v] (+ n 1 (size v))) 0 x)
+                                :else 1))
+        go (fn go [acc root? a b]
+             (cond (identical? a b) acc
+                   (or (nil? a) (nil? b)) (update acc :changes inc)
+                   (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
+                   (let [ks (cond->> (distinct (concat (keys a) (keys b))) root? (remove (set environment-keys)))]
+                     (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :keys + (count a) (count b)) ks))
+                   :else (cond-> (update acc :eq + (min (size a) (size b))) (not= a b) (update :changes inc))))]
+    (go {:keys 0 :eq 0 :changes 0} true a b)))
+
+(def change-steps
+  "What each step of changes' walk costs, measured once with the contracts on, on a case that
+  isolates it (seon.ctx-test/changes-step-costs-are-current measures them again): the call itself,
+  a key visited (sorted gets through the members' comparator, the members? scan, distinct over
+  concat; at collections of 100 to 1,000 members), an element compared by =, and a change (its
+  tuple, and its path printed for the sort, at 100 to 1,000 changes)."
+  {:fixed {:ticks 148.0 :bytes 1008.0} :key {:ticks 927.0 :bytes 2980.0} :eq {:ticks 1.0 :bytes 0.0} :change {:ticks 3788.0 :bytes 30810.0}})
+
+(defn- changes-bound
+  "What one call of changes may cost on c0 and c1: its fixed part and each step of its walk
+  (walk-of), each at its measured cost (change-steps). :out, how many changes it answers."
+  {:malli/schema [:=> [:cat :map :map] [:map [:ticks number?] [:bytes number?] [:out [:map [:changes nat-int?]]]]]}
   [c0 c1]
-  (let [d (into {} (for [p (:changed c1) :let [o (get-in (:tree c0) p) n (get-in (:tree c1) p)] :when (not= o n)] [p [o n]]))]
-    ;; a path under another the diff holds is in that one's values: left out, so each change is said once
-    (into {} (remove (fn [[p _]] (some #(contains? d (subvec p 0 %)) (range (count p))))) d)))
+  (let [w (walk-of (tree-of c0) (tree-of c1))
+        {:keys [fixed]} change-steps]
+    (-> (into {} (for [d [:ticks :bytes]]
+                   [d (+ (get fixed d) (* (:keys w) (get-in change-steps [:key d])) (* (:eq w) (get-in change-steps [:eq d]))
+                         (* (:changes w) (get-in change-steps [:change d])))]))
+        (assoc :out {:changes (:changes w)}))))
+
+(defn changes
+  "What changed from record (or map) c0 to c1, as data in the record's own shape: [[op path value]
+  …], op :add (value the new one), :remove (value nil) or :replace (value the new one), in the
+  order of their paths. It walks the two maps together, one entity's two nodes (a map with its
+  :db/id) and two collections (a join's map of members) into their keys, any other value (and
+  another entity under the same key) compared whole, and
+  skips a pair that is the same object (identical?) before comparing it (=): a patch keeps
+  every subtree it did not reach the same object, so the walk costs what changed, never the
+  record. The environment (:t :branch :commit) is the record's basis, not its data: left out.
+  The one diff of ctx: a turn's (diff), and what a view or the model's request redraws."
+  {:malli/schema [:=> [:cat :map :map] [:vector [:tuple [:enum :add :remove :replace] [:vector :any] :any]]]
+   :seon.cost/bound (fn [c0 c1] (changes-bound c0 c1))}
+  [c0 c1]
+  (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
+        walk (fn walk [acc p a b]
+               (cond (identical? a b) acc
+                     (nil? a) (conj acc [:add p b])
+                     (nil? b) (conj acc [:remove p nil])
+                     ;; one entity's two nodes, or two collections: into their keys; another entity
+                     ;; under the same key (retracted and made again) is replaced whole
+                     (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
+                     (reduce (fn [acc k] (walk acc (conj p k) (get a k) (get b k)))
+                             acc (remove (if (empty? p) (set environment-keys) #{}) (distinct (concat (keys a) (keys b)))))
+                     (= a b) acc
+                     :else (conj acc [:replace p b])))]
+    (vec (sort-by (fn [[_ p]] (str/join "\u0001" (map str p))) (walk [] [] (tree-of c0) (tree-of c1))))))
+
+(defn diff
+  "What changed of the record from c0 to c1 (changes), as {path [old new]}: old nil for a member
+  that joined, new nil for one that went; a change undone within a turn is no change. Pure in the
+  two values. Work: what differs, never the record."
+  {:malli/schema [:=> [:cat :map :map] [:map-of [:vector :any] [:tuple :any :any]]]}
+  [c0 c1] (let [t0 (tree-of c0)] (into {} (for [[_ p v] (changes c0 c1)] [p [(get-in t0 p) v]]))))
 
 (defn- agent-record
   "The record of the agent state st names (its key's entity on db, its branch), built."
@@ -440,7 +664,7 @@
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
       (nil? (get-in @held [:tree :db/id])) (install! (agent-record b n))
-      (= (:max-tx a) (:max-tx b)) (install! (-> @held (update :tree merge (environment b (:branch n))) (assoc :changed #{})))
+      (= (:max-tx a) (:max-tx b)) (install! (update @held :tree with-environment b (:branch n)))
       :else (let [c (patch @held b (moved a b (:tx n)) (:branch n))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
               (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))

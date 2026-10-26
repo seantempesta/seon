@@ -108,7 +108,7 @@
     (let [em (agent/error-map (ArithmeticException. "Divide by zero"))
           r (repl/response [{"status" ["eval-error"] :tag :err :err em :id 0 :form "(/ 1 0)"}] 'result/e1)
           rec (some :seon.eval/record (repl/record-tx {:seon.agent/key "b/a1" :seon.agent/id :a1} "e1" "a1"
-                                                      {:code "(/ 1 0)" :response r} nil))]
+                                                      {:code "(/ 1 0)" :response r}))]
       (is (= em (:ex r)))
       (is (= em (get-in rec [:response :ex])) "grouped by type and producer without parsing text")))
   (testing "the agent folds its errors until its commit; root folds them as :eval occurrences"

@@ -82,9 +82,10 @@
     false))
 
 (defn inbox
-  "The messages delivered to this agent and not yet taken ({:from :body}, and :id :to for a
-  message that is a fact), left in the inbox: root's requests (e.g. :catch-up, \"main moved,
-  merge main\"), other agents' sends and the owner's (the page's message bar). What root sent
+  "The messages delivered to this agent and not yet taken ({:from :body}), left in the inbox:
+  root's requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends. Words to
+  its session's runs (the owner's, root's at a stage, a verdict) are entries on main, which its
+  turn takes (seon.turn/take!), never the inbox. What root sent
   before this call is read off the socket first (without waiting); any other request read
   waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
@@ -96,12 +97,74 @@
         (recur))))
   (:inbox @state))
 
-(defn messages
-  "The inbox (inbox), taken: its reader is the turn that read them."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
+(defn- session-branch
+  "The branch main names this agent's session by: its run's :seon.run/branch, which the store
+  qualifies on a main that is not :db (seon.db/on-main), so (:branch @state) is not it. nil
+  with no run: then no entry is to it."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
+  [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
+
+(defn untaken-entries
+  "The entries main holds to the runs of this agent's session (the runs on its branch, as main
+  names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
+  Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
+  process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
+  ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
+  the frame alone left such a run with nothing, parked short of main's count, and spawned again).
+  O(the entries to the session's runs)."
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
   []
-  (inbox)
-  (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)
+        br (session-branch main)]
+    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
+                          :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
+                          [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
+                          [(get-else $ ?m :seon.message/kind :message) ?kind]]
+                        main br))
+         (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
+         (sort-by (juxt first second))
+         (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
+
+(def taken-attributes
+  "The attributes of the runs of an agent's session that root writes on main and its turn copies
+  onto its branch (seon.turn/take!), so its ctx holds them: those whose schema says
+  {:seon.db/taken true}, read here once. Its outcome and reason, never its status: a branch
+  holds its run by reference (the agent's own record), and a status there says the branch holds
+  the whole run (seon.task/run, seon.task/running read it so)."
+  (into #{} (filter #(:seon.db/taken (contract/properties %))) (keys contract/forms)))
+
+(defn untaken-facts
+  "The transaction that copies onto this branch what main holds and its branch does not, of its
+  own entities: the taken attributes (taken-attributes) of the runs on its branch that it
+  holds, and each eval of its own its agent's :seon.agent/opened names, as that eval's
+  :seon.eval/opened. take! is the one way outside facts reach the branch, and so its ctx (a
+  change the agent's context and page show goes through the data its context reads). Root is
+  the one writer of these: the agent writes its run's end as :seon.end/*, so main's value is
+  never older than the branch's; a value main retracts stays on the branch. O(the session's
+  runs and the opened evals on main)."
+  {:malli/schema [:=> [:cat] :seon.db/tx-data]}
+  []
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)
+        pattern (into [:seon.run/id] taken-attributes)
+        br (session-branch main)]
+    (vec (concat
+           (for [m (when br (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern br))
+                 :let [held (d/entity b [:seon.run/id (:seon.run/id m)])
+                       new (into {} (remove (fn [[k v]] (= v (get held k)))) m)]
+                 :when (and held (seq (dissoc new :seon.run/id)))]
+             (assoc new :seon.run/id (:seon.run/id m)))
+           (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key @state)]))
+                 :let [e (d/entity b [:seon.eval/id id])]
+                 :when (and e (not (:seon.eval/opened e)))]
+             {:seon.eval/id id :seon.eval/opened true})))))
+
+(defn entries-tx
+  "The transaction that writes entries (untaken-entries) on this branch: the same facts root
+  wrote on main, which their reader takes by writing them."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
+  [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries))
 
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
@@ -166,6 +229,27 @@
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
+
+(defn take-main!
+  "Take what main holds for this agent onto its branch, committed: its entries
+  (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
+  (seon.turn/take!) and its code's (messages). Answers the entries taken."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (untaken-entries)
+        tx (into (untaken-facts) (entries-tx es))]
+    (when (seq tx) (transact! tx))
+    (commit!)
+    es))
+
+(defn messages
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them), then the
+  inbox's sends (inbox). Its reader is the code that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (take-main!)]
+    (inbox)
+    (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
@@ -544,19 +628,57 @@
      :reports reports}))
 
 (defn test-run-answer
-  "The run, from the last line the test child wrote on its pipe before EOF (nil: none) and
-  its exit status: that line when it is the run's result; else the child died while running
-  the test the line's {:seon.test/started var} names, and the run is one :error report on
-  that test var with the status as :exit (none started: a run error naming the status)."
-  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status] :seon.test/result]}
-  [line status]
-  (let [v (some-> line read-string) var (:seon.test/started v)]
-    (if (contains? v :pass)
-      v
-      {:pass 0 :fail 0 :error 1
-       :reports [(cond-> {:type :error :exit status
-                          :message (str "test process died: " status (when var (str " while " var " ran")))}
-                   var (assoc :var var))]})))
+  "The run, from the last line the test child wrote on its pipe before EOF or its exit (nil:
+  none), its exit status, and held? (the child exited and its pipe was still open: a process it
+  forked holds the write end): that line when it is the run's result; else the child died while
+  running the test the line's {:seon.test/started var} names, and the run is one :error report on
+  that test var with the status as :exit (none started: a run error naming the status). A held
+  pipe adds an :error report of its own (:seon.test/pipe-held)."
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]}
+  [line status held?]
+  (let [v (some-> line read-string) var (:seon.test/started v)
+        res (if (contains? v :pass)
+              v
+              {:pass 0 :fail 0 :error 1
+               :reports [(cond-> {:type :error :exit status
+                                  :message (str "test process died: " status (when var (str " while " var " ran")))}
+                           var (assoc :var var))]})]
+    (cond-> res
+      held? (-> (update :error inc)
+                (update :reports conj {:type :error :seon.error/type :seon.test/pipe-held
+                                       :message "the test process exited and a process it forked still holds its pipe (its end of file never came): what it wrote is the run"})))))
+
+(defn read-to-exit
+  "The last line test child pid writes on fd r, read to the pipe's end of file or the child's
+  exit, whichever comes first: the exit is kqueue's NOTE_EXIT, the fact the fork server reaps
+  by, so a process the child forked that holds the write end cannot keep the run waiting.
+  Parks on seon.lib/wait-fd-or-exit (r's input or the exit). After the exit, what is left in
+  the pipe is read: a read that found nothing there (its wait called) with the pipe still open
+  means it is held, and a read that ended on part of a line goes on. Answers {:line :held?}, or
+  :seon.lib/unwatched."
+  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]}
+  [r pid]
+  (let [w (lib/wait-fd-or-exit r pid)]
+    (if (contract/error? w)
+      w
+      (let [{:keys [wait close]} w
+            exited (volatile! false) failed (volatile! nil) waited (volatile! false)
+            rd (sock/line-reader r #(let [x (wait)]
+                                      (vreset! waited true)
+                                      (cond (= :exited x) (vreset! exited true)
+                                            (contract/error? x) (vreset! failed x))))]
+        (try
+          (loop [line nil]
+            (vreset! waited false)
+            (let [ls (rd)]
+              (cond (= ls :eof) {:line line :held? false}
+                    @failed @failed
+                    (seq ls) (recur (peek ls))
+                    ;; nothing there yet, or part of a line: read again
+                    (or (not @exited) (not @waited)) (recur line)
+                    ;; exited, and a read found nothing there: the pipe is still open, held
+                    :else {:line line :held? true})))
+          (finally (close)))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
@@ -629,6 +751,9 @@
                                             (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
                  :child (fn []
                           (lib/c-close r)
+                          ;; nothing this child forks (a test's own child, a root it starts) holds the
+                          ;; write end, so its exit is the pipe's end of file
+                          (sock/clofork! w)
                           ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
                           ;; pair closing raises SIGIO here and ends the child, whatever the test is
                           ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
@@ -645,13 +770,12 @@
                  :parent (fn [pid]
                            (lib/c-close w)
                            (forked pid)
-                           (let [rd (sock/line-reader r)
-                                 line (loop [line nil]
-                                        (let [ls (rd)]
-                                          (if (= ls :eof) line (recur (or (peek ls) line)))))
+                           (let [read (read-to-exit r pid)
                                  st (lib/wait-status pid)]
                              (lib/c-close r)
-                             (assoc (test-run-answer line st) :ms (profile/ms-since t0) :pid pid :exit st)))})))
+                             (if (contract/error? read)
+                               read
+                               (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))})))
         unstored (when (and dir (not (contract/error? res)))
                    (proofs/store-greens! #(fx! :file % {}) dir
                                          (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
@@ -736,7 +860,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 
@@ -820,6 +944,17 @@
   (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
     {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
 
+(defn begin-run!
+  "Run run of task recorded as this process's session's on its branch, as root records it on main:
+  the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
+  the run with its task. Written as the process starts with its run (init!: an outside agent's
+  branch is cut before its run is written on main), or by the turn that begins a later run of the
+  session; once, nothing written when the branch holds it."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
+  [task run]
+  (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
+    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state)}}])))
+
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
@@ -887,4 +1022,6 @@
      ;; its task from main, with the failure and evidence the last run left there; an
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
-       (transact! tx))))))
+       (transact! tx))
+     ;; forked for a run: it is this session's on the branch from the start
+     (when (and task run) (begin-run! task run))))))

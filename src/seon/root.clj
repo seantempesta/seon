@@ -227,15 +227,12 @@
   st)
 
 (defn- deliver-message
-  "Send message m ({:from :to [id ...] :body :id}) to each agent it names: the one delivery, for
-  an agent's send and the owner's message alike. A message that is a fact (:id, :seon.message/id)
-  carries its id and the run each agent works (none for an agent no run started), so the agent
-  that takes it writes the same fact on its branch (seon.task/message-tx)."
+  "Send an agent's message m ({:from :to [id ...] :body}) to each agent it names, as a frame:
+  a send no fact holds. An entry (a fact on main to a run) is not sent: its run reads it from
+  main (seon.agent/untaken-entries)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o m]
-  (reduce (fn [st id]
-            (to-agent st o id {:op :write :msg (cond-> {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}
-                                               (:id m) (assoc :id (:id m) :to (get-in st [:view :agents id :run])))}))
+  (reduce (fn [st id] (to-agent st o id {:op :write :msg {:op :message :from (:from m) :body (:body m) :ns (profile/now-ns)}}))
           st (:to m)))
 
 (defn- spawn-failed
@@ -336,6 +333,9 @@
                (cond
                  holder (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder)
                                               {:branch (:branch opts) :agent holder}))
+                 ;; no server to fork it: refused before an agent proc and its socket are made (a
+                 ;; socket the lost server closes would end that agent first, as a death)
+                 (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
@@ -368,17 +368,22 @@
                     ;; its page's parts drawn by its own renders (the render proc's, seon.render.proc/ask-parts)
                     :render {:op :render})]
           (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
-      ;; a message to a live agent (the owner's, from the page or the server): root's one
-      ;; delivery, as an agent's send is; it lands in the agent's inbox, which its next turn reads
-      ;; the owner's message is a fact on main (root's branch: :seon.message/*, seon.task/message-tx),
-      ;; delivered once the writer has it, and answered then; the agent writes the same fact on
-      ;; its own branch when its turn takes it (seon.turn/basis!)
-      :message (if (nil? (get-in st [:agents id]))
-                 (reply! st o p (gone id (str "no live agent " id)))
-                 (let [mid (str "m-" (random-uuid))
-                       [st rid] (pend st p :tx nil)]
-                   (step/out! o :to-writer {:op :tx :branch :db :tx-data (task/message-tx mid (name (:from m)) (get-in st [:view :agents id :run]) (:body m))
-                                            :dest {:rid rid :message {:from (:from m) :to [id] :body (:body m) :id mid}}})
+      ;; an entry to a live agent's run (the owner's message from the page or the server, root's
+      ;; :stage at a boundary): a fact on main (root's branch: :seon.message/*,
+      ;; seon.task/message-tx), synced before it is answered, so what follows (the turn that
+      ;; takes it, a wake) finds it in the store; the agent's turn reads it from main and writes
+      ;; the same fact on its branch (seon.turn/take!, seon.agent/untaken-entries). No frame
+      ;; carries it: delivery is the fact
+      :message (cond
+                 (nil? (get-in st [:agents id])) (reply! st o p (gone id (str "no live agent " id)))
+                 ;; an entry is to a run: an agent working none has no session to take it
+                 (nil? (get-in st [:view :agents id :run]))
+                 (reply! st o p (refused 'seon.root/message! (str "agent " id " works no run: an entry is to a run") {:agent id}))
+                 :else
+                 (let [[st rid] (pend st p :tx nil)]
+                   (step/out! o :to-writer {:op :tx :branch :db :flush? true
+                                            :tx-data (task/message-tx (str "m-" (random-uuid)) (:kind m :message) (name (:from m)) (get-in st [:view :agents id :run]) (:body m))
+                                            :dest {:rid rid}})
                    (update st :writes (fnil conj #{}) rid)))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
@@ -430,9 +435,7 @@
                                true (deliver-rid o (:rid dest) (dissoc r :sync))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
-        ;; a message is delivered once its fact is written, never before
-        (:rid dest) (cond-> (deliver-rid st o (:rid dest) r)
-                      (and (:message dest) (not (contract/error? r))) (deliver-message o (:message dest)))
+        (:rid dest) (deliver-rid st o (:rid dest) r)
         (:agent-facts dest) (cond-> st
                               (contract/error? r) (problem (err/occurrence r :agent {:agent (:agent-facts dest)} (System/currentTimeMillis))))
         (:agent dest) (to-agent st o (:agent dest) {:op :write :msg (cond (:op r) r
@@ -456,7 +459,11 @@
               (if-let [[aid died inflight] (get-in st [::dying (:pid m)])]
                 (-> st (update ::dying dissoc (:pid m)) (record-death o aid (:status m) died inflight))
                 st))
-      :fork-failed (spawn-failed st o (:agent m) (str "fork refused: " (:active-threads m) " active threads") nil)
+      ;; a fork the lost server was asked after its death failed every spawn still waiting
+      ;; (:fork-server-down): one already answered is not failed again
+      :fork-failed (cond-> st
+                     (get-in st [::spawning (:agent m)])
+                     (spawn-failed o (:agent m) (or (:reason m) (str "fork refused: " (:active-threads m) " active threads")) nil))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
@@ -1183,6 +1190,14 @@
                   [:=> [:cat :seon.root/sys :seon.db/tx-data [:maybe :map]] :seon.host/promise]]}
   ([sys tx-data] (transact-main! sys tx-data nil))
   ([sys tx-data {:keys [flush?]}] (write! sys (cond-> {:op :tx :branch :db :tx-data tx-data} flush? (assoc :flush? true)))))
+
+(defn opened!
+  "A reader of agent key's page opened its eval eval-id: the fact on main, on the agent's own
+  entity (:seon.agent/opened: an eval's id names it only within its agent), which its next turn
+  writes on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts), so its
+  context and its page read it from the same data. Never retracted. A promise of the writer's answer."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/key :seon.eval/id] :seon.host/promise]}
+  [sys key eval-id] (transact-main! sys [{:seon.agent/key key :seon.agent/opened #{eval-id}}]))
 
 (defn interrupt!
   "Interrupt the agent's evaluation in progress: SIGUSR1, run by Chez at the agent's next

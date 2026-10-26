@@ -88,7 +88,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **root's run** | one process of root on a store; what `runs/` keeps (`:seon.config.root/runs-dir`), never a run of an agent | `seon.root/start!` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
-| **request** | what someone asked, as design → implement → merge tasks on one branch, written in one transaction | `seon.template/request` |
+| **request** | what someone asked, as its design-build task and its merge task on one branch, written in one transaction | `seon.template/request` |
 | **held for root** | a task whose run was refused (done rule, dead agent, refused merge) or marked failed: its failure and evidence on it, execution `:held`, state `:failed`, until root releases, edits or cancels it; never retried on its own | `seon.reconcile/hold-tx` |
 | **observed state** | what happened to a task (running, blocked, open, held, failed, done, merged, cancelled; `:seon.task/state`), derived once from the index | `seon.reconcile/task-state` |
 | **done rule** | why a run's measured facts do not make its task done; empty means done | `seon.reconcile/done-explain` |

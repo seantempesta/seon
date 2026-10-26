@@ -184,8 +184,8 @@
 
 (defn run-row
   "A run: its agent, status, turns, tokens and outcome (from main's facts)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.run/keys [id agent status turns tokens outcome reason start-ms end-ms env]} _]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ {:seon.run/keys [id agent status turns tokens outcome reason start-ms end-ms env]}]
      [:tr {:class (str "at s-" (kname status) (when outcome (str " o-" (kname outcome))))}
     [:td [:code id]]
     [:td (kname agent)
@@ -203,8 +203,8 @@
   on main: every key grouped by its area, its value whole, its unit, and its schema's
   description on hover. Where each value comes from (unit, provenance, its bound) is
   written beside it in resources/seon/config/default.edn."
-  {:malli/schema [:=> [:cat :seon.config/config :seon.render/opts] :any]}
-  [c _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.config/config] :any]}
+  [_ c]
   (let [prop (fn [k p] (get (contract/properties k) p))
         groups (group-by (comp namespace key) (sort-by (comp str key) c))]
          [:section {:id "t-config" :class "tile wide config"}
@@ -216,7 +216,7 @@
           (for [[k v] kvs]
             [:div {:title (str (prop k :description))}
              [:dt (name k)]
-             [:dd (render/html v {:budget (part)}) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]))
+             [:dd (render/html {:budget (part)} v) (when-let [u (prop k :seon.config/unit)] [:span {:class "muted"} " " u])]])])]]))
 
 ;;; --- agent cards --------------------------------------------------------------
 
@@ -256,8 +256,8 @@
   fix when it carries one, and every other key it carries by the printer
   (`error-shown`), its cut read through opts
   :handle (a form that answers e) when it has one."
-  {:malli/schema [:=> [:cat :seon.error/base :seon.render/opts] :any]}
-  [e {:keys [handle]}]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.error/base] :any]}
+  [{:keys [handle]} e]
   (let [own (apply dissoc e (error-hidden e))
         budget (config/value :seon.config.render/part-budget)]
          [:div {:class "err"}
@@ -360,8 +360,8 @@
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
   is wrong (its failure, held for root), its needs and proofs, and its evidence."
-  {:malli/schema [:=> [:cat :seon.task/task :seon.render/opts] :any]}
-  [t _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.task/task] :any]}
+  [_ t]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
          [:section {:class "box"}
       (kicker (str "task · " (:seon.task/id t))
@@ -379,20 +379,20 @@
                            (cond (nil? b) n (contains? b n) [:span {:class "warn"} (str n " (not done)")] :else (str n " (done)"))))])
       [:p {:class "muted"} (str (count proofs) (if (= 1 (count proofs)) " proof: " " proofs: ")) (str/join " " (map str (sort-by str proofs)))]
       (when-let [ev (:seon.task/evidence t)]
-        [:div {:class "muted"} "evidence " (render/print-html ev {:budget (config/value :seon.config.render/part-budget)})])]))
+        [:div {:class "muted"} "evidence " (render/print-html {:budget (config/value :seon.config.render/part-budget)} ev)])]))
 
 (defn verdict-box
   "A cost verdict (seon.cost/verdict-lines, the agent's words too): red when a size is over
   its estimate or grew steeper."
-  {:malli/schema [:=> [:cat :seon.cost/verdict :seon.render/opts] :any]}
-  [v _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.cost/verdict] :any]}
+  [_ v]
   (let [[[_ head] & more] (cost/verdict-lines v nil)]
     [:div {:class (str "verdict " (if (:ok? v) "ok" "red"))} [:b head] (for [[c w] more] [:span {:class c} (str " " w)])]))
 
 (defn cost-report
   "A cost proof's measurements against its estimate, row by size, then its verdict."
-  {:malli/schema [:=> [:cat :seon.render/cost-report :seon.render/opts] :any]}
-  [{:keys [rows verdict]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/cost-report] :any]}
+  [opts {:keys [rows verdict]}]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
          [:div {:class "cost"}
       [:table {:class "costrows"}
@@ -402,7 +402,7 @@
                   (for [d dims :let [m (get measured d) x (get expected d)]]
                     [:td {:class (when (and m x (pos? x) (> (/ m x) 3)) "bad")}
                      (str (group3 m) " / " (group3 x) (when (and m x (pos? x)) (str " (" (fmt2 (/ m x)) "×)")))])])]]
-      (render/html verdict (assoc opts :schema :seon.cost/verdict))]))
+      (render/html (assoc opts :schema :seon.cost/verdict) verdict)]))
 
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
@@ -410,8 +410,8 @@
   > is a message its next turn reads (seon.root/message!); interrupt stops its running form;
   release runs its task's next run when the task is held (seon.root/release!). input {:id
   :live? :held}: live, root's view holds its process in this boot."
-  {:malli/schema [:=> [:cat :seon.render/agent-input :seon.render/opts] :any]}
-  [{:keys [id live? held]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
+  [opts {:keys [id live? held]}]
   [:section {:id (:unit opts) :class "flex flex-col gap-2"}
    (if live?
      [:form {:class "flex gap-2" :seon/call 'seon.root/submit! :seon/agent id}
@@ -470,8 +470,8 @@
   (seon.print/record-text of its record; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line. Rendered from the record, which never changes."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [e opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts e]
   (let [rec (or (:seon.eval/record e) e)
         r (merge (:response rec) (select-keys rec [:code :prose :fns]) (dissoc e :seon.eval/record))
         ;; a value recorded as data: inline, printed as its reply reads under its handle; in a row,
@@ -495,12 +495,12 @@
        (when-not (str/blank? (:prose r)) [:p {:class "whitespace-pre-wrap text-text-300 italic"} (prose (:prose r) (form-budget))])
        (when (:code r) (code (:code r) (form-budget)))
        (if (map? (:ex r))
-         (render/html (:ex r) (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))))
+         (render/html (cond-> {} (:handle r) (assoc :handle (list :ex (:handle r)))) (:ex r))
          (if data?
            ;; a value stored as data renders as structure, the printer's hiccup under its handle
            (let [v (shown-value (:response rec))]
              [:div {:class "flex flex-col gap-1 text-text-200"}
-              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html v {:handle (:handle r)})]
+              [:div {:class "flex gap-2"} [:span {:class "text-text-500"} "⇒"] (render/html {:handle (:handle r)} v)]
               ;; each cut opened: what its form reads, from the record, under that form (seon.web/open-form read it)
               (for [f (:opened opts) :let [form (edn/read-string f)]]
                 [:div {:class "flex gap-2"}
@@ -508,11 +508,11 @@
                  [:button {:type "button" :class "text-text-500 font-mono text-left" :data-seon-form f :title "close"
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
-                 (render/html (print/read-rest form (:handle r) v) {:handle form})])])
+                 (render/html {:handle form} (print/read-rest form (:handle r) v))])])
            (if-let [v (based-value rec e (:db opts))]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
-              (render/html v {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts)})]
+              (render/html {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts)} v)]
              [:pre {:class "text-text-200"} [:span {:class "text-text-500"} "⇒ "] (prose (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
@@ -527,8 +527,8 @@
   it ran: which turn of how many, its tokens and the share its provider served from cache, how
   its reply stopped and its model; its reply and reasoning as prose. Nothing it did not record is
   shown."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.turn/keys [n origin reply reasoning tokens cache-hit-tokens cache-miss-tokens finish model errors forms truncated basis]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:seon.turn/keys [n origin reply reasoning tokens cache-hit-tokens cache-miss-tokens finish model errors forms truncated basis]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         head (str (if (= :outside origin) (str "context read " n) (str "turn " (inc n) (when-let [m (:max-turns basis)] (str " of " m)))))]
     (if (= :inline (:as opts))
@@ -549,8 +549,8 @@
 
 (defn message
   "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as prose."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.message/keys [from body]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
     [:span (str from ": ") (prose body (cell) {:one-line? true})]
     [:div {:class "border-l-2 border-info pl-3 py-1"}
@@ -560,8 +560,8 @@
 (defn run
   "A run (the declared html render of :seon.run/run-fact) as a person reads it: its id, status,
   turn n of its max, its model, and how it ended and why."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.run/keys [id status outcome reason model turns max-turns]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:seon.run/keys [id status outcome reason model turns max-turns]}]
   ;; main records :seon.run/turns at the run's end; a running run says its cap (its newest turn's
   ;; row in the conversation names the turn it is on)
   (let [line (str id " · " (kname status) (cond turns (str " · turn " turns (when max-turns (str " of " max-turns)))
@@ -577,8 +577,8 @@
 (defn task
   "A task (the declared html render of :seon.task/task-fact) as a person reads it: its id, kind
   and execution, then its plan as prose; its proofs are its unit, shown beside it."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.task/keys [id kind execution plan]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:seon.task/keys [id kind execution plan]}]
   (let [line (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
     (if (= :inline (:as opts))
       [:span (str "task " line)]
@@ -603,8 +603,8 @@
   "One problem (the declared html render of :seon.problems/row, :class assoc'd by its reader) as
   one line: its class and count, what it is about, then why (its message, its error's, its
   reason, else its outcome) and what answered it."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [r _]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ r]
   (let [why (or (:message r) (get-in r [:error :seon.error/message]) (:reason r) (some-> (:outcome r) kname))]
     [:p {:class "text-xs"}
      (str (kname (:class r)) (some->> (:count r) (str " ×")) (when-let [w (seq (problem-about r))] (str " " (str/join " " w))))
@@ -616,8 +616,8 @@
   its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
   tab opened the class (its id in :open, the /open toggle's; a report shown with no :open shows
   every class's rows)."
-  {:malli/schema [:=> [:cat :seon.problems/report :seon.render/opts] :any]}
-  [{:keys [classes open]} _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.problems/report] :any]}
+  [_ {:keys [classes open]}]
   (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
     [:div {:class "flex flex-col gap-1 text-xs"}
      (if (empty? cs)
@@ -625,23 +625,23 @@
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
           [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
-          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html (assoc r :class c) {:schema :seon.problems/row})))]))]))
+          (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/html {:schema :seon.problems/row} (assoc r :class c))))]))]))
 
 (defn runs
   "Main's runs (the declared html render of :seon.render/runs): how many by status, and each
   running one by its own view (`run`, a line)."
-  {:malli/schema [:=> [:cat :seon.render/runs :seon.render/opts] :any]}
-  [{:keys [by-status running]} _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/runs] :any]}
+  [_ {:keys [by-status running]}]
   [:div {:class "flex flex-col gap-1 text-xs"}
    [:p (if (empty? by-status) "none yet" (str/join " · " (for [[s n] (sort-by (comp str key) by-status)] (str n " " (kname s)))))]
-   (for [r running] [:p (render/html r {:schema :seon.run/run-fact :as :inline})])])
+   (for [r running] [:p (render/html {:schema :seon.run/run-fact :as :inline} r)])])
 
 (defn proofs
   "An agent's proofs as its newest turn measured them (the declared html render of
   :seon.render/proofs): how many are green, red, not run or not written, each test's name,
   status and first failing assertion on open."
-  {:malli/schema [:=> [:cat :seon.render/proofs :seon.render/opts] :any]}
-  [ps _]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/proofs] :any]}
+  [_ ps]
   (let [by (group-by (comp :status val) ps)]
     [:details {:class "text-xs"}
      [:summary {:class "cursor-pointer text-text-100"}
@@ -657,8 +657,8 @@
   (seon.repl/parts); anywhere else, by main's. Beside each attribute, who made it as of t
   (seon.ctx/made-by): the eval whose code wrote it, else the branch it came from when not this one,
   and a catch-up's merge from main."
-  {:malli/schema [:=> [:cat :seon.ctx/ctx :seon.render/opts] :any]}
-  [{:keys [t branch commit] :as c} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.ctx/ctx] :any]}
+  [opts {:keys [t branch commit] :as c}]
   (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))
         ;; read as of t, as the map is: no later transaction changes them, so they are left out of
         ;; the component's read set (*reads* nil), and a move of the branch never renders it again
@@ -667,7 +667,7 @@
                        (when-let [{:seon.tx/keys [eval merged] b :seon.tx/branch} (binding [datahike.index.interface/*reads* nil] (seon.ctx/made-by at (:db/id c) k))]
                          (str/join " · " (remove nil? [eval (when (and b (not= b branch)) (str "from " b)) (when merged (str "merged from " merged))])))))
         handle (:handle opts)
-        cell (fn [k v] (render/html v (cond-> {:schema (when (qualified-keyword? k) k)} handle (assoc :handle (list k handle)))))]
+        cell (fn [k v] (render/html (cond-> {:schema (when (qualified-keyword? k) k)} handle (assoc :handle (list k handle))) v))]
     (if (= :inline (:as opts))
       [:span {:class "font-mono"} (str "ctx " branch " t " t ", " (count ks) " keys")]
       [:div {:class "flex flex-col gap-1 border border-base-700 rounded p-2 text-xs"}
@@ -687,7 +687,7 @@
   "Node nd's value by its schema's :html render as as (seon.render/html: none declared, the one
   printer): the one site a page part is drawn at. The model reads the same hiccup."
   {:malli/schema [:=> [:cat :map :seon.render/as] :any]}
-  [nd as] (render/html (:seon.render/value nd) {:as as :schema (:seon.render/schema nd)}))
+  [nd as] (render/html {:as as :schema (:seon.render/schema nd)} (:seon.render/value nd)))
 
 (defn comp-id
   "The element id of entity eid's component shown as as: the main pane p-head, a row r-<eid>, a
@@ -759,7 +759,7 @@
     (case schema
       ;; a turn's header (the page it read is the debug page's, in its requests)
       :seon.turn/turn-fact
-      [:li {:id id :class "flex flex-col gap-1 py-1"} (turn (dissoc own :seon.turn/reply) {})]
+      [:li {:id id :class "flex flex-col gap-1 py-1"} (turn {} (dissoc own :seon.turn/reply))]
       :seon.db/eval-fact
       (let [rec (:seon.eval/record own)
             r (merge (:response rec) (select-keys rec [:code :prose]))
@@ -776,8 +776,8 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "min-w-0 flex-1 truncate text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "shrink-0 tabular-nums text-2xs text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {:opened opened :db db}))]])
-      [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
+          (when open? (evaluation {:opened opened :db db} own))]])
+      [:li {:id id :class "py-1"} (render/html {:schema schema} (dissoc own :db/id))])))
 
 (defn component
   "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
@@ -790,7 +790,7 @@
   (let [id (comp-id eid as)]
   (cond
     (and (vector? as) (= :debug (first as)))
-    (let [[_ open? view] as] (sent-request (debug-input db eid open? view) {:unit id}))
+    (let [[_ open? view] as] (sent-request {:unit id} (debug-input db eid open? view)))
     (or (= :chat as) (and (vector? as) (= :chat (first as))))
     (chat-part db eid (when (vector? as) (rest as)) id)
     (= :side as)
@@ -804,7 +804,7 @@
     :else
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own nil)
-        units (:seon.render/units (contract/properties schema))
+        units (render/units schema)
         nd {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
             :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}]
     (case as
@@ -821,8 +821,8 @@
 (defn tile
   "One tile of a page's column that is a value, not an entity (a task's plan, root's open
   problems, a branch's read error), the unit's element (opts :unit): by its own render."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [nd opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts nd]
   [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
    [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"}
     (name (or (:seon.render/schema nd) (get-in nd [:seon.render/from :seon.render/attr]) (render/schema-of (:seon.render/value nd) nil) :value))]
@@ -835,8 +835,8 @@
   input {:older n :view param :click? b}: click?, the next come when it is clicked (a list whose
   older end is at its top, an agent's conversation: in view as the page opens, it would ask for
   every row)."
-  {:malli/schema [:=> [:cat [:map [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]] :seon.render/opts] :any]}
-  [{:keys [older view click?]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts [:map [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]] :any]}
+  [opts {:keys [older view click?]}]
   (if (pos? older)
     (if click?
       [:button {:id (:unit opts) :type "button" :class "py-2 text-center text-text-500 underline" (keyword "data-on:click") (str "@post('/more?view=" view "')")}
@@ -853,8 +853,8 @@
   as tiles beside it. opts {:shown n :view param :input {:schema k :value v} :open #{ids}
   :sides [{:eid :db}] :focus id}: focus, whose page it is (:root, an agent's id), the top bar's
   toggle to what its model reads."
-  {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides focus]}]
+  {:malli/schema [:=> [:cat :map :seon.render/walk] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [{:keys [shown view input open sides focus]} {:seon.render/keys [root nodes]}]
   (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
@@ -894,10 +894,10 @@
   "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
   kind and execution, then the task's data (seon.context/task-data over opts :db, the branch as of
   the record's t): its plan as prose, then what to prove, the sections and the similar as a call of
-  the one printer ([#'seon.render/html data opts], expanded when the page is written), so the model
+  the one printer ([#'seon.render/html opts data], expanded when the page is written), so the model
   reads the data as data. Each var the plan cites is a part of its own (`cited`)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:seon.task/keys [id kind execution] :as task} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:seon.task/keys [id kind execution] :as task}]
   [:section {:class "tile"}
    [:h2 {:class "kicker"} "task"]
    [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
@@ -906,40 +906,40 @@
      (let [data (context/task-data db (task/task db id) false)]
        ;; a cut names the form that answers the whole at the agent's REPL
        (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
-             [#'render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)}])))])
+             [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)} (dissoc data :task)])))])
 
 (defn cited
   "A var the task's plan cites (the declared html render of :seon.render/cited): its source and
   callers, seon.context/cited over opts :db, as a call of the one printer (the model reads the data)."
-  {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
-  [{:keys [var]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/cited] :any]}
+  [opts {:keys [var]}]
   [:section {:class "tile"} [:h2 {:class "kicker"} (str "cites " var)]
-   (when-let [db (:db opts)] [#'render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)
-                                                                  :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}])])
+   (when-let [db (:db opts)] [#'render/html {:budget (config/value :seon.config.render/value-budget)
+                                                                  :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))} (context/cited db var)])])
 
 (defn status
-  "What the newest model turn of the task observed (the declared html render of
+  "What the newest turn of the task observed, a model's or an outside read's (the declared html render of
   :seon.render/status), as (my.task/status) answers it: seon.context/turn-state over the turn's
   recorded basis (seon.context/turn-input, with the turn before it for its last reply) on opts
   :db, as a call of the one printer (the model reads the data)."
-  {:malli/schema [:=> [:cat :seon.render/status :seon.render/opts] :any]}
-  [{:keys [task turn last]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/status] :any]}
+  [opts {:keys [task turn last]}]
   (when-let [db (:db opts)]
     (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] turn))
           lst (when last (d/pull db [:seon.turn/truncated :seon.turn/calls] last))]
       [:section {:class "tile"} [:h2 {:class "kicker"} "status"]
-       [#'render/html (context/turn-state db (task/task db task) (context/turn-input db b lst))
-        {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}]])))
+       [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
+        (context/turn-state db (task/task db task) (context/turn-input db b lst))]])))
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (the declared html render of
   :seon.render/related): seon.context/related over opts :db, as a call of the one printer; a line
   saying so when there is nothing yet."
-  {:malli/schema [:=> [:cat :seon.render/related :seon.render/opts] :any]}
-  [{:keys [task]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/related] :any]}
+  [opts {:keys [task]}]
   (let [r (when-let [db (:db opts)] (context/related db task))]
     [:section {:class "tile"} [:h2 {:class "kicker"} "related"]
-     (if r [#'render/html r {:handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
+     (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
 
 (defn part-id
   "The element id of an agent page's part by its key ([:eval \"e12\"] -> \"q-eval-e12\")."
@@ -954,8 +954,8 @@
   html :inline) behind an arrow, its value drawn only once opened (opening it tells the render
   proc, /open, which draws it); a model turn or a message as drawn; any other part a tile under
   its key's name when its render does not name itself. input {:key :html :inline}."
-  {:malli/schema [:=> [:cat :seon.render/part-html :seon.render/opts] :any]}
-  [{:keys [key html inline]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/part-html] :any]}
+  [opts {:keys [key html inline]}]
   (case (first key)
     ;; a handle printed anywhere on the page links to its eval's block, open or not (eval-eN)
     :eval [:li {:id (:unit opts)}
@@ -979,8 +979,8 @@
   scrollable column beside it. Each part a unit whose input is its html, so the render proc
   sends one only when its bytes changed. opts {:parts [{:key :html :inline}] :shown :view :input :sides
   :head [db eid] :caption}."
-  {:malli/schema [:=> [:cat :keyword :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [id {:keys [parts shown view input sides head caption]}]
+  {:malli/schema [:=> [:cat :map :keyword] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [{:keys [parts shown view input sides head caption]} id]
   (let [in (fn [r] (filterv #(= r (:region % :task)) parts))
         listed (in :chat)
         task (in :task)
@@ -1017,8 +1017,8 @@
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
   what it runs and on which branch. Its page is its parts (seon.render.proc's agent page,
   parts-page)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [v opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts v]
   ;; what it evaluates now (:seon.agent/running) is its conversation's newest part
   (let [{:seon.agent/keys [id status branch pid description]} v]
     [:div {:class "flex flex-col gap-1"}
@@ -1042,8 +1042,8 @@
   its walk's other nodes and main's problems and runs as tiles (page opts :recorded, main's problems
   as the render proc holds them), its input (root-input); at any other size, its head: its boot, its generation and,
   when it last went quiet, its root causes a line each."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [v opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts v]
   (if-let [{:keys [walk dbs recorded open] :as page} (when (= :page (:as opts)) (:page opts))]
     (let [agent? #(= :seon.db/agent-fact (:seon.render/schema %))
           eid (get-in walk [:seon.render/root :seon.render/eid])
@@ -1051,9 +1051,9 @@
           ;; render their rows) and main's runs, each by its own render
           tiles [{:seon.render/kind :value :seon.render/value (assoc recorded :open (or open #{})) :seon.render/schema :seon.render/problems :seon.render/eid eid}
                  {:seon.render/kind :value :seon.render/value (runs-of (first dbs)) :seon.render/schema :seon.render/runs :seon.render/eid eid}]]
-      (chat (update walk :seon.render/nodes #(into (vec (remove agent? %)) tiles))
-            (assoc page :input {:schema :seon.render/root-input :value {}} :focus :root
-                   :sides (vec (cons {:eid eid :db 0} (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0}))))))
+      (chat (assoc page :input {:schema :seon.render/root-input :value {}} :focus :root
+                   :sides (vec (cons {:eid eid :db 0} (for [nd (:seon.render/nodes walk) :when (agent? nd)] {:eid (:seon.render/eid nd) :db 0}))))
+            (update walk :seon.render/nodes #(into (vec (remove agent? %)) tiles))))
     (let [{:seon.root/keys [boot generation quiescent]} v]
       [:div {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-bold text-signal"} "root"]
@@ -1066,8 +1066,8 @@
 (defn root-input
   "Root's input at the top of its page: spawn agents (seon.root/spawn!), or evaluate forms in
   every live agent (seon.root/submit! to :all)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [_ opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts _]
   [:section {:id (:unit opts) :class "flex flex-col gap-2 xl:flex-row"}
    [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/spawn! :seon/agent :root}
     [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "a task for a new agent (Enter spawns it)"}]
@@ -1084,8 +1084,8 @@
   render proc renders once and again only when what it read changes ({:comp [db eid as]}); a value
   part (a task's plan, root's open problems) renders when it changes. opts {:shown n :view param
   :input {:schema k :value v}}, the input for the page's focus (root's, an agent's)."
-  {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:seon.render/keys [root nodes]} {:keys [shown view input]}]
+  {:malli/schema [:=> [:cat :map :seon.render/walk] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [{:keys [shown view input]} {:seon.render/keys [root nodes]}]
   (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         rs (rows listed)
@@ -1141,8 +1141,8 @@
 (defn root-context
   "What root reads (the declared html render of :seon.render/root-context): its size, then the
   text whole, as it is sent."
-  {:malli/schema [:=> [:cat :seon.render/root-context :seon.render/opts] :any]}
-  [{:keys [text tokens]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/root-context] :any]}
+  [opts {:keys [text tokens]}]
   [:section {:id (:unit opts) :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
    [:div {:class "flex flex-wrap items-baseline gap-3"}
     [:b {:class "text-signal"} "root's context"] [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens (estimated)")]]
@@ -1197,8 +1197,8 @@
   tokens went (:split, seon.context/sent-split of its parts: system, conversation, page). input {:turn
   :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
   (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
-  {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
-  [{:keys [turn run view refs added same whole split] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]} opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         unit (:unit opts)]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
@@ -1214,7 +1214,7 @@
         (str/join " · " (for [[k w] [[:system "system"] [:conversation "conversation"] [:page "page"]]]
                           (str w " " (group3 (get split k 0)))))])
      ;; a call that failed: its typed error, by its render
-     (when error [:div {:class "rounded border border-error p-2"} (render/html error {})])
+     (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
      [:div {:class "text-2xs uppercase text-text-500"} (if same "what this turn added" "what this turn sent")]
      (sent-parts-html added)
      (when same [:p {:class "text-text-500"} (str "and " (:parts same) " records as turn " (inc (:turn same)) " sent them")])

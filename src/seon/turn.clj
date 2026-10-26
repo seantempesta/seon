@@ -41,9 +41,8 @@
   (if (= run (get-in @agent/state [:turn :run]))
     (:turn @agent/state)
     (let [db (agent/db)]
-      ;; the run is this session's on its own branch too (root writes it on main): the
-      ;; conversation finds the messages its runs took by it (seon.context/records reads the branch)
-      (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}])
+      ;; the run is this session's on its own branch too (seon.agent/begin-run!)
+      (agent/begin-run! task run)
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
@@ -150,26 +149,30 @@
      :will-merge will-merge :tests tests :attention attention}))
 
 (defn- take!
-  "The messages delivered since the last turn, taken before the turn's request is made, so each
-  sits in the conversation before the page that shows what came after it (a session's next stage
-  opens with root's message, seon.reconcile/stage-boundary, before that stage's first page). The turn is their reader: a message that is a fact is written on this branch first,
-  the same fact root wrote on main, and named by id, so its text is read again from the commit.
-  A read that is not the run's turn (take? false: an observer's read of an agent its model
-  drives) shows the inbox and leaves it, each message as it was sent. Answers the observations
-  they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when there are some."
+  "The entries since the last turn (a person's message, root's at a stage boundary, a refused
+  verdict: :seon.message/kind), taken before the turn's request is made, so each sits in the
+  conversation before the page that shows what came after it (a session's next stage opens with
+  its :stage entry, seon.reconcile/stage-boundary, before that stage's first page). They are the
+  facts main holds to the session's runs that this branch does not (seon.agent/untaken-entries):
+  delivery is the fact, which root syncs before anything that follows it. The turn is their
+  reader: each is written on this branch first, the same fact root wrote on main, and named by
+  id, so its text is read again from the commit; with them, what root wrote on main of the
+  agent's own entities (seon.agent/untaken-facts). The inbox holds the sends no fact holds
+  (another agent's), shown and taken with them. A read that is not the run's turn (take? false:
+  an observer's read of an agent its model drives) shows both and writes nothing. Answers the
+  observations they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when
+  there are some."
   {:malli/schema [:=> [:cat :boolean] :map]}
   [take?]
-  (let [msgs (agent/inbox)
-        {facts true others false} (if take? (group-by (comp some? :id) msgs) {false msgs})
-        _ (when (seq facts)
-            (agent/transact! (into [] (mapcat (fn [{:keys [id from to body]}] (task/message-tx id (name from) to body))) facts)))
-        _ (agent/commit!)
-        ;; taken once their facts are committed: a refused write leaves them in the inbox
-        _ (when take? (agent/taken! (count msgs)))]
+  (let [sends (agent/inbox)
+        entries (if take? (agent/take-main!) (agent/untaken-entries))]
+    ;; taken once their facts are committed: a refused write leaves them for the next turn
+    (when take? (agent/taken! (count sends)))
     (cond-> {}
-      (seq facts) (assoc :message-ids (mapv :id facts))
-      ;; a send no fact holds (another agent's, until its sender writes one)
-      (seq others) (assoc :messages (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) others)))))
+      (and take? (seq entries)) (assoc :message-ids (mapv :id entries))
+      ;; an observer's read: the entries as they are, unwritten
+      (and (not take?) (seq entries)) (assoc :messages (mapv #(select-keys % [:from :body]) entries))
+      (seq sends) (update :messages (fnil into []) (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) sends)))))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -236,7 +239,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? run] :as st} {:keys [results tests-ms] :as obs} model-name]
+  [{:keys [turn tokens max-turns merge? whole? run] :as st} {:keys [results tests-ms unmerged] :as obs} model-name]
   (let [t (:task obs)
         proofs (:proofs (:seon.task/accumulated t))
         t0 (profile/now-ns)
@@ -330,7 +333,9 @@
                                                  :shown {'seon.docs/resolve-ref (set (keep :symbol (:write-set block)))
                                                          'seon.context/current-state (set (map :test (:proofs block)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
-          merge? (update :merge-turns inc))))))
+          ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
+          ;; only a turn with what both sides changed still to resolve
+          (and merge? (or (not whole?) (seq unmerged))) (update :merge-turns inc))))))
 
 (defn context-block
   "The request of task as a model is sent it on this branch now (the proofs run again): what an
@@ -392,13 +397,13 @@
   [{:keys [task run model max-turns]}]
   (let [{:keys [plan-before]} (begin! task run)
         t0-task (task/task (agent/db) task)
-        merge? (= :merge (:seon.task/kind t0-task))
+        merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]
     ;; every run starts on main: a kept branch made before main moved merges it first, so
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run
+    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       (let [{:keys [reasons unmerged] :as obs} (observe task plan-before)
             stop (get-in @agent/state [:turn :stop])
@@ -410,8 +415,11 @@
           (let [m (branch/merge-main!)]
             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
           (empty? reasons) (end! st :green nil nil)
-          stop (end! st (:outcome stop) (:reason stop) nil)
+          ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
+          ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
+          (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
           hairy (end! st :merge-failed (:reason hairy) nil)
           (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
+          stop (end! st (:outcome stop) (:reason stop) nil)
           :else (let [st' (act! st obs model)]
                   (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))

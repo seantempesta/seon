@@ -261,14 +261,17 @@
   empty) or :eof. It reads what is there (MSG_DONTWAIT) and, when nothing is, parks until fd
   is readable (poller/wait-ready: a fiber's park, so on a main carrier the process's other
   fibers run while it waits; a thread's wait elsewhere), then answers [] and the caller asks
-  again: an agent waits on its test child for the whole test run (seon.agent/run-tests-forked)."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :seon.host/fn]}
-  [fd]
+  again: an agent waits on its test child for the whole test run (seon.agent/run-tests-forked).
+  With wait!, that is what it calls when nothing is there (seon.agent/read-to-exit: fd's input or
+  its writer's exit, whichever comes first)."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd] :seon.host/fn] [:=> [:cat :seon.lib/fd :seon.host/fn] :seon.host/fn]]}
+  ([fd] (line-reader fd #(poller/wait-ready fd :read)))
+  ([fd wait!]
   (let [cap 1048576 buf (ffi/alloc cap) pending (volatile! (byte-array 0))]
     (fn []
       (let [r (c-recv-nb fd buf cap MSG-DONTWAIT)]
         (cond
-          (neg? r) (do (poller/wait-ready fd :read) [])
+          (neg? r) (do (wait!) [])
           (zero? r) :eof
           :else
           (let [more (ffi/read-array buf r) ^bytes p @pending q (byte-array (+ (alength p) r))]
@@ -278,7 +281,7 @@
               (if (neg? nl)
                 (do (vreset! pending q) [])
                 (do (vreset! pending (java.util.Arrays/copyOfRange q (inc nl) (alength q)))
-                    (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8")))))))))))))
+                    (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8"))))))))))))))
 
 (defn send-frame!
   "Write frame bytes f to fd; with pass-fd, the descriptor travels with them
