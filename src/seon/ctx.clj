@@ -50,23 +50,21 @@
 ;; ---- derived members: computed from the db, kept while what they read is unchanged ---------
 
 (defn- story
-  "Run node n's stage story on db: its task's run sections (seon.context/run-state); nil with no
-  task, or while the run is not running (its stage is not live: only a live run's is derived)."
+  "Run node n's stage story on db: its task's run sections (seon.context/run-state); nil with no task."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
-  [db n] (when-let [id (and (= :running (:seon.run/status n)) (get-in n [:task :seon.task/id]))]
-           (context/run-state db (task/task db id))))
+  [db n] (when-let [id (get-in n [:task :seon.task/id])] (context/run-state db (task/task db id))))
 
 (defn- related
   "Run node n's related sections, functions and schema keys on db (seon.context/related): nil
-  when it answers none, with no task, or while the run is not running."
+  when it answers none, or with no task."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :map]]}
-  [db n] (when-let [te (and (= :running (:seon.run/status n)) (get-in n [:task :db/id]))] (context/related db te)))
+  [db n] (when-let [te (get-in n [:task :db/id])] (context/related db te)))
 
 (def derived
-  "{entity-schema [[key f]]}: the members ctx derives for an entity of the schema held as the
-  record's own or as one of its runs (where a patch keeps them), (f db node) their value (no key
-  when nil), as of the db ctx is of. A run's story and related are its while it is running (its
-  status as the branch holds it: a session's stages, not its evals, bound their cost). They
+  "{entity-schema [[key f]]}: the members ctx derives, (f db node) their value (no key when nil),
+  as of the db ctx is of, for the record's live nodes (`live`): its own entity when its schema
+  has them, and its newest run, the session's current stage. One run, so their cost is one
+  run's whatever the session holds; an earlier stage's run holds none. They
   read the task and the tasks it needs, the program, the wiki, the schemas and the vectors
   (`read-nss`), so a transaction touching none of those keeps them as they were. Not tracked: what
   run-state reads beside the db (a cited file's text on disk, a namespace's meta in this
@@ -128,8 +126,7 @@
                            (let [[sub ix] (node db v nil (conj p key) ix)] [(-> m (dissoc attr) (assoc key sub)) ix])
                            [m ix])))
                        [m ix] (get units s))]
-    ;; its derived members, once its units (its task) are there
-    [(if (and (contains? derived s) (or (empty? p) (and (= 2 (count p)) (= :runs (first p))))) (first (derive-into db s m)) m) ix]))
+    [m ix]))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
@@ -149,16 +146,10 @@
                          born))
           born es))
 
-(defn build
-  "The record of entity e on db as ctx's value {:tree :ix :born :changed}: e and its units, and
-  its environment on branch; each member's first transaction (:born, what `order` sorts by);
-  :changed #{[]}, the root path, since every value is new (a memo of a part misses once,
-  everywhere). Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no e (an
-  agent whose entity its branch does not hold yet), its environment alone. O(the record)."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed [:set [:vector :any]]]]]}
-  [db e branch]
-  (let [[tree ix] (if e (node db e nil [] {}) [{} {}])]
-    {:tree (merge tree (environment db branch)) :ix ix :born (born db ix {} (keys ix)) :changed #{[]}}))
+(defn- schema-at
+  "The schema the node at path p of c is held with, by its entity's index."
+  {:malli/schema [:=> [:cat :map [:vector :any]] [:maybe :qualified-keyword]]}
+  [c p] (some (fn [[q s]] (when (= q p) s)) (get (:ix c) (:db/id (get-in (:tree c) p)))))
 
 (defn order
   "The keys of the unit at path p of c (its members' map: [:evals], [:runs id :turns]) by each
@@ -172,6 +163,34 @@
     (vec (sort-by (fn [k] [(get (:born c) (:db/id (get u k))) k]) (keys u)))))
 
 ;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance) --------------------------
+
+(defn- live
+  "The paths of c's nodes that hold derived members: its own entity when its schema has them, and
+  its newest run (by first transaction: the session's current stage)."
+  {:malli/schema [:=> [:cat :map] [:vector [:vector :any]]]}
+  [c]
+  (cond-> []
+    (contains? derived (schema-at c [])) (conj [])
+    (seq (get-in c [:tree :runs])) (conj [:runs (peek (order c [:runs]))])))
+
+(defn- derive-at
+  "c with the derived members of the node at path p derived from db, a changed one a path of :changed."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:vector :any]] :map]}
+  [c db p]
+  (let [[m ch] (derive-into db (schema-at c p) (get-in (:tree c) p))]
+    (if (seq ch) (-> c (assoc :tree (if (seq p) (assoc-in (:tree c) p m) m)) (update :changed into (map #(conj p %) ch))) c)))
+
+(defn build
+  "The record of entity e on db as ctx's value {:tree :ix :born :changed}: e and its units, and
+  its environment on branch; each member's first transaction (:born, what `order` sorts by);
+  :changed #{[]}, the root path, since every value is new (a memo of a part misses once,
+  everywhere). Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no e (an
+  agent whose entity its branch does not hold yet), its environment alone. O(the record)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :map] [:born :map] [:changed [:set [:vector :any]]]]]}
+  [db e branch]
+  (let [[tree ix] (if e (node db e nil [] {}) [{} {}])
+        c {:tree (merge tree (environment db branch)) :ix ix :born (born db ix {} (keys ix)) :changed #{[]}}]
+    (assoc (reduce #(derive-at %1 db %2) c (live c)) :changed #{[]})))
 
 (defn made-by
   "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest
@@ -262,26 +281,23 @@
                      (= v cur) (without (:tree c) p a)
                      :else (:tree c)))))))
 
-(defn- schema-at
-  "The schema the node at path p of c is held with, by its entity's index."
-  {:malli/schema [:=> [:cat :map [:vector :any]] [:maybe :qualified-keyword]]}
-  [c p] (some (fn [[q s]] (when (= q p) s)) (get (:ix c) (:db/id (get-in (:tree c) p)))))
-
 (defn- rederive
-  "c with the derived members of its nodes that have them (the record's own entity, its runs)
-  derived again on db when a datom of datoms can change what they read (read-nss); else c as it
-  was. A member whose value is the same stays the object it was, and only a changed one is a
-  path of :changed. Work: a test per datom, then the members' own (as their computation costs)."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :any]] :map]}
-  [c db datoms]
-  (if-not (some (fn [{:keys [a]}] (or (#{:seon.run/task :seon.run/status} a) (contains? read-nss (namespace a)))) datoms)
-    c
-    (reduce (fn [c p]
-              (let [s (schema-at c p) [m ch] (if (contains? derived s) (derive-into db s (get-in (:tree c) p)) [nil []])]
-                (if (seq ch)
-                  (-> c (assoc :tree (if (seq p) (assoc-in (:tree c) p m) m)) (update :changed into (map #(conj p %) ch)))
-                  c)))
-            c (cons [] (for [k (keys (get-in c [:tree :runs]))] [:runs k])))))
+  "c, patched from c0 by datoms, with its live nodes' derived members (`live`) kept: derived again
+  on db at a node that became live (a new stage's run) or when a datom can change what they read
+  (read-nss), and gone from one no longer live; else as they were. A member whose value is the
+  same stays the object it was, and only a changed one is a path of :changed. Work: a test per
+  datom, then the live nodes' members' own (one run's, as their computation costs)."
+  {:malli/schema [:=> [:cat :map :map :seon.host/db [:sequential :any]] :map]}
+  [c0 c db datoms]
+  (let [was (set (live c0)) now (live c)
+        read? (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? read-nss (namespace a)))) datoms)
+        ;; an earlier stage's run: its members gone
+        c (reduce (fn [c p] (let [m (get-in (:tree c) p) ks (filter #(contains? m %) (map first (get derived (schema-at c p))))]
+                              (if (and m (seq ks) (not (some #{p} now)))
+                                (-> c (assoc-in (into [:tree] p) (apply dissoc m ks)) (update :changed into (map #(conj p %) ks)))
+                                c)))
+                  c was)]
+    (reduce (fn [c p] (if (or read? (not (contains? was p))) (derive-at c db p) c)) c now)))
 
 (defn patch
   "ctx's value c with datoms (a transaction's :tx-data, or a datoms-diff marked :added) applied on
@@ -319,7 +335,7 @@
                  held (get (:ix c) e)]
              (reduce (own held) (reduce link c put) put))))
        (assoc c :changed #{}) (group-by :e datoms))
-      (rederive db datoms)
+      (as-> c' (rederive c c' db datoms))
       (update :tree #(merge (apply dissoc % environment-keys) (environment db branch)))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
