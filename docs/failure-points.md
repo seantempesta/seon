@@ -222,8 +222,9 @@ close removes it. See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner 
 uses is taken by the next opener whose key reaches it, so the left sets stay about a tenth of the
 key space (6,400 measured after 23 days, before the fork); the bound is `sysctl kern.sysv.semmns`
 (87,381 semaphores, 14,563 sets at six a set), and at it an open fails in `semget` (ENOSPC).
-Upstream's two-semaphore sets left before the fork are never taken (not of this layout) and stay
-until removed. Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
+Upstream's two-semaphore sets are never taken (not of this layout); those left before the fork
+were removed on 2026-10-26, except the ones a process still on upstream's build used
+(notes/archive/lmdb-leftover-sets-2026-10-26.md). Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
 makes a new one at the next open.
 
 Each env a process has open holds one SEM_UNDO entry of the process's `kern.sysv.semume` (10 on
