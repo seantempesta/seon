@@ -16,12 +16,19 @@ This replaces every earlier revision. The owner's rulings of 2026-10-26 (docs/de
 8. **One cache, keyed by what each render declares:**
    - declares nothing: cached by its children's identity (pure Reagent);
    - declares `:seon.db/db`: also keeps the db ranges it read (`d/with-reads`) and recomputes only when a transaction touches them;
-   - declares `:seon.ctx/ctx`: keyed on ctx's identity, so it redraws on every change. The cost is visible in its declaration; take a slice as children where possible.
+   - declares `:seon.ctx/ctx`: keyed on ctx's identity. Only the layout should need it; every other render is handed its slice as children, which is how re-frame components get precision without any tracking.
+   - whatever re-runs, an output `=` to last time redraws nothing downstream (Reagent's reactions, re-frame's subscriptions).
+   - each cache entry records calls, hits, misses and allocation in one map keyed by the render's var (`seon.profile`), so an inefficient render shows up as data.
+
+**Why this works everywhere and is simple (owner, 2026-10-26: "I don't want to reinvent the wheel"):** it is re-frame's model, which is Reagent's, which is React's memo, proven in production Clojure for about ten years. One atom holds an immutable value (`@ctx`, as `app-db`); events update it (a transaction patched in); subscriptions and components are pure functions of slices, recomputed only when their slice changes and passing nothing on when their output is `=` to before. Immutability makes "did my input change" a pointer check, so nothing is guessed and nothing knows the data's shape. A render is a plain function: to make it cheaper, hand it a smaller slice; there is nothing to register or invalidate by hand. The one addition, because our source is a database rather than an atom, is `d/with-reads` (already in our Datahike fork) for renders that query.
 9. **`diff`.** One walk that skips `identical?` subtrees: ctx's diff and the page's diff. The model's turn message is the two diffs; the page patches with the second.
 
 The model's request: system; the page emitted at the session's first turn; then per turn the evals (assistant), their answers (tool) and the turn's two diffs (user). It renders nothing itself.
 
 Things that exist only when rendered, such as the functions a plan cites or the related sections from an embedding search, are computed by renders that declare `:seon.db/db`. They are never stored, and their db reads are what invalidates them.
+
+## Refinement (owner, 2026-10-26): a server-side ratom, and Datastar
+"maybe we should just pass in the ctx atom and the deref plus access isn't that how the ratom works to track when to re-render? … Are we writing a server based ratom and then telling datastar to patch some data?" Yes, and it replaces handing renders slices: `ctx` is a ratom with Reagent's semantics ported to the server (atom, cursor, reaction, dependency capture while a render derefs). The patch `reset!`s it with untouched paths `identical?`; a render derefs the ctx atom or a cursor into it, and its dependencies are recorded as it runs; a cursor signals only when its path's value is not `=`; renders that read the db keep `d/with-reads`. Each component's root element id is its key, and a component whose new hiccup is not `=` to before is sent to Datastar as one patch-elements event over the page's SSE stream. The model's turn diff is the same set of components. Being measured in the lab before any build.
 
 ## How exactly we know what changed
 A transaction's datoms → the eid → paths index → only those entities re-pulled, paths copied → every other subtree `identical?` → the cache misses only for calls whose children sit on a changed path, or whose recorded db reads the datoms touch → those redraw → the diff walks only new objects.
