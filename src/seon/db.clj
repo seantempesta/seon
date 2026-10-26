@@ -158,7 +158,8 @@
   :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
   runtime, since it installs the attribute), then the rest in one transaction carrying
   tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
-  a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
+  a value type is fixed once installed; one it holds without its declared content id or index
+  gains it): a kept store seeded before an attribute existed gains it when a root
   opens it, and a branch cut before one existed when its agent resumes it (seon.agent's
   resume: a branch keeps the schema it was cut with; Datahike accepts new attribute
   definitions at any time). Nothing missing writes nothing."
@@ -176,9 +177,12 @@
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         ;; an identity a kept store holds without its content id gains it (Datahike admits
-        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids)
+        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids), and an
+        ;; attribute held without its declared index gains it (Datahike admits adding :db/index in
+        ;; place: its datoms are in the AVET index at once)
         missing (vec (remove #(and (contains? have (:db/ident %))
-                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
+                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId]))
+                                   (or (not (:db/index %)) (get-in have [(:db/ident %) :db/index])))
                              schema))]
     (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
       (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))

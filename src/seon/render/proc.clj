@@ -293,7 +293,7 @@
         parts (if own?
                 (:parts held)
                 (cond bdb (mapv #(render/part-html % (render/part-faces %))
-                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
+                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (context/renders bdb)))
                       ;; a branch that could not be read: its error, by the error's render
                       berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} (assoc f :text "")))]))
         root (:db/id (d/entity db [:seon.root/id :root]))
