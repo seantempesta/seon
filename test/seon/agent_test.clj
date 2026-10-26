@@ -675,11 +675,12 @@
            ab (pdb/on-main (:branch cfg) :agent-taken)
            k (task/agent-key "boot-1" :a1)
            ;; as in production: the branch is made, the run starts on main, and the branch holds
-           ;; the run by reference only, as its turns record it
+           ;; the run by reference only, as its turns record it (its id, task and agent)
            _ (d/branch! conn (:branch cfg) ab)
            _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch :agent-taken :model nil :max-turns 4} 1000 "Wait."))
            store-conn (d/connect (assoc cfg :branch ab))
-           _ (d/transact store-conn [{:seon.run/id "demo/w#1" :seon.run/task [:seon.task/id "demo/w"]}
+           _ (d/transact store-conn [{:db/id k :seon.agent/key k :seon.agent/id :a1}
+                                     {:seon.run/id "demo/w#1" :seon.run/task [:seon.task/id "demo/w"] :seon.run/agent k}
                                      {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
            ;; on main: what root decided of the run, and the page's open
            _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
