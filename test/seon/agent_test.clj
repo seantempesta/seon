@@ -776,6 +776,40 @@
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
+(deftest a-green-whole-task-merges-itself-with-no-act-beyond-done
+  ;; owner, 2026-10-26: "we have the agents have live feedback so we can know if we can auto merge
+  ;; so test for it": through my.root/request! (the default, one whole task) and the reconciler, a
+  ;; run whose proof passes on its branch ends green, and root merges its branch into main: the
+  ;; agent does nothing beyond its work
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wg\" :seon.task/plan \"Make wg.\"})"
+                  " _ (seon.root/await-db sys \"the whole task merged\" #(= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"demo/wg\")))"
+                  " db @(:conn sys) r (seon.task/run db \"demo/wg#1\")]"
+                  " [(:seon.task/kind (seon.task/task db \"demo/wg\")) (:seon.run/outcome r) (:seon.run/status r) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/whole-green"]})]
+    (is (= [:whole :green :merged true] (:value r)) (pr-str r))))
+
+(deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
+  ;; the other way: a whole run that ends with its proof red is not merged; root's verdict, the
+  ;; done rule's reasons as data, goes to its session, and the session's next run's first request
+  ;; carries it (seon.reconcile's :verdict, taken by seon.turn's take!)
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
+                  " _ (seon.root/await-db sys \"the next run parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#2\"]))))"
+                  " db @(:conn sys)"
+                  " v (datahike.api/q '[:find [?id ?body] :where [?r :seon.run/id \"demo/wr#1\"] [?m :seon.message/to ?r] [?m :seon.message/kind :verdict] [?m :seon.message/id ?id] [?m :seon.message/body ?body]] db)"
+                  " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/wr\")}}))"
+                  " sent (datahike.api/q '[:find ?s . :where [?r :seon.run/id \"demo/wr#2\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 0] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b)]"
+                  " [(:seon.run/outcome (seon.task/run db \"demo/wr#1\")) (seon.reconcile/task-state (seon.reconcile/index db) \"demo/wr\") (first v)"
+                  "  (mapv :reason (:reasons (seon.edn/decode (second v)))) (boolean (some #(= [:message (first v)] (vec (take 2 %))) sent))])")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
+        [outcome state vid reasons told?] (:value r)]
+    (is (= :red outcome) (pr-str r))
+    (is (not= :merged state) "not merged")
+    (is (= "v-demo/wr#1" vid) "root's verdict to the run")
+    (is (= [:proof-red] reasons) "its reasons as data: the proof is red")
+    (is told? "the session's next run's first request carries it")))
+
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
   ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! with the

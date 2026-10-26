@@ -293,6 +293,29 @@
                                   "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")"))
         :else "The proof is written and red, and the plan says what implement changes."))
 
+(defn whole-green
+  "The scripted model of a whole task that goes green (seon.agent-test): it writes a proof that
+  passes and registers it; the done rule then passes and the run ends, for root to merge."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [turn]}]
+  (if (zero? turn)
+    (fenced "Write the proof, and register it."
+            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 1)))\n"
+                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
+    "The proof passes."))
+
+(defn whole-red
+  "The scripted model of a whole task that ends red (seon.agent-test): its first run writes a red
+  proof, registers it and ends its turn with prose; its next run (the session again, woken by
+  root's verdict, so the conversation already holds the first run's turns) waits."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [{:keys [turn messages]}]
+  (cond (some #(= "assistant" (name (:role %))) (if (zero? turn) messages [])) "(my.turn/wait)"
+        (zero? turn) (fenced "Write the proof, red, and register it."
+                             (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
+                                  "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
+        :else "I stop here."))
+
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task

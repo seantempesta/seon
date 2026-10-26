@@ -466,7 +466,15 @@
     (is (= [(spawn "a" 1) (spawn "b" 1)] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")
     (is (= [{:op :octopus-merge :run "demo/a#1" :members [{:run "demo/a#1" :task "demo/a"}]}]
            (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass})))))
-    (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))))
+    (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))
+    ;; owner, 2026-10-26 ("test for it"): a whole run that ended red, or green with main's merge
+    ;; unresolved on its branch, is not merged: its verdict goes back to its own session, the
+    ;; done rule's reasons as data (a merge task's holds for root)
+    (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :proof-red :symbol (t "a")}]}]
+           (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :red :results {(t "a") :fail})))))
+    (is (= [[:verdict [:unmerged]]]
+           (map (juxt :op #(mapv :reason (:reasons %)))
+                (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass} :unmerged ["[:var app/f]"]))))))))
 
 (deftest a-requests-green-work-is-merged-by-its-merge-task
   ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged

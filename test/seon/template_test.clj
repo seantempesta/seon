@@ -91,6 +91,9 @@
     (is (= [:whole :task-demo-w] [(:seon.task/kind w) (:seon.task/branch w)]))
     (is (= (:whole tpl/instructions) (:seon.task/instructions w)))
     (is (str/includes? (:whole tpl/instructions) "main's work merged in") "done on main's merged program")
+    ;; owner, 2026-10-26: the agent reads its merge readiness on its page and is done when it can merge
+    (is (str/includes? (:whole tpl/instructions) "status's :merge") "it reads whether it can merge on its page")
+    (is (str/includes? (:whole tpl/instructions) "Once :merge says :ready, your run ends and root merges your branch"))
     ;; agent loop's park findings: a green run ends before its closing prose, so "end your turn
     ;; with prose" left the next turn parked :waiting; a false premise was reported in prose
     (doseq [k [:whole :work]]
