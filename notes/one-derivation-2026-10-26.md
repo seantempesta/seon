@@ -34,3 +34,7 @@ The page's separate walk, the screen's separate producer (`seon.screen/show` bec
 - The one printer is the default for every value: one pass into ops, `print/text` for the model and `emit/ops-hiccup` for the page, the same selection and cuts.
 - A declared render is the exception, only where a value earns a custom view; its hiccup is drawn on the page and printed for the model.
 - Not everything in ctx is shown: the layout and screen show what is relevant; the rest is one form away, named by a cut. Leaving irrelevant data out is a feature.
+
+## Narrowed to the implementation (owner, 2026-10-26)
+"I think the html(ctx) will remove details that the agent needs for the ai context so it isn't that formula"; "Make it so that the data dependencies are clear and we have good functions for processing the data".
+`(ctx db agent)` → map (one pull, patched per transaction) → `(view ctx)` → ordered keyed parts (what is relevant, in what order; layout as data) → per part `(html part)` → hiccup → page, and `(ai part)` → text → model; both default to the one printer (ops-hiccup and text from one selection), a schema's `:seon.render/html` or `:seon.render/ai` overrides that face only; `(diff prev next)` by part key for both (rule 7); cache by (renderer, part value). The page may collapse details; the model's text carries what the agent needs within budget; they differ in detail, never in which parts.
