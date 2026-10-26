@@ -546,7 +546,7 @@
   "a3's page's parts as its process draws them (seon.repl/parts), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (:tree (seon.ctx/build branch (seon.task/agent-key "b1" :a3) :task-demo-f))))})
+  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))})
 
 (defn- conversation-rows
   "The ids of view's conversation parts st holds."
@@ -737,10 +737,7 @@
         html (p/page-html st1 :a3)
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    ;; the message is in the conversation; its place by the transaction that wrote it waits on each
-    ;; member's t in ctx (the one derivation's slice 1): by entity id, a content id sorts last
-    (is (< (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: an eval's prose, the turn, the owner's eval")
-    (is (at "check g") "the message to the run")
+    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
@@ -1120,7 +1117,7 @@
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons ["demo/f-test is red"]}}}])
-        c (:tree (seon.ctx/build branch k :task-demo-f))
+        c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
         parts (r/view c)
         ks (mapv :key parts)]
     (is (= [[:task] [:proofs] [:verdict] [:run]] (subvec ks 0 4)) "the task, its proofs, the verdict, the run, first")
@@ -1128,7 +1125,8 @@
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
-    (is (= [[:eval "e1"] [:eval "e2"] [:eval "e3"]] (filterv #(= :eval (first %)) ks)) "the evals in the order they were written")
+    (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
+        "the conversation in the order it was written: each member's first transaction")
     (is (some #(= [:message "m-1"] %) ks) "the message to the run, in the conversation")
     (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq (map :value parts)))
         "no entity ids, no counters")
@@ -1152,11 +1150,11 @@
   ;; the review of slice 2: view makes new part values on every call, so the memo keys on the ctx
   ;; members a part was made from (:from), which ctx's patch leaves identical when unchanged
   (let [[main branch _] (paged-dbs)
-        c (:tree (seon.ctx/build branch (seon.task/agent-key "b1" :a3) :task-demo-f))
+        c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)
         draw (fn [memo] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [memo []] (r/view c)))
         [m1 fs1] (draw {})
         [_ fs2] (draw m1)
-        c2 (assoc-in c [:evals "e1" :seon.eval/record :response :value] 5)
+        c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
         [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2))]
     (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
     (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))

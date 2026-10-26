@@ -185,20 +185,22 @@
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
 (defn view
-  "An agent's ctx c as its parts, in order: [:task], the task's relevant keys; [:proofs], each
+  "An agent's held record ({:tree c :born}, seon.ctx/build's: c is @ctx, born each member's first
+  transaction) as its parts, in order: [:task], the task's relevant keys; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
   rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (their entity ids). Each part names the members of c it was made from
-  (:from), so a part made again from the same members is drawn from the memo (drawn). Pure in c:
+  the order they were written (their first transactions). Each part names the members of c it was made from
+  (:from), so a part made again from the same members is drawn from the memo (drawn). Pure in the record:
   it reads no db and no config. What a
   part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
   observation, the agent's own counters): a change without meaning is a data defect, fixed here."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.render/part]]}
-  [c]
-  (let [run (last (sort-by :db/id (vals (:runs c))))
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:born :map]]] [:vector :seon.render/part]]}
+  [{c :tree :keys [born]}]
+  (let [t-of #(get born (:db/id %) 0)
+        run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
         turn (last (sort-by :seon.turn/n (vals (:turns run))))
         {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
@@ -217,9 +219,10 @@
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
                 {:key [k] :from [(get c k)] :value (get c k) :schema k}))
-        (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [(:db/id e) (entry :eval e)])
-                                                  (for [t (vals (:turns run))] [(:db/id t) (entry :turn t)])
-                                                  (for [m (vals (:messages run))] [(:db/id m) (entry :message m)])))))))
+        ;; in the order written: each member's first transaction (ctx's :born), then its key
+        (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [[(t-of e) (:seon.eval/id e)] (entry :eval e)])
+                                                  (for [t (vals (:turns run))] [[(t-of t) (:seon.turn/id t)] (entry :turn t)])
+                                                  (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)])))))))
 
 (defn part-faces
   "Part p's faces, {:html hiccup :text string :inline hiccup}: each by the render its value's schema

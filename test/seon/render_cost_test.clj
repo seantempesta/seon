@@ -213,9 +213,10 @@
                 "its place in the walk's map and in the sort by transaction. Contracted calls flat in the rows; bytes "
                 "~6 KB a row (was 49.5 KB, every row pulled whole: a-page-walks-each-db-once)")
      :growth :linear
-     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations
+     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations; 65 at 100
+     ;; with the agent's catch-ups a unit (task seon.ctx/one-derivation): its index read, empty here
      :per-n {:bytes 6100}
-     :fixed {:calls 59 :bytes 2650000}
+     :fixed {:calls 65 :bytes 2650000}
      :sizes [100 1000 4000]}))
 
 (defn- watching
@@ -353,17 +354,18 @@
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
 
 (defn ctx-of
-  "The input of size n: an agent's ctx (seon.ctx/build's shape) of one run, its task with one proof,
+  "The input of size n: an agent's held record (seon.ctx/build's shape, each member's first t) of one run, its task with one proof,
   one turn, and n evals, each a record of a short form and its value."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
-  [{:t n :branch :b
+  [{:born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))
+    :tree {:t n :branch :b
     :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
                     :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
                     :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
     :evals (into {} (for [i (range n) :let [id (str "e" i)]]
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}])
+                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its

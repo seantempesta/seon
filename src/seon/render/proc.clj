@@ -28,7 +28,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -293,7 +293,7 @@
         parts (if own?
                 (:parts held)
                 (cond bdb (mapv #(render/part-html % (render/part-faces %))
-                                (render/view (:tree (ctx/build bdb (:seon.agent/key e) (:seon.agent/branch e)))))
+                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
                       ;; a branch that could not be read: its error, by the error's render
                       berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} (assoc f :text "")))]))
         root (:db/id (d/entity db [:seon.root/id :root]))]

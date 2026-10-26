@@ -13,7 +13,20 @@ Things are named by themselves: an eval by its id, a run by its id, an attribute
 
 ## Kept by the change, never rebuilt
 
-``seon.ctx/build`` reads the record once, when the agent's state first holds its db (a spawn, a resume, a clone), and ``seon.ctx/patch`` keeps it from each transaction's datoms, which ``seon.agent/transact!`` records with the db they made: a datom of an entity the map holds sets or removes its attribute, and a new entity whose ref names a held one by a unit's attribute joins it, read whole. One entity can sit at several paths (each run of a task holds the task), and each is patched. A move with no transaction (a merge of main, a resume) is patched from the datoms the two values differ by. A patch costs its change: six contracted calls for a new eval at 100 and at 1,000 evals (`seon.ctx-test/the-patch-costs-the-change-not-the-session`), and after each of 150 random changes of a session's kinds the patched map equals a fresh build (`seon.ctx-test/ctx-is-the-record-after-every-transaction`). The atom lives as long as the agent's process, across the runs of its session.
+``seon.ctx/build`` reads the record once, when the agent's state first holds its db (a spawn, a resume, a clone), and ``seon.ctx/patch`` keeps it from each transaction's datoms, which ``seon.agent/transact!`` records with the db they made: a datom of an entity the map holds sets or removes its attribute, and a new entity whose ref names a held one by a unit's attribute joins it, read whole. One entity can sit at several paths (each run of a task holds the task), and each is patched. A move with no transaction (a merge of main, a resume) is patched from the datoms the two values differ by. A patch costs its change: eight contracted calls for a new eval at 100, 1,000 and 3,000 evals (`seon.ctx-test/the-patch-costs-the-change-not-the-session`). After each of 150 random changes of a session's kinds, the patched map equals a fresh build (`seon.ctx-test/ctx-is-the-record-after-every-transaction`). The atom lives as long as the agent's process, across the runs of its session.
+
+**What changed, and what did not.** A patch answers `:changed`, the paths its transaction changed: an attribute's, or a member's that joined or left. It changes only along those paths. So every value at a path not at, under or above one of them is the same object it was (`identical?`), and a part's memo is a pointer test. The same property test holds this after each of the 150 changes. The environment (`:t`, `:branch`, `:commit`) is the root map's, new each transaction and no path of `:changed`, so nothing caches on the root map. A build answers `:changed #{[]}`, the root path: every value is new, and a memo misses once, everywhere. The test counts the paths it checked (over 1,000 in 150 changes), so a patch that reported everything changed could not pass it.
+
+**Order is the facts'.** ctx keeps each member's first transaction (`:born`, its identity datom's tx, which an upsert never writes again). ``seon.ctx/order`` answers a unit's member keys in the order the entries happened: `(seon.ctx/order c [:evals])`. It is derived, never a stored vector; entries of one transaction go by their keys. The property test checks it against the facts after every change. It sorts the unit on each call (O(n log n)), so a view memoizes it on the unit.
+
+**Any entity, any branch.** ``seon.ctx/build`` takes an entity id: an agent's (its `@ctx`), root's, the user's, a task's, a run's. ``seon.ctx/follow`` patches a record from one of the writer's commits as main's readers receive them (`{:t :ops :db}`), as an agent's follows its own transactions. A run or task retracted leaves its environment alone, as a build of no entity does (`seon.ctx-test/any-entitys-record-follows-mains-commits`, 60 commits, two records).
+
+**What a view reads is in ctx.** Two values that were computed at a view are now facts on the agent's branch, so a view of ctx computes nothing (`seon.context-test/the-stages-story-and-related-are-facts-of-the-branch`):
+- `:seon.run/story` is the stage's story (``seon.context/run-state``), written once in the transaction that begins the run (``seon.turn``'s `begin!`). In an agent's ctx it sits at `[:runs id :seon.run/story]`.
+- `:seon.run/story` is written once per run: a resumed run keeps the story its stage began with.
+- `:seon.task/related` is what the plan likely needs beyond what it cites (``seon.context/related``). The turn's observe writes it when the plan's vectors move, and retracts it when related answers none. It sits at `[:runs id :task :seon.task/related]`. It stays on the branch: the merge carries only a task's plan and instructions to main.
+- A catch-up (``seon.agent/merge-main!``) is a `:seon.catch-up/*` entity written in the merge's own transaction: the branch and t merged, what applied and what conflicted. It is the agent's unit `:catch-ups` (`seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base`).
+- Proof results and the done rule's reasons are each turn's `:seon.turn/basis` `:observed`, already in ctx under `[:runs id :turns tid]`. A message the turn takes is written on the branch (``seon.turn``'s `take!`) and sits under `[:runs id :messages]`.
 
 ## What the model reads, and what the page draws
 
@@ -49,6 +62,14 @@ The record's environment is read-only; everything else is writable, and history 
 
 **The screen is the agent's to change.** `(swap! ctx assoc :seon.agent/screen ["(my.task/status)" "(:lab.ctx/steps @ctx)"])` sets the forms its next screen evaluates (``seon.turn``'s screen reads the record; absent, ``seon.screen/forms``).
 
+## Provenance: who made each fact
+
+Who made a fact is a query on the tx-meta of its transaction, Datomic's reified transactions. Every transaction Seon makes names its branch (`:seon.tx/branch`, ``seon.db/tx-meta``). An agent's write during an eval also names that eval (`:seon.tx/eval`, its `:seon.eval/id`, "e5"): ``seon.repl/eval-string`` holds the running eval's id on the agent's state while its forms run, and ``seon.agent/transact!`` writes it, so a `swap!`, any `transact!` its code makes, and the eval's own record all name it. A catch-up (``seon.agent/merge-main!``) also names the branch it merged (`:seon.tx/merged`), so a fact main made reads as main's after the agent caught up, though the agent's branch wrote the merge.
+
+``seon.ctx/made-by`` answers it for one attribute of one entity: the tx-meta of its newest datom's transaction, by two seeks (`(seon.ctx/made-by (my.db/db) (:db/id @ctx) :lab.ctx/steps)`). The page's ctx block shows it beside each attribute, as of the eval's t: the eval that wrote it, else "from :main" for a fact the agent was forked holding, and "merged from :main" for one a catch-up brought (`seon.ctx-test/a-change-names-its-eval`; the tx-meta itself, `seon.agent-test/an-agents-transactions-name-their-runtime` and `after-merge-main-the-agent-judges-against-the-new-base`).
+
+Not covered: root's own writes (``seon.root``'s transactions on main) name no eval; a unit's members show no provenance on the block (each eval is its own record); a removed member is not shown as removed.
+
 ## Not yet
 
-Provenance (which eval and branch made each fact), the diff from main and its merge mark are the plan's next steps.
+The diff from main and its merge mark are the plan's next step.
