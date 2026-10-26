@@ -67,6 +67,10 @@
   ;; to write deftests but not how found the checkout on disk, appended its deftest to the test file
   ;; and load-file'd it; a deftest is evaluated in its namespace, recorded on the branch
   (is (str/includes? (:design tpl/instructions) "(in-ns 'ns.x-test)") "design says where a proof is evaluated")
+  ;; the thinking-off designs of 2026-10-26 registered a red proof at turns 7, 12 and 21, then
+  ;; tried the fix until the cap and never wrote the plan
+  (is (str/includes? (:design tpl/instructions) "Once the proof is red, write the plan") "the plan follows the red proof")
+  (is (str/includes? (:design tpl/instructions) "Do not try the fix") "the fix is the implement step's")
   (is (str/includes? (:design tpl/instructions) "you write no file"))
   ;; pipeline 1 (notes/live-2026-10-25.md F4): both printer designs reproduced their bug by turn 11,
   ;; then read on to the cap and registered no proof; reading came before the proof, with no end.
