@@ -111,8 +111,8 @@
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
                                            {:type :error :var nil :message "test process died: 9"}]}))))
-    (testing "the printed context carries them"
-      (let [text (:content (peek (context/messages "H" block)))]
+    (testing "printed, as the page's status and (my.task/status) print it, they are there"
+      (let [text (print/text (vary-meta (dissoc block :write-set :to-prove :task) assoc :seon.print/full true))]
         (is (re-find #":regression" text))
         (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
@@ -373,19 +373,27 @@
           (is (= ["system" "user"] (mapv :role read)) "an outside agent's read: the system prompt and the page whole")
           (is (str/includes? (:content (peek read)) "quadruple")))))))
 
-(deftest each-section-is-sent-once-per-request
-  ;; the old request sent the task, its references and its sections in the first turn's
-  ;; context and again in the current block, every turn
-  (let [db (d/db-with (db-with-program) (program-facts '[[demo/g "(defn g \"Halves.\" [x] (/ x 2))" []]]))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
+(deftest each-section-is-told-once-on-the-page
+  ;; the old request sent the task, its references and its sections in the first turn's context
+  ;; and again in the current block, every turn; on the page each is one part: the plan in
+  ;; [:task], a cited var's source in its own part, the proofs' statuses in [:status]
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (program-facts '[[demo/g "(defn g \"Halves.\" [x] (/ x 2))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (context/current-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :turn 1 :max-turns 4})
-        ms (context/messages "H" block)
-        times (fn [s] (count (filter #(str/includes? (str (:content %)) s) ms)))]
-    (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
-    (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-    (is (= 1 (times ":test demo-test/f-test")) "the proofs once, in the turn sections")
-    (is (not (str/includes? (:content (peek ms)) ":write-set")) "the turn sections hold no run section")))
+      (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1"}}
+                        {:seon.turn/id "demo/f#1/0" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 0 :seon.turn/origin :model
+                         :seon.turn/basis {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 4 :origin :model
+                                           :observed {:results {'demo-test/f-test :fail} :reds [] :reasons []}}}])
+      (let [db @conn
+            a (pdb/eid db :seon.agent/key "b/a1")
+            page (context/page db (ctx/build db a :b))
+            text (print/text (vary-meta page assoc :seon.print/full true))
+            times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
+        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
+        (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
+        (is (= 1 (times "demo-test/f-test :fail")) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -408,22 +416,25 @@
     (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")} (by 'ctx-depth/tri))
         "three backticks: the source, as code")))
 
-(deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
-  ;; the clipping audit (2026-10-25, P4): a cited source is whole in the task's data; the one printer
-  ;; cuts it at the context's budget, and the cut reads its rest through (my.task/data)
+(deftest a-long-source-is-whole-for-the-model-and-cut-on-the-page
+  ;; the clipping audit (2026-10-25, P4): a cited source is whole in the task's data, never swapped
+  ;; for its doc by size. Its part returns it as a call of the printer with the budget and the
+  ;; form that reads it ([#'seon.render/html value opts]): the page's writer cuts it there, saying
+  ;; so with that form; the model reads the call as returned, the value whole (root's ruling pending:
+  ;; whether the printer prints a call's value at its own budget)
   (binding [*ns* *ns*]
     (eval '(ns ctx-big))
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "Read ```ctx-big/big```."
-                                               :seon.task/proofs #{'demo-test/f-test}}]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
-        data (#'context/task-message (context/task-data db (task/task db "demo/b")))]
+        hiccup (seon.render.ui/cited {:var 'ctx-big/big} {:db db})
+        html (seon.web.html/html hiccup)]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
-    (is (< (select/estimate data) (select/estimate src)) "the task's data is cut where it is printed")
-    (is (str/includes? data "(my.task/data)") (str "its cut reads the rest through the task data's form: " (subs data 0 (min 400 (count data)))))))
+    (is (< (count html) (count src)) "the page cuts it where it is written")
+    (is (str/includes? html "seon.context/cited") "and its cut names the form that reads the rest")
+    (is (str/includes? (print/text (vary-meta hiccup assoc :seon.print/full true)) "(inc 1) (inc 1)") "the model reads the value whole, in the call")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]
@@ -436,10 +447,9 @@
   ;; as the agent works, so it is turn content, never the cached prefix
   (let [db (db-with-program)
         will {:added ['demo/h] :changed ['demo/f] :schemas [:demo/k]}
-        ms (context/messages "H" (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will}))]
-    (is (str/includes? (:content (peek ms)) ":will-merge") "in the turn sections")
-    (is (str/includes? (:content (peek ms)) "demo/h"))
-    (is (not (str/includes? (:content (second ms)) ":will-merge")) "not in the run sections")
+        state (context/turn-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will})]
+    (is (= will (:will-merge state)) "in the turn's state, which the page's [:status] prints")
+    (is (not (contains? (context/task-data db (task-f db)) :will-merge)) "not in the task's data")
     (is (= {} (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}})))
         "measured and nothing to carry says so")
     (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))

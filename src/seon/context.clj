@@ -619,30 +619,6 @@
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
 
-(def task-keys
-  "The block's run sections: what the task is and what it cites, the same each turn of an
-  run (made from its first turn's basis), so they are sent once, in the cached prefix."
-  [:task :write-set :to-prove :sections :similar])
-
-(defn- task-message
-  "The run sections of block, printed by the one printer under the context's budget, its cuts
-  reading their rest through (my.task/data), the form that answers them as data: a request with
-  no agent (a test's `messages`); an agent's reads the page."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [block]
-  (let [r (print/print-value (select-keys block task-keys) {:handle '(my.task/data) :budget (:context print/budgets)})]
-    (str "Your task and what it cites, the same for this whole run:\n" (or (:text r) (:seon.error/message r)))))
-
-(defn- state-message
-  "The turn sections of block (everything but the task's), printed under the
-  context's budget, with how many earlier turns the history budget left out. Sent last, and
-  replaced by the next request's."
-  {:malli/schema [:=> [:cat :map :int] :string]}
-  [block dropped]
-  (str "The current state:\n" (print/text (cond-> (apply dissoc block task-keys)
-                                             (pos? dropped) (assoc :history {:left-out-turns dropped}))
-                                           (:context print/budgets))))
-
 (defn page
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
   commit): the :task region of render-ctx (seon.render/render-ctx), each part's hiccup exactly as
@@ -702,79 +678,49 @@
 
 (defn request
   "The agent's request, a render of its record: agent a (its entity map, :db/id) for the turn
-  basis b on db (opts :db :basis :block :help, and :help-ref, the record the system prompt
-  renders): the system prompt (system-text), then the session in tx order (`records`, printed
+  basis b on db (opts :db :basis :help, and :help-ref, the record the system prompt renders): the system prompt (system-text), then the session in tx order (`records`, printed
   once by printed-run, opts :printed the run's earlier requests' prints, answered again as
   :printed; within the history budget, `kept`): each eval (eval-messages) and message
   (message-messages), and at each model turn of the session, the page: the first turn's whole,
   each later one's what changed since the turn before (`world`: the page's parts by key and ctx's
-  diff), each at the commit its turn's request was made on, after the turn's record. So the session's first request reads the page
-  whole and each later one what changed, each change told once, and every request is the one
-  before and what was added. How many earlier parts the budget left out goes just after the
-  system prompt. An outside agent's read (origin :outside): the system prompt and the page whole.
-  With no agent (a test's `messages`): the block's run and turn sections. Answers {:messages
+  diff), each at the commit its turn's request was made on, after the turn's record. So the
+  session's first request reads the page whole and each later one what changed, each change told
+  once, and every request is the one before and what was added. How many earlier parts the budget
+  left out goes just after the system prompt. An outside agent's read (origin :outside): the
+  system prompt and the page whole. Answers {:messages
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
   records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
   as of t; [:eval id] (with its fold); [:line id], an eval sent collapsed; [:message id]; [:page a
   c0 c1], the page at commit c1 (c0 nil) or what changed since c0; [:history n], the n parts the
-  budget left out. :sent is nil with no agent. Called by the turn."
-  {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
-  [a {:keys [db basis block help help-ref printed]}]
-  (if-not a
-    {:messages [{:role "system" :content help} {:role "user" :content (task-message block)} {:role "user" :content (state-message block 0)}]
-     :printed {} :sent nil}
-    (let [e (:db/id a)
-          model? (= :model (:origin basis))
-          since (:tx printed)
-          ;; each model turn's page at the commit its request was made on (a turn records itself
-          ;; before its request; a read with none recorded, db's), drawn only when printed-run has not
-          ;; printed it (a delay)
-          ts (or (not-empty (if model? (turn-pages db e) [])) [[(:max-tx db) (d/commit-id db)]])
-          pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
-                      :when (or (nil? since) (>= tx since))]
-                  [[:page [e prev c]] (delay (world db e prev c)) nil tx])
-          rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
-          items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
-          cache (printed-run items (when model? printed))
-          parts (mapv #(get-in cache [:parts %]) (:ids cache))
-          [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
-          whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (and (= :whole pick) (= :eval (first ref))) (second ref)))) (map vector (drop dropped parts) picks))
-          sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
-                     (drop dropped parts) picks)
-          note (when (pos? dropped) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
-      ;; how many parts the budget left out, just after the system prompt: it changes only when the
-      ;; cut jumps, so every message after it is the one before and what was added
-      {:messages (-> [{:role "system" :content help}] (cond-> note (conj note)) (into (mapcat second) sent))
-       :printed cache
-       :sent (-> [help-ref] (cond-> note (conj [:history dropped])) (into (map first) sent))})))
-
-(defn messages
-  "A request's messages without an agent (a test's, a read before any eval): the system prompt, the
-  run sections of block and its turn sections."
-  {:malli/schema [:=> [:cat :string :map] [:vector :seon.model/message]]}
-  [help block] (:messages (request nil {:block block :help help :basis {}})))
-
-(defn reader-text
-  "What a turn's reader got beyond the system prompt and the scrollback: its run sections and
-  its turn sections, as one text (the server's context, the page's panel)."
-  {:malli/schema [:=> [:cat [:vector :seon.model/message]] :string]}
-  [msgs] (str (:content (second msgs)) "\n\n" (:content (peek msgs))))
+  budget left out. Called by the turn."
+  {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
+  [a {:keys [db basis help help-ref printed]}]
+  (let [e (:db/id a)
+        model? (= :model (:origin basis))
+        since (:tx printed)
+        ;; each model turn's page at the commit its request was made on (a turn records itself
+        ;; before its request; a read with none recorded, db's), drawn only when printed-run has not
+        ;; printed it (a delay)
+        ts (or (not-empty (if model? (turn-pages db e) [])) [[(:max-tx db) (d/commit-id db)]])
+        pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
+                    :when (or (nil? since) (>= tx since))]
+                [[:page [e prev c]] (delay (world db e prev c)) nil tx])
+        rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
+        items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
+        cache (printed-run items (when model? printed))
+        parts (mapv #(get-in cache [:parts %]) (:ids cache))
+        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
+        whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (and (= :whole pick) (= :eval (first ref))) (second ref)))) (map vector (drop dropped parts) picks))
+        sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
+                   (drop dropped parts) picks)
+        note (when (pos? dropped) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
+    ;; how many parts the budget left out, just after the system prompt: it changes only when the
+    ;; cut jumps, so every message after it is the one before and what was added
+    {:messages (-> [{:role "system" :content help}] (cond-> note (conj note)) (into (mapcat second) sent))
+     :printed cache
+     :sent (-> [help-ref] (cond-> note (conj [:history dropped])) (into (map first) sent))}))
 
 ;; ---- a turn's basis: what its context was built from, and the text made from it again ----
-
-(defn- turn-record
-  "The turn entity e on db, its facts."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
-  [db e]
-  (d/pull db [:db/id :seon.turn/id :seon.turn/n :seon.turn/origin :seon.turn/basis :seon.turn/reply :seon.turn/calls :seon.turn/truncated :seon.turn/reasoning] e))
-
-(defn- model-turns
-  "The model turns of run on db before turn n, oldest first, each with the tx that recorded it (:tx)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id :int] [:vector :map]]}
-  [db run n]
-  (->> (d/q '[:find ?e ?k ?tx :in $ ?a ?n :where [?r :seon.run/id ?a] [?e :seon.turn/run ?r] [?e :seon.turn/origin :model ?tx] [?e :seon.turn/n ?k] [(< ?k ?n)]]
-            db run n)
-       (sort-by second) (mapv (fn [[e _ tx]] (assoc (turn-record db e) :tx tx)))))
 
 (declare render)
 
@@ -835,18 +781,16 @@
 
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
-  the commit b names: the current-state block of its task with the observations b holds (with
-  an agent, the run's sections only: its page tells the rest), and the messages, the agent's
-  request (`request`). The one maker of a context: the model's request is this, and so is every
+  the commit b names: its task's data (the block the turn's waste reads), and the messages, the
+  agent's request (`request`), b's :agent's. The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :printed, what the run's earlier requests printed (the cache
   `printed-run` answers): only what is new is printed. {:block :messages :sent :printed}."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]
-                  [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
+                  [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [task run turn origin agent] :as basis} {:keys [printed]}]
-  (let [t (task/task db task)
-        block (if agent (task-data db t) (current-state db t (turn-input db basis (peek (if (= :model origin) (model-turns db run turn) [])))))
-        a (when agent (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent]))
+  ([db {:keys [task agent] :as basis} {:keys [printed]}]
+  (let [block (task-data db (task/task db task))
+        a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
         r (request a {:db db :basis basis :block block :help (system-text db) :printed printed
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]})]
     {:block block :messages (:messages r) :sent (:sent r) :printed (:printed r)})))

@@ -918,7 +918,7 @@
                                                                   :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}])])
 
 (defn status
-  "What the newest model turn of the task observed (the declared html render of
+  "What the newest turn of the task observed, a model's or an outside read's (the declared html render of
   :seon.render/status), as (my.task/status) answers it: seon.context/turn-state over the turn's
   recorded basis (seon.context/turn-input, with the turn before it for its last reply) on opts
   :db, as a call of the one printer (the model reads the data)."
