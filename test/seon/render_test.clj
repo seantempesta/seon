@@ -1140,6 +1140,7 @@
         [_ fs2] (draw m1)
         c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
         [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2 (seon.context/renders branch)))]
+    ;; the task's part reads the db (its story), compared by its story key: the same db, from the memo
     (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
     (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))
 

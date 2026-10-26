@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen] [seon.ctx :as ctx] [seon.render :as render] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -986,6 +986,19 @@
           s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
       (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (context/related s te)))
           "a section embedded on the branch with the plan unchanged is in the next answer"))))
+
+(deftest a-cited-var-redefined-shows-in-the-next-view
+  ;; the story is a render, never held: a var the plan cites redefined (the agent's defn, or main
+  ;; caught up), the next view's task part shows its new source, through the parts' memo
+  (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        c (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b)
+        draw (fn [memo c db] (reduce (fn [[m acc] p] (let [[m f] (render/drawn m p)] [m (conj acc f)])) [memo []] (render/view c (context/renders db))))
+        [m0 fs0] (draw {} c db)
+        rep (d/with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
+        [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))]
+    (is (not (str/includes? (seon.web.html/html (:html (first fs0))) ":redefined")))
+    (is (str/includes? (seon.web.html/html (:html (first fs1))) "(defn g [] :redefined)") "the next view's story: the new source")))
 
 (deftest related-key-moves-with-a-vector-written
   ;; related is memoized by related-key: the same while nothing it reads is written, moved when a
