@@ -48,7 +48,7 @@
        ;; 8.1 ms, 3.9, 5.1 and 5.4 MB at 100, 1k and 10k
        :per-n {:ns 400000 :bytes 300000}
        :fixed {:ns 4000000 :bytes 2500000}
-       :sizes [100 1000 10000]})
+       :sizes [100 300 1000 10000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
                  (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))

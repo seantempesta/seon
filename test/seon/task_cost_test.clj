@@ -23,7 +23,7 @@
      :growth :log
      :per-n {:ns 150 :bytes 50}
      :fixed {:ns 1000 :bytes 600 :calls 1}
-     :sizes [100 1000 10000]
+     :sizes [100 300 1000 10000]
      ;; measured 2026-10-20 (was a Datalog query: 99 us, 108 KB): the seek itself allocates
      ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt, on the whole process's count.
      ;; Re-measured 2026-10-23 on the proof's own thread (18b0774; Chez 80e4b9f, load 17): 17 ->

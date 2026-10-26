@@ -38,4 +38,5 @@ Every limit, bound or default is a config key (AGENTS §5). A number left in src
 
 - `seon.agent-proc/stop-bound-ms`: a clock standing in for an exit, which its task deletes rather than makes config (`seon.root/shutdown-and-death-are-dataflow`; [clocks](clocks.md)). The stall bound is a config key, `:seon.config.agent/stall-ms`: it decides nothing, only when a stall is recorded (task `seon.root/a-stall-is-past-the-requests-own-bound` replaces it with each request's own bound).
 - `seon.cost/tick-allowance`, `seon.cost/steeper-by`, `seon.cost/ratchet`, `seon.cost/growth-share`, `seon.cost/repeats`: the cost judge's own definitions of a proof's tolerance, which task `seon.cost/cost-tolerances-are-derived` derives from measurement instead ([cost](cost.md)).
+- `seon.cost/min-points`: three, the fewest sizes a cost proof measures, because a growth is judged on a curve and two points always make a line. A definition of a growth judgement, not a tolerance; a proof the cap leaves fewer is refused ([cost](cost.md)).
 - `seon.error/digest`: its 8 bytes are the 16 hex digits its contract and `:seon.error/signature`'s schema state, the identity's width, not a bound.
