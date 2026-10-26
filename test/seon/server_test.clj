@@ -89,7 +89,7 @@
                                         "(my.agent/messages)"
                                         {:op :message :agent "a9" :body "hello?"}])]
     (is (true? (:ok sent)) "answered when its fact is on main")
-    (is (re-find #":from :owner" (:text taken)) (:text taken))
+    (is (re-find #":from \"owner\"" (:text taken)) (:text taken))
     (is (re-find #":body \"use demo/g\"" (:text taken)))
     (is (re-find #":to \"demo/t#1\"" (:text taken)) "to the run the agent works")
     (is (re-find #":id \"m-" (:text taken)) "the fact's id, which the agent writes on its branch")

@@ -168,7 +168,7 @@
   (let [sends (agent/inbox)
         entries (agent/untaken-entries)]
     (when take?
-      (let [tx (into (agent/untaken-facts) (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries)]
+      (let [tx (into (agent/untaken-facts) (agent/entries-tx entries))]
         (when (seq tx) (agent/transact! tx)))
       (agent/commit!)
       ;; taken once their facts are committed: a refused write leaves them for the next turn

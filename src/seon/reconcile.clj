@@ -146,7 +146,7 @@
 (defn- keeps?
   "Whether a run of a task of kind, ended with outcome, keeps its process at its end (:diffed):
   the agent ended it on a park outcome, and the task is no merge (a merge's run ends its
-  process, as before). Its judge then parks it, or stops the kept process (stop-kept)."
+  process). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
@@ -432,7 +432,7 @@
                        ;; its end refused by the done rule (the agent's own check, or root's facts
                        ;; that its branch did not show): words to the agent, a :verdict entry with
                        ;; what root judged on, which wakes the session; the same verdict twice holds
-                       ;; (start) (design one-derivation 4.1 section 5; root, 2026-10-26). A merge's holds, and
+                       ;; (start) (design one-derivation 4.1 section 5). A merge's holds, and
                        ;; an outside agent's: it read the verdict as :done's answer, and no turn loop takes entries
                        (and (not merge?) (not= "outside" (:seon.run/model a)) (#{:green :red} (:seon.run/outcome a)))
                        {:op :verdict :run aid :task id :reasons rs}
@@ -547,12 +547,12 @@
             (:seon.run/basis-t a) (assoc :main-t (:seon.run/basis-t a)))))
 
 (defn- last-verdict
-  "The reasons of the newest :verdict entry to run aid's session (the runs on its branch, as main
-  names them), or nil."
+  "The reasons of the newest :verdict entry to run aid's session on its task (the task's runs on
+  its branch, as main names them; a session's earlier stage is another task), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe [:vector :any]]]}
   [db aid]
-  (some->> (d/q '[:find ?tx ?body :in $ ?a :where [?x :seon.run/id ?a] [?x :seon.run/branch ?b] [?r :seon.run/branch ?b]
-                  [?m :seon.message/to ?r ?tx] [?m :seon.message/kind :verdict] [?m :seon.message/body ?body]] db aid)
+  (some->> (d/q '[:find ?tx ?body :in $ ?a :where [?x :seon.run/id ?a] [?x :seon.run/branch ?b] [?x :seon.run/task ?t]
+                  [?r :seon.run/branch ?b] [?r :seon.run/task ?t] [?m :seon.message/to ?r ?tx] [?m :seon.message/kind :verdict] [?m :seon.message/body ?body]] db aid)
            (sort-by first) last second sedn/decode :reasons))
 
 (defn hold-tx
