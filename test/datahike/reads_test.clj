@@ -76,7 +76,7 @@
      ;; measured 2026-10-24: 98.6 KB / 983 KB / 9.83 MB at 100 / 1,000 / 10,000 datoms
      :per-n {:bytes 984}
      :fixed {:bytes 1000}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (deftest matching-is-flat-in-what-was-read
   (cost/proof
@@ -86,4 +86,4 @@
      :growth :constant
      ;; measured 2026-10-24: 98.6 / 99.8 / 99.1 KB at 100 / 1,000 / 10,000 reads
      :fixed {:bytes 100000}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))

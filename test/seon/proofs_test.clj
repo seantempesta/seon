@@ -245,7 +245,7 @@
      :growth :n-log-n
      :per-n {:ns 100 :bytes 120}
      :fixed {:ns 20000 :bytes 40000 :calls 1}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn- checkout!
   "A git checkout in a scratch dir holding files ({path text}), every file added."

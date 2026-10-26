@@ -441,10 +441,8 @@
                ;; each comparison's try/catch)
                :fixed {:ticks 4700000.0 :bytes 18000000.0}
                :per-n {:ticks 3100.0 :bytes 6000.0}
-               ;; below 1,000 the growth is smaller than the layout variance between builds (n=500 measured
-               ;; cheaper than linear, 5.36M ticks), so the slope is read between sizes the work outweighs it:
-               ;; 10, 1,000 and 2,000, until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
-               :sizes [10 1000 2000]}))
+               ;; within :seon.config.proofs/cost-max-n (1,000): a size past it is not measured
+               :sizes [10 500 1000]}))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]

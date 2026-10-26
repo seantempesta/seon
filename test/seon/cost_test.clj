@@ -9,16 +9,15 @@
 
 (def ^:private linear
   {:of 'seon.cost-test/one-pass :input 'seon.cost-test/ints :n "integers" :work "one pass" :growth :linear
-   :per-n {:ns 100.0 :bytes 50.0 :calls 1.0} :fixed {:calls 1.0} :sizes [100 1000 10000]})
+   :per-n {:ns 100.0 :bytes 50.0 :calls 1.0} :fixed {:calls 1.0} :sizes [100 300 1000 10000]})
 
 (defn- rows
   "Rows of estimate e at its sizes, measured as (m n) per dimension."
   {:malli/schema [:=> [:cat :seon.cost/estimate :seon.host/fn] [:vector :seon.cost/row]]}
   [e m] (vec (for [n (:sizes e)] {:n n :measured (m n) :expected (cost/expected e cost/units n)})))
 
-(deftest a-proofs-sizes-stop-at-the-cap-keeping-two
-  (is (= [100 1000] (cost/sizes [100 1000 10000] 1000)) "the sizes up to the cap")
-  (is (= [1000 10000] (cost/sizes [10000 1000 100000] 1000)) "ascending, and at least the two smallest: a growth fit needs two")
+(deftest a-proofs-sizes-stop-at-the-cap
+  (is (= [100 300 1000] (cost/sizes [100 300 1000 10000] 1000)) "the sizes up to the cap")
   (is (= [100 1000 10000] (cost/sizes [10000 100 1000] 100000)) "under the cap: as written, ascending")
   (is (= [4 40 400] (cost/sizes [4 40 400] 1000))))
 
@@ -90,7 +89,7 @@
   ;; task seon.cost/a-speedup-never-reads-as-steeper: reach-update on Jolt 0d39edc3, cheaper at
   ;; both sizes than its estimate; with the stated :fixed (420k) taken off, 7k was left at n=100
   ;; and the fit read n^1.96 (two sizes, as a run capped at 1,000 measures)
-  (let [e (assoc linear :per-n {:ticks 850.0} :fixed {:ticks 420000.0} :sizes [100 1000 10000])
+  (let [e (assoc linear :per-n {:ticks 850.0} :fixed {:ticks 420000.0} :sizes [100 300 1000 10000])
         rs [{:n 100 :measured {:ticks 427200.0} :expected (cost/expected e cost/units 100)}
             {:n 1000 :measured {:ticks 1070000.0} :expected (cost/expected e cost/units 1000)}]]
     (is (empty? (:over (cost/judge e rs))))
@@ -132,7 +131,7 @@
   ;; task seon.cost/ticks-are-exact: one measure of a call's ticks may read one 1,000-tick timer
   ;; chunk more than another on the same input (:seon.config.proofs/tick-quantum)
   (let [q (double (seon.config/value :seon.config.proofs/tick-quantum))
-        e (assoc linear :per-n {:ticks 100.0} :fixed {} :sizes [100 1000 10000])
+        e (assoc linear :per-n {:ticks 100.0} :fixed {} :sizes [100 300 1000 10000])
         x (fn [n] (:ticks (cost/expected e cost/units n)))
         at (fn [f] (rows e (fn [n] {:ticks (f n)})))
         bound (fn [n] (* (cost/slack :ticks) (x n)))]
@@ -192,11 +191,11 @@
   {:of 'seon.cost-test/one-pass :input 'seon.cost-test/ints :n "integers in the input"
    :work "one pass: per integer one seen call (one persistent assoc)" :growth :linear
    :ops {:seq/reduce 1.0 :fn/armed-call 1.0 :map/assoc 1.0} :per-n {:calls 1.0} :fixed {:calls 1.0}
-   :sizes [100 1000 10000]})
+   :sizes [100 300 1000 10000]})
 
 (deftest a-one-pass-function-meets-its-estimate
   (let [{:keys [rows verdict]} (cost/run estimate)]
-    (is (= (cost/sizes [100 1000 10000] (seon.config/value :seon.config.proofs/cost-max-n)) (mapv :n rows)))
+    (is (= (cost/sizes (:sizes estimate) (seon.config/value :seon.config.proofs/cost-max-n)) (mapv :n rows)))
     (when seon.contract/on?
       (is (= (mapv #(double (inc %)) (mapv :n rows)) (mapv #(get-in % [:measured :calls]) rows)) "calls are exact: n + 1"))
     (is (:ok? verdict) (cost/explain estimate rows verdict))))
@@ -371,3 +370,18 @@
             v (cost/judge e (rows e m))]
         (is (not (:ok? v)))
         (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))
+
+(deftest a-proof-the-cap-leaves-too-few-sizes-is-refused
+  ;; root, after [10 1000 2000] measured two points at the cap and said green as if three: a
+  ;; normal run measures up to :seon.config.proofs/cost-max-n, so a proof it leaves fewer than
+  ;; three sizes is refused, naming them and the key, and measures nothing; one with three
+  ;; names the sizes it left out past the cap on its verdict
+  (let [cap (seon.config/value :seon.config.proofs/cost-max-n)
+        r (cost/run (assoc estimate :sizes [100 cap (* 10 cap)]))]
+    (is (= :seon.cost/too-few-sizes (:seon.error/type r)) (pr-str r))
+    (is (= [100 cap (* 10 cap)] (:sizes r)))
+    (is (re-find #"cost-max-n" (:seon.error/message r)) "naming the key"))
+  (let [cap (seon.config/value :seon.config.proofs/cost-max-n)
+        r (cost/run (assoc estimate :sizes [10 100 cap (* 10 cap)]))]
+    (is (= [(* 10 cap)] (:left-out r)) "the size past the cap, named")
+    (is (= [10 100 cap] (mapv :n (:rows r))) "and three measured")))
