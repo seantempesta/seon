@@ -1076,7 +1076,7 @@
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
     (is (str/includes? (str (pages 1)) "seon.render/view-defect") "the debug page is its error")
     (is (str/includes? (str (pages 1)) ":no-such-part") "it says what threw")
-    (is (str/includes? (str (pages 2)) "(+ 1 2)") "the agent's own page renders through the same pass")
+    (is (str/includes? (str (pages 2)) "drawn by root from its branch") "the agent's own page renders through the same pass")
     (is (some #(and (= :error (:op %)) (= :seon.render/view-defect (get-in % [:data :seon.error/type]))) (:to-api @o))
         "recorded as the problem it is: the api's proc error")
     (is (empty? (:waiting st')) "nothing left waiting")
