@@ -226,6 +226,5 @@
         (is (= :seon.vector/encode-failed (:seon.error/type (agent/embed-written! 1 "m"))) "a text the model cannot encode fails its request")
         (is (= 1 (agent/embed-written! 1 "m")) "and is kept out of the next, so the text after it is embedded")
         (is (= 0 (agent/embed-written! 1 "m")) "nothing else due: nothing asked")
-        (is (= [["title: none | text: (defn a [])"] ["title: none | text: (defn b [])"] ["title: none | text: (defn c [])"]] @asked))
-        (is (some? (:vectors-t @agent/state)) "the branch's last vector write is marked (seon.context/related-at's mark)"))
+        (is (= [["title: none | text: (defn a [])"] ["title: none | text: (defn b [])"] ["title: none | text: (defn c [])"]] @asked)))
       (finally (reset! agent/state old)))))

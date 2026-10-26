@@ -1,210 +1,242 @@
-# One derivation, joint design: the page and the model's request as one render of @ctx
+# One derivation, joint design (revision 3)
 
-Agent view (render, layout, the printer and request side) with ctx-atom (the ctx side, `ctx-side-of-webui-design-2026-10-26.md`, folded in below). It answers root's reference (`one-derivation-2026-10-26.md`), its eight points and its deletion list, under the owner's rulings of 2026-10-26. Status: for root's check and an independent review before anything is built.
+Agent view with ctx-atom. Root approved revision 2 with eight named changes after the second independent review (`joint-design-review-2.md`), and this revision makes them. It implements the owner's narrowing ("Narrowed to the implementation", `notes/one-derivation-2026-10-26.md`) and the owner's later rulings: evals run once; what changed between turns arrives as one "Since your last turn" message; each role on the wire has one meaning. Line numbers are main's at e622c0b1b.
 
-## The split in two lines (the owner's ruling on faces)
-- **The one printer is the default face of every value, both ways from one pass:** `print/text` for the model and `emit/ops-hiccup` for the page, with the same selection and the same cuts. `:seon.render/ai` remains only as that printer's text face, never as a hand-written second view.
-- **Everything else is the page itself:** the layout and the custom renders are hiccup made compact enough that the model is shown it as rendered (through the printer), so the agent and the user see the same thing.
-
-## The shape (root's eight points, each with how)
-
-**1. Pull once.**
-- ctx is one pull per agent, `seon.ctx/build` on its branch, with the pattern derived from the schemas' `:seon.render/units`.
-- Each transaction patches it with `seon.ctx/patch`: 6 contracted calls per change at any session size (`seon.ctx-test/the-patch-costs-the-change-not-the-session`).
-- The one addition is that the patch also answers `:changed #{path}` and each new member's t.
-- Order comes from facts: each entry's first transaction (its t), which the patch knows when the member appears and a build gets by one seek of its identity datom.
-- The conversation is the members sorted by t once; each patch then appends at the end, because a new entity's t is the newest. There is no stored vector (root: an append to a `[:vector]` rewrites it, quadratic). A small ordered value, such as tile order, may be a `[:vector]` key in ctx.
-- Where it runs: the agent's own @ctx lives in its process. Root keeps a ctx per **viewed** agent page, built by the same `build` on the branch and patched by the same `patch` from the writer's reports. It is dropped when no tab views it, never kept for every agent. That is the same two functions in two processes, equal at each t (the patch's property test run on root's side), so a parked or gone agent's page still renders.
-
-**2. Render once, by schema.**
-- One function, `(render v)`: the `:seon.render/html` its schema declares, else the one printer's hiccup (`emit/ops-hiccup`: maps as grids, same-keyed maps as tables, code as code, prose as prose). A render calls `render` on its children.
-- The page is `(render ctx)`. Layout is the render `:seon.ctx/ctx` declares (root's ruling: no layout attribute). It is overridden like any render, by a schema entry on the branch, seen at once (slice 1's `branch-render` and `{:op :render}`).
-- An @ctx eval in the conversation shows collapsed: the page already is it. Measured on a1 below, a whole @ctx drawn as a tile is 19.8k of the page's 25k tokens.
-- **Not everything is shown.** The layout chooses what is relevant, and the rest is one form away, named by a cut (owner: "not rendering data we don't think is particularly relevant is helpful").
-
-**3. Two outputs of one hiccup.**
-- HTML for the user: the theme map is expanded into Tailwind utilities at the HTML render.
-- The printer's compact print for the model:
-  - Semantic class names in hiccup shorthand, such as `[:section.tile …]` and `[:span.badge.red …]`. The theme map (class → utilities) is shown once with the whole hiccup, and again only when it changes.
-  - Each component is marked with the render function that made it and its key, printed compactly as `{:render seon.render.ui/tile :key [:proofs]}`, so an agent knows what to edit: the render fn or the theme entry.
-  - The owner's correction applies: "compress, don't remove". Nothing about how the tree is styled is hidden; it is named once.
-  - Layout-only wrappers that carry no class, text or key are elided. Values the printer prints well (code, prose, tables) stay values, not re-wrapped markup.
-  - Cuts say what they left and the form that reads it.
-- **A component whose input the model already reads prints as its render call.** The chat side's parts are renders of eval records that the conversation already sends whole, so the model's print of the chat side is the conversation itself (as today), never its markup a second time. This is the largest saving measured: a chat part is 112 tokens as markup, against about 10 as `[:chat-part {:key "c-1665"} result/e42]` beside the record already sent.
-- The model gets the whole page once (at a session's start, and after a cut), then diffs by component key.
-
-**4. Replay is explicit (owner: "an explicit thing not an inferred").**
-- Every eval's tile shows its current value. Whether its form is re-executed each turn or its recorded value is pulled is one attribute, written when the form is set up: `:seon.eval/replay?`, true on the screen's forms (`:seon.agent/screen`: `(my.task/status)`, `(my.branch/changes)`, `(my.task/related)`), declared by the form, never inferred from the value.
-- A replayed form's tile shows the newest execution's value. Any other eval's tile shows its record's value.
-- This **deletes my record-versus-computed rule**, `seon.render.ui/live-key` on branch webui-root-chat, which is not merged. That branch keeps the toggle, root's context page and the sidebar.
-- "As recorded at turn n" stays one click away because the record never changes.
-
-**5. Cache by value.**
-- The component key is the ctx path plus its render fn.
-- The patch's `:changed` paths invalidate along the path only, root to leaf. Every other path's value is `identical?` to the cached one, because the patch keeps unchanged subtrees shared, so it is never rendered again and never compared by content.
-- On jolt/one-content-keyed-derivation: its `encode` (canonical EDN, full SHA-256) is the right key for reuse **across** processes and boots. It is the wrong key for this in-process cache, because encoding costs the value's size on every lookup, where `identical?` on a shared subtree costs O(1).
-- The memo stays a plain in-process map keyed by path, cleared with its ctx when the page is unviewed, with no db facts. The content key is left for a cross-process need, such as rendering for a parked agent from another process; none exists today.
-- This replaces the render proc's read-set index (`d/with-reads`, `comps-touched`, `:comp-index`) for ctx's part.
-
-**6. The two sides.**
-- **The screen side**, live as the agent works:
-  - the task, its proofs and open reasons, and the run;
-  - a tile per eval whose value has a declared render or whose form is replayed (current value);
-  - related sections as a tile, the same `(my.task/related)` value kept off the story (related-sections: the story's pulls made designs worse, 8/15 → 4/15).
-  - The model's screen is the screen side's print.
-- **The chat side:** prose (the model's and the user's), messages, and each eval collapsed to its one line (code ⇒ value · ms), expandable to the whole.
-- Both are columns of `(render ctx)`'s layout; the sidebar is root's ctx's agents.
-
-**7. Diffs never hide what matters (the live agents' finding).**
-- The live agents found the screen said `:unchanged [[:proofs] [:refused]]` after the full screen had fallen under the history cut, and the model looped.
-- The rule: `:since eN` and `:unchanged` only for a part the model can still read in full above. Anything the cut dropped or folded to its line is sent whole again.
-- The task's open reasons are always sent whole.
-- The same holds for the printer's seen-value reference `(:out result/eN)`: a reference only to a part still readable whole, else the value itself (the mixed-collection run repeated a probe 8 times on `(:out result/e89)`).
-- This is small and goes into `seon.screen/diff` and `seon.context/printed-run` now, as related-sections' slice.
-
-**8. Caching is accretion.**
-- Request order: system, the story (the task, once), `{:history {:left-out N}}` right after the story, the turns, then the screen last. Everything before the screen is a stable prefix.
-- The history cut jumps once to half the budget when it fills, then holds. Measured: shared prefix 22.5% → 93.7%, cache breaks 23 → 1, tokens per turn 35.1k → 27.3k.
-- Nothing already sent is rewritten. A part shown whole stays whole until the next jump. The stage boundary (root's message at `:briefed`) is a conversation entry after the earlier stages' entries, changing none of them.
-- `:same-as` stays an attribute of the entry's render, not a run counter (`seon.context/printed-run`).
-- With ctx: turn n's diff is the members whose paths are in `:changed` since turn n-1's t. New members are appended to the conversation; changed screen components are replaced by their key.
-
-## Messages, the user agent and root (ctx-atom's side, with root's rulings)
-- **Root and the user are agent entities.** Each one's page is the render of its ctx on main, so the same layout serves root, the user and every agent.
-- **A message is an entry in both ctxs.** `:seon.message/from` becomes a ref to the sender's agent entity. This is a schema change, so the store is erased, never migrated, at a quiet moment root picks, told first.
-- The sender's ctx holds what it sent through the unit `:seon.message/_from`. The receiver's ctx holds it when its turn **takes** it: `seon.turn/take!` writes the same message entity, upserted by `:seon.message/id`, on the agent's branch, in the turn that took it. Writing it at take time rather than at send time keeps the conversation and root's wake count (`:seon.run/taken`) in agreement (the agent loop's invariant 1).
-
-**The flow, end to end:**
-1. The owner types in an agent's chat input.
-2. `/call` reaches `seon.root/message!`.
-3. A message fact on main (from: the user's agent entity, to: the run) appears in the user's ctx through its patch.
-4. It enters the agent's inbox.
-5. The agent's next turn takes it before the screen is evaluated (`take!` before `screen!`, as today) and writes it on the branch.
-6. The agent's ctx patch appends it to the conversation by its t.
-7. The agent's reply (a turn's prose, an eval) is written on the branch, and its ctx patch appends it.
-8. Root's viewed ctx of that agent is patched from the writer's report. The changed components are re-rendered and sent as a Datastar patch to every tab on that page.
-9. A reply addressed to the user (`my.agent/send-message`) is a message fact whose `:from` is the agent, so it appears in the user's ctx the same way.
-
-**Missing today:**
-- step 5's write on the branch;
-- `:from` as a ref;
-- root's per-viewed ctx;
-- an eval line on root's own page: root's REPL is the server's `root-eval`. Once root is an agent entity, its input is the same `/call` → submit path as an agent's (the root-as-one-system slice).
-
-## Root's debug toggle, kept
-The toggle is "conversation | context" on every page. The context view is the request as recorded: each turn's sent parts, for a model agent; for root, which has no model turn, the context the render proc already holds. Both are built on webui-root-chat, and it stays as the view of the model's face.
-
-## What it deletes, and the src estimate
-| deleted | where | lines |
-|---|---|---|
-| the page walk (`walk`, `one`, `relevant` and its helpers) | `seon.render` 216–311 | −95 |
-| the read-set index for pages (`with-reads` capture, `comps-touched`, `:comp-index`, `location` and `page-value`'s walk path, branch reads per view) | `seon.render.proc` | −160 |
-| the walk-driven layouts (`page`, `rows`, the agent page's tile gathering, `component`'s size cases), replaced by `:seon.ctx/ctx`'s layout render | `seon.render.ui` | −300 |
-| `:seon.render/ai` hand-written faces where the hiccup serves | `seon.render.ai`, schemas | −120 |
-| the screen's own producer (`seon.screen/show`); its diff becomes the printer's component diff | `seon.screen` | −40 |
-| the request's own read of the records (`seon.context/records`), replaced by ctx's ordered conversation | `seon.context` | −50 |
-| `live-key` (never merged) | webui-root-chat | (0 on main) |
-| **deleted** | | **≈ −765** |
-
-| added | where | lines |
-|---|---|---|
-| `patch` answers `:changed` and each member's t | `seon.ctx` | +30 |
-| root's ctx per viewed page, built and patched from the writer's reports | `seon.render.proc` | +50 |
-| the ctx-path render cache | `seon.render.proc` | +40 |
-| `:seon.ctx/ctx`'s layout render: the screen side, the chat side, the sidebar | `seon.render.ui` | +150 |
-| hiccup as a printer value kind: theme map once, render markers, wrapper elision, the component diff | `seon.print`, `emit` | +110 |
-| `:seon.eval/replay?` on screen forms | `seon.screen`, schema | +15 |
-| `take!` writes the message; `:from` as a ref | `seon.turn`, schema | +15 |
-| **added** | | **≈ +410** |
-
-**Net ≈ −350 src lines.** Estimated from the current files' sizes, not measured; each slice reports its measured delta.
-
-## Cost per transaction, against today
-- **Today:**
-  - The render proc walks each viewed page's entity under `d/with-reads` and indexes the reads.
-  - A commit's datoms look up the components they touched, one lookup per datom key.
-  - The screen's forms run each turn.
-  - The request re-reads the run's records from the branch (`context/records`) and prints them.
-- **After:**
-  - The patch costs the change (6 calls a change).
-  - Components on `:changed` paths re-render: the new eval's chat part, plus the screen tiles whose values changed.
-  - The request appends the new members' prints and replaces the changed screen components.
-  - Nothing walks or re-reads the session.
-- The cost proofs carry over:
-  - a new eval redraws one component (`seon.render-cost-test/a-transaction-renders-what-it-touched`, rekeyed to paths);
-  - the patch costs the change (`seon.ctx-test/the-patch-costs-the-change-not-the-session`);
-  - a turn's request costs its new parts (`seon.render-cost-test/a-new-turn-costs-one-turns-messages`).
-
-## Measurements, one real agent (a1 on this worktree's root, attached outside, 2026-10-26)
-a1 has 42 evals: the task story, `source`, `grep`, the task's status, a `def`, a map, `related`, `@ctx` and `(my.task/current)`. Tokens are estimated at 3.2 characters a token (`:seon.config.ai/chars-per-token-prior`). The script is `notes/measure/hiccup_measure.py`; it is a prototype measure, not the implementation.
-
-**Today, what its model is sent (one context read):**
-| part | tokens |
-|---|---|
-| system | ≈500 |
-| the task story | ≈4,500 |
-| the screen | ≈1,400 |
-| whole request | 6,400 |
-
-An outside agent's request carries no conversation. For a model agent's conversation, the recorded a-map run is 27.3k tokens a turn after the history-cut fix, with the screen at 4,458 as diffs (11,848 whole).
-
-**The page:**
-| print | tokens |
-|---|---|
-| the page's HTML | 29.8k |
-| its hiccup with every attribute | 29.1k |
-| the compact print (semantic classes, theme map 733 tokens for 50 classes, markers, no Datastar attributes, wrappers elided) | 25.0k |
-| of which the @ctx tile drawn whole | 19.8k |
-| **the compact print with @ctx collapsed** | **≈5.2k** |
-| the screen side alone (tiles) | 2.1k + 0.15k theme |
-| a chat part as markup | ≈112 each |
-| a chat part as its render call beside a record already sent | ≈10 each |
-| **a typical turn's diff** (one new eval: its record, as today, plus its call `[:chat-part {:key …} result/eN]`, plus changed screen tiles) | **≈ the record + 10 + the changed tiles** (one status tile ≈100–300) |
-
-**So the rendered page printed for the model is small enough to send whole once, about 5k tokens, against today's 6.4k request, which already includes the story.** The chat side costs the model nothing new, because its markup is calls on records the conversation already holds.
-
-## Mock: a1's page beside what its model reads (same turn)
-The page as the user sees it (light theme, desktop):
-- top bar: `◆ seon` and `a1 · [conversation] context`
-- sidebar: `● root main`, `○ a1 idle`, `○ user`
-- screen side (right):
-  - task: "seon.render/a-render-defect-answers-the-pages-it-holds · work · running"
-  - proofs: "1 proof: 1 pass"
-  - run: "#3 · running · up to 40 turns"
-  - related: 3 sections
-- chat side (centre): each line is `(my.task/current) ⇒ #:seon.task{:execution :running …} · 0.84 ms`, expandable; the owner's message `> check the proofs` appears as a prose line.
-
-What its model reads for the screen side, whole once:
-```clojure
-;; theme: {tile "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto", kicker "text-2xs uppercase tracking-wider text-text-500", …}
-[:aside.tiles
- [:section.tile {:render seon.render.ui/task :key [:task]}
-  [:h2.kicker "task"] [:p "seon.render/a-render-defect-answers-the-pages-it-holds · work · running"]]
- [:section.tile {:render seon.render.ui/proofs :key [:proofs]}
-  [:h2.kicker "proofs"] {seon.render-test/a-view-that-throws-answers-its-page-with-the-error :pass}]
- [:section.tile {:render seon.render.ui/run :key [:run]} [:h2.kicker "run"] [:p "#3 · running · up to 40 turns"]]
- [:section.tile {:render seon.render.ui/tile :key [:related]} [:h2.kicker "related"] …3 sections, (my.task/related)]]
+## The chain
 ```
-The chat side is the conversation, printed as today. The next turn's screen, after a proof went red, is just this:
-```clojure
-{:since result/e44 :changed {[:proofs] [:section.tile {:render seon.render.ui/proofs :key [:proofs]} [:h2.kicker "proofs"] {seon.render-test/… :fail}]}}
+(ctx db e) --> map --> (view ctx) --> parts [{:key k :value v} ...]        --+--> (html part) --> hiccup --> page   (Datastar patch by key)
+                                                                               +--> (ai part)   --> text   --> the request's assembly --> model
+            (diff prev next) by key: the page's patches;  "Since your last turn": ctx's data diff, paths and values;  memo per part: [the fn the var holds now, value] identical?
 ```
-`:since` refers to a screen still readable above (point 7).
+- The page and the model get **the same parts**, differing in detail: the page may collapse a part, while the model's text carries what the agent needs within budget, and its cuts say how to read the rest.
+- The order differs:
+  - the page shows parts in the view's order;
+  - the model gets the starting page once, then each turn's data diff of ctx: paths into ctx and their new values, in the order they happened.
+- Both faces default to the one printer, `ops-hiccup` and `text` from one selection under one budget. A schema's `:seon.render/html` or `:seon.render/ai` overrides that face, for that value only.
 
-## The agents' help text (the acceptance test)
-> Everything in `@ctx` is shown to you and the user the same way: your page, printed. Put data in with `swap!`. Any value reads well with no render; what the page shows is chosen by its layout, and the rest is one form away. To change how a key looks, register its schema with `{:seon.render/html your/fn}`, where your fn takes the value and answers hiccup. To change the layout, do the same for `:seon.ctx/ctx`. A form you want re-run every turn goes on your screen (`:seon.agent/screen`); every other eval shows what it answered.
+## 1. `(ctx db e)` → map
+- **Contract:** `[:=> [:cat :seon.host/db pos-int?] :map]`. It returns entity e and its units, pulled once by the pattern its schema's `:seon.render/units` derives, plus its environment, then patched per transaction at the cost of the change.
+- **Is:** `seon.ctx/build` (ctx.clj:93) and `seon.ctx/patch`, which exist. The patch is 6 contracted calls per change at any session size, and equals a fresh build after 150 random changes.
+- **New:** `build`'s root generalised from `:seon.agent/key` to any entity id, and a patch driver from main's transaction reports for root's, the user's and task pages, beside today's watch on `agent/state` (ctx.clj:343-360). +50.
+- **Everything view reads is in this pull (root's change 1):**
+  - the task;
+  - its proofs and their results, as the turn's observe records them;
+  - the done rule's verdict and reasons;
+  - the run;
+  - merges from main (`:seon.tx/merged`);
+  - related sections, as facts written when the plan changes;
+  - the stage's story: `run-state`'s value (context.clj:280, its references, resolved refs, callers and similar), computed once at the stage's first turn and written as a fact on the run, so the view reads it and never queries.
+  No part's value is computed outside ctx.
+- **Order:** an entry's first transaction t, a derived index (never a stored vector).
+- **Sharing (ctx-atom):**
+  - The patch changes only along each changed path, so every unchanged member stays `identical?` (slice 1's proof).
+  - The root map is new each transaction, so nothing caches on it.
+  - A build makes all-new objects, so the memo misses once, everywhere (the cost proof says so).
+- **Replaces:** `seon.render/walk` (render.clj:272), `one` (230), `relevant` (221), `forward` (216); `seon.context/records` (557).
 
-**The proof of the acceptance test:** a fresh agent `swap!`s a key no schema names (a vector of maps) and gets a readable table on the page and in its print. It then registers a render for that key and sees its hiccup on the page and in its print at once.
+## 2. `(view ctx)` → parts
+- **Contract:** `[:=> [:cat :map] [:vector [:map [:key :any] [:value :any]]]]`. It is **pure in ctx** (root's change 1).
+- **Is:** the one step that decides what is relevant and in what order. The layout is its output, as data, overridden by a branch's schema entry for `:seon.ctx/ctx`.
+- **An agent's parts:**
+  - `[:system]`, the help page, pinned per session;
+  - `[:task]`, the stage's story fact;
+  - `[:proofs]` and `[:verdict]`;
+  - `[:run]`;
+  - `[:merges]`;
+  - `[:related]`;
+  - `[:conversation n]`: the agent's evals, turns and taken messages, in t order.
+- **The sidebar is not a part (root's change 5):** root's agents live on main, so the sidebar is page chrome root renders around an agent's parts.
+- **Evals run once.** An eval's record is written once. A re-run happens only on resume, to rebuild the environment. There are no screen forms, no replay and no `:seon.eval/by "screen"`.
+- **Every change is told; noise is a data defect** (the owner: "all changes should be worth telling (if we have weird naming and unnecessary updates and machinery instead of actual values we have the wrong design)"). There is no filter. A value that changes without meaning is kept out of ctx or out of its pulled parts at its producer. Measured on a1 below, today's noise and its fix:
+  - the environment's `:t` and `:commit`, and `:seon.agent/answered-t`, counters: kept out of the pulled parts (ctx's metadata, not its data);
+  - the context read recorded as an eval (`[:evals "e54"]`, 22.6k characters): no longer an eval in 4b, since the outside read is the parts' ai;
+  - the screen evals (`e55`–`e58`, 7.0k): deleted with the screen in 4a;
+  - a run pulled whole with every turn's basis (`[:runs "…#9"]`, 6.6k): the run part pulls its id, status, turn and outcome (its schema's `:seon.render/keys`); the basis stays a record, one form away;
+  - the agent's own evals (`e53`, `e59`, `e60`): their changes are told by their tool answers in the same request, so the data diff starts after them, by provenance (`:seon.tx/eval`, ctx-atom's). That is a time window on what this request already carries, not a filter.
+- **Big values stay small by their own shape:** a cited var's change is its path and new head, `[:task :cites 'ns/f :head] "(defn f [x] …)"`, because ctx holds the head for a cited var and the source is one form away.
+- **Replaces:**
+  - `seon.render.ui/agent`'s tile gathering (ui.clj:1012);
+  - `chat`'s split (962), `rows` (804), `shown-as` (783), `tile-id` (841);
+  - the request's assembly order: `request` (context.clj:601), `run-message` (583), `screen-message` (591), `messages` (652).
+  - `run-state` moves to the stage-start fact; it is moved, not deleted.
 
-## Slices, in order (each red then green, measured; owners from root's note)
-1. **related-sections:** point 7's rule in `seon.screen/diff` and `printed-run` now. Small, needs nothing else.
-2. **ctx-atom:** `patch` answers `:changed` and each member's t; root keeps a ctx per viewed page (property test: equal to the agent's @ctx at each t).
-3. **agent view:** the ctx-path render cache and `:seon.ctx/ctx`'s layout render (screen side, chat side, sidebar), replacing the walk for agent pages. Browser-checked. Cost proof: a new eval redraws one component.
-4. **agent view:** hiccup as a printer value kind (theme map, markers, wrapper elision, component diff) and the request's screen as the screen side's print. Measured against the numbers above.
-5. **agent loop:** `take!` writes the message; `:from` as a ref (the store erase, root's moment); the stage boundary as a conversation entry; resume rebuilds ctx at a commit.
-6. **agent view + root-as-one-system:** root and the user as agent entities; their pages as renders of their ctx; root's eval line.
-7. **Deletions:** the walk, the read-set index, `records`' read, the screen producer, the hand-written `:ai` faces. Each slice deletes what it replaces in the same merge.
+## 3. `(html part)` → hiccup
+- **Contract:** `[:=> [:cat :map] :any]`. The part's value goes through its schema's `:seon.render/html` if declared, else `emit/ops-hiccup` of the printer's selection under the part's budget. A large value is drawn to its cuts, never whole. Styling is the stylesheet's semantic classes.
+- **Pure in `[f v]`:** the budgets it reads come in v (the part carries its budget) or are named in f, never read from config at render time. A mutation test changes the budget config and sees the page change.
+- **A render that throws answers its part as its error** and every other part renders: today's `view-pass` failure point (proc.clj:502), moved to the part.
+- **Where it runs:**
+  - The agent renders its own parts, since its ctx and render fns are in its process. Root forwards them and adds the sidebar.
+  - An agent with no process is drawn by root from its branch, once and unpatched, with main's renders wherever the branch's render is not on main, captioned so. It is discarded when the agent starts.
+- **Replaces:**
+  - `component` (ui.clj:896), `chat-part` (850), `page` (1132), `tile` (935), `view` (788), down to one eval-part render and one layout;
+  - `ctx`'s unbudgeted table (747);
+  - the draw-asking machinery: `ask-draws` (proc.clj:390), `*drawn*` (ui.clj:469), `*wanted*` (474), `branch-render` (492), `drawer` (503), `seon.repl/draw` (repl.clj:460);
+  - `pass-view` (proc.clj:463), `view-pass` (502), `forget` (448), down to a pass over parts.
 
-## Open, for root
-- Point 4's attribute name and home: `:seon.eval/replay?` on the eval record, or only on the screen form's declaration with the eval inheriting it. I'd put it on the form, since the form is set up once, and record it on each eval it makes.
-- Whether the theme map is config (`resources/seon/config`), a schema property of the layout render, or a ctx key an agent can `swap!`. I'd make it a value the layout render holds, overridden like the layout.
+## 4. `(ai part)` → text
+- **Contract:** `[:=> [:cat :map] :string]`. The part's value goes through its schema's `:seon.render/ai` if declared, else `print/text` of the same selection under the same budget, after a one-line `[key]` header.
+- **One selection for both faces:** today `render/html` and `render/ai` each make their own selection (`print-html`/`print-ai`, render.clj:113-132). The printer already answers both from one, `select/show` with `:outputs #{:text :hiccup}` (select.clj:849, `emit/emit-both`), so a part's two default faces are one `show`, and the page and the model can never differ in what was cut.
+- **Pure in `[f v]`, with no folds (root's change 3).** It never refers to another part. An eval part's ai face is the record's existing one, `eval-messages` (context.clj:372); a message's is `message-messages` (405).
+- **An @ctx eval reads the past:** it is recorded as its basis (repl.clj:391) and drawn as of t (`based-value`, ui.clj:480). Its basis never changes, so it is memoed by its basis. This is the second as-of read, alongside the debug page.
+- **Replaces:**
+  - `seon.context/render` (755), and its callers: `seon.judge` (judge.clj:22) and the outside read (turn.clj:353, `seon_context`), which move to the parts in slice 4b;
+  - `story` (733);
+  - `parts-of` (688) and `sent-split` (719), which go when the debug page moves (4c).
+
+## 5. `(diff prev next)` by part key
+- **Contract:** `[:=> [:cat [:vector :map] [:vector :map]] [:map [:changed [:vector :map]] [:added [:vector :map]] [:removed [:vector :any]]]]`, comparing values by `=`.
+- **The page:** a changed or added part is re-rendered (through the memo) and sent as a Datastar patch by its key. An identical value sends nothing.
+- **The model:** "Since your last turn" is ctx's data diff since the agent's last request: each changed path into ctx and its new value, in t order (`[:messages "m3"] {:from :owner :body …}`, `[:task :stage] :implement`, `[:proofs 'ns/x-test :status] :red`), so the agent reads it as the data it is and changes it with the same paths (`swap! ctx assoc-in …`). A changed part's new text may go with it where it helps, even with some duplication.
+- **The memo:** `{key [f v out]}`, a hit when f (the fn the var holds now, never the var) and v are both `identical?`.
+- **Replaces:** the read-set index: `comp-entry` (proc.clj:368), 327–367, 401–462, `walk?` (319), `ready?` (291).
+
+## The request's assembly (root's changes 2 and 3)
+The request is no function of the chain. It is the assembly of what was sent, plus this turn's data diff of ctx.
+- **The prefix is pinned.** It is the system prompt, fixed for the session, and the starting page: each part's ai text at the session's start (or resume), as sent.
+  - Its bytes are kept and reused from `:seon.turn/sent`'s recorded text, never re-rendered. An ai override, a resume or a new generation changes only what is sent after it.
+  - The task's stage changes arrive only in "Since your last turn".
+- **Each turn appends:** the agent's prose and eval calls, their tool answers, then one "Since your last turn:" message.
+  - It is ctx's data diff: each changed path and its new value, in t order (a message taken at the turn's start is the new entry `[:messages id]`, turn.clj:154).
+  - A changed part's rendered text may go with its path where it helps.
+  - When nothing changed, it says "nothing".
+- **Where today's history machinery goes:**
+
+  | function (context.clj) | fate |
+  |---|---|
+  | `kept` (525, 32), the history cut that jumps once and holds | **moved** into the assembly unchanged, over the conversation's sent messages |
+  | `printed-run` (454, 62): per-record cache, `fold-of`, `:same-as`, canon | **moved** into the assembly as its rules over the conversation; its screen branches (15) **deleted** |
+  | `fold-of` (425), `folded` (366), `ref-of` (420) | **moved** with `printed-run`; a fold or reference only to a part still readable whole (rule 7) |
+  | `as-sent` (516, 9) | **moved**: what each sent part is, whole or line, recorded with its mode |
+  | `as-diff` (446, 8) | **deleted** in 4b, its last reader then gone |
+  | `turn-input` (743, 12), `seon.screen/input` (70, 7) | **kept**: `my.task/status` reads them (my/task.clj:56) |
+  | `messages-tokens` (711, 8) | **kept**: `seon.turn`'s cache check (turn.clj:224) |
+
+- **Each turn records** the parts it sent with each one's key, mode (whole, line, diff entry) and t, so the debug page (4c) shows exactly what was sent.
+
+## The wire: one meaning per role
+| role | carries | changes |
+|---|---|---|
+| system | the rules: the help page, pinned for the session | never |
+| user, first | the starting page: each part `[key]` then its ai text | never: the cached prefix |
+| assistant | prose plus eval tool calls: the agent's own evals, the only tool calls | appended |
+| tool | each call's answer | appended |
+| user, one per turn | "Since your last turn:", ctx's data diff, each changed path and its new value in order; a message is the new `[:messages id]` entry; "nothing" when nothing changed | appended, never rewritten |
+
+Nothing else pretends to be an eval. A person's message is a new entry in ctx, so it appears once, as its path in the data diff, and the page's transcript shows the same entry, one patch, with no re-send.
+
+### One recorded turn, both ways (a1, this worktree's root)
+Today, after the system prompt (538 tokens):
+```
+user  Your task and what it cites, the same for this whole run: {:task #:seon.task{…} …}                       4,545
+user  {:by "screen" :code "(seon.screen/show)" :response {:handle result/e49, :value {:page {:seon.render/html […]}}}}   672
+user  {:by "screen" :code "(my.task/status)" :response {:handle result/e50, :value {:proofs […] …}}}                   100
+user  {:by "screen" :code "(my.branch/changes)" :response {:handle result/e51, :value {}}}                              26
+user  {:by "screen" :code "(my.task/related)" :response {:handle result/e52, :value {:read … :sections […]}}}            700
+```
+This design:
+```
+user  Your starting page: each part is [key] and its value. After this, each turn ends with one message, "Since your last turn", listing what changed.
+      [:task]  {:task #:seon.task{…} …}
+      [:proofs] {seon.render-test/a-view-that-throws-answers-its-page-with-the-error :pass}
+      [:run] "#6 · running · turn 3 of 40"
+      [:related] {:read … :sections […]}
+…assistant / tool: the agent's own evals, as today…
+user  Since your last turn:
+      [:messages "m3"] {:from :owner :body "check the proofs before you merge"}
+      [:proofs seon.render-test/a-view-that-throws-answers-its-page-with-the-error :status] :fail
+      [:proofs seon.render-test/a-view-that-throws-answers-its-page-with-the-error :failure] {:expected 1 :got 2}
+      [:runs "seon.render/a-render-defect-answers-the-pages-it-holds#9" :turn] 2
+```
+
+## Tokens
+**The starting page, a1** (characters ÷ 3.2, `:seon.config.ai/chars-per-token-prior`):
+
+| | today | this design |
+|---|---|---|
+| system | 538 | 538 |
+| story / `[:task]` | 4,545 | 4,545 |
+| screen / the other parts | 1,498 (`show` 672, `status` 100, `changes` 26, `related` 700) | ≈ 830 (`[:proofs]` and `[:verdict]` ≈ 100, `[:run]` ≈ 30, `[:related]` 700) |
+
+**The data diff, measured on a1 (root's ruling on telling every change).** One real turn on this worktree's root:
+- a1 held `c0 = @ctx`;
+- the owner sent it a message;
+- its turn read its context;
+- it evaluated `(defn f …)`.
+
+The path diff of `c0` against `@ctx` today has 11 paths and 37,387 characters (≈ 11.7k tokens):
+
+| path | characters | fate under the design |
+|---|---|---|
+| `[:evals "e54"]` (the context read as an eval) | 22,618 | gone in 4b |
+| `[:evals "e55"]`–`[:evals "e58"]` (screen evals) | 7,011 | gone in 4a |
+| `[:runs "…#9"]` (a new run, pulled with every turn's basis) | 6,622 | ≈ 100: its id, status, turn, outcome |
+| `[:evals "e53"]`, `"e59"`, `"e60"` (its own evals) | 1,882 | told by their tool answers in the same request |
+| `[:seon.agent/answered-t]`, `[:t]`, `[:commit]` | 62 | kept out of the parts |
+| the message (not in ctx today: `take!` does not write it, slice 6) | 0 | ≈ 80: `[:messages "m3"] {:from :owner :body …}` |
+
+**Under the design, that turn's diff is ≈ 180 characters, about 55 tokens.**
+
+**Per turn on a recorded sequence (root's change 8).** The recorded a-map run is `seon.print/a-map-shows-its-first-entry#2`: 29 model turns, re-rendered by related-sections with main's history cut (`a-map-per-turn-2026-10-26.md`).
+
+| | today, per turn | this design, per turn |
+|---|---|---|
+| system + story | 962 | 962, pinned |
+| conversation | 24,213 | 24,213 (the same records; the cut jumps at turns 13 and 28) |
+| screen / "Since your last turn" | 804 | ≈ 20: `[:runs id :turn] n` every turn, plus the proofs' paths at the 3 turns their results changed (0, 26, 28); no messages were taken |
+| **total** | **25,979** | **≈ 25,195 (−3.0%)** |
+
+- On this run the screen was only 3.1% of each request, so the token saving is small. The conversation is where the tokens are, and the design leaves it as it is.
+- The design's gain here is that the agent reads one consistent shape (its own ctx's paths), not that it reads fewer tokens.
+- A message-heavy or long-running agent's numbers are slice 4b's live measurement.
+
+## What it deletes, and the src delta (root's change 6)
+Deletions are function sizes on main, with the second review's spot-checks. Additions are estimates, ±50%.
+
+| deleted | lines |
+|---|---|
+| every page's walk: `walk`, `one`, `relevant`, `forward` | −97 |
+| the read-set index, `ready?`, `walk?` | −139 |
+| `page-value` (40), `debug-value` (25) | −65 |
+| `pass-view` (39), `view-pass` (30), `forget` (7) | −76 |
+| the draw-asking machinery: `ask-draws`, `*drawn*`, `*wanted*`, `branch-render`, `drawer`, `repl/draw` | −52 |
+| the screen: `seon.screen` less `input` (68), `seon.turn/screen!` and its calls (16), the screen branches (15), the `:screen` origin (2), `seon.agent/screen` (14), the proc's screen views (72), the handlers (4), the page's screen fold (13) | −204 |
+| `seon.context/as-diff` | −8 |
+| the request's assembly order: `request`, `run-message`, `screen-message`, `messages`, `records`, `render` (`turn-input` kept) | −129 |
+| the debug read-back: `parts-of`, `sent-split`, `story` (`messages-tokens` kept) | −47 |
+| walk layouts and the debug page in ui.clj (17 functions) | −445 |
+| **deleted** | **≈ −1,262** |
+
+| added | lines |
+|---|---|
+| `ctx` over any entity, with main's patch driver | +50 |
+| the stage's story as a fact at the stage's first turn | +20 |
+| `view`: an agent's, root's, a task's, the default | +130 |
+| `html` and `ai` part, pure, with the budget in the part | +40 |
+| `diff` and the per-part memo | +40 |
+| a page as a layout of parts, the sidebar as root's chrome, one eval-part render, a part pass with its failure point | +165 |
+| the debug page as the parts each turn sent | +30 |
+| the request's assembly: the pinned prefix, "Since your last turn" as ctx's path diff, the moved `printed-run`, `kept` and `as-sent` rules | +70 |
+| the agent renders its parts; root forwards them; a processless agent with defaults | +60 |
+| `take!` writes the message; `:from` as a ref | +15 |
+| **added** | **≈ +620** |
+
+**Net ≈ −640, within −330 to −950 given the additions' error.** The second review put revision 2's shape at −560 to −630. This revision also deletes the whole screen and the draw-asking machinery, keeps the 27 lines callers still need, and adds the ctx driver and the story fact.
+
+## The agents' help text
+> Your page is `(view @ctx)`: keyed parts, in order, sent to you whole at the start of your session. After that, each turn ends with one message, "Since your last turn": what changed in your ctx, as paths into it and their new values, in the order it happened (a message someone sent you is a new `[:messages id]` entry), so you can read it as data and change it with the same paths. Your tool calls are your own evals, and each runs once. Each part has two faces, html for the user and ai for you, and both default to the one printer, so any value reads well with no render. To change how a key looks on the page, register its schema with `{:seon.render/html f}` (f: value → hiccup); to change what you read, `{:seon.render/ai f}` (value → text); the layout is `:seon.ctx/ctx`'s view.
+
+**Its proof:** a fresh agent `swap!`s a key no schema names (a vector of maps). It reads a table in its text and sees one on the page. It then registers an html render for that key and sees it on the page at once, with its own text unchanged.
+
+## Slices (root's change 7)
+Each slice gets its own `bin/prove`, a browser check, and a live measurement by live-agents before merge.
+
+1. **ctx-atom:** `(ctx db e)` over any entity, with main's patch driver; the sharing proof (every path not changed stays `identical?`); order by first t; the stage's story and related sections as facts in ctx.
+2. **agent view:** `(view ctx)` for an agent, pure in ctx; the noisy values kept out of the pulled parts (`answered-t`, the run's basis); `(html part)`/`(ai part)`, pure, with the budget in the part; the agent page as a layout of parts, rendered in the agent and forwarded by root with the sidebar as chrome; the per-part memo; the part pass with its failure point. Old and new producers coexist from 2 to 5, and the window is kept short.
+3. **related-sections:** `(diff prev next)` and the page's patches; ctx's path diff for "Since your last turn" (a cited var's head, a proof's status and failure as paths). It deletes nothing of the request's yet.
+4. The request, split so each part is measured alone:
+   - **4a (agent view):** the screen deleted: no screen forms, no `:screen` origin, no round trip. Today's request path stays, less its screen. Measured free of charge on an outside run.
+   - **4b (agent view + related-sections):** the request as the pinned starting page plus "Since your last turn"; `printed-run`, `kept` and `as-sent` moved into it; `as-diff` deleted; `seon.judge` and the outside read (`seon_context`) on the parts. The paid, measured run: turns to green, cache share, tokens per turn on a recorded sequence.
+   - **4c (agent view):** the debug page as the parts each turn sent, with their modes.
+5. **agent view:** every other page (root's, the user's, a task's, `/walk/<eid>`) on the chain. Delete the walk, the read-set index and the walk layouts.
+6. **agent loop:** `take!` writes the message; `:from` as a ref (the store erase, at root's moment). This is independent of 2–5; only its stage-boundary part needs 4b.
+7. **root-as-one-system:** root and the user as agent entities; root's eval line.

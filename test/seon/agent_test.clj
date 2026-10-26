@@ -836,9 +836,11 @@
 (deftest related-is-an-eval-of-the-plan-and-of-any-text
   ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
-  (let [[db _ dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+  (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        ;; the agent working the task, as a session holds it: its entity and its running run
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
         old @agent/state]
-    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
       (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
           "the screen form: the sections nearest the plan, the cited one left out")

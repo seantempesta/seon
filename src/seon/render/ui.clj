@@ -927,6 +927,8 @@
     [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
      ;; a key the agent added, or the verdict, is named; the task's, the proofs' and the run's renders name themselves
      (when (or (qualified-keyword? (first key)) (= [:verdict] key)) [:h2 {:class "kicker"} (str/join " " (map kname key))])
+     ;; the page draws the task; what the model reads of it is the stage's story (seon.render/view)
+     (when (= [:task] key) [:p {:class "text-2xs text-text-500"} "the model reads its story: what it cites and what to prove"])
      (h/raw html)]))
 
 (defn parts-page

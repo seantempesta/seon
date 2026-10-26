@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen] [seon.turn]
+            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.screen] [seon.ctx :as ctx]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- db-with-program []
@@ -325,7 +325,7 @@
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before but its last message (the
-  ;; turn sections), even after the program the task cites changed
+  ;; turn sections), even after the program the task cites, or the task's plan, changed
   (ts/test-branch!
     (fn [_ conn]
       (wiki! conn)
@@ -341,8 +341,13 @@
             r0 (request 0)
             _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
             r1 (request 1)
+            ;; the plan rewritten mid-run (the story ctx derives follows it, seon.ctx/derived): the
+            ;; request's prefix is the story as of the session's first turn, so its bytes stay
+            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
             r2 (request 2)]
         (is (= (pop r0) (subvec r1 0 (dec (count r0)))) "turn 1 starts with turn 0's request but its turn sections")
+        (is (and (str/includes? (:content (second r2)) "triple") (not (str/includes? (:content (second r2)) "quadruple")))
+            "a plan changed mid-run: the story sent is still the first turn's, byte for byte")
         (is (= (pop r1) (subvec r2 0 (dec (count r1)))) "turn 2 starts with turn 1's request but its turn sections")
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
@@ -966,41 +971,27 @@
     (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 
-(deftest the-stages-story-and-related-are-facts-of-the-branch
-  ;; joint design, slice 1: what a view reads is in ctx, so nothing is computed at the view. The
-  ;; stage's story (run-state) is written once as its run begins, and related as the turn observes
-  ;; the plan's vectors, each on the agent's branch
-  (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")]
-    (try
-      (reset! agent/state {:db db :key "demo/a1" :branch :b :mode :test})
-      (#'seon.turn/related! "demo/r")
-      (is (= (context/related db te) (:seon.task/related (d/entity (agent/db) te))) "related, as its fact on the task")
-      (let [db1 (agent/db)]
-        (#'seon.turn/related! "demo/r")
-        (is (identical? db1 (agent/db)) "the vectors unmoved: nothing computed again, nothing written"))
-      (#'seon.turn/begin! "demo/r" "demo/r#1")
-      (is (= (context/run-state db (task/task db "demo/r")) (:seon.run/story (d/entity (agent/db) [:seon.run/id "demo/r#1"])))
-          "the stage's story, as its fact on the run it begins")
-      (finally (reset! agent/state nil)))))
-
 (deftest related-sections-follow-a-rewritten-plan
+  ;; related is a derived member of the agent's record for its newest run (seon.ctx/derived): a
+  ;; patch derives it again when the plan's vector or a section's is written, and keeps it, the
+  ;; same object, while nothing it reads is
   (let [[db te dir] (sections-near "Make the page say one thing.")
-        held (context/related-at db te 1 nil)
-        _ (is (= "docs/vector.md#the-model" (first (:sections (:value held)))))
-        ;; the plan rewritten on the branch and embedded there (the branch's vector write is the
-        ;; mark), its vector now beside the last section's
-        db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
-        t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
-        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
-        again (context/related-at db te 2 held)]
-    (is (not= (:key held) (:key again)) "a vector write is a new key")
-    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (:value again)))) "and the sections follow it: the one nearest the new plan first")
-    (is (identical? again (context/related-at db te 2 again)) "nothing written since: what was made is reused")
-    (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
-          se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
-          s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
-      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (:value (context/related-at s te 3 again))))
-          "a section embedded on the branch with the plan unchanged is in the next answer: its write is the mark"))))
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        rel (fn [c] (get-in (:tree c) [:runs "demo/r#1" :related]))
+        step (fn [[c db] tx] (let [rep (d/with db tx)] [(ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep)]))
+        s0 [(ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b) db]
+        _ (is (= "docs/vector.md#the-model" (first (:sections (rel (first s0))))))
+        ;; the plan rewritten on the branch and embedded there, its vector now beside the last section's
+        s1 (step s0 [[:db/add te :seon.task/plan "Make the last section say it."]])
+        t (:tx (first (d/datoms (second s1) :eavt te :seon.task/plan)))
+        s2 (step s1 (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))]
+    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (rel (first s2))))) "the sections follow it: the one nearest the new plan first")
+    (is (identical? (rel (first s2)) (rel (first (step s2 [{:seon.turn/id "demo/r#1/0" :seon.turn/run [:seon.run/id "demo/r#1"] :seon.turn/n 0}]))))
+        "nothing it reads written since: the same object")
+    (let [s (step s2 [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
+          se (pdb/eid (second s) :seon.section/address "docs/vector.md#the-pyramid-b")]
+      (is (some #{"docs/vector.md#the-pyramid-b"} (:sections (rel (first (step s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))))))
+          "a section embedded on the branch with the plan unchanged is in the next answer"))))
 
 (deftest related-fuses-the-plans-references-with-meaning
   ;; seon.context/related's graph half: the plan cites `demo/h`, so its caller demo/k (no vector:
