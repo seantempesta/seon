@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl] [jolt.io-poller :as poller]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -550,10 +550,8 @@
   running the test the line's {:seon.test/started var} names, and the run is one :error report on
   that test var with the status as :exit (none started: a run error naming the status). A held
   pipe adds an :error report of its own (:seon.test/pipe-held)."
-  {:malli/schema [:function [:=> [:cat [:maybe :string] :seon.lib/exit-status] :seon.test/result]
-                  [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]]}
-  ([line status] (test-run-answer line status false))
-  ([line status held?]
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]}
+  [line status held?]
   (let [v (some-> line read-string) var (:seon.test/started v)
         res (if (contains? v :pass)
               v
@@ -564,32 +562,39 @@
     (cond-> res
       held? (-> (update :error inc)
                 (update :reports conj {:type :error :seon.error/type :seon.test/pipe-held
-                                       :message "the test process exited and a process it forked still holds its pipe (its end of file never came): what it wrote is the run"}))))))
+                                       :message "the test process exited and a process it forked still holds its pipe (its end of file never came): what it wrote is the run"})))))
 
 (defn read-to-exit
   "The last line test child pid writes on fd r, read to the pipe's end of file or the child's
   exit, whichever comes first: the exit is kqueue's NOTE_EXIT, the fact the fork server reaps
   by, so a process the child forked that holds the write end cannot keep the run waiting.
   Parks on seon.lib/wait-fd-or-exit (r's input or the exit). After the exit, what is left in
-  the pipe is read, and a pipe still open then is held. Answers {:line :held?}."
-  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean]]]}
+  the pipe is read: a read that found nothing there (its wait called) with the pipe still open
+  means it is held, and a read that ended on part of a line goes on. Answers {:line :held?}, or
+  :seon.lib/unwatched."
+  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]}
   [r pid]
-  (let [{:keys [wait close]} (lib/wait-fd-or-exit r pid)
-        exited (volatile! false)
-        rd (sock/line-reader r #(when (= :exited (wait)) (vreset! exited true)))]
-    (try
-      (loop [line nil]
-        (let [ls (rd)]
-          (cond (= ls :eof) {:line line :held? false}
-                (seq ls) (recur (peek ls))
-                (not @exited) (recur line)
-                ;; exited: what is left in the pipe, then an open pipe is held
-                :else (loop [line line]
-                        (let [ls (rd)]
-                          (cond (= ls :eof) {:line line :held? false}
-                                (seq ls) (recur (peek ls))
-                                :else {:line line :held? true}))))))
-      (finally (close)))))
+  (let [w (lib/wait-fd-or-exit r pid)]
+    (if (contract/error? w)
+      w
+      (let [{:keys [wait close]} w
+            exited (volatile! false) failed (volatile! nil) waited (volatile! false)
+            rd (sock/line-reader r #(let [x (wait)]
+                                      (vreset! waited true)
+                                      (cond (= :exited x) (vreset! exited true)
+                                            (contract/error? x) (vreset! failed x))))]
+        (try
+          (loop [line nil]
+            (vreset! waited false)
+            (let [ls (rd)]
+              (cond (= ls :eof) {:line line :held? false}
+                    @failed @failed
+                    (seq ls) (recur (peek ls))
+                    ;; nothing there yet, or part of a line: read again
+                    (or (not @exited) (not @waited)) (recur line)
+                    ;; exited, and a read found nothing there: the pipe is still open, held
+                    :else {:line line :held? true})))
+          (finally (close)))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
@@ -681,11 +686,12 @@
                  :parent (fn [pid]
                            (lib/c-close w)
                            (forked pid)
-                           (let [{:keys [line held?]} (read-to-exit r pid)
+                           (let [read (read-to-exit r pid)
                                  st (lib/wait-status pid)]
-                             (poller/forget! r)
                              (lib/c-close r)
-                             (assoc (test-run-answer line st held?) :ms (profile/ms-since t0) :pid pid :exit st)))})))
+                             (if (contract/error? read)
+                               read
+                               (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))})))
         unstored (when (and dir (not (contract/error? res)))
                    (proofs/store-greens! #(fx! :file % {}) dir
                                          (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
