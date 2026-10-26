@@ -4,9 +4,9 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 ## Now (2026-10-26, evening)
 
-Pins (docs/forks.md): Chez fa6a4c73; Jolt 2eda21da (d598fc04, the fiber dump, merging next); Datahike e5a55664; LMDB 15420ce; http-client e866277d. Paid model runs are on hold (owner: "hold off launching paid agents for now"); about $1.7 of the day's $30 spent.
+Pins (docs/forks.md): Chez fa6a4c73; Jolt 2eda21da (d598fc04, the fiber dump, merging next); Datahike e5a55664; LMDB 15420ce; http-client e866277d. Paid model runs: $30 overnight (owner, 2026-10-26 night), only after a free audit of each request's context finds none of its known problems, and once the hang fixes are on main.
 
-**Where it stands.** Main is green on prove, `bin/check contracts`, the process tests and smoke. A request is one whole task by default (design, build and merge in one run); `seon.template/design-build` and `stages` remain as experiment choices passed to `my.root/request!`. The last live run (design-build, 2026-10-26): 1/10 merged, 93% cached, 1.7k first-turn tokens; four of the ten requests were already done on main (refreshed since) and the rest capped for context the page lacked (notes/context-for-20-turns-2026-10-26.md).
+**Where it stands.** Main is green on prove, `bin/check contracts`, the process tests and smoke. A request is one whole task by default (design, build and merge in one run; owner, 2026-10-26 night); design-build and `stages` remain as experiment choices passed to `my.root/request!`. The last live run (design-build, 2026-10-26): 1/10 merged, 93% cached, 1.7k first-turn tokens; four of the ten requests were already done on main (refreshed since) and the rest capped for context the page lacked (notes/context-for-20-turns-2026-10-26.md).
 
 **The direction.** Three things, in this order of urgency:
 1. **Stability: no process waits forever unseen.** Today's hangs each had a cause found and fixed (the watcher's lost first event, a dead fork server's waiters, a test child's held pipe, a forked child unwinding into its parent, a fresh root booting with no tasks). A stall becomes a fact, an open problem and a task for root (agent loop, building). `kill -INFO` on any process prints every fiber and what it waits on (the fiber dump).
@@ -33,7 +33,6 @@ What each working session is doing now and takes next; every session is linked t
 
 The rulings and calls root holds for the owner.
 
-- Paid model runs: on hold until the owner says.
 - Delete jolt/evaluations, jolt/acts-by-second-move and jolt/flow-lab (carried forward or superseded; notes/branch-merit-2026-10-26.md); carry or delete examples, wiki, unitflake, one-content-keyed-derivation.
 - Three worktrees hold uncommitted work (live-agents, stability's jolt/fork-guard, acts-by-second-move): keep or drop.
 

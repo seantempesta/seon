@@ -2,6 +2,24 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
+## 2026-10-26 night rulings
+The owner's rulings of the night of 2026-10-26, each with his words and where it is now stated; they stand over earlier entries where they differ.
+
+### A request is one whole task by default (owner, 2026-10-26 night)
+Asked which default tonight's runs use, the owner chose one whole task over design-build and merge: `seon.template/request` makes the :whole task, and design-build and stages stay as experiment choices. Supersedes "make the default tests into two tasks -- design-build and merge". Stated in: docs/plan.md (Now), seon.template (jolt/work-text-and-requests).
+### Paid runs only on context whose known problems are solved; $30 overnight (owner, 2026-10-26 night)
+"How about the same $30 budget overnight. Only use paid runs though when we legitimately have solved the known problems with our context. Garbage in = garabage out and don't waste money if it's clearly got problems fix the problems. And not in a patch and hack the reds to green. But understand the scope of the real problem and we solve it at the root". A paid run starts only after a free audit of each request's context (`seon_context`, read by a reviewer that has not seen the work) finds none of the known problems (notes/known-context-problems-2026-10-26.md on jolt/work-text-and-requests); a problem found is fixed at its producer. A wait is never capped by a timer: paid runs wait on the hang fixes. Stated in: docs/plan.md (Now).
+### Correctness and stability first, then efficiency to a stated bound; no regression without a reason (owner, 2026-10-26 night)
+"dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (Every change earns its place).
+### Main's merge verification goes first, as a fact (owner, 2026-10-26 night)
+Asked whether main's verification goes first, the owner chose "main first, as a fact": while main's verification runs, a worktree's heavy run waits on it, a dependency the tool reads (a lock main's run holds), never a rule to remember and never a timer. Stated in: AGENTS.md §2 (Heavy runs); the tool on its way (full-run-reds).
+### The agent's view is the render of ctx; "page" names a wiki page only (owner, 2026-10-26 night)
+"Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: jolt/render-walk and build 4; AGENTS.md §7a once both merge.
+### Styling: compact hiccup, every element earns its spot (owner, 2026-10-26 night)
+"Find efficient styling that we can pull in references for automatically and make it so the fully printed hiccup is compact and everything earns it's spot. The goal isn't to render everything, but to highlight key things to the user and to compute additional derived things to help the agent too". A component's root element carries one class, its render's name; the stylesheet is gathered from the renders drawn. Stated in: docs/render.md once built (after build 3).
+### Old branches: audit, then delete (owner, 2026-10-26 night)
+An agent read each old branch and dirty worktree for anything not carried forward (notes/deleted-branches-2026-10-26.txt lists the tips); what was worth keeping is filed, then the branch is deleted. Raw stores of paid rounds stay the owner's call.
+
 ## 2026-10-25 rulings
 The owner's rulings of 2026-10-25, each with his words and where it is now stated.
 
