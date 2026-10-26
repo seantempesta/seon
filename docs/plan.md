@@ -19,10 +19,10 @@ What each working session is doing now and takes next; every session is linked t
 | **Agent view r3** | one-derivation slice 2b: the agent page from its parts (`:render` answers parts; a dead agent renders from its record) | slice 4c (debug view re-derived), slice 5 (every page off the walk) |
 | **ctx-atom** | one-derivation slice 1: ctx carries every fact view needs; the patch reports changed paths and first t | slices with agent view |
 | **Related sections** | waits for slice 1 | slice 3 (one diff by part key) and 4b's request side (history cut, folds, as-sent into the request's assembly) |
-| **Agent loop** | park/wake proofs merged | messages and outside changes as inbox entries carrying ctx-shaped diffs (slice 6); resume rebuilds ctx at a commit |
-| **Root as one system** (stability lead) | the zygote: load, then fork, then threads; measure what is parked when boot returns | one mode for forking processes (every thread a fiber), the fork-alone codes deleted |
+| **Agent loop** | Jolt: timer errors no longer swallowed (approved), the double-fork failure | messages and outside changes as inbox entries carrying ctx-shaped diffs (slice 6); resume rebuilds ctx at a commit |
+| **Root as one system** (stability lead), top priority | the zygote: load, then fork, then threads, in shippable pieces | one mode for forking processes (every thread a fiber), the fork-alone codes deleted |
 | **Live agents** | design-plan-after-proof ready | the ten-request rerun on main; then measures each one-derivation slice against the 2026-10-26 baselines |
-| full-run-reds (idle) | the full run's reds fixed and merged | the next full run's reds |
+| **full-run-reds**, stability | LMDB EINVAL: macOS ftok collisions share SysV semaphore sets between stores; fix in a seantempesta/lmdb fork (PostgreSQL's way) | the leaked sets, after root sees the list |
 
 ## Waiting on the owner
 
