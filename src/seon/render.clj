@@ -186,7 +186,10 @@
 
 (defn view
   "An agent's held record ({:tree c :born}, seon.ctx/build's: c is @ctx, born each member's first
-  transaction) as its parts, in order: [:task], the task's relevant keys; [:proofs], each
+  transaction) as its parts, in order: [:task], the stage's story (its run's derived :story,
+  seon.context/run-state as of t: the task, what it cites, what to prove), else the task's relevant
+  keys; [:related], the sections, functions and schema keys nearest its plan (the run's derived
+  :related) when there are any; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
   rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
@@ -208,7 +211,11 @@
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})
+        (cond-> task (conj (if-let [story (:story run)]
+                             ;; the model reads the stage's story; the page draws the task, by its own render
+                             {:key [:task] :from [story task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))}
+                             {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))}))
+                (:related run) (conj {:key [:related] :from [(:related run)] :value (:related run)})
                 (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
@@ -228,16 +235,20 @@
   "Part p's faces, {:html hiccup :text string :inline hiccup}: each by the render its value's schema
   declares for that face, else the one printer's, html and text from one selection under one budget
   (seon.print.select/show with :outputs #{:text :hiccup}), so the page and the model never differ
-  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows."
+  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows. A part
+  with :page draws that value on the page and its own for the model."
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
   [{:keys [value schema] :as p}]
+  (if (contains? p :page)
+    ;; a part whose page shows another value than the model reads (the task beside its story)
+    {:html (html (:page p) {}) :text (ai value {:schema schema})}
   (let [h (render-of value :html schema) a (render-of value :ai schema)
         both (when-not (and h a)
                (print/print-value value (assoc (printer-opts {}) :outputs #{:text :hiccup} :render nested-html)))]
     {:html (if h (html value {:schema schema}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
      :text (if a (ai value {:schema schema}) (or (:text both) (:seon.error/message both) ""))
      ;; a folded part's one line: the conversation's evals fold (seon.render.ui/agent-part)
-     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))}))
+     :inline (when (= :eval (first (:key p))) (html value {:as :inline :schema schema}))})))
 
 (defn part-html
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line

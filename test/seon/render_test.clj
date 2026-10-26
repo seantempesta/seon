@@ -1126,6 +1126,10 @@
     (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (second parts)))
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
+    (let [task (first parts)]
+      (is (contains? (:value task) :to-prove) "the model reads the stage's story (the run's derived :story)")
+      (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
+      (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render"))
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
         "the conversation in the order it was written: each member's first transaction")
