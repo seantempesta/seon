@@ -4,7 +4,8 @@
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib]))
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib]
+            [datahike.datom :as dd] [datahike.index.persistent-set :as psi]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -701,7 +702,7 @@
      :work "per datom: its insert into :eavt and :aevt, one :eavt descent for the attribute's current value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (deftest an-identity-costs-its-seek
   ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
@@ -753,4 +754,52 @@
      ;; level); 100,000 because flat must hold at a collection an agent's history reaches (root's ask),
      ;; and a prove run (cost-max-n 1,000) builds only the two smaller inputs
      :fixed {:ticks 30000 :bytes 125000}
-     :sizes [10 1000 100000]}))
+     :sizes [10 100 1000 100000]}))
+
+(defn- attr-db
+  "An in-memory db of eight long attributes and 200 random facts, with :attribute-refs? refs?
+  (an attribute is then an entity id, not a keyword): a db of each kind a datom's :a can be."
+  [refs? ^java.util.Random rnd]
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false :attribute-refs? refs?}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        attrs (mapv #(keyword "t" (str "a" %)) (range 8))]
+    (d/transact conn (mapv #(hash-map :db/ident % :db/valueType :db.type/long :db/cardinality :db.cardinality/one) attrs))
+    (d/transact conn (vec (for [i (range 200)] {:db/id (str "e" (.nextInt rnd 60)) (nth attrs (.nextInt rnd 8)) (long i)})))
+    [conn attrs]))
+
+(deftest an-attribute-slice-is-the-same-without-the-try
+  ;; datahike.datom/cmp-attr-nil compares two attributes with no try (a db's attributes are one
+  ;; type: all keywords, or with :attribute-refs? all entity ids); the try/catch it replaced
+  ;; (cmp-nil's safe-compare) cost 417 B a slice comparison. Under both configs, for random datom
+  ;; pairs its order is today's (cmp-nil's), and each attribute's :aevt slice is every datom of it
+  (doseq [refs? [false true]]
+    (let [rnd (java.util.Random. 17)
+          [conn attrs] (attr-db refs? rnd)
+          db @conn
+          all (vec (d/datoms db :aevt))
+          ds (vec (filter #(contains? (set (map (fn [a] (if refs? (:db/id (d/entity db a)) a)) attrs)) (:a %)) all))
+          sign #(compare (long (or % 0)) 0)]
+      (testing (str ":attribute-refs? " refs?)
+        (is (< 60 (count ds)) "the facts are there")
+        (is (every? true? (for [_ (range 500) :let [x (nth ds (.nextInt rnd (count ds))) y (nth ds (.nextInt rnd (count ds)))]]
+                            (= (sign (dd/cmp-attr-nil (:a x) (:a y))) (sign (dd/cmp-nil (:a x) (:a y))))))
+            "the order of any two attributes is cmp-nil's")
+        (doseq [a attrs :let [aid (if refs? (:db/id (d/entity db a)) a)]]
+          (is (= (filterv #(= aid (:a %)) all) (vec (d/datoms db :aevt a))) (str a "'s slice is every datom of it")))
+        (d/release conn)))))
+
+(deftest a-slice-comparison-allocates-nothing
+  ;; the :aevt slice comparator's attribute step entered a try on every comparison (cmp-nil's
+  ;; safe-compare): 417 B a call on Jolt, about 1.9 MB of one seon.program/diff-plan. Bytes are
+  ;; deterministic: the least of five runs of 10,000 calls
+  (let [d (dd/datom 42 :form/id "x" 536870913)
+        from (dd/datom 0 :form/defines nil 0) to (dd/datom Long/MAX_VALUE :form/defines nil Long/MAX_VALUE)
+        c (psi/slice-comparator-constructor :aevt from to)
+        bytes-now #(jolt.host/scheme-eval-string "(sstats-bytes (statistics))")
+        n 10000
+        per (fn [f] (f) (/ (double (apply min (for [_ (range 5)] (let [b0 (bytes-now)] (dotimes [_ n] (f)) (- (bytes-now) b0))))) n))
+        base (per #(do nil))
+        slice (per #(c d from))]
+    (is (<= (- slice base) 8.0) (str "a slice comparison allocates " slice " B, an empty call " base " B"))))
+

@@ -9,7 +9,7 @@
             [seon.reconcile :as r]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
-            [seon.program :as program] [seon.writer :as writer] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
+            [seon.program :as program] [seon.writer :as writer] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -418,31 +418,56 @@
                 [db' idx']))
             [db0 (r/index db0)] steps)))
 
+(def ^:private observed-sizes [10 500 1000])
+
+(defn- observed-path
+  "Where the index proof keeps its store of size n."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
+  [n] (str (System/getProperty "user.dir") "/target/tmp/observed-" n))
+
 (defn observed-input
-  "The cost proof's input at n: the index of a main db with n unrelated tasks, that db, and
-  the db after one task's plan improved (one datom differs)."
+  "The cost proof's input at n, on a store on disk of its own (the one-store rule's last resort:
+  a stored db keeps its index nodes at addresses, so datoms-diff skips the subtrees two values
+  share; the test store's in-memory values keep none, and there every diff walks its attribute's
+  datoms, a cost no root's main has): main seeded as the test store is with n unrelated tasks
+  released, its index, that db, and the db after one task's plan improved (one datom differs).
+  The store is made afresh at observed-path; the proof's end releases and removes it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.reconcile/index :seon.host/db :seon.host/db]]}
   [n]
-  (let [db0 (db-of (mapv #(decl (str "u" %)) (range n)))]
-    [(r/index db0) db0 (d/db-with db0 [{:seon.task/id "demo/u0" :seon.task/plan "Make u0 truer."}])]))
+  (let [path (observed-path n)
+        _ (sh/sh "rm" "-rf" path)
+        ;; seeded with the test store's 2,000 datoms (seon.db/seed-tx), so the two inputs differ only in where they keep their nodes
+        {:keys [conn]} (pdb/open! :lmdb path 2000 :db)
+        decls (mapv #(decl (str "u" %)) (range n))]
+    (d/transact conn (task/create-tx @conn decls))
+    (d/transact conn (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) decls) :running))
+    (d/transact conn (task/boot-tx "boot-1" 4))
+    (let [db0 @conn]
+      (d/transact conn [{:seon.task/id "demo/u0" :seon.task/plan "Make u0 truer."}])
+      [(r/index db0) db0 @conn])))
 
 (deftest an-index-is-observed-at-the-cost-of-what-changed
-  (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/observed-input
-               :n "unrelated tasks on main, beside one whose plan changed"
-               :work (str "a datahike.api/datoms-diff of each of the 74 watched attributes' ranges, one pull of the "
-                          "entity that differs and its task re-derived. The test store keeps no node at an address, so "
-                          "each diff walks the attribute's datoms (linear here; on a stored db it skips the subtrees "
-                          "both share: 1.29M ticks, 10.2 MB on a root's main of 680 tasks and 118k datoms). Listing "
-                          "the index again, as seon.turn/observe did every turn, settles all n tasks: n^1.75, 258M "
-                          "ticks and 922 MB at 1,000 (92.0M ticks, 384 MB on that root's main)")
-               :growth :linear
-               ;; measured 2026-10-24: 8.51M ticks / 67.7 MB at 10, 8.23M / 61.1 MB at 100, 11.3M / 68.7 MB at 1,000
-               :fixed {:ticks 8500000.0 :bytes 65000000.0}
-               :per-n {:ticks 3000.0 :bytes 8000.0}
-               ;; below 1,000 the growth is smaller than the fixed part's layout variance between builds,
-               ;; measured (8.18M ticks at 10 on main's tree, 8.33M with one more schema attribute; n=500 costs
-               ;; less than n=10 on both, 7.9M ticks and 52 MB): no size but 1,000 sees the work, so 100 is left
-               ;; out until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
-               :sizes [10 500 1000]}))
+  (try
+    (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/observed-input
+                 :n "unrelated tasks on main, beside one whose plan changed"
+                 :work (str "a datahike.api/datoms-diff of each of the 84 watched attributes' ranges, each one cached "
+                            "descent where nothing changed (the stored subtrees both values share are skipped), one "
+                            "pull of the entity that differs and its task re-derived. Listing the index again, as "
+                            "seon.turn/observe did every turn, settles all n tasks: n^1.75, 258M ticks and 922 MB at "
+                            "1,000 (92.0M ticks, 384 MB on a root's main of 680 tasks)")
+                 :growth :linear
+                 ;; measured on LMDB: 1.11M ticks / 5.8 MB at 10, 1.03M / 4.6 MB at 500, 1.47M / 5.8 MB at 1,000: 84 descents of
+                 ;; 5-11k ticks, the change itself about 30k. On the address-less test store the same observe
+                 ;; read 4.71M / 17.9 MB at 10 and 5.36M / 18.3 MB at 500 (every diff walked its attribute);
+                 ;; the 84 descents are task seon.reconcile/one-observe-descends-once
+                 :fixed {:ticks 1200000.0 :bytes 5900000.0}
+                 :per-n {:ticks 300.0 :bytes 100.0}
+                 :sizes observed-sizes})
+    (finally
+      ;; each store made, released whatever holds it and removed
+      (doseq [n observed-sizes :let [path (observed-path n)] :when (pdb/store? path)]
+        (d/release (d/connect (pdb/store-cfg :lmdb path)) true)
+        (sh/sh "rm" "-rf" path)))))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -978,9 +1003,10 @@
   ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
   ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
   ;; read a db without the run start :spawned wrote, found no earlier run on its agent, and wrote
-  ;; no :stage entry. An answer main has not reached waits for main's commit of its t
+  ;; no :stage entry. An answer main has not reached waits for main's commit of its t. A commit's
+  ;; :ns is 0: the proc measures a stat from it, which nothing here reads (no clock in the test)
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns 0}))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
         env {:branch (task/default-branch "demo/d") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}
         ;; the session's earlier stage: demo/d's run on the agent the spawn will answer

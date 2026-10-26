@@ -50,7 +50,7 @@
      :per-n {:calls 11 :bytes (Math/round (bytes-of per-node))}
      ;; html itself, the root's write! and its StringBuilder
      :fixed {:calls 3}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn runs
   "The input of size n: a vector of n runs (each a value whose schema declares a render),
@@ -74,7 +74,7 @@
      ;; own-key, schema-of and declared (its parents) each, print/line and its prose
      :per-n {:calls 19}
      :fixed {:calls 47}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 
 (defn main-of
@@ -139,7 +139,7 @@
      :per-n {:calls 3}
      ;; walk, one per db and per part, the root's schema
      :fixed {:calls 8}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 (defn paged-of
   "The input of size n: agent a1's page walk (seon.render/walk) with n evaluations of a1, none in a
@@ -166,7 +166,7 @@
      ;; page, rows, top-bar (the bar every page shares), and a slot per shown row and the list's
      ;; end; what the first page's units hold
      :fixed {:calls 7 :bytes 30000}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 (defn walked-of
   "The input of size n: main and agent a1's branch with n evaluations of a1 on the branch (main
@@ -193,7 +193,7 @@
      ;; d/schema rebuilt the schema map (0.8 MB, 365 attributes) on every `one`, 6.92 / 52.1 MB
      :per-n {:calls 3 :bytes 49500}
      :fixed {:calls 15 :bytes 600000}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 (defn walked-shown-of
   "walked-of n with the page's rows shown: the walk's opts {:limit 20}."
@@ -217,7 +217,7 @@
      ;; 67 with the units read from the schema's pattern (seon.render/units)
      :per-n {:bytes 6100}
      :fixed {:calls 67 :bytes 2650000}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 (defn- watching
   "The render proc's state as it holds pages watched pages, each having read 100 entities."
@@ -244,7 +244,7 @@
      ;; measured 2026-10-24: 207 KB / 2.06 MB / 21.2 MB at 100 / 1,000 / 10,000 datoms; one contracted call
      :per-n {:bytes 2120}
      :fixed {:calls 1 :bytes 2000}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (deftest matching-a-commit-is-flat-in-the-pages-watched
   (cost/proof
@@ -254,7 +254,7 @@
      :growth :constant
      ;; measured 2026-10-24: 209 / 207 / 207 KB at 10 / 100 / 1,000 pages
      :fixed {:calls 1 :bytes 212000}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn debug-of
   "The input of size n: the render proc's state holding agent a1's debug page after a pass over n
@@ -307,7 +307,7 @@
      ;; seon.web.html: 41 calls, measured per function against main, 2026-10-26)
      :fixed {:calls 500 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))
 
 (defn growing-debug
   "The render proc's state holding agent a1's debug page after n model turns as a real run
@@ -392,4 +392,4 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 140 :bytes 150000}
-     :sizes [100 1000 4000]}))
+     :sizes [100 300 1000 4000]}))

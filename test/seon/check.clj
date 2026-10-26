@@ -241,8 +241,6 @@
   "{[test-namespace var, the read] why its verdict is a function of its digest anyway}."
   '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
-    [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
-    [seon.lib-test/a-wait-for-a-line-parks-the-fiber Thread/sleep] "the end of a held carrier's wait (only a thread can write the line then); the verdict is whether a fiber ran before the line came, an order, never a duration"
     [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted measure of kernel time)"
     [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"

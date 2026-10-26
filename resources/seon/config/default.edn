@@ -310,13 +310,17 @@
  ;; vector makes nothing the program's (no law site, no related function but the agent's own).
  :seon.config.source/program-dirs ["src"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
- ;; facts) references one of these reaches a process of its own: a shell, a fork, a root booted
- ;; for it, the binary. Such tests never run automatically, only when named (owner, 2026-10-23;
- ;; root's ruling 2026-10-22: by the reach walk, never a hand tag). Provenance: step E's run 4,
- ;; where a turn's tests booted roots and spun for minutes in an agent's fork; process tests
- ;; were 782 s of 917 s of recorded test time (pure-tests, 2026-10-23). A var missing here makes
- ;; its tests run automatically (slower, never wrong).
- :seon.config.source/process-vars #{seon.agent-test/in-agent clojure.java.shell/sh seon.lib/fork! seon.test-store/binary-sh}
+ ;; facts) references one of these reaches a process of Seon's own: an agent (in-agent), a fork
+ ;; (lib/fork!), the binary or a root booted for it (binary-sh, through which ts/start-root!
+ ;; starts every test root). Such tests run when named or in a merge's verification (bin/prove
+ ;; --merge), not in a plain bin/prove (owner, 2026-10-23; root's ruling 2026-10-22: by the reach
+ ;; walk, never a hand tag). A shell (clojure.java.shell/sh) is no such process: a git, perl or
+ ;; mkfifo call costs milliseconds, and naming sh here left main-test's laws out of every plain
+ ;; prove (audit 2026-10-26, item 7). Provenance: step E's run 4, where a turn's tests booted
+ ;; roots and spun for minutes in an agent's fork; process tests were 782 s of 917 s of recorded
+ ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
+ ;; (slower, never wrong).
+ :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
  ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
  ;; reach references one runs it, so bin/test builds it first; a process test that only shells
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-

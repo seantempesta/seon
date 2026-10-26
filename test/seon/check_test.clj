@@ -159,13 +159,16 @@
   (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/end-" (random-uuid))
         _ (.mkdirs (java.io.File. dir))
         sh clojure.java.shell/sh
+        started (volatile! [])
         held (fn []
                (let [ready (str dir "/ready-" (random-uuid)) done (str dir "/done-" (random-uuid))]
                  (sh "mkfifo" ready done)
                  ;; a command that says it is up, then reads its stdin until the holder closes it
                  (sh "bin/held" "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
                      "sh" "-c" "echo ROOT LISTENING 1; exec cat")
-                 (let [[h c] (str/split (str/trim (slurp ready)) #" ")] {:holder h :cmd c :done done})))
+                 (let [[h c] (str/split (str/trim (slurp ready)) #" ")]
+                   (vswap! started conj h c)
+                   {:holder h :cmd c :done done})))
         end (fn [{:keys [holder done]}] (sh "bin/held" "--end" "TERM" holder done "1"))]
     (try
       (let [live (held) r (end live)]
@@ -178,7 +181,8 @@
       (let [f (str dir "/plain")]
         (spit f "")
         (is (= 2 (:exit (sh "bin/held" "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
-      (finally (sh "rm" "-rf" dir)))))
+      ;; the holders this test started end with it, by their own pids, whatever an assertion threw
+      (finally (doseq [p @started] (sh "kill" "-9" p)) (sh "rm" "-rf" dir)))))
 
 ;; ---- task seon.check/health-is-what-a-branch-caused ------------------------------------------
 
@@ -343,3 +347,16 @@
         (is (zero? (:exit r)))
         (is (str/includes? line "MERGE OK") line))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest only-mains-merge-verification-holds-the-lock
+  ;; root, 2026-10-27: a worktree's bin/prove --merge (render-walk's) took main's lock and made
+  ;; every session's runs wait on its own branch's verification. Main's merge verification goes
+  ;; first, not every --merge: bin/prove holds the lock only in the main tree (bin/env's
+  ;; is_main_tree), and a worktree's --merge runs everything the same way holding nothing. The
+  ;; checkout is given as ROOT and the main tree as MAIN_TREE, so the answer does not depend on
+  ;; which checkout the test runs in
+  (let [here (.getCanonicalPath (java.io.File. "."))
+        other (.getCanonicalPath (java.io.File. "target"))
+        main? (fn [root main] (:exit (clojure.java.shell/sh "zsh" "-c" (str ". bin/env; ROOT=" root "; MAIN_TREE=" main "; is_main_tree"))))]
+    (is (zero? (main? here here)) "the main tree's --merge holds the lock")
+    (is (= 1 (main? here other)) "a worktree's holds nothing")))

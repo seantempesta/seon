@@ -42,7 +42,7 @@
      ;; cost reads as steeper growth)
      :per-n {:ticks 200.0 :bytes 700.0}
      :fixed {:ticks 1050000.0 :bytes 5200000.0}
-     :sizes [500 1000 2000]}))
+     :sizes [250 500 1000 2000]}))
 
 (defn due-of
   "seon.vector/due's arguments: n forms, every one with its vector, of another model than asked,
@@ -86,4 +86,4 @@
      :growth :n-log-n
      :per-n {:ticks 4000.0 :bytes 20000.0}
      :fixed {:ticks 300000.0 :bytes 1500000.0}
-     :sizes [1000 2000 4000]}))
+     :sizes [250 500 1000 2000 4000]}))

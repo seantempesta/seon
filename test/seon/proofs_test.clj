@@ -104,9 +104,10 @@
 
 (deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
-  ;; step (or test) whose function reaches a process var (a fork, a shell, a root booted for it:
+  ;; step (or test) whose function reaches a process var (a fork, an agent, a root booted for it:
   ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
-  ;; nothing; it runs when named
+  ;; nothing; it runs when named. A shell call is no process (audit 2026-10-26, item 7): a test
+  ;; that only shells runs in a plan that names nothing
   (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
                    'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
                    'app.pv-boot "(defn calc [] (c/add 1 2))")
@@ -123,15 +124,16 @@
     (let [d (scratch-dir)
           files {"deps.edn" "{}"
                  "test/app/pt_calc_test.clj" "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is (= 3 (+ 1 2))))\n"
-                 "test/app/pt_shell_test.clj" "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))\n(deftest shells (is (zero? (:exit (sh/sh \"true\")))))\n"}
+                 "test/app/pt_shell_test.clj" "(ns app.pt-shell-test (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh]))\n(deftest shells (is (zero? (:exit (sh/sh \"true\")))))\n"
+                 "test/app/pt_fork_test.clj" "(ns app.pt-fork-test (:require [clojure.test :refer [deftest is]] [seon.lib :as lib]))\n(deftest forks (is (lib/fork! {:child (fn [] nil) :refused identity :parent identity})))\n"}
           _ (doseq [[p t] files] (.mkdirs (.getParentFile (java.io.File. (str d "/" p)))) (spit (str d "/" p) t))
           _ (clojure.java.shell/sh "git" "-C" d "init" "-q")
           _ (clojure.java.shell/sh "git" "-C" d "add" ".")
           auto (runner/plan-of d "tests" false nil (ts/program-store))
-          named (runner/plan-of d "tests" false ["app.pt-shell-test"] (ts/program-store))]
-      (is (= ['app.pt-calc-test/adds] (:run-tests auto)) "named nothing: the in-process test runs, the shelling one does not")
-      (is (= ['app.pt-shell-test/shells] (:left auto)) "and the plan says it left that one out")
-      (is (= ['app.pt-shell-test/shells] (:run-tests named)) "named, it runs")
+          named (runner/plan-of d "tests" false ["app.pt-fork-test"] (ts/program-store))]
+      (is (= #{'app.pt-calc-test/adds 'app.pt-shell-test/shells} (set (:run-tests auto))) "named nothing: the in-process test runs, the shelling one too (a shell is no process), the forking one does not")
+      (is (= ['app.pt-fork-test/forks] (:left auto)) "and the plan says it left that one out")
+      (is (= ['app.pt-fork-test/forks] (:run-tests named)) "named, it runs")
       (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes"
         (profile/begin!)
         (runner/plan-of d "both" false nil (ts/program-store))
@@ -245,7 +247,7 @@
      :growth :n-log-n
      :per-n {:ns 100 :bytes 120}
      :fixed {:ns 20000 :bytes 40000 :calls 1}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn- checkout!
   "A git checkout in a scratch dir holding files ({path text}), every file added."
