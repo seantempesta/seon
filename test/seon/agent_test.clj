@@ -459,6 +459,30 @@
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
     (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
 
+(deftest a-branch-that-deletes-mains-test-it-breaks-is-not-merged
+  ;; owner, 2026-10-26: "auto merge (the goal) means the old tests need to pass too. So deleting
+  ;; the old test doesn't stop the old test from running": a branch breaks what one of main's
+  ;; tests checks and deletes that test (unmapped, staged as its removal); the test still judges,
+  ;; from main's definition, so the run is red, not merged, and its end names main's test
+  (let [main-test 'seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+        [_ _ _ _ _ _ done seen]
+        (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                   "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                   "(deftest t (is (= 2 (inc 1))))"
+                   "(in-ns 'seon.ref) (defn- first-sentence \"Every sentence of flat prose.\" {:malli/schema [:=> [:cat :string] :string]} [flat] flat)"
+                   (str "(ns-unmap 'seon.ref-test '" (name main-test) ") (seon.stage/stage!) (in-ns 'agent.a1)")
+                   before-done {:op :done :agent "a1"}
+                   {:op :eval :agent "root"
+                    :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
+                               " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason])"
+                               "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}]
+                  {:dirs ["src" "test"]})
+        [run state] (:value seen)]
+    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
+    (is (= :red (:seon.run/outcome run)) (pr-str run))
+    (is (not (#{:done :merged} state)) (str "not merged: " state))
+    (is (str/includes? (str (:seon.run/reason run)) (str main-test)) "its end names main's failing test")))
+
 (deftest an-outside-run-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands the run back is
   ;; judged by the end it wrote, and its task finishes, not held
