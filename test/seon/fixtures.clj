@@ -263,6 +263,12 @@
   {:malli/schema [:=> [:cat :seon.model/request] :string]}
   [_] "(my.turn/wait)")
 
+(defn fail-call
+  "The scripted model of a run that refutes its premise (seon.agent-test): every turn fails the
+  task (my.task/fail!), the agent's own verdict."
+  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  [_] "(my.task/fail! \"the premise is refuted\" '(= 1 2))")
+
 (defn stages
   "The scripted model of a request's stages on one session (seon.agent-test): the design writes
   a proof red, registers it and adds to its plan, then ends its turn with prose (done: its proof

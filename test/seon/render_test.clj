@@ -369,7 +369,7 @@
              (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}})
              (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
              [{:seon.run/id "demo/f#1" :seon.run/results [{:seon.proof/test 'demo/f-test :seon.proof/status :pass}]}]
-             (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g, see `seon.print`")
+             (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g, see `seon.print`")
              [{:db/id "run" :seon.run/id "demo/f#1"}
               {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "(f 2), as `seon.render/walk` says"
                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 5}]
@@ -463,7 +463,7 @@
                          :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
-                       (seon.task/message-tx "m-1" "owner" "demo/f#1" "check g")
+                       (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g")
                        ;; root's own evaluation, from its REPL
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:code "(my.root/problems sys)" :response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0

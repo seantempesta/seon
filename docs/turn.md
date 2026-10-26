@@ -6,9 +6,10 @@ An agent works its task in a loop inside its own process: observe the branch, en
 
 Root's reconciler forks an agent for a released task and evaluates ```seon.turn/work!``` in it, naming the task, the run and `:seon.config.agent/max-turns`. The loop ends on the first of:
 - the done rule refuses nothing (`:green`; all green at the start ends it with no model call);
-- a function asked to stop: `my.turn/wait` (`:waiting`) or `my.task/fail!` (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
-- the turns run out (`:cap`, with the done rule's reasons as its reason);
+- `my.task/fail!` asked to stop (`:failed`, the task held for root: [tasks](tasks.md#a-refused-run-is-held-for-root));
 - a merge task's merge of main is too hairy (`:merge-failed`, [below](#a-merge-tasks-loop));
+- the turns run out (`:cap`, with the done rule's reasons as its reason): a run whose last turn waits spent its budget, so it is `:cap`, never `:waiting` (`seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting`);
+- `my.turn/wait` asked to stop, or a reply made no eval call (`:waiting`);
 - the model call fails (`:error`: [model](model.md#failures)).
 
 Its end is written on the branch (`seon.turn/end!`: outcome, turns, tokens, the error that ended it, the turns' `:waste`), the live runtime is staged onto the branch (`seon.stage/stage!`) so the next agent on it holds it, and root's judge reads that end, asks the agent for its test results, reads the branch and its diff, and writes the run's end on main from those measured facts (`seon.reconcile/judge-tx`; a merge task is green only when merging main again brings nothing new).
@@ -31,6 +32,14 @@ Tests run three times in a run's life, each on what it needs:
 ## A merge task's loop
 
 Every run's agent first merges main into its branch with no model call (a kept branch made before main moved holds main's program, its tests and their digests included; one at main's head brings nothing). A merge task's agent merges main again each time all is green, until a merge brings nothing new; it stops early when the merge is too hairy (`seon.reconcile/hairy`). Its unmerged entries are in its context, and it resolves them at the REPL ([agent](agent.md#merging)).
+
+## What a turn takes from main
+
+Words to the agent and what root decided of its runs are facts on main, and a turn takes them onto its branch before it observes, so its context and page read them from the branch like any other fact: `seon.turn/take!`, the one way outside facts reach the branch. Root writes nothing to a live process for them, so a session whose process is gone (parked in an earlier boot, a lost wake) takes them when it is spawned again.
+- **Entries** (```seon.agent/untaken-entries```): the `:seon.message/*` facts main holds to the runs of the agent's session (its run's `:seon.run/branch`, as main names it), of each kind (`:seon.message/kind`): a person's `:message` (`seon.root/message!`, refused for an agent working no run), root's `:stage` boundary, and root's `:verdict` (below). Each is written on the branch with the same id, in main's order.
+- **Taken attributes** (```seon.agent/untaken-facts```): the run attributes whose schema says `{:seon.db/taken true}`, its outcome and reason, copied onto the runs the branch holds; never its status, since the branch holds its run by reference and a status there says it holds the whole run. With them, each eval of its own the page opened (main's `:seon.agent/opened`, written by `seon.root/opened!`) as `:seon.eval/opened`.
+
+A run the done rule refuses (`:green` or `:red` by the agent's own word, but not done by root's facts) is told why rather than held: root's judge writes a `:verdict` entry with the reasons and results it judged on and parks the run, and the entry wakes the session ([processes](processes.md#a-parked-process)). The same reasons again hold the task. A merge task's refused run holds at once, and so does an outside agent's, which read the verdict as `seon_done`'s answer.
 
 ## An outside agent
 

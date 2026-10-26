@@ -82,9 +82,10 @@
     false))
 
 (defn inbox
-  "The messages delivered to this agent and not yet taken ({:from :body}, and :id :to for a
-  message that is a fact), left in the inbox: root's requests (e.g. :catch-up, \"main moved,
-  merge main\"), other agents' sends and the owner's (the page's message bar). What root sent
+  "The messages delivered to this agent and not yet taken ({:from :body}), left in the inbox:
+  root's requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends. Words to
+  its session's runs (the owner's, root's at a stage, a verdict) are entries on main, which its
+  turn takes (seon.turn/take!), never the inbox. What root sent
   before this call is read off the socket first (without waiting); any other request read
   waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
@@ -96,12 +97,74 @@
         (recur))))
   (:inbox @state))
 
-(defn messages
-  "The inbox (inbox), taken: its reader is the turn that read them."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
+(defn- session-branch
+  "The branch main names this agent's session by: its run's :seon.run/branch, which the store
+  qualifies on a main that is not :db (seon.db/on-main), so (:branch @state) is not it. nil
+  with no run: then no entry is to it."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
+  [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
+
+(defn untaken-entries
+  "The entries main holds to the runs of this agent's session (the runs on its branch, as main
+  names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
+  Delivery is the fact, read here, not the frame root pushes to a live process: a session whose
+  process is gone (parked in an earlier boot, a lost wake, a red verdict on a run whose process
+  ended) is spawned again, and its run takes them from main (design one-derivation 4.1 section 5;
+  the frame alone left such a run with nothing, parked short of main's count, and spawned again).
+  O(the entries to the session's runs)."
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
   []
-  (inbox)
-  (let [[old _] (swap-vals! state assoc :inbox [])] (:inbox old)))
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)
+        br (session-branch main)]
+    (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
+                          :where [?r :seon.run/branch ?br] [?r :seon.run/id ?rid]
+                          [?m :seon.message/to ?r ?tx] [?m :seon.message/id ?id] [?m :seon.message/from ?from] [?m :seon.message/body ?body]
+                          [(get-else $ ?m :seon.message/kind :message) ?kind]]
+                        main br))
+         (remove (fn [[_ id]] (d/entity b [:seon.message/id id])))
+         (sort-by (juxt first second))
+         (mapv (fn [[_ id kind from rid body]] {:id id :kind kind :from from :to rid :body body})))))
+
+(def taken-attributes
+  "The attributes of the runs of an agent's session that root writes on main and its turn copies
+  onto its branch (seon.turn/take!), so its ctx holds them: those whose schema says
+  {:seon.db/taken true}, read here once. Its outcome and reason, never its status: a branch
+  holds its run by reference (the agent's own record), and a status there says the branch holds
+  the whole run (seon.task/run, seon.task/running read it so)."
+  (into #{} (filter #(:seon.db/taken (contract/properties %))) (keys contract/forms)))
+
+(defn untaken-facts
+  "The transaction that copies onto this branch what main holds and its branch does not, of its
+  own entities: the taken attributes (taken-attributes) of the runs on its branch that it
+  holds, and each eval of its own its agent's :seon.agent/opened names, as that eval's
+  :seon.eval/opened. take! is the one way outside facts reach the branch, and so its ctx (a
+  change the agent's context and page show goes through the data its context reads). Root is
+  the one writer of these: the agent writes its run's end as :seon.end/*, so main's value is
+  never older than the branch's; a value main retracts stays on the branch. O(the session's
+  runs and the opened evals on main)."
+  {:malli/schema [:=> [:cat] :seon.db/tx-data]}
+  []
+  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+        b (db)
+        pattern (into [:seon.run/id] taken-attributes)
+        br (session-branch main)]
+    (vec (concat
+           (for [m (when br (d/q '[:find [(pull ?r pattern) ...] :in $ pattern ?br :where [?r :seon.run/branch ?br]] main pattern br))
+                 :let [held (d/entity b [:seon.run/id (:seon.run/id m)])
+                       new (into {} (remove (fn [[k v]] (= v (get held k)))) m)]
+                 :when (and held (seq (dissoc new :seon.run/id)))]
+             (assoc new :seon.run/id (:seon.run/id m)))
+           (for [id (:seon.agent/opened (d/entity main [:seon.agent/key (:key @state)]))
+                 :let [e (d/entity b [:seon.eval/id id])]
+                 :when (and e (not (:seon.eval/opened e)))]
+             {:seon.eval/id id :seon.eval/opened true})))))
+
+(defn entries-tx
+  "The transaction that writes entries (untaken-entries) on this branch: the same facts root
+  wrote on main, which their reader takes by writing them."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
+  [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries))
 
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
@@ -166,6 +229,27 @@
         (seq (:tempids r)) (assoc :tempids (into {} (filter (comp string? key)) (:tempids r)))))))
 
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
+
+(defn take-main!
+  "Take what main holds for this agent onto its branch, committed: its entries
+  (untaken-entries) and the facts of its own entities (untaken-facts). The one take, a turn's
+  (seon.turn/take!) and its code's (messages). Answers the entries taken."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (untaken-entries)
+        tx (into (untaken-facts) (entries-tx es))]
+    (when (seq tx) (transact! tx))
+    (commit!)
+    es))
+
+(defn messages
+  "The words to this agent not yet taken, taken (take-main!, as a turn takes them), then the
+  inbox's sends (inbox). Its reader is the code that read them."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
+  (let [es (take-main!)]
+    (inbox)
+    (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
   "Inside a test (a fork of this agent) no effect leaves the process: a test that needs
@@ -776,7 +860,7 @@
                                               :heap-mb (lib/r2 (/ (lib/bytes-in-heap) 1048576.0))}}]
     ;; a message (session F2): it waits in :inbox until the agent's code takes it ((messages));
     ;; root hears that it arrived
-    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body :id :to]))
+    :message (do (swap! state update :inbox (fnil conj []) (select-keys m [:from :body]))
                  [{:op :received :sent-ns (:ns m) :recv-ns (profile/now-ns)}])
     nil))
 

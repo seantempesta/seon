@@ -633,6 +633,78 @@
              "so the run's end carries nothing of it back onto main")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
+(deftest a-run-takes-its-sessions-entries-from-main
+  ;; design one-derivation 4.1 section 5: delivery is the fact. A session whose process is gone
+  ;; is spawned again, and its run must take the entries main holds to its earlier runs; a frame
+  ;; pushed only to a live process left such a run with nothing, parked short of main's count, and
+  ;; spawned again
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
+           ab (pdb/on-main (:branch cfg) :agent-entries)
+           ;; main names a run's branch as it is; the store qualifies it on a test's main
+           env {:branch :agent-entries :model nil :max-turns 4}
+           _ (d/transact conn (into (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 env 1000 "Wait.")
+                                    (task/run-start-tx "demo/w#2" "demo/w" "boot-1" :a2 env 1000 "Wait.")))
+           ;; the session's branch, then on main: a verdict to its earlier run, a message to another session's run
+           _ (d/branch! conn (:branch cfg) ab)
+           _ (d/transact conn (into (task/message-tx "m-v" :verdict "root" "demo/w#1" "red: demo-test/w is red")
+                                    (task/run-start-tx "demo/x#1" "demo/w" "boot-1" :a3 {:branch :elsewhere :model nil :max-turns 4} 1000 "Wait.")))
+           _ (d/transact conn (task/message-tx "m-x" :message "user" "demo/x#1" "not yours"))
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#2" :db @store-conn})
+         (is (= [{:id "m-v" :kind :verdict :from "root" :to "demo/w#1" :body "red: demo-test/w is red"}]
+                (agent/untaken-entries))
+             "the session takes what main holds to its earlier run, and nothing of another session's")
+         (agent/transact! (task/message-tx "m-v" :verdict "root" "demo/w#1" "red: demo-test/w is red"))
+         (agent/commit!)
+         (is (= [] (agent/untaken-entries)) "once its branch holds it, it is taken")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest a-runs-outcome-on-main-reaches-the-agents-ctx-at-its-next-take
+  ;; owner, 2026-10-26: take! is the one way outside facts reach the agent's branch, and so its
+  ;; ctx. Root writes its session's runs' outcome and reason on main, and a reader's opened
+  ;; eval as the agent's :seon.agent/opened; the copy take! transacts (untaken-facts) puts each on
+  ;; the branch, and @ctx, which follows the branch, holds it; a second copy has nothing to add
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
+           ab (pdb/on-main (:branch cfg) :agent-taken)
+           k (task/agent-key "boot-1" :a1)
+           ;; as in production: the branch is made, the run starts on main, and the branch holds
+           ;; the run by reference only, as its turns record it (its id, task and agent)
+           _ (d/branch! conn (:branch cfg) ab)
+           _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch :agent-taken :model nil :max-turns 4} 1000 "Wait."))
+           store-conn (d/connect (assoc cfg :branch ab))
+           _ (d/transact store-conn [{:db/id k :seon.agent/key k :seon.agent/id :a1}
+                                     {:seon.run/id "demo/w#1" :seon.run/task [:seon.task/id "demo/w"] :seon.run/agent k}
+                                     {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
+           ;; on main: what root decided of the run, and the page's open
+           _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
+                               {:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
+           [a b] (sock/socketpair)
+           old @agent/state
+           ;; a collection's member in the agent's ctx, found by its id
+           member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
+         (is (nil? (:seon.run/outcome (member :runs :seon.run/id "demo/w#1"))) "before the take, nothing of main's")
+         (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
+                 {:seon.eval/id "e1" :seon.eval/opened true}]
+                (agent/untaken-facts))
+             "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
+         (is (= [] (agent/take-main!)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
+         (is (= [nil :waiting "waiting for a message"]
+                (mapv (member :runs :seon.run/id "demo/w#1") [:seon.run/status :seon.run/outcome :seon.run/reason]))
+             "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
+         (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
+         (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
+         (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
 (deftest an-agents-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
@@ -754,6 +826,17 @@
     (is (= (range (nth (first runs) 5)) (numbers "demo/w#1")) "the parked run's turns, numbered from 0")
     (is (= (range (nth (second runs) 5)) (numbers "demo/w#2")) "the wake's, numbered from its own 0, none over the parked run's")
     (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
+
+(deftest a-run-at-its-cap-is-recorded-cap-never-waiting
+  ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
+  ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
+  ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
+  (let [outcome (fn [script max-turns]
+                  (:outcome (:value (first (in-agent [(str "(seon.turn/work! {:task \"demo/t\" :run \"demo/t#cap\" :max-turns " max-turns "})")]
+                                                     {:sets [(str ":seon.config.ai/script=seon.fixtures/" script)]})))))]
+    (is (= :cap (outcome "wait-call" 1)) "a wait on the last turn: the budget spent")
+    (is (= :waiting (outcome "wait-call" 2)) "a wait with turns left: waiting")
+    (is (= :failed (outcome "fail-call" 1)) "fail! on the last turn: the agent's verdict")))
 
 (deftest a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (written as the
