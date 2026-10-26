@@ -282,7 +282,7 @@
         _ (.mkdirs (java.io.File. dir))
         lock (str dir "/main-verify.lock")
         holder (str "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush;"
-                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
+                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); delete $ENV{SEON_MAIN_FIRST_HELD}; exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
                     " my $first = <$w>; print \"while held: $first\"; flock($f, LOCK_UN); close($f);"
                     " print \"after: $_\" while <$w>; close($w); print 'exit: ', $? >> 8, \"\\n\";")
         r (clojure.java.shell/sh "perl" "-MFcntl=:flock" "-e" holder lock)

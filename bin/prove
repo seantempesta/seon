@@ -30,11 +30,16 @@ merge_verdict() {
   local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" "$out/contracts.log" "$out/smoke.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
   local counts=$(grep -E "^prove: [0-9]+ keys" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: //; s/; selected in.*//')
   local merged=$(grep -E "^prove: a merge's verification" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: a merge.s verification: //')
-  local srcd=$(git -C "$ROOT" diff --shortstat HEAD^1 HEAD -- src 2>/dev/null | sed -E 's/^ *//')
+  local srcd
+  if git -C "$ROOT" rev-parse -q --verify HEAD^1 >/dev/null; then
+    srcd=$(git -C "$ROOT" diff --shortstat HEAD^1 HEAD -- src | sed -E 's/^ *//'); srcd=${srcd:-unchanged}
+  else srcd="unknown (no first parent)"; fi
+  local left=$(grep -oE "[0-9]+ left out\)?$" "$out/prove.log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
   local main_left=$(grep -oE "[0-9]+ process keys left out|left out [0-9]+" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
   local verdict="MERGE FAILED"
   (( st == 0 && cst == 0 && sst == 0 )) && verdict="MERGE OK"
-  local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); contracts $(v $cst); smoke $(v $sst); reds: ${reds:-none}; src ${srcd:-unchanged}; left out 0 (main's last line: ${main_left:-none recorded})"
+  [[ -z $reds && $verdict == "MERGE FAILED" ]] && reds="none named (see the logs in $out)"
+  local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); contracts $(v $cst); smoke $(v $sst); reds: ${reds:-none}; src $srcd; left out ${left:-not measured} (main's last line: ${main_left:-none recorded})"
   echo "$line" >> "$log"
   echo "$line"
   echo "$verdict"
@@ -44,27 +49,14 @@ merge_verdict() {
 MERGE=0
 [[ ${1:-} == --merge ]] && { MERGE=1; shift }
 if (( MERGE )) && [[ -z ${SEON_MAIN_FIRST_HELD:-} ]]; then
-  # take the main checkout's lock (waiting for another merge's verification, saying so), name
-  # the holder in it, and run this verification under it: its steps are the holder's
-  MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-  mkdir -p "$MAIN_TREE/target"
-  exec perl -MFcntl=:flock -e '
-    my ($lock, $who, @cmd) = @ARGV;
-    open(my $f, ">>", $lock) or die "bin/prove --merge: $lock: $!\n";
-    unless (flock($f, LOCK_EX | LOCK_NB)) {
-      open(my $r, "<", $lock); my $w = <$r> // ""; chomp $w;
-      print STDERR "waiting for main\x27s merge verification ($w)\n";
-      flock($f, LOCK_EX) or die "bin/prove --merge: flock: $!\n";
-    }
-    truncate($f, 0); print $f "$who\n"; $f->flush;
-    $ENV{SEON_MAIN_FIRST_HELD} = $$;
-    my $st = system(@cmd);
-    exit($st == -1 ? 127 : ($st & 127) ? 128 + ($st & 127) : $st >> 8);' \
-    "$MAIN_TREE/target/main-verify.lock" "pid $$, $(git -C "$ROOT" rev-parse --short HEAD) in $ROOT, since $(date '+%H:%M:%S')" \
-    "$0" --merge "$@"
+  # this verification run again under the main checkout's lock (bin/env's main_hold): its steps
+  # are the holder's, and every other heavy run waits for it
+  ( . "$ROOT/bin/env"; main_hold "pid $$, $(git -C "$ROOT" rev-parse --short HEAD) in $ROOT, since $(date '+%H:%M:%S')" "$0" --merge "$@" )
+  exit $?
 fi
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
+(( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }
 OUT=$ROOT/target/prove
 mkdir -p "$OUT"
 rm -f "$OUT/steps" "$OUT/steps.edn" "$OUT/green"
