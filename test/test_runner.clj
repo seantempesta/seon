@@ -136,7 +136,7 @@
 (defn automatic
   "What a run that names nothing selects from cand ({key digest}): every key but those in
   process, the tests and bin/check steps that reach a process of their own (a root, an agent,
-  a shell, a fork, the binary: seon.program/reach-index's :process?). Owner, 2026-10-23: tests
+  a fork, the binary; a shell call is none: seon.program/reach-index's :process?). Owner, 2026-10-23: tests
   shouldn't be running agent turns, not automatically at least. Those run when named (bin/test
   NS, bin/check MODE), in the full run, or by root's gate before a merge that reaches them."
   {:malli/schema [:=> [:cat [:map-of :any :string] [:set :any]] [:map-of :any :string]]}

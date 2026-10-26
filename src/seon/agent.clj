@@ -754,7 +754,7 @@
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
   the test service's runs) selects the plan's tests. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
-  :process: it reaches a shell, a fork, a root or the binary) never runs here unless its namespace
+  :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
   is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge

@@ -1273,8 +1273,8 @@
               (recur (vec (distinct (map first step))) from'))))))))
 
 (defn process-tests
-  "The keys of index (reach-index's answer) that reach a process of their own (a shell, a
-  fork, a root booted for it, the binary): never run automatically, only when named (DECISIONS,
+  "The keys of index (reach-index's answer) that reach a process of their own (an agent, a
+  fork, a root booted for it, the binary; a shell call is none): never run automatically, only when named (DECISIONS,
   Process tests are not automatic). Taking the index, not db, so a caller holding one walks once."
   {:malli/schema [:=> [:cat [:map-of :any [:map [:process? :boolean]]]] [:set :any]]}
   [index] (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) index))
