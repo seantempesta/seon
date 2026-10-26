@@ -4,7 +4,7 @@
   first agent only from a main that holds all of it (task
   seon.template/a-request-is-one-linked-transaction).
   Run: bin/test seon.template-test"
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn]
             [datahike.api :as d]
             [seon.db :as pdb] [seon.task :as task] [seon.reconcile :as r] [seon.template :as tpl] [seon.fixtures :as fx] [clojure.string :as str]))
 
@@ -54,6 +54,14 @@
     (is (not (contains? d :seon.task/proofs)) "no proof given: the agent writes its own")
     (is (re-find #"Reproduce: [\(\[].*[\)\]] answers [\[\"0-9a-z].*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
     (is (< (count (:seon.task/plan d)) 1000) (str "short: " (:seon.task/name d)))
+    ;; a cause carried from a task entry is that entry's own words, so the two cannot drift
+    (when-let [[_ tid cause] (re-find #"Its cause \(task ([\w./-]+)\): (.*)$" (:seon.task/plan d))]
+      (let [[tns tname] (str/split tid #"/" 2)
+            entry (some #(when (= tname (:seon.task/name %)) %) (clojure.edn/read-string (slurp (str "resources/seon/tasks/" tns ".edn"))))
+            words #(str/replace % #"`" "")]
+        (is (some? entry) (str "its task entry exists: " tid))
+        (is (str/includes? (words (:seon.task/plan entry)) (str/replace (words cause) #"\.$" ""))
+            (str "the cause is the entry's own words: " tid))))
     (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
 
 (deftest a-design-build-request-is-its-design-build-task-and-its-merge

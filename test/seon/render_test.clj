@@ -1095,9 +1095,9 @@
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
 (deftest a-whole-tasks-page-holds-its-instructions
-  ;; the context audit of 2026-10-26 (notes: known-context-problems): the task part drew the plan and
-  ;; dropped the task's own data, its instructions with it, so no agent read how its kind is worked
-  ;; (reproduce first, fail! when already right, stop reading once wrong); now drawn above the plan, whole
+  ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
+  ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
+  ;; wrong): they are drawn above the plan, whole
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         h (h/html (:html (r/part-faces {:key [:task] :value {:seon.task/id "demo/w"} :schema :seon.render/task-page :db db})))]
