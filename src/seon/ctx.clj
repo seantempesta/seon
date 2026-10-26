@@ -301,8 +301,10 @@
   [o n]
   (cond (identical? o n) o
         (and (map? o) (map? n))
-        ;; built anew in n's order (into its empty, its comparator kept): an assoc over an equal
-        ;; value may keep the value it holds
+        ;; built anew in n's order (into its empty, its comparator kept), not by assoc: Jolt's
+        ;; sorted-map assoc keeps the value it holds when the new one is = to it (Clojure's replaces
+        ;; it unless identical). A workaround, deleted when Jolt's fix is pinned (task
+        ;; seon.ctx/share-assocs-what-it-shares)
         (let [n (into (empty n) (map (fn [[k v]] [k (share (get o k) v)])) n)]
           (if (and (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)) o n))
         (= o n) o

@@ -336,14 +336,21 @@
         :attrs (into (into #{} (filter keyword?) p) (keep #(when (:rev? %) (:by %))) joins)
         :joins joins}))))
 
+(def ^:private units-by-schema
+  "{entity-schema [attribute]}: each entity schema's joins as the attributes they read, in pull's
+  syntax (a leading _ the reverse ref), read once from the registry by pattern (as
+  entity-schemas is derived)."
+  (into {} (for [[s _] contract/forms
+                 :let [p (:seon.ctx/pattern (contract/properties s))]
+                 :when (and p (:seon.db/attributes (contract/properties s)))]
+             [s (mapv (fn [j] (if (:rev? j) (keyword (namespace (:attr j)) (str "_" (name (:attr j)))) (:attr j)))
+                      (:joins (pattern p #{s})))])))
+
 (defn units
   "Entity schema s's joins as the attributes they read, in pull's syntax (a leading _ the reverse
-  ref): the joins of the pattern it declares (:seon.ctx/pattern, read by pattern)."
+  ref): the joins of the pattern it declares (:seon.ctx/pattern, read by pattern), [] with none."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :keyword]]}
-  [s]
-  (if-let [p (some-> s contract/properties :seon.ctx/pattern)]
-    (mapv (fn [j] (if (:rev? j) (keyword (namespace (:attr j)) (str "_" (name (:attr j)))) (:attr j))) (:joins (pattern p #{s})))
-    []))
+  [s] (get units-by-schema s []))
 
 (defn- relevant
   "Entity value m of schema, as a walk shows it: only the attributes its schema declares
