@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [seon.screen :as screen] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
-            [seon.error :as err] [datahike.api :as d]))
+            [seon.error :as err] [seon.db :as pdb] [datahike.api :as d]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
 ;; works, and a stop a function requested.
@@ -32,9 +32,10 @@
   [] (:task @agent/state))
 
 (defn- begin!
-  "This process works task as run: the run recorded as its session's on its branch, and the
-  turn state, begun once per run with the task's accumulated plan as the branch held it (a
-  design step answers for improving it).
+  "This process works task as run: the run recorded as its session's on its branch, with the
+  stage's story (seon.context/run-state, the same every turn of the run) as its fact
+  :seon.run/story, and the turn state, begun once per run with the task's accumulated plan as
+  the branch held it (a design step answers for improving it).
   The turn loop and an outside agent's context read begin it the same way."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :map]}
   [task run]
@@ -44,7 +45,9 @@
       ;; the run is this session's on its own branch too (root writes it on main): the
       ;; conversation finds the messages its runs took, and the story its first stage's, by it
       ;; (seon.context/records, session-first-run read the branch)
-      (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}])
+      ;; the story once, as the run begins: a resumed run keeps the one its stage began with
+      (agent/transact! [(cond-> {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}
+                          (nil? (:seon.run/story (d/entity db [:seon.run/id run]))) (assoc :seon.run/story (context/run-state db (task/task db task))))])
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
 
@@ -77,6 +80,24 @@
     (swap! agent/state assoc :index {:db db :index v})
     v))
 
+(defn- related!
+  "The task's related sections, functions and schema keys (seon.context/related) as its fact
+  :seon.task/related on this branch: computed again only when its key moves (related-at: the
+  task, the count shown, the branch's last vector write), written when it answers, retracted
+  when it answers none. A view reads the fact and computes nothing."
+  {:malli/schema [:=> [:cat :seon.task/id] :nil]}
+  [id]
+  (let [db (agent/db)
+        te (pdb/eid db :seon.task/id id)
+        held (:related @agent/state)
+        r (when te (context/related-at db te (:vectors-t @agent/state) held))]
+    (when (and r (not= (:key r) (:key held)))
+      (swap! agent/state assoc :related r)
+      (if-let [v (:value r)]
+        (agent/transact! [[:db/add te :seon.task/related v]])
+        (when-let [old (:seon.task/related (d/entity db te))] (agent/transact! [[:db/retract te :seon.task/related old]]))))
+    nil))
+
 (defn- observe
   "What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run
   per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof:
@@ -89,6 +110,7 @@
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
         _ (agent/embed-written!)
+        _ (related! id)
         t0 (profile/now-ns)
         test-run (agent/prove!)
         tests-ms (long (profile/ms-since t0))

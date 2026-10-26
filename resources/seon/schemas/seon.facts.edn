@@ -156,7 +156,7 @@
                      [:seon.eval/record :seon.eval/record]]
  ;; an entity's units (seon.render/walk): the neighbours a view of it shows, one hop, as pull's
  ;; attributes (a leading _ the reverse ref), each rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.render/units [:seon.run/_agent :seon.eval/_agent :seon.catch-up/_agent] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -196,6 +196,10 @@
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
+ ;; what the work on the plan is likely to need beyond what it cites (seon.context/related's
+ ;; answer), written on the agent's branch by its turn's observe when the plan's vectors move
+ ;; (seon.turn/related!), so a view reads it as a fact and never computes it
+ :seon.task/related [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]]
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
  :seon.task/task-fact [:map {:seon.db/attributes true :seon.render/units [:seon.task/proofs] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -209,6 +213,7 @@
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
                           [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/declared {:optional true} :seon.task/declared]
+                          [:seon.task/related {:optional true} :seon.task/related]
                           [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
                           [:seon.config.merge/max-conflicts {:optional true} :seon.config.merge/max-conflicts]
                           [:seon.config.merge/max-merge-turns {:optional true} :seon.config.merge/max-merge-turns]]
@@ -268,6 +273,11 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
+ ;; the stage's story: the task's run sections as data (seon.context/run-state: the task and its
+ ;; accumulated plan, the write set with sources and callers, how to run each proof, the cited
+ ;; sections, what is similar), the same every turn of the run, so written once as the run begins
+ ;; on the agent's branch (seon.turn/begin!) and read by a view as a fact
+ :seon.run/story [:map [:task :map] [:write-set [:vector :any]] [:to-prove [:map-of :qualified-symbol :any]]]
  :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.render/units [:seon.run/task :seon.turn/_run :seon.message/_to] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
@@ -285,6 +295,7 @@
                              [:seon.run/conflicts {:optional true} :seon.run/conflicts]
                              [:seon.run/unmerged {:optional true} :seon.run/unmerged]
                              [:seon.run/changed {:optional true} :seon.run/changed]
+                             [:seon.run/story {:optional true} :seon.run/story]
                              [:seon.run/deferred {:optional true} :seon.run/deferred]
                              [:seon.run/deferred-results {:optional true} :seon.run/deferred-results]
                              [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
@@ -360,8 +371,16 @@
  ;; the branch the transaction was written on: it travels with a merged datom, so the union
  ;; of every branch's history names who wrote what (seon.union)
  :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ ;; the eval whose code made it (its :seon.eval/id on the branch, "e5"): an agent's write during
+ ;; an eval, its record's included (seon.agent/transact!); none outside an eval
+ :seon.tx/eval [:string {:min 1}]
+ ;; the branch a catch-up merged (seon.agent/merge-main!): what it applied is that branch's, not
+ ;; the agent's, though :seon.tx/branch names the branch it was written on
+ :seon.tx/merged :seon.db/branch
  :seon.tx/meta [:map {:seon.db/attributes true} [:seon.tx/runtime {:optional true} :seon.tx/runtime]
-                [:seon.tx/branch {:optional true} :seon.tx/branch]]
+                [:seon.tx/branch {:optional true} :seon.tx/branch]
+                [:seon.tx/eval {:optional true} :seon.tx/eval]
+                [:seon.tx/merged {:optional true} :seon.tx/merged]]
  ;; a message between root and an agent, as a fact on the sender's branch: root's on main, an
  ;; agent's reply on its own; the union of every branch's history joins a conversation in one
  ;; query (seon.union). from and to name a run (its :seon.run/id, "demo/f#1"),
@@ -380,6 +399,20 @@
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
+ ;; a catch-up: one merge of main into the agent's branch (seon.agent/merge-main!), written in the
+ ;; merge's own transaction, so the agent's record holds what main brought it (its ctx's
+ ;; :catch-ups, in the order they happened) and a view reads it as a fact
+ :seon.catch-up/id [:and {:seon.db/identity true} :string]
+ :seon.catch-up/agent [:and {:seon.db/index true} :seon.db/ref]
+ ;; the branch merged in, and its t: main's head the catch-up merged
+ :seon.catch-up/from :seon.db/branch
+ :seon.catch-up/from-t :int
+ ;; the program keys main changed that applied, and those that conflicted (left unmerged)
+ :seon.catch-up/applied [:vector :seon.merge/program-key]
+ :seon.catch-up/conflicts [:vector :seon.merge/conflict]
+ :seon.catch-up/fact [:map {:seon.db/attributes true} [:seon.catch-up/id :seon.catch-up/id] [:seon.catch-up/agent :seon.catch-up/agent]
+                      [:seon.catch-up/from :seon.catch-up/from] [:seon.catch-up/from-t :seon.catch-up/from-t]
+                      [:seon.catch-up/applied :seon.catch-up/applied] [:seon.catch-up/conflicts :seon.catch-up/conflicts]]
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/run [:and {:seon.db/index true} :seon.db/ref]
  :seon.turn/n :int

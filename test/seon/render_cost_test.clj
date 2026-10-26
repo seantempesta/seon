@@ -213,9 +213,10 @@
                 "its place in the walk's map and in the sort by transaction. Contracted calls flat in the rows; bytes "
                 "~6 KB a row (was 49.5 KB, every row pulled whole: a-page-walks-each-db-once)")
      :growth :linear
-     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations
+     ;; measured 2026-10-25: 59 / 59 calls and 3.24 / 8.65 MB at 100 / 1,000 evaluations; 65 at 100
+     ;; with the agent's catch-ups a unit (task seon.ctx/one-derivation): its index read, empty here
      :per-n {:bytes 6100}
-     :fixed {:calls 59 :bytes 2650000}
+     :fixed {:calls 65 :bytes 2650000}
      :sizes [100 1000 4000]}))
 
 (defn- watching

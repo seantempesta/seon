@@ -132,10 +132,15 @@
 
 (defn tx-meta
   "The tx-meta of every transaction Seon makes: the runtime that made it
-  (:seon.tx/runtime, jolt.host/runtime-fingerprint). A runtime Jolt cannot identify (nil)
-  is refused by this contract, never recorded as no runtime."
-  {:malli/schema [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]}
-  [branch] {:seon.tx/runtime (jolt.host/runtime-fingerprint) :seon.tx/branch branch})
+  (:seon.tx/runtime, jolt.host/runtime-fingerprint) and the branch it is written on; and, given
+  them, the eval whose code made it (:seon.tx/eval) and the branch a catch-up merged
+  (:seon.tx/merged): provenance is a query on these (docs/ctx.md#provenance). A runtime Jolt
+  cannot identify (nil) is refused by this contract, never recorded as no runtime."
+  {:malli/schema [:function [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]
+                  [:=> [:cat :seon.db/branch [:map [:seon.tx/eval {:optional true} :seon.tx/eval] [:seon.tx/merged {:optional true} :seon.tx/merged]]]
+                   [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]]}
+  ([branch] (tx-meta branch {}))
+  ([branch more] (merge {:seon.tx/runtime (jolt.host/runtime-fingerprint) :seon.tx/branch branch} more)))
 
 (defn main-branch
   "The branch the root holding cfg works on as its main: cfg's :branch, :db when none."

@@ -483,10 +483,10 @@
   {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
   [rec e db]
   (when-let [{:keys [t branch]} (when db (:basis rec))]
-    (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
+    (let [a (:db/id (:seon.eval/agent e))]
       ;; a value as of t never changes: its reads are not the component's (no later transaction
       ;; touches them), so it is built when the component renders and never because the branch moved
-      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t)
+      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) a branch))) :t t)
         {:seon.render/schema (:schema rec)}))))
 
 (defn- branch-render
@@ -750,10 +750,18 @@
   (render/html with :schema the key), else the one printer's structure. A key whose schema its
   branch registered or changed (opts :db, its branch) is drawn by its agent, which defines that
   render (opts :drawer {:agent :handle}): as the agent drew it (*drawn*), else by the printer's
-  structure, naming its render, while the render proc asks the agent for it (*wanted*)."
+  structure, naming its render, while the render proc asks the agent for it (*wanted*). Beside
+  each attribute, who made it as of t (seon.ctx/made-by): the eval whose code wrote it, else the
+  branch it came from when not this one, and a catch-up's merge from main."
   {:malli/schema [:=> [:cat :seon.ctx/ctx :seon.render/opts] :any]}
   [{:keys [t branch commit] :as c} opts]
   (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))
+        ;; read as of t, as the map is: no later transaction changes them, so they are left out of
+        ;; the component's read set (*reads* nil), and a move of the branch never renders it again
+        at (when-let [db (when (:db/id c) (:db opts))] (d/as-of db t))
+        made (fn [k] (when (and at (qualified-keyword? k))
+                       (when-let [{:seon.tx/keys [eval merged] b :seon.tx/branch} (binding [datahike.index.interface/*reads* nil] (seon.ctx/made-by at (:db/id c) k))]
+                         (str/join " · " (remove nil? [eval (when (and b (not= b branch)) (str "from " b)) (when merged (str "merged from " merged))])))))
         {:keys [agent handle]} (:drawer opts)
         cell (fn [k v]
                (let [[sym text] (when (and agent (:db opts)) (branch-render (:db opts) k))
@@ -778,7 +786,8 @@
        [:table [:tbody (for [k ks :let [v (get c k)]]
                          [:tr {:class "align-top"}
                           [:td {:class "pr-3 font-mono text-text-400 whitespace-nowrap"} (str k)]
-                          [:td (cell k v)]])]]])))
+                          [:td (cell k v)]
+                          [:td {:class "pl-3 text-2xs text-text-500 whitespace-nowrap"} (made k)]])]]])))
 
 (defn- shown-as
   "How node nd's schema says it is shown on a page (:seon.render/as on its entity schema), else as a tile."

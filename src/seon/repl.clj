@@ -439,23 +439,28 @@
   ([code] (eval-string code {:origin :model}))
   ([code req]
    (let [answers (volatile! [])
-         handle (symbol "result" (str "e" (eval-n!)))]
-     (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
-           ;; printing is inside the boundary: a value that throws as it is realized is the error
-           [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
-                         (answered)
-                         (catch Throwable e
-                           (let [em (agent/error-map e)]
-                             (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
-                             (answered))))
-           recorded (into [] (mapcat :recorded) @answers)]
-       (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-       ;; the screen's responses are replaced each request: no later response reads them
-       (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
-       ;; the handle a printed cut reads through, as the REPL's *1 is read
-       (intern (create-ns 'result) (symbol (name handle)) r)
-       (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
-                code req)))))
+         handle (symbol "result" (str "e" (eval-n!)))
+         ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
+         ;; eval inside it (the screen's, a context read's) names its own, then this one's again
+         outer (:eval @agent/state)]
+     (swap! agent/state assoc :eval (name handle))
+     (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
+                ;; printing is inside the boundary: a value that throws as it is realized is the error
+                [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                              (answered)
+                              (catch Throwable e
+                                (let [em (agent/error-map e)]
+                                  (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
+                                  (answered))))
+                recorded (into [] (mapcat :recorded) @answers)]
+            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+            ;; the screen's responses are replaced each request: no later response reads them
+            (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
+            ;; the handle a printed cut reads through, as the REPL's *1 is read
+            (intern (create-ns 'result) (symbol (name handle)) r)
+            (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
+                     code req))
+          (finally (swap! agent/state assoc :eval outer))))))
 
 (defn draw
   "Value v drawn as HTML by the render its schema k names on this branch (root's render proc asks:
