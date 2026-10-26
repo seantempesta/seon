@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [seon.ctx]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.screen :as screen] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -60,12 +60,12 @@
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the
   wiki sections, program functions and schema keys nearest it by its references and by meaning,
-  :seon.config.render/related of each (seon.context/related), as the agent's record derives it
-  for its live run (@ctx's [:runs id :related], seon.ctx/derived: computed again only when what
-  it reads changes), each a line at summary depth with the forms that read one whole and search
-  further (seon.context/related-view). (my.agent/related \"words\" k) refines it by any text."
+  :seon.config.render/related of each (seon.context/related, a render over the plan's vectors),
+  each a line at summary depth with the forms that read one whole and search further
+  (seon.context/related-view). (my.agent/related \"words\" k) refines it by any text."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (if-let [r (get-in @seon.ctx/ctx [:runs (get-in @agent/state [:turn :run]) :related])]
-    (or (context/related-view (agent/db) r) {:nothing "nothing nearer the plan than what it cites"})
-    {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"}))
+  (let [db (agent/db)]
+    (if-let [r (some->> (current) :seon.task/id (pdb/eid db :seon.task/id) (context/related db))]
+      (or (context/related-view db r) {:nothing "nothing nearer the plan than what it cites"})
+      {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"})))

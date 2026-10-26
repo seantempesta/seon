@@ -185,24 +185,25 @@
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
 (defn view
-  "An agent's held record ({:tree c :born}, seon.ctx/build's: c is @ctx, born each member's first
-  transaction) as its parts, in order: [:task], the stage's story (its run's derived :story,
-  seon.context/run-state as of t: the task, what it cites, what to prove), else the task's relevant
-  keys; [:related], the sections, functions and schema keys nearest its plan (the run's derived
-  :related) when there are any; [:proofs], each
+  "An agent's held record ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its
+  parts, in order, with the renders fs that read the db beside it ({:story :related :first-t},
+  each over the branch's db as of the record's t: seon.context/story, related and first-t):
+  [:task], the stage's story ((:story fs) of the task: the task, what it cites, what to prove),
+  the page drawing the task's relevant keys; [:related], the sections, functions and schema keys
+  nearest its plan ((:related fs) of the task entity) when there are any; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
   rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (their first transactions). Each part names the members of c it was made from
-  (:from), so a part made again from the same members is drawn from the memo (drawn). Pure in the record:
-  it reads no db and no config. What a
+  the order they were written (their first transactions, (:first-t fs)). Each part names the members of c it was made from
+  (:from), so a part made again from the same members is drawn from the memo (drawn). It reads the
+  db only through fs, and no config. What a
   part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
   observation, the agent's own counters): a change without meaning is a data defect, fixed here."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:born :map]]] [:vector :seon.render/part]]}
-  [{c :tree :keys [born]}]
-  (let [t-of #(get born (:db/id %) 0)
+  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:story :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
+  [{c :tree} fs]
+  (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
         turn (last (sort-by :seon.turn/n (vals (:turns run))))
@@ -211,12 +212,13 @@
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj (if-let [story (:story run)]
-                             ;; the model reads the stage's story; the page draws the task, by its own render
-                             {:key [:task] :from [story task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))}
-                             {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))}))
-                (:related run) (conj {:key [:related] :from [(:related run)] :value (:related run)})
-                (seq (:seon.task/proofs task))
+        (cond-> task (conj (let [story ((:story fs) task)]
+                             ;; the model reads the stage's story; the page draws the task, by its own render.
+                             ;; Made from the story rendered now, a new value each view: drawn again every
+                             ;; time, so never stale (memoizing it by story-key is an optimization to come)
+                             {:key [:task] :from [story task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
+        (as-> ps (if-let [rel (and task ((:related fs) (:db/id task)))] (conj ps {:key [:related] :from [rel] :value rel}) ps))
+        (cond-> (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
                                                                 [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
@@ -226,7 +228,7 @@
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
                 {:key [k] :from [(get c k)] :value (get c k) :schema k}))
-        ;; in the order written: each member's first transaction (ctx's :born), then its key
+        ;; in the order written: each member's first transaction (first-t), then its key
         (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [[(t-of e) (:seon.eval/id e)] (entry :eval e)])
                                                   (for [t (vals (:turns run))] [[(t-of t) (:seon.turn/id t)] (entry :turn t)])
                                                   (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)])))))))
