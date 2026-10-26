@@ -1,6 +1,6 @@
 # One derivation, joint design: five functions (revision 2)
 
-Agent view with ctx-atom, for root's second review. It implements the owner's narrowing in `notes/one-derivation-2026-10-26.md` ("Narrowed to the implementation") and root's rulings on the first review (`notes/one-derivation-joint-design-review-2026-10-26.md`). It replaces revision 1's "the model reads a print of the page": the owner withdrew that ("html(ctx) will remove details that the agent needs"), and with it went revision 1's theme map in the text, render markers, wrapper elision, hiccup as a printer kind, the chat-part call form, `:changed` paths, `:seon.eval/replay?` and root's second ctx. Line numbers are main's at e622c0b1b.
+Agent view with ctx-atom, for root's second review. It implements the owner's narrowing in `notes/one-derivation-2026-10-26.md` ("Narrowed to the implementation") and root's rulings on the first review (`notes/one-derivation-joint-design-review-2026-10-26.md`). It replaces revision 1's "the model reads a print of the page": the owner withdrew that ("html(ctx) will remove details that the agent needs"), and with it went revision 1's theme map in the text, render markers, wrapper elision, hiccup as a printer kind, the chat-part call form, `:changed` paths, `:seon.eval/replay?` and root's second ctx. Since then, the owner's later rulings: evals run once, there is no replay, and what changed between turns comes as one "Since your last turn" message, with one meaning per role on the wire. Line numbers are main's at e622c0b1b.
 
 ## The chain
 ```
@@ -30,16 +30,17 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
 - **Takes:** the map from (1). For an agent, by default:
   - `[:task]`: the task, its plan and what it cites;
   - `[:run]`;
-  - `[:eval h]` for each replayed form's one eval entity (the forms in `:seon.agent/screen`), placed where the layout puts them; a replay changes the part's value, never its key or place;
+  - `[:proofs]`, `[:verdict]`: each proof's result as the turn's observe recorded it, and the done rule's verdict and reasons: facts in ctx, not evals;
+  - `[:merges]`: what main merged into the branch (`:seon.tx/merged`, ctx-atom's provenance);
+  - `[:related]`: the sections related to the task's plan, written as facts when the plan changes (related-sections' vectors), never an eval re-run;
   - `[:conversation n]`: one part per eval, message and turn in t order, each its record;
   - `[:side]`: root's agents, on root's page and the sidebar.
 
   Root's view and a task's view are view fns of their own entity's schema, each a few lines.
-- **One component kind, the eval, always live** (the owner, 2026-10-26: "evals are evals … keep the ctx updated so we are always rendering the db. The agents context and the users context are always live").
-  - A replayed form (listed in `:seon.agent/screen`, screen.clj:11; its eval marked `:seon.eval/by "screen"`, seon.facts.edn:123) has **one eval entity per form**. Each turn it is re-run and its new value is transacted onto that same entity, replacing the old value; the db's history keeps the old one.
-  - Every other eval is run once, and its value never changes.
-  - So there is no "as recorded" mode and no copy of an old value: every part renders the current db through ctx. Nothing is added to say which evals replay; the facts above already say it.
-  - What changes today: `seon.screen` writes a new eval entity (a new handle) for every screen form every turn. It upserts the form's one entity instead (slice 4).
+- **Evals run once** (the owner, 2026-10-26: "evals maybe should never be re-run (unless we are resuming a session)").
+  - An eval's record is written once and never changes. A re-run happens only when a session resumes, to rebuild its environment.
+  - There are no screen forms, no replay, and no `:seon.eval/by "screen"`: all of it is deleted. What used to be re-run (the task, its status, the branch's changes, related sections) is ctx data, so it changes when the db changes, and every part renders the current db.
+- **What is worth telling is declared once.** Each part view answers carries `:tell?`, a filter over ctx's changed parts. It is true for the task, proofs, verdict, run, merges, edits to what the task cites, and messages. It is false for the agent's own eval records, which come back as their tool answers. The filter is data in the view's output, overridden with the view.
 - **Replaces:**
   - the agent page's tile gathering, `seon.render.ui/agent` (ui.clj:1012, 70);
   - `chat`'s split into list and tiles (ui.clj:962, 50), `rows` (804, 11), `shown-as` (783, 5) and `tile-id` (841, 9);
@@ -72,14 +73,11 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
   - A part counts as unchanged for the model only while its last whole send is still readable above. A part the history cut dropped, or folded to its line, is sent whole again.
   - The task's open reasons are always sent whole.
   - A seen-value reference `(:out result/eN)` is used only for a part still readable.
-- **One patch mechanism for both** (the owner, 2026-10-26: "just updating the data in the db and having the updates be reflected in the context and the UI as diffs/patches"):
-  - A replay updates the eval in the db, and nothing moves.
-  - **The page:** that eval's part re-renders in place, as a Datastar patch by its key. An identical value sends nothing (the memo).
-  - **The model:** each request is the byte-identical prefix (everything sent before, never rewritten) plus this turn's diff of the db since the last request, keyed by part.
-    - A changed replayed eval appears in the diff as its new value, keyed to the same eval; an identical one does not appear.
-    - New conversation parts appear as added parts.
-    - A part whose earlier value fell under the history cut, or was folded to its line, is carried whole (rule 7).
-  - So there is no screen block rewritten at the end. The prefix holds because nothing sent is rewritten, and the diff is the only new text.
+- **One mechanism for "what changed"** (the owner: "How do we best inform the agent shit has changed between turns"; "Messages are also async and out of band so maybe it's a similar mechanism?"):
+  - **The page:** a changed part re-renders in place, as a Datastar patch by its key. An identical value sends nothing (the memo).
+  - **The model:** each request is the byte-identical prefix (everything sent before, never rewritten) plus one last message, "Since your last turn:". It lists the told parts that changed since the agent's last turn, and the messages taken from its inbox, which are just new ctx entries, in the order they happened (each change's t). Each entry names the change and its new value.
+  - A part whose earlier value fell under the history cut, or was folded to its line, is carried whole (rule 7).
+  - So there is no screen block at all. The prefix only grows, and the last message is the only new text the system writes.
 
 - **The memo is one per part:** `{key [f v out]}`, a hit when both the renderer value f (never its symbol, since a redefined fn re-renders) and the part value v are `identical?` (ruling 2). It is one pointer compare per part; there is no `:changed` set from the patch and no read-set index.
 - **Replaces:**
@@ -94,15 +92,15 @@ Today, the screen forms arrive as user messages shaped like evals (`{:by "screen
 | role | carries | changes |
 |---|---|---|
 | system | the rules: the help page | never |
-| user, first | the page as of the session's start: `[:task]`, `[:status]`, `[:changes]`, `[:related]`, …, each `[key]` then its ai text | never: the cached prefix |
+| user, first | the starting page at the session's start (or a resume): `[:task]`, `[:proofs]`, `[:verdict]`, `[:run]`, `[:related]`, …, each `[key]` then its ai text | never: the cached prefix |
 | assistant | prose plus eval tool calls: the agent's own evals, the only tool calls | appended |
 | tool | each call's answer | appended |
-| user, from a person | a message, labelled with its sender (`message from user:`, `message from root:`) | appended |
-| user, last each turn | "Changed since your last turn:", then each changed part `[key]` and its new ai text, a new conversation part, or a part sent whole because its base is out of view; "nothing" when nothing changed | appended, never rewritten |
+| user, one per turn | "Since your last turn:", then each told change and each message taken, in order, each naming its key or sender and its new value | appended, never rewritten |
 
-- A replayed form is no longer an eval the model sees, either as a call or as a user message. It is a part whose changes appear in the last message.
-- A stage switch is the `[:task]` part's new value in that message.
-- The page shows the same parts with the same keys.
+- Nothing else pretends to be an eval.
+- A message from a person is an entry in that last message, labelled with its sender.
+- A stage switch is the `[:task]` entry's new value.
+- The page shows the same changes, as patches.
 
 ### One recorded turn, both ways (a1, this worktree's root, its newest context read)
 Today, after the system prompt (538 tokens):
@@ -116,45 +114,36 @@ user  {:by "screen" :code "(my.task/related)" :response {:handle result/e52, :va
 ```
 This, after the same system prompt:
 ```
-user  Your page as of this session's start: each part is [key] and its value. Later, the last message of each turn lists only what changed.
+user  Your starting page: each part is [key] and its value. After this, each turn ends with one message, "Since your last turn", listing what changed.
       [:task]
       {:task #:seon.task{:kind :work, :id "seon.render/a-render-defect-…", :plan "Seen 2026-10-26 …"} …}
-      [:status] (my.task/status), kept current
-      {:proofs [{:test seon.render-test/… :status :pass}] …}
-      [:changes] (my.branch/changes), kept current
-      {}
-      [:related] (my.task/related), kept current
+      [:proofs]
+      {seon.render-test/a-view-that-throws-answers-its-page-with-the-error :pass}
+      [:run]
+      "#6 · running · turn 3 of 40"
+      [:related]
       {:read … :sections […]}
 …assistant / tool: the agent's own evals, as today…
-user  Changed since your last turn:
-      [:status] (my.task/status)
-      {:proofs [{:test seon.render-test/… :status :fail}] …}
+user  Since your last turn:
+      [:proofs] seon.render-test/a-view-that-throws-answers-its-page-with-the-error :pass → :fail (expected 1, got 2)
+      message from user: check the proofs before you merge
 ```
 
 | tokens (characters ÷ 3.2) | today | this |
 |---|---|---|
 | first send (story + screen) | 6,043 (4,545 + 1,498) | 5,362 |
-| each later turn, screen | 1,498 whole for a1; 4,458 as diffs on the recorded a-map model run | 12 when nothing changed; 92 when the status changed |
+| each later turn | 1,498 for a1's screen, whole; 4,458 as diffs on the recorded a-map model run | about 5 when nothing changed ("Since your last turn: nothing."); about 45 for a proof's change and a message |
 | the page's hiccup printed for the model | 672 per turn | 0 |
 
 The later-turn numbers for this design are the diff's text for a1's parts. A model run's numbers (turns to green, cache share, tokens per turn) are slice 4's to measure before merge.
 
-**What it deletes:**
-- the screen's eval-shaped user messages: `seon.context/screen-message` (591, 10) and the `{:by "screen" …}` entries `printed-run` folds;
-- the story's duplicate of the task: `run-message` (583, 8), now the `[:task]` part;
-- the per-turn print of the page, `seon.screen/show`.
-
-These are already in the deletion table. What's new is the last message's text (+10).
+**What it deletes:** the screen and everything it is made of. That is `seon.screen` (the forms, `show`, `last-screen`, `diff`), the screen forms' evaluation each turn (`seon.turn/screen!`), the `{:by "screen"}` user messages (`seon.context/screen-message` and `printed-run`'s screen branches), the `:screen` origin and the screen's round trip to root. It also deletes the story's duplicate of the task (`run-message`, now the `[:task]` part). The table below counts each. New: the "Since your last turn" message and the tell filter (+40).
 
 ## Where it runs: one render site (ruling 4)
 - **The agent renders its own page.** Its ctx and its render fns are in its process already. Root's page for an agent asks it for the parts' html (the `:render` op from ctx slice 1, `ask-draws` proc.clj:390). A parked agent answers (part 3).
 - **An agent with no process** is rendered by root from its record with main's defaults: the same `(ctx db e)` and `(view ctx)` on its branch, once, unpatched, with the structure render captioned "drawn with main's defaults". No second patched ctx lives in root.
 - **Root's own page** is root's ctx, rendered by root.
-- **The screen's per-turn round trip to root goes** (ruling 3; the review's −100): the agent evaluates its screen forms itself and renders their parts.
-  - `seon.agent/screen` (agent.clj:516, 14);
-  - the proc's `screen-view?` (539, 5), `drop-view` (544, 14), `screen-hiccup` (558, 22), `screen-of` (580, 9), `index-of` (589, 6) and `screen-due?` (595, 10);
-  - `seon.screen/show` (58, 12), `last-screen` (48, 10) and `input` (70, 7);
-  - the handlers at root.clj:399 and agent_proc.clj:222.
+- **The screen and its round trip to root go entirely:** there are no screen forms to evaluate.
 
 ## Messages and the user (ctx-atom's side, root's rulings)
 - **Root and the user are agent entities.** Each one's page is the chain over its own entity on main.
@@ -163,7 +152,7 @@ These are already in the deletion table. What's new is the last message's text (
   1. The owner's input becomes `/call` and then `message!`.
   2. A fact is written on main, in the user's ctx.
   3. The message reaches the agent's inbox.
-  4. The agent's next turn takes it before the screen and writes it on its branch, where it becomes a conversation part.
+  4. The agent's next turn takes it at the turn's start and writes it on its branch, a new ctx entry that appears in that turn's "Since your last turn".
   5. The agent's reply is written on its branch as a part.
   6. The agent renders the changed parts and root's page forwards them as Datastar patches.
 - **Missing today:** the write in step 4, `:from` as a ref, and root's eval line on its own page (root-as-one-system's slice).
@@ -176,12 +165,12 @@ Measured from a1's recorded request on this worktree's root. Each screen form's 
 | system | 502 | 502, the same |
 | the story / `[:task]` ai | 4,537 | 4,537, the same text |
 | `(seon.screen/show)`: the page's hiccup printed for the model | 546 | **0**: the model no longer reads the page; its `[:run]` part is about 30 |
-| `(my.task/status)` / `[:screen (my.task/status)]` | 101 | 101, the same print, with failures, done-rule reasons and turn count whole |
-| `(my.branch/changes)` | 27 | 27 |
-| `(my.task/related)` | 702 | 702 |
-| **screen total** | **1,376** | **≈ 860** |
+| `(my.task/status)` / `[:proofs]` and `[:verdict]` | 101 | about 100, the same facts (results with their failures, the done rule's reasons, the turn count) |
+| `(my.branch/changes)` / `[:merges]` | 27 | about 27 |
+| `(my.task/related)` / `[:related]` | 702 | 702 |
+| **starting page, past the story** | **1,376** | **≈ 860** |
 
-- **Nothing the agent needs is lost.** The model reads `my.task/status`'s own print; the page's proofs tile may collapse it (ui.clj:722 shows status and assert/got only). The owner's "html removes details" holds for the page alone, by design.
+- **Nothing the agent needs is lost.** The model reads the proofs' and verdict's facts in full; the page's proofs tile may collapse it (ui.clj:722 shows status and assert/got only). The owner's "html removes details" holds for the page alone, by design.
 - **Not measured:** a model agent under the chain, meaning turns to green, cache share and tokens per turn. Today's model-agent numbers are screen 11,848 whole and 4,458 as diffs, and the cut's shared prefix at 93.7%. Slice 4 measures these on a real run before it merges.
 - Revision 1's page-print numbers, from parsing HTML in Python, are withdrawn: the model does not read the page.
 
@@ -193,12 +182,12 @@ Deletions are measured function sizes on main. Additions are estimates, ±50%.
 | every page's walk: `walk`, `one`, `relevant`, `forward` (render.clj) | −97 |
 | the read-set index, `ready?`, `walk?` (proc.clj) | −139 |
 | `page-value` (proc.clj:251, 40) and `debug-value` (226, 25) | −65 |
-| the screen's round trip (agent.clj 14, proc.clj 66, screen.clj 29, the handlers at root.clj and agent_proc.clj 4) | −113 |
-| `seon.screen/diff`, `seon.context/as-diff` | −31 |
+| the screen and replay: `seon.screen` (75), `seon.turn/screen!` and its calls (16), `printed-run`'s and the request's screen branches (15), the `:screen` origin (2), `seon.agent/screen` (14), the proc's screen views (72), the handlers (4), the page's screen fold (13) | −211 |
+| `seon.context/as-diff` | −8 |
 | the request's assembly (`request`, `run-message`, `screen-message`, `turn-input`, `messages`, `records`, `render`) | −141 |
 | the debug read-back (`parts-of`, `sent-split`, `messages-tokens`, `story`) | −55 |
 | walk-driven layouts and the debug page (ui.clj: `agent`, `chat`, `rows`, `shown-as`, `tile-id`, `component`, `chat-part`, `page`, `tile`, `view`, `root`, `debug`, `debug-input`, `source`, `sent-parts-html`, `sent-request`, `root-context`) | −443 |
-| **deleted** | **≈ −1,084** |
+| **deleted** | **≈ −1,159** |
 
 | added | lines |
 |---|---|
@@ -209,25 +198,25 @@ Deletions are measured function sizes on main. Additions are estimates, ±50%.
 | a page as a layout of parts; one eval-part render; the debug page as parts' ai | +140 |
 | the request as the parts' ai, whole then diffs, with keys recorded per turn | +55 |
 | the agent renders its own parts; root forwards them; a gone agent with defaults | +60 |
-| a screen form's eval upserted on its one entity each turn | +10 |
+| "Since your last turn": told changes and messages in order | +40 |
 | `take!` writes the message; `:from` as a ref | +15 |
-| **added** | **≈ +530** |
+| **added** | **≈ +560** |
 
-**Net ≈ −550, within −290 to −820 given the additions' error.**
+**Net ≈ −600, within −320 to −880 given the additions' error.**
 - The review's −50 to −150 was for agent pages only, with revision 1's hiccup-print machinery added and the screen round trip left in.
-- This revision moves every page off the walk (slice 5), drops that machinery, and counts the round trip.
+- This revision moves every page off the walk (slice 5), drops that machinery, and deletes the screen whole.
 - The `:ai` faces in `seon.render.ai` are kept (ruling 1), so nothing is claimed there.
 
 ## The agents' help text
-> Your page is `(view @ctx)`: keyed parts, in order, sent to you whole at the start of your session. After that, the last message each turn is what changed: each changed part's key and its new value. Each part has two faces, html for the user and ai for you, and both default to the one printer, so any value reads well with no render. To change how a key looks on the page, register its schema with `{:seon.render/html f}` (f: value → hiccup); to change what you read, `{:seon.render/ai f}` (value → text); the layout is `:seon.ctx/ctx`'s view. Forms in `:seon.agent/screen` are kept current every turn; your tool calls are your own evals, and a message from a person says who sent it.
+> Your page is `(view @ctx)`: keyed parts, in order, sent to you whole at the start of your session. After that, each turn ends with one message, "Since your last turn": what changed (your task, proof results, verdicts, merges) and the messages people sent you, in the order they happened. Your tool calls are your own evals, and each runs once. Each part has two faces, html for the user and ai for you, and both default to the one printer, so any value reads well with no render. To change how a key looks on the page, register its schema with `{:seon.render/html f}` (f: value → hiccup); to change what you read, `{:seon.render/ai f}` (value → text); the layout is `:seon.ctx/ctx`'s view.
 
 **Its proof:** a fresh agent `swap!`s a key no schema names (a vector of maps). It reads a table in its text and sees one on the page. It then registers an html render for that key and sees it on the page at once, with its own text unchanged.
 
 ## Slices (each red then green, measured; owners per root's note)
 1. **ctx-atom:** `(ctx db e)` over any entity; the sharing proof (every path not changed stays `identical?`); order by first t.
 2. **agent view:** `(view ctx)` for an agent and `(html part)`/`(ai part)` with the budgeted html face; the agent page as a layout of parts, rendered in the agent and forwarded by root; the per-part memo. Browser-checked. Cost proof: a new eval renders one part.
-3. **related-sections:** `(diff prev next)` with rule 7, used by the page's patches and by the request's diff, one mechanism. Delete `seon.screen/diff` and `as-diff`.
-4. **agent view + related-sections:** the request as parts' ai, whole once then diffs; the screen round trip deleted; the debug page as parts' ai. Measured on a real model run (turns to green, cache share, tokens per turn) before merge.
+3. **related-sections:** `(diff prev next)` with rule 7 for the page's patches; "Since your last turn" from the told changes and the messages taken; `[:related]` written as facts when the plan changes. Delete `as-diff`.
+4. **agent view + related-sections:** the request as the starting page, then one "Since your last turn" per turn; `seon.screen`, the screen forms and replay deleted; the debug page as parts' ai. Measured on a real model run (turns to green, cache share, tokens per turn) before merge.
 5. **agent view:** every other page (root's, the user's, a task's, `/walk/<eid>`) as the chain over its entity. Delete the walk, the read-set index and the walk layouts.
 6. **agent loop:** `take!` writes the message; `:from` as a ref (the store erase, root's moment); the stage boundary as a conversation part.
 7. **root-as-one-system:** root and the user as agent entities; root's eval line.
