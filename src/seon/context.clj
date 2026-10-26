@@ -394,9 +394,10 @@
   rule refuses (regressions, stray reds, contract gaps), and a test run that failed as a whole;
   the branch's unmerged entries (base, ours, theirs); what its merge will carry to main; the
   wiki sections its changes made stale; the tests run; what happened to the last reply; turns
-  left. The messages delivered are the conversation's (`conversation`), not the block's."
+  left; and, for a task that merges itself, whether it can merge now. The messages delivered
+  are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention merge]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -422,6 +423,10 @@
       ;; owner D4: every change the branch's merge carries to main, every turn measured and
       ;; empty ({}) says so; absent only when not measured (a basis before D4)
       (some? will-merge) (assoc :will-merge will-merge)
+      ;; a task that merges itself (seon.task/merges?): ready when the done rule passes and
+      ;; merging main would conflict nowhere (seon.agent/merge-readiness); what main changed
+      ;; since the merge base is merged in at the green (seon.turn/work!), so it is shown, never a reason
+      merge (assoc :merge (assoc merge :ready (and (empty? reasons) (empty? (:conflicts merge)))))
       ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
       ;; branch changed), those the judge runs at the run's end, the process tests run only
       ;; when root asks (DECISIONS, Process tests are not automatic); a run its bound ended leaves

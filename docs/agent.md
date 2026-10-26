@@ -36,6 +36,7 @@ The turn's part, last, made again before each request:
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
 - `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
+- `:merge`: on a task that merges itself, whether it can merge now: `:main-moved`, what main changed since your branch's merge base; `:conflicts`, what merging main would leave unmerged (both sides changed it); `:ready`, true when the done rule refuses nothing and nothing would conflict. Once it is ready your run ends and root merges your branch, and main's tests judge it, those you removed included.
 - `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
 - `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (a shell, a fork, a root). Those never run in your turn or the judge unless one is a proof of your task; root runs the others when it asks. `(my.agent/deferred)` lists them, each with the process var it uses and the calls from the test to it; `(my.agent/prove)` answers the same under `:why`.
 - `:history`: how many earlier records the history budget left out of the conversation. Older records come collapsed before that: a result as its handle and its value in one line (`result/e12 ⇒ [0 1 2 …]`); evaluate the handle to read it whole.
@@ -52,6 +53,14 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 - A schema changes as a function does, on your branch: `(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])`; your next forms see it. To change an existing key, start from its form: `(get (my.schema/forms) :seon.task/task)`.
 - Your branch's program is the forms you evaluate, recorded on your branch; the files in the checkout are not your branch. Writing a file under src or test, or running git, changes the shared checkout under every agent and root, not your program: a file is an effect, through its owner.
 - An earlier response: ``result/e3``, or ``(my.agent/$ :e3)`` by its handle; the last value `*1`; the last error is `*e`, and ``(my.agent/pst)`` prints it with its causes.
+
+## ctx
+
+`@ctx` is your record as one map: your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process). It is kept current by a patch from each transaction you make, so a read is a deref and builds nothing; `(keys @ctx)` lists what it holds.
+
+- To see more or less of it, change its pattern: Datahike's pull syntax, held as data at `:seon.ctx/pattern`. `(:seon.ctx/pattern @ctx)` is your own edit (nil until you make one), and ``(swap! ctx assoc :seon.ctx/pattern [...])`` writes it; the record is built again by it (`(my.agent/help "docs/ctx.md#the-pattern")`). A window (your evals, a run's turns) holds the newest few, and a printed cut names the form that reads the rest.
+- To change something, `swap!` it as any atom: ``(swap! ctx assoc-in [path] value)``. The change is one transaction on your branch, each value checked by its schema, or it is refused with the error that says why and nothing is written: ``:seon.ctx/invalid`` (no schema, or a value its schema refuses), ``:seon.ctx/not-held`` (the db would not hold it), ``:seon.ctx/basis`` (the swap!'s function wrote the db itself, or wrote `:t`, `:branch` or `:commit`, which are read-only). A refused swap! is never retried.
+- What arrives each turn: your first request shows your page whole; each later turn shows what changed since your last, `{:page {part-key hiccup} :ctx {path [old new]}}`: the parts whose drawing changed, and each path of your record that changed and no part shows (old nil for what joined, new nil for what went; ``seon.ctx/diff``). An eval runs once, when you send it: nothing is evaluated again for you, and what changed is told.
 
 ## Finding your way
 

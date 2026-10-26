@@ -440,9 +440,11 @@
                        ;; its end refused by the done rule (the agent's own check, or root's facts
                        ;; that its branch did not show): words to the agent, a :verdict entry with
                        ;; what root judged on, which wakes the session; the same verdict twice holds
-                       ;; (start) (design one-derivation 4.1 section 5). A merge's holds, and
-                       ;; an outside agent's: it read the verdict as :done's answer, and no turn loop takes entries
-                       (and (not merge?) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
+                       ;; (start) (design one-derivation 4.1 section 5). A whole task's goes back to
+                       ;; its own session too (it merges itself, so it is told why it could not); a
+                       ;; merge task's holds, and an outside agent's: it read the verdict as :done's
+                       ;; answer, and no turn loop takes entries
+                       (and (not= :merge (:seon.task/kind t)) (not (outside? (:seon.run/env a))) (#{:green :red} (:seon.run/outcome a)))
                        {:op :verdict :run aid :task id :reasons rs}
                        :else
                        (failed aid id (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
