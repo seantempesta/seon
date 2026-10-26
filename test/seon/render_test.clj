@@ -1253,7 +1253,7 @@
 
 (deftest a-collection-keyed-by-id-prints
   ;; a collection of ctx (a join's members, keyed by their ids, newest first) holds no override key and no
-  ;; error type: its order is total over any key (seon.ctx's newest-first), so a keyword lookup answers nil
+  ;; error type: its order is total over any key (seon.ctx/members-map's comparator), so a keyword lookup answers nil
   ;; and every value holding one prints (a sorted map ordered by compare throws on that lookup instead)
   (let [[_ branch _] (paged-dbs)
         evals (:evals (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f)))]

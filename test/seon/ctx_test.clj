@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [clojure.test.check.generators :as gen] [clojure.string :as str] [clojure.walk :as walk]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -669,3 +669,96 @@
      :growth :constant
      :fixed {:calls 1}
      :sizes [100 1000 3000]}))
+
+;; ---- changes' bound, checked on generated records -----------------------------------------
+
+(defn- text "n letters, a function of seed." {:malli/schema [:=> [:cat :int nat-int?] :string]}
+  [seed n] (apply str (map #(char (+ 97 (mod (+ seed (* 7 %)) 26))) (range n))))
+
+(defn- members "Entities es as a collection: ctx's newest-first map by eid." {:malli/schema [:=> [:cat [:sequential :map]] :map]}
+  [es] (#'seon.ctx/members-map (mapv (juxt :db/id identity) es)))
+
+(defn- an-eval {:malli/schema [:=> [:cat nat-int? pos-int?] :map]} [i len]
+  {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by "a1"
+   :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))}
+                      :line (text i (min len 80)) :prose (text (inc i) len)}})
+
+(defn- record-of
+  "An agent's record shaped as ctx holds it: evals, and runs each with the task (held once, a
+  stub under the others) and its cited vars with their forms."
+  {:malli/schema [:=> [:cat [:map [:evals nat-int?] [:runs nat-int?] [:cites nat-int?] [:len pos-int?]]] :map]}
+  [{:keys [evals runs cites len]}]
+  {:db/id 1 :seon.agent/key "b/a1"
+   :evals (members (map #(an-eval % len) (range evals)))
+   :runs (members (for [r (range runs)]
+                    {:db/id (+ 100 r) :seon.run/id (str "demo/f#" r)
+                     :task (if (pos? r) {:db/id 50}
+                               {:db/id 50 :seon.task/id "demo/f" :seon.task/plan (text r (* 4 len))
+                                :cited (members (for [i (range cites)] {:db/id (+ 5000 i) :var/name (symbol "demo" (str "f" i)) :var/doc (text i 40)
+                                                                        :var/form {:db/id (+ 6000 i) :form/src (text (* 3 i) len)}}))})}))})
+
+(defn- edited
+  "Record t after edit [kind i], sharing every subtree it does not touch, as the patch does: a new
+  eval, an eval's line replaced, every eval's line replaced, the plan edited, a cited form
+  redefined, an eval gone; or an equal copy sharing nothing (a record built twice)."
+  {:malli/schema [:=> [:cat :map [:tuple :keyword nat-int?]] :map]}
+  [t [kind i]]
+  (let [ev (keys (:evals t)) cited (some-> (get-in t [:runs 100 :task :cited]) keys)]
+    (case kind
+      :new-eval (assoc-in t [:evals (+ 1900 i)] (an-eval (+ 900 i) 60))
+      :eval-edit (if (seq ev) (assoc-in t [:evals (nth ev (mod i (count ev))) :seon.eval/record :line] (text i 30)) t)
+      :plan (if (get-in t [:runs 100]) (assoc-in t [:runs 100 :task :seon.task/plan] (text (+ 7 i) 200)) t)
+      :cited (if (seq cited) (assoc-in t [:runs 100 :task :cited (nth cited (mod i (count cited))) :var/form :form/src] (text i 300)) t)
+      :all-evals (reduce (fn [t e] (assoc-in t [:evals e :seon.eval/record :line] (text (+ e i) 30))) t ev)
+      :rebuilt (walk/postwalk identity t)
+      :gone (if (seq ev) (update t :evals dissoc (nth ev (mod i (count ev)))) t))))
+
+(def records
+  "changes' arguments, generated: a record and the same record after 0 to 5 edits."
+  (gen/let [shape (gen/hash-map :evals (gen/choose 0 80) :runs (gen/choose 0 4) :cites (gen/choose 0 15) :len (gen/choose 10 400))
+            edits (gen/vector (gen/tuple (gen/elements [:new-eval :eval-edit :all-evals :plan :cited :gone :rebuilt]) gen/nat) 0 5)]
+    (let [t (record-of shape)] [t (reduce edited t edits)])))
+
+(defn changes-unskipped
+  "seon.ctx/changes without its identical? skip, under changes' own bound: every pair walked."
+  {:malli/schema [:=> [:cat :map :map] [:vector [:tuple [:enum :add :remove :replace] [:vector :any] :any]]]
+   :seon.cost/bound (fn [c0 c1] ((:seon.cost/bound (meta #'seon.ctx/changes)) c0 c1))}
+  [c0 c1]
+  (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
+        members? (fn [x] (and (map? x) (not (entity? x)) (every? entity? (vals x))))
+        walk (fn walk [acc p a b]
+               (cond (nil? a) (if (nil? b) acc (conj acc [:add p b]))
+                     (nil? b) (conj acc [:remove p nil])
+                     (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
+                     (reduce (fn [acc k] (walk acc (conj p k) (get a k) (get b k))) acc (distinct (concat (keys a) (keys b))))
+                     (= a b) acc
+                     :else (conj acc [:replace p b])))]
+    (vec (sort-by (fn [[_ p]] (str/join "\u0001" (map str p))) (walk [] [] c0 c1)))))
+
+(def ^:private changes-bound
+  {:of 'seon.ctx/changes :gen 'seon.ctx-test/records :cases 200
+   :n "a generated record and the same record after up to five edits sharing what they leave, or an equal copy sharing nothing"
+   :work "the walk's keys where the two sides are not the same object, each value compared there, each change and its sort"})
+
+(deftest changes-holds-its-bound-on-generated-records
+  ;; task seon.cost/a-contract-carries-its-cost-bound: the bound sketches the walk; a copy that
+  ;; skips nothing goes over it, so the proof can fail
+  (cost/proof changes-bound)
+  (let [{:keys [verdict]} (cost/run (assoc changes-bound :of 'seon.ctx-test/changes-unskipped))]
+    (is (not (:ok? verdict)) "the walk with no identical? skip is over changes' bound")
+    (is (some #(#{:ticks :bytes} (:dim %)) (:over verdict)) "over in a counted dimension")))
+
+(deftest changes-step-costs-are-current
+  ;; each step of seon.ctx/change-steps measured again on the case that isolates it, as the unit
+  ;; table is (seon.cost-test/the-unit-table-is-current): a bound priced from stale steps is red here
+  (let [m (fn [a b] (select-keys (cost/measure ctx/changes [a b]) [:ticks :bytes]))
+        t (record-of {:evals 0 :runs 0 :cites 0 :len 10})
+        per (fn [case a b] (let [x (case a) y (case b)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (double (- b a)))]))))
+        ;; a collection of n members re-made as a new map: n keys visited, nothing changed
+        keys-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
+        ;; n evals each changed
+        changes-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (edited t [:all-evals 1]))))
+        measured {:fixed (m t t) :key (per keys-at 100 1000) :change (per changes-at 100 1000)}]
+    (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
+      ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
+      (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
