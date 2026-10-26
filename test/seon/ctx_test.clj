@@ -767,13 +767,36 @@
         per (fn [case a b] (let [x (case a) y (case b)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (double (- b a)))]))))
         ;; a collection of n members re-made as a new map: n entries stepped past, nothing changed
         entries-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (update t :evals #(into (empty %) %)))))
-        ;; an entity of n attributes re-made as a new map: n keys visited, nothing changed
-        keys-at (fn [n] (let [e (into {:db/id 1} (map (fn [i] [(keyword "a" (str i)) (text i 10)])) (range n))] (m e (into {} e))))
+        ;; n members of two keys each re-made: n entity pairs walked into, each two entries and four keys
+        entities-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :a (str "v" i)}))}]
+                              (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        ;; n evals as the generator makes them, each rebuilt equal (walk/postwalk, as :rebuilt does):
+        ;; per member an entity pair, two entries, eight keys, and its :seon.eval/record compared by =
+        ;; (walk-of's size of it)
+        eq-at (fn [n] (let [t {:db/id 1 :evals (members (map #(an-eval % 30) (range n)))}]
+                        (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (walk/postwalk identity e)])) %)))))
+        rec-size (#'seon.ctx/walk-of {:db/id 1 :r (:seon.eval/record (an-eval 7 30))} {:db/id 1 :r (walk/postwalk identity (:seon.eval/record (an-eval 7 30)))})
+        ;; n members each holding a one-member collection re-made (the member itself kept): per member
+        ;; what a member holding a string costs, less two entries, plus a collection pair walked into
+        coll-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :c (members [{:db/id 0}])}))}]
+                          (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (update e :c (fn [c] (into (empty c) c)))])) %)))))
+        str-at (fn [n] (let [t {:db/id 1 :evals (members (for [i (range n)] {:db/id i :c "x"}))}]
+                         (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        ;; 300 members of k keys each re-made (small entities, array maps, as a record's members are):
+        ;; per key added, a key of each side visited
+        members-of (fn [k] (let [t {:db/id 1 :evals (members (for [i (range 300)] (into {:db/id i} (for [j (range (dec k))] [(keyword (str "a" j)) (str "v" i j)]))))}]
+                             (m t (update t :evals #(into (empty %) (map (fn [[i e]] [i (into {} e)])) %)))))
+        keys-per (let [x (members-of 2) y (members-of 6)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (* 300.0 4))])))
         ;; n evals each changed
         changes-at (fn [n] (let [t (record-of {:evals n :runs 0 :cites 0 :len 10})] (m t (edited t [:all-evals 1]))))
         side (fn [x] (update-vals x #(/ % 2)))
         ;; a key or an entry is a step of one side (walk-of counts both): half of each pair's
-        measured {:fixed (m t t) :key (side (per keys-at 100 1000)) :entry (side (per entries-at 100 1000)) :change (per changes-at 100 1000)}]
+        key (side keys-per) entry (side (per entries-at 100 1000))
+        entity (merge-with - (per entities-at 100 1000) (update-vals entry #(* 2 %)) (update-vals key #(* 4 %)))
+        measured {:fixed (m t t) :key key :entry entry :change (per changes-at 100 1000)
+                  :entity entity
+                  :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
+                  :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 8 %))) #(/ % (:eq rec-size)))}]
     (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))

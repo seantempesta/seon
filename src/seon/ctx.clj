@@ -568,14 +568,14 @@
   [c] (if (contains? c :tree) (:tree c) c))
 
 (defn- walk-of
-  "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :keys, the keys
-  of both sides of each entity pair that is not the same object (the root's environment left out,
-  as changes leaves it); :entries, the entries of both sides of each collection pair that is not
+  "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :entities,
+  each entity pair walked into; :collections, each collection pair walked into; :keys, the keys of both sides of each entity pair that is not the
+  same object (the root's environment left out, as changes leaves it); :entries, the entries of both sides of each collection pair that is not
   the same object, each stepped past; :eq, the elements compared by = where neither is walked
   into; :changes, what it answers. It restates changes' walk on purpose: a bound is the algorithm
   sketched beside it, and the walk's predicates stay local to it (a contracted helper would add an
   armed call to every key it visits)."
-  {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:entries nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
+  {:malli/schema [:=> [:cat :any :any] [:map [:entities nat-int?] [:collections nat-int?] [:keys nat-int?] [:entries nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
   [a b]
   (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
         collection? (fn [x] (and (map? x) (sorted? x)))
@@ -587,20 +587,23 @@
                    (or (nil? a) (nil? b)) (update acc :changes inc)
                    (and (entity? a) (entity? b) (= (:db/id a) (:db/id b)))
                    (let [ks (cond->> (distinct (concat (keys a) (keys b))) root? (remove (set environment-keys)))]
-                     (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :keys + (count a) (count b)) ks))
+                     (reduce (fn [acc k] (go acc false (get a k) (get b k))) (-> acc (update :entities inc) (update :keys + (count a) (count b))) ks))
                    (and (collection? a) (collection? b))
-                   (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :entries + (count a) (count b)) (distinct (concat (keys a) (keys b))))
+                   (reduce (fn [acc k] (go acc false (get a k) (get b k))) (-> acc (update :collections inc) (update :entries + (count a) (count b))) (distinct (concat (keys a) (keys b))))
                    :else (cond-> (update acc :eq + (min (size a) (size b))) (not= a b) (update :changes inc))))]
-    (go {:keys 0 :entries 0 :eq 0 :changes 0} true a b)))
+    (go {:entities 0 :collections 0 :keys 0 :entries 0 :eq 0 :changes 0} true a b)))
 
 (def change-steps
   "What each step of changes' walk costs, measured once with the contracts on, on a case that
-  isolates it (seon.ctx-test/changes-step-costs-are-current measures them again): the call itself,
-  an entity's key visited (at entities of 100 to 1,000 attributes), a collection's entry stepped past
-  (its sorted map's seq, and its key compared by =; at collections of 100 to 1,000 members), each a
-  step of one side, as walk-of counts them, an element compared by =, and a change (its tuple, and its path printed for the
-  sort, at 100 to 1,000 changes)."
-  {:fixed {:ticks 148.0 :bytes 1008.0} :key {:ticks 20.0 :bytes 42.0} :entry {:ticks 37.0 :bytes 194.0} :eq {:ticks 1.0 :bytes 0.0} :change {:ticks 3788.0 :bytes 30810.0}})
+  isolates it (seon.ctx-test/changes-step-costs-are-current measures them again), at 100 to 1,000
+  members: the call itself; an entity pair walked into (a member of two keys re-made, less its
+  entries and keys); a collection pair walked into (each side's seq begun: a member holding a
+  one-member collection re-made, less a string's member and two entries); an entity's key and a
+  collection's entry stepped past, each a step of one side as walk-of counts them (keys on members
+  of two to six keys, as a record's are); an element compared by = (the generator's eval records
+  rebuilt equal); and a change (its tuple, and its path printed for the sort)."
+  {:fixed {:ticks 148.0 :bytes 1008.0} :entity {:ticks 42.0 :bytes 192.0} :collection {:ticks 490.0 :bytes 1310.0}
+   :key {:ticks 20.0 :bytes 48.0} :entry {:ticks 37.0 :bytes 194.0} :eq {:ticks 2.0 :bytes 0.0} :change {:ticks 2462.0 :bytes 20697.0}})
 
 (defn- changes-bound
   "What one call of changes may cost on c0 and c1: its fixed part and each step of its walk
@@ -610,7 +613,8 @@
   (let [w (walk-of (tree-of c0) (tree-of c1))
         {:keys [fixed]} change-steps]
     (-> (into {} (for [d [:ticks :bytes]]
-                   [d (+ (get fixed d) (* (:keys w) (get-in change-steps [:key d])) (* (:entries w) (get-in change-steps [:entry d]))
+                   [d (+ (get fixed d) (* (:entities w) (get-in change-steps [:entity d])) (* (:collections w) (get-in change-steps [:collection d])) (* (:keys w) (get-in change-steps [:key d]))
+                         (* (:entries w) (get-in change-steps [:entry d]))
                          (* (:eq w) (get-in change-steps [:eq d]))
                          (* (:changes w) (get-in change-steps [:change d])))]))
         (assoc :out {:changes (:changes w)}))))
@@ -644,15 +648,15 @@
                      ;; two collections, each sorted by its members' ids in one order: their entries in
                      ;; step, a member that is the same object passed by with no path made
                      (and (collection? a) (collection? b))
-                     (let [cmp (.comparator a)]
-                       (loop [acc acc xs (seq a) ys (seq b)]
-                         (cond (nil? xs) (reduce (fn [acc y] (walk acc (conj p (key y)) nil (val y))) acc ys)
-                               (nil? ys) (reduce (fn [acc x] (walk acc (conj p (key x)) (val x) nil)) acc xs)
-                               :else (let [x (first xs) y (first ys) c (if (= (key x) (key y)) 0 (.compare cmp (key x) (key y)))]
-                                       (cond (neg? c) (recur (walk acc (conj p (key x)) (val x) nil) (next xs) ys)
-                                             (pos? c) (recur (walk acc (conj p (key y)) nil (val y)) xs (next ys))
-                                             (identical? (val x) (val y)) (recur acc (next xs) (next ys))
-                                             :else (recur (walk acc (conj p (key x)) (val x) (val y)) (next xs) (next ys)))))))
+                     (loop [acc acc xs (seq a) ys (seq b)]
+                       (cond (nil? xs) (reduce (fn [acc y] (walk acc (conj p (key y)) nil (val y))) acc ys)
+                             (nil? ys) (reduce (fn [acc x] (walk acc (conj p (key x)) (val x) nil)) acc xs)
+                             ;; the comparator read only where the keys differ (a host object made per read)
+                             :else (let [x (first xs) y (first ys) c (if (= (key x) (key y)) 0 (.compare (.comparator a) (key x) (key y)))]
+                                     (cond (neg? c) (recur (walk acc (conj p (key x)) (val x) nil) (next xs) ys)
+                                           (pos? c) (recur (walk acc (conj p (key y)) nil (val y)) xs (next ys))
+                                           (identical? (val x) (val y)) (recur acc (next xs) (next ys))
+                                           :else (recur (walk acc (conj p (key x)) (val x) (val y)) (next xs) (next ys))))))
                      (= a b) acc
                      :else (conj acc [:replace p b])))]
     (vec (sort-by (fn [[_ p]] (str/join "\u0001" (map str p))) (walk [] [] (tree-of c0) (tree-of c1))))))
