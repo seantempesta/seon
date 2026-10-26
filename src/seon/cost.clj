@@ -186,11 +186,12 @@
                            :let [{:keys [exponent allowed]} (growth e (toward-flat d) d)]
                            :when (and exponent (> exponent allowed))]
                        {:dim d :exponent exponent :allowed allowed}))
-        ;; the largest size, or the generated case whose bound is the greatest
-        largest (if (:cases e) (last (sort-by #(reduce + (vals (:expected %))) rows)) (peek rows))
+        ;; the largest size, or in each dimension the generated case whose bound is the greatest there
+        largest-in (fn [d] (if (:cases e) (last (sort-by #(get-in % [:expected d] 0.0) rows)) (peek rows)))
+        largest (peek rows)
         under (vec (for [d dimensions :when (dims d)
-                         :let [q (when largest (ratio largest d))] :when (and q (< q loose))]
-                     {:dim d :n (:n largest) :ratio q}))
+                         :let [l (largest-in d) q (when l (ratio l d))] :when (and q (< q loose))]
+                     {:dim d :n (:n l) :ratio q}))
         unmeasured (vec (for [d dimensions :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
         held? (when-let [{:keys [measured]} (:overrun e)]
                 (and largest (every? (fn [[d m]] (or (not (exact d)) (<= (get-in largest [:measured d] 0.0) (* ratchet m)))) measured)))
@@ -274,18 +275,28 @@
   of its answer a caller's bound passes on. Its terms are the algorithm's steps, each step's cost
   measured once (docs/cost.md#a-bound-in-the-contract)."
   {:malli/schema [:=> [:cat :qualified-symbol] :seon.host/fn]}
-  [sym] (:seon.cost/bound (meta (requiring-resolve sym))))
+  [sym]
+  (or (:seon.cost/bound (meta (requiring-resolve sym)))
+      (throw (ex-info (str sym " carries no :seon.cost/bound")
+                      (contract/error :seon.cost/no-bound #'bound (str sym " carries no :seon.cost/bound beside its :malli/schema")
+                                      {:seon.error/fix (str "Add :seon.cost/bound (fn [& args] {:ticks :bytes :out}) to " sym "'s attribute map.") :var sym})))))
+
+(def case-sizes
+  "The sizes generated cases are drawn at, case i at (mod i case-sizes): test.check's own range,
+  0 to 100, so a run of 100 cases or more reaches every size once."
+  101)
 
 (defn cases
   "The argument vectors a generated estimate measures its function on: :cases of them from :gen
   (the var of a test.check generator of argument vectors), else from the function's contract
-  (malli's generator of its input), at sizes spread over 0 to 100 and the running test's seed
-  (seon.proofs/test-seed, a function of its reach digest): the same code draws the same cases."
+  (malli's generator of its input), at sizes spread over case-sizes and the running test's seed
+  (seon.proofs/test-seed, a function of its reach digest: the same code draws the same cases;
+  outside a test, the seed of no test, still the same each call)."
   {:malli/schema [:=> [:cat :seon.cost/generated] [:vector [:vector :any]]]}
   [{:keys [of cases] g :gen}]
   (let [g (if g @(requiring-resolve g) (mg/generator (first (m/children (contract/schema (:malli/schema (meta (requiring-resolve of))))))))
         seed (proofs/test-seed)]
-    (mapv #(vec (gen/generate g (mod % 101) (+ seed %))) (range cases))))
+    (mapv #(vec (gen/generate g (mod % case-sizes) (+ seed %))) (range cases))))
 
 (defn run
   "Estimate e measured: its function on its input at each size (sizes, under
@@ -298,13 +309,14 @@
         ;; each point measured: a size and its input built outside the measure, or a generated
         ;; case and its arguments, the contract's bound on them its estimate
         points (if (:cases e)
-                 (let [b (bound (:of e))] (map-indexed (fn [i args] [(inc i) (delay args) #(select-keys (apply b args) dimensions)]) (cases e)))
+                 (let [b (bound (:of e))] (map-indexed (fn [i args] [(inc i) args #(select-keys (apply b args) dimensions)]) (cases e)))
                  (let [input @(requiring-resolve (:input e))]
                    (map (fn [n] [n (delay (vec (input n))) #(expected e units n)]) (sizes (:sizes e) (config/value :seon.config.proofs/cost-max-n)))))]
     (loop [[[n args allowed] & more] points rows []]
       (if (nil? n)
         {:rows rows :verdict (judge e rows)}
-        (let [row (cond-> {:n n :measured (measure f @args) :expected (allowed)} (:cases e) (assoc :args @args))
+        (let [args (force args)
+              row (cond-> {:n n :measured (measure f args) :expected (allowed)} (:cases e) (assoc :args args))
               rows (conj rows row)]
           (if (and (nil? (:overrun e)) (not (:ok? (judge e [row]))))
             {:rows rows :verdict (judge e rows)}
@@ -352,7 +364,7 @@
         line (fn [{:keys [n measured expected]}]
                (str n ": " (str/join "  " (for [d dims :let [m (get measured d) x (get expected d)]]
                                             (str (num-text m) "/" (num-text x)
-                                                 (when (and m (pos? x)) (format " (%.2fx)" (/ m x))))))))
+                                                 (when m (if (pos? x) (format " (%.2fx)" (/ m x)) (when (pos? m) " (inf x)"))))))))
         ratios (fn [d] (sort (keep (fn [{:keys [measured expected]}] (let [m (get measured d) x (get expected d)] (when (and m x (pos? x)) (/ m x)))) rows)))
         over (set (map :n (:over v)))]
     (str/join "\n"
@@ -377,7 +389,7 @@
   (let [{:keys [rows verdict]} (run e)]
     (t/do-report {:type (if (:ok? verdict) :pass :fail)
                   :message (explain e rows verdict)
-                  :expected (list 'within-estimate (:of e) (:growth e :bound))
+                  :expected (if (:cases e) (list 'within-bound (:of e)) (list 'within-estimate (:of e) (:growth e)))
                   :actual {:rows rows :verdict verdict}})
     verdict))
 

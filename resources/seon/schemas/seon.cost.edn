@@ -28,8 +28,9 @@
                        ;; how many cases, and the var of a test.check generator of argument vectors
                        ;; (none: the contract's input, by malli's generator)
                        [:cases pos-int?]
-                       [:gen {:optional true} :qualified-symbol]
-                       [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
+                       [:gen {:optional true} :qualified-symbol]]
+ ;; a generated estimate of a function whose contract carries no bound (seon.cost/bound)
+ :seon.cost/no-bound [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/no-bound]] [:var :qualified-symbol]]]
  :seon.cost/sized [:map {:closed true}
                       ;; the function measured, and the function of n answering its argument vector
                       [:of :qualified-symbol]

@@ -570,8 +570,11 @@
 
 (defn- walk-of
   "The steps changes takes from a to b, sketched as its walk goes (its bound's terms): :keys, the keys
-  of both sides of each entity or collection pair that is not the same object; :eq, the elements
-  compared by = where neither is walked into; :changes, what it answers."
+  of both sides of each entity or collection pair that is not the same object (the root's
+  environment left out, as changes leaves it); :eq, the elements compared by = where neither is
+  walked into; :changes, what it answers. It restates changes' walk on purpose: a bound is the
+  algorithm sketched beside it, and the walk's predicates stay local to it (a contracted helper
+  would add an armed call to every key it visits)."
   {:malli/schema [:=> [:cat :any :any] [:map [:keys nat-int?] [:eq nat-int?] [:changes nat-int?]]]}
   [a b]
   (let [entity? (fn [x] (and (map? x) (contains? x :db/id)))
@@ -579,25 +582,34 @@
         size (fn size [x] (cond (map? x) (reduce-kv (fn [n k v] (+ n 1 (size k) (size v))) 0 x)
                                 (coll? x) (reduce (fn [n v] (+ n 1 (size v))) 0 x)
                                 :else 1))
-        go (fn go [acc a b]
+        go (fn go [acc root? a b]
              (cond (identical? a b) acc
                    (or (nil? a) (nil? b)) (update acc :changes inc)
                    (or (and (entity? a) (entity? b) (= (:db/id a) (:db/id b))) (and (members? a) (members? b)))
-                   (reduce (fn [acc k] (go acc (get a k) (get b k))) (update acc :keys + (count a) (count b)) (distinct (concat (keys a) (keys b))))
+                   (let [ks (cond->> (distinct (concat (keys a) (keys b))) root? (remove (set environment-keys)))]
+                     (reduce (fn [acc k] (go acc false (get a k) (get b k))) (update acc :keys + (count a) (count b)) ks))
                    :else (cond-> (update acc :eq + (min (size a) (size b))) (not= a b) (update :changes inc))))]
-    (go {:keys 0 :eq 0 :changes 0} a b)))
+    (go {:keys 0 :eq 0 :changes 0} true a b)))
+
+(def change-steps
+  "What each step of changes' walk costs, measured once with the contracts on, on a case that
+  isolates it (seon.ctx-test/changes-step-costs-are-current measures them again): the call itself,
+  a key visited (sorted gets through the members' comparator, the members? scan, distinct over
+  concat; at collections of 100 to 1,000 members), an element compared by =, and a change (its
+  tuple, and its path printed for the sort, at 100 to 1,000 changes)."
+  {:fixed {:ticks 148.0 :bytes 1008.0} :key {:ticks 927.0 :bytes 2980.0} :eq {:ticks 1.0 :bytes 0.0} :change {:ticks 3788.0 :bytes 30810.0}})
 
 (defn- changes-bound
-  "What one call of changes may cost on c0 and c1: its fixed part, and each step of its walk
-  (walk-of) at that step's cost, each measured once on a case that isolates it (docs/cost.md#a-bound-in-the-contract): a key 927 ticks and 2,980 B (sorted gets through
-  the members' comparator, the members? scan, distinct over concat), an element compared 1 tick, a
-  change 3,788 ticks and 30.8 KB (its tuple, and its path printed for the sort). :out, how many changes."
+  "What one call of changes may cost on c0 and c1: its fixed part and each step of its walk
+  (walk-of), each at its measured cost (change-steps). :out, how many changes it answers."
   {:malli/schema [:=> [:cat :map :map] [:map [:ticks number?] [:bytes number?] [:out [:map [:changes nat-int?]]]]]}
   [c0 c1]
-  (let [{:keys [keys eq changes]} (walk-of (tree-of c0) (tree-of c1))]
-    {:ticks (+ 148.0 (* 927.0 keys) (* 1.0 eq) (* 3788.0 changes))
-     :bytes (+ 1008.0 (* 2980.0 keys) (* 30810.0 changes))
-     :out {:changes changes}}))
+  (let [w (walk-of (tree-of c0) (tree-of c1))
+        {:keys [fixed]} change-steps]
+    (-> (into {} (for [d [:ticks :bytes]]
+                   [d (+ (get fixed d) (* (:keys w) (get-in change-steps [:key d])) (* (:eq w) (get-in change-steps [:eq d]))
+                         (* (:changes w) (get-in change-steps [:change d])))]))
+        (assoc :out {:changes (:changes w)}))))
 
 (defn changes
   "What changed from record (or map) c0 to c1, as data in the record's own shape: [[op path value]
