@@ -34,17 +34,18 @@
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage stories (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
-  {:design (str "Your task: turn the plan below, however rough, into a plan the implement "
+  {:design (str "Your task: turn the plan below into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
                 "backticks, and the proofs that will show the change are written, registered "
                 "and red for the reason the plan gives. You do it at the REPL, proof first: reproduce what the plan says is wrong "
-                "as a deftest, evaluated in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your "
-                "branch's program, so you write no file), register it (``(my.task/update! :seon.task/proofs conj "
+                "as a deftest, evaluated in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is "
+                "your branch's program, so you write no file), register it (``(my.task/update! :seon.task/proofs conj "
                 "'ns.x-test/a-proof)``) and run it red. Then read what the change touches (``(clojure.repl/source ns/f)``; "
-                "``(clojure.repl/source ns)`` lists its every definition; ``(my.agent/callers 'ns/f)``). Leave each new function's defn with its contract and a stub body, each new "
-                "schema registered, a cost proof (``seon.cost/proof``) for a function whose input grows, and the plan rewritten "
-                "with ``(my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: \" \"<each function and what it does then>\")``. "
-                "Do not write the bodies: they are the implement step's. Then end your turn with prose.")
+                "``(clojure.repl/source ns)`` lists its every definition; ``(my.agent/callers 'ns/f)``). Once the proof is red, write the plan: "
+                "``(my.task/update! :seon.task/plan str \"\\n\\nWhat the implement step changes: \" \"<each function and what it does then>\")``, "
+                "with each new function's defn, its contract and a stub body, each new schema registered, and a cost proof "
+                "(``seon.cost/proof``) for a function whose input grows. Do not try the fix: the implement step makes it, from "
+                "your red proof. Then end your turn with prose.")
    :implement (str "Your task: make the change the plan describes. You are done when every proof passes, the cost proofs "
                    "included. You do it by redefining the functions the plan cites, in their own namespaces, keeping their "
                    "contracts, and running the proofs (`(my.task/status)` shows how) until they are green. Never loosen a "
