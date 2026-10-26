@@ -16,13 +16,15 @@ What each working session is doing now and takes next; every session is linked t
 
 | Session | Now | Next |
 |---|---|---|
-| **Agent view** | revision 4.2 (jolt/design-rev42); stopped from building a projection the owner ruled out; measuring the unprojected page against 6,043 tokens | after root's go: delete `:seon.render/ai` and the ai faces; the request reads the page and the two diffs |
-| **ctx-atom** | jolt/ctx-atom (WIP): derived members deleted, ctx is the pull patched; task data, related and first-t as renders' keys; `:seon.vector/text-t` indexed in place | the turn's ctx diff as a pure (diff ctx0 ctx1) |
-| **Agent loop** | slice 6′: a person's messages and root's stages as entries read from main; a red verdict wakes on new reasons; tests running | the busy-with-no-process defect (filed to it) |
-| **Root as one system** (stability lead), top priority | the fork server's boot order (root requires every namespace, then forks the fork server before any thread starts), on jolt/zygote-one-mode; its run found a lost fork server leaving fork requests unanswered and Jolt's zip reader hiding errors, both being fixed | one mode for forking processes |
-| **full-run-reds** | jolt/an-asker-records-its-effects-error-once: each root asker records its outcome and error in one transaction | the next full run on a clean main |
-| **Live agents** | jolt/one-go: whole-task runs (fix 62cd450f8, queued) against the staged run (3 of 10 merged, 88.6% cached) | measure each one-derivation slice |
-| Related sections (idle) | its slice 3 and 4b work is superseded by revision 4.2 | archive, owner's call |
+| **full-run-reds** | build 0: the three Jolt gaps the ratom port found (sorted?/subseq on a deftype, reset!/swap!/add-watch through IAtom/IRef, a volatile-mutable field in a map literal), on a jolt/ branch | the next full run on clean main |
+| **Agent view** | build 1: every render as [f opts & children], lists keyed by eid | build 3: the ratom (Reagent's, cursors inferred), the walk, one cache, the per-render ledger, the print boundary, keyed appends |
+| **ctx-atom** | Datahike's as-of order (jolt/time-pred-order) | build 2: the pattern in ctx, the pattern-driven patch, symbols resolved by lookup ref, newest-first windows; the task held once; bookkeeping off the agent's data |
+| **Related sections** | idle | build 4: the model's request from the page and the two diffs; today's per-turn rebuild deleted |
+| **Agent loop** | 6′ (messages and stages from main, a red verdict wakes on new reasons, opened evals and run status by take!) | :cap recorded as :cap; the busy-with-no-process defect |
+| **Root as one system** (stability lead) | the fork server's boot order; a dead fork server answers its waiters; Jolt's zip errors reach the caller | one process mode |
+| **Live agents** | the default request as design-build plus merge (staged kept for experiments) | the next live run, after agent loop's :cap fix |
+
+The render build follows notes/render-design-2026-10-26.md (owner's go, 2026-10-26: "build it however you think is best"), in small branches measured against the lab's numbers (notes: render-investigation-2026-10-26.md).
 
 ## Waiting on the owner
 
