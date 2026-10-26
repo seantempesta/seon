@@ -633,8 +633,8 @@
   (let [r (print/print-value (select-keys block task-keys) {:handle '(my.task/data) :budget (:context print/budgets)})]
     (str "Your task and what it cites, the same for this whole run:\n" (or (:text r) (:seon.error/message r)))))
 
-(defn- screen-message
-  "The turn sections of block (everything but the run's), printed under the
+(defn- state-message
+  "The turn sections of block (everything but the task's), printed under the
   context's budget, with how many earlier turns the history budget left out. Sent last, and
   replaced by the next request's."
   {:malli/schema [:=> [:cat :map :int] :string]}
@@ -644,15 +644,14 @@
                                            (:context print/budgets))))
 
 (defn page
-  "Agent entity a's page as its model reads it on db (its branch as of a turn's commit), with its
-  record: [c page], c the record seon.ctx/build makes, page the :task region of render-ctx
-  (seon.render/render-ctx), each part's hiccup exactly as its render returned it, by key, in order:
-  the same hiccup the person's page shows (seon.repl/page draws it through this process's memo)."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:tuple :map :map]]}
-  [db a]
-  (let [c (ctx/build db a (:seon.agent/branch (d/entity db a)))]
-    [c (apply array-map (mapcat (fn [p] [(:key p) (:html (render/part-faces p))])
-                                (filter #(= :task (:region % :task)) (render/html c (assoc (renders db) :schema :seon.render/render-ctx)))))]))
+  "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
+  commit): the :task region of render-ctx (seon.render/render-ctx), each part's hiccup exactly as
+  its render returned it, by key, in order: the same hiccup the person's page shows (seon.repl/page
+  draws it through this process's memo)."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
+  [db c]
+  (apply array-map (mapcat (fn [p] [(:key p) (:html (render/part-faces p))])
+                           (filter #(= :task (:region %)) (render/html c (assoc (renders db) :schema :seon.render/render-ctx))))))
 
 (defn- told?
   "Is ctx path p told to the model elsewhere: by its transcript (an eval's record, its turns and
@@ -674,13 +673,15 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
   (let [at #(d/commit-as-db db %)
-        [r1 p1] (page (at c1) a)
+        branch (:seon.agent/branch (d/entity db a))
+        db1 (at c1)
         v (if (nil? c0)
-            {:page p1}
-            (let [db0 (at c0) [r0 p0] (page db0 a)
+            {:page (page db1 (ctx/build db1 a branch))}
+            ;; the record at c0, built, then advanced to c1 by what the two commits differ by: one build
+            (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
+                  p0 (page db0 r0) p1 (page db1 r1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
-                  dc (into (sorted-map-by #(compare (str %1) (str %2)))
-                           (remove (comp told? key)) (ctx/diff r0 (ctx/advance r0 db0 (at c1) (:seon.agent/branch (d/entity db a)))))]
+                  dc (into (sorted-map-by #(compare (str %1) (str %2))) (remove (comp told? key)) (ctx/diff r0 r1))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 
@@ -720,7 +721,7 @@
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help help-ref printed]}]
   (if-not a
-    {:messages [{:role "system" :content help} {:role "user" :content (task-message block)} {:role "user" :content (screen-message block 0)}]
+    {:messages [{:role "system" :content help} {:role "user" :content (task-message block)} {:role "user" :content (state-message block 0)}]
      :printed {} :sent nil}
     (let [e (:db/id a)
           model? (= :model (:origin basis))

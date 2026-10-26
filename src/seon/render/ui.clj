@@ -854,13 +854,8 @@
   :sides [{:eid :db}] :focus id}: focus, whose page it is (:root, an agent's id), the top bar's
   toggle to what its model reads."
   {:malli/schema [:=> [:cat :seon.render/walk :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides folded focus]}]
-  ;; the screen's evals are the system's, folded into their turn (chat-part), not parts of their own:
-  ;; opts :folded, their entities (by their :seon.eval/by, read from its index: every row alike,
-  ;; those the walk listed without reading them too)
-  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))
-                              (not (contains? (or folded #{}) (:seon.render/eid %))))
-                        nodes)
+  [{:seon.render/keys [root nodes]} {:keys [shown view input open sides focus]}]
+  (let [listed (filterv #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         tiles (remove #(and (= :entity (:seon.render/kind %)) (= :row (shown-as %))) nodes)
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
@@ -919,6 +914,20 @@
   [:section {:class "tile"} [:h2 {:class "kicker"} (str "cites " var)]
    (when-let [db (:db opts)] (render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)}))])
 
+(defn status
+  "What the newest model turn of the task observed (the declared html render of
+  :seon.render/status), as (my.task/status) answers it: seon.context/turn-state over the turn's
+  recorded basis (seon.context/turn-input, with the turn before it for its last reply) on opts
+  :db, drawn by the one printer."
+  {:malli/schema [:=> [:cat :seon.render/status :seon.render/opts] :any]}
+  [{:keys [task turn last]} opts]
+  (when-let [db (:db opts)]
+    (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] turn))
+          lst (when last (d/pull db [:seon.turn/truncated :seon.turn/calls] last))]
+      [:section {:class "tile"} [:h2 {:class "kicker"} "status"]
+       (render/html (context/turn-state db (task/task db task) (context/turn-input db b lst))
+                    {:budget (config/value :seon.config.render/value-budget)})])))
+
 (defn related
   "What the task's plan is likely to need beyond what it cites (the declared html render of
   :seon.render/related): seon.context/related over opts :db, drawn by the one printer; a line
@@ -954,8 +963,8 @@
     ;; whose drawing the page is: a unit, so the line goes when the agent's own parts arrive
     :caption [:p {:id (:unit opts) :class "text-2xs text-text-500"} (h/raw html)]
     [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
-     ;; a key the agent added, or the verdict, is named; the task's, the proofs' and the run's renders name themselves
-     (when (or (qualified-keyword? (first key)) (= [:verdict] key)) [:h2 {:class "kicker"} (str/join " " (map kname key))])
+     ;; a key the agent added is named; the task's, the status' and the run's renders name themselves
+     (when (qualified-keyword? (first key)) [:h2 {:class "kicker"} (str/join " " (map kname key))])
           (h/raw html)]))
 
 (defn parts-page
@@ -1182,7 +1191,7 @@
   request (:added, each part beside the record that made it), a line naming what it sends as the
   turn before it in its run did (:same), and its whole request in a <details> that is rendered
   only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
-  tokens went (:split, seon.context/sent-split of its parts: system, conversation, screen). input {:turn
+  tokens went (:split, seon.context/sent-split of its parts: system, conversation, page). input {:turn
   :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
   (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}

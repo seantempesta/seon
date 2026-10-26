@@ -111,6 +111,8 @@
  ;; the task, drawn as the task's data (seon.context/task-data over the db), and its related
  :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
  :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
+ ;; what the newest model turn observed (seon.render.ui/status over its basis): the task, the turn, the one before it
+ :seon.render/status [:map {:seon.render/html seon.render.ui/status} [:task :seon.task/id] [:turn pos-int?] [:last {:optional true} pos-int?]]
  ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)
  :seon.render/cited [:map {:seon.render/html seon.render.ui/cited} [:var :symbol]]
  :seon.render/faces [:map [:html {:optional true} :any] [:inline {:optional true} :any]]

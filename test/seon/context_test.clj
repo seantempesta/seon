@@ -357,10 +357,11 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(str/includes? (:content (second r0)) %) ["{:page" "[:task :cites demo/f]" "Doubles." "[:proofs]"]) "the page whole, by part key")
+        (is (every? #(str/includes? (:content (second r0)) %) ["{:page" "[:task :cites demo/f]" "Doubles." "[:status]" "1 of 4"]) "the page whole, by part key: the turn's status too")
         (is (str/includes? (:content (peek r1)) "[:task :cites demo/f]") "the cited var's edit: its part, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
-        (is (not (str/includes? (:content (peek r1)) "[:proofs]")) "a part that did not change is not told again")
+        (is (not (str/includes? (:content (peek r1)) "[:task]")) "a part that did not change is not told again")
+        (is (str/includes? (:content (peek r1)) "2 of 4") "the turn's status, what changed of it")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
               read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 1

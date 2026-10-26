@@ -160,9 +160,10 @@
   [:task :cites sym] for each var its plan cites (seon.context/cites), drawn by
   seon.render.ui/cited, compared by its own key, so a cited var's edit is that part's change
   alone; [:related], drawn by
-  seon.render.ui/related (seon.context/related), compared by its related key; [:proofs], each
-  proof's status as the newest turn observed it, with its first failure; [:verdict], the done
-  rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
+  seon.render.ui/related (seon.context/related), compared by its related key; [:status], what the
+  newest model turn observed, as (my.task/status) answers it (seon.render.ui/status: each proof
+  with its failures, source and calls, the done rule's reasons, the turn of how many, what the
+  merge will carry, the last reply); [:run], the newest run's relevant keys and the turns it took;
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
@@ -178,9 +179,7 @@
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
-        turn (last (sort-by :seon.turn/n (vals (:turns run))))
-        {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
-        failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
+        [prev turn] (take-last 2 (cons nil (sort-by :seon.turn/n (filter #(= :model (:seon.turn/origin %)) (vals (:turns run))))))
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
                          :opened (boolean (:seon.eval/opened e))
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})
@@ -194,12 +193,10 @@
                              {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ck :db (:db fs)}))
                 task (conj {:key [:related] :from [task] :value {:task (:db/id task)} :region :task
                             :schema :seon.render/related :read [tk (vec (vals cks)) ((:related-key fs) (:db/id task))] :db (:db fs)})
-                (seq (:seon.task/proofs task))
-                (conj {:key [:proofs] :from [task turn] :region :task :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
-                                                              (for [t (:seon.task/proofs task)]
-                                                                [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
-                                                  {:seon.render/schema :seon.render/proofs})})
-                (seq reasons) (conj {:key [:verdict] :from [turn] :value reasons :region :task})
+                ;; what the newest turn observed, as (my.task/status) answers it: drawn over the turn's
+                ;; recorded basis and the one before it (its last reply), both ctx's
+                (and task turn) (conj {:key [:status] :from [task turn prev] :region :task :schema :seon.render/status :db (:db fs)
+                                       :value (cond-> {:task (:seon.task/id task) :turn (:db/id turn)} prev (assoc :last (:db/id prev)))})
                 run (conj {:key [:run] :from [run] :region :task :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
@@ -230,7 +227,8 @@
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
   serialized."
   {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
-  [p f] (cond-> {:key (:key p) :region (:region p :task)}
+  [p f] (cond-> {:key (:key p)}
+          (:region p) (assoc :region (:region p))
           (:html f) (assoc :html (h/html (:html f)))
           (:inline f) (assoc :inline (h/html (:inline f)))))
 

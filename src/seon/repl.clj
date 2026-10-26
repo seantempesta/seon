@@ -366,8 +366,7 @@
 
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
-  session (root's server), a context read, the screen (the forms run before each model
-  request, seon.turn), else the agent itself (its model's turn)."
+  session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
   [origin]
   (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
@@ -450,7 +449,7 @@
    (let [answers (volatile! [])
          handle (symbol "result" (str "e" (eval-n!)))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
-         ;; eval inside it (the screen's, a context read's) names its own, then this one's again
+         ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
      (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
@@ -510,7 +509,7 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])
-                           (filter (comp #{:task} #(:region % :task) first) (:parts (drawn-parts))))))
+                           (filter (comp #{:task} :region first) (:parts (drawn-parts))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

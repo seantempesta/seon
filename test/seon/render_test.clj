@@ -1088,12 +1088,13 @@
         parts (r/render-ctx c (seon.context/renders branch))
         ks (mapv :key parts)
         part (fn [k] (some #(when (= k (:key %)) %) parts))]
-    (is (= [[:task] [:task :cites 'seon.render/walk] [:related] [:proofs] [:verdict] [:run]] (subvec ks 0 6))
+    (is (= [[:task] [:task :cites 'seon.render/walk] [:related] [:status] [:run]] (subvec ks 0 5))
         "the task, each var it cites, what is related, its proofs, the verdict, the run, first")
-    (is (= #{:task} (set (map :region (take 6 parts)))) "the task region: what the model reads too")
-    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (part [:proofs])))
-        "each proof's status as the newest turn observed it, with its first failure")
-    (is (= ["demo/f-test is red"] (:value (part [:verdict]))))
+    (is (= #{:task} (set (map :region (take 5 parts)))) "the task region: what the model reads too")
+    (let [h (h/html (:html (r/part-faces (part [:status]))))]
+      (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
+      (is (str/includes? h ":fail"))
+      (is (str/includes? h "2 of 8") "the turn of how many"))
     (let [task (first parts) h (h/html (:html (r/part-faces task)))]
       (is (= "demo/f" (:seon.task/id (:value task))) "the task part's value is the task: nothing derived is stored in a part")
       (is (some? (:read task)) "and it carries its task data's key, what its memo compares")

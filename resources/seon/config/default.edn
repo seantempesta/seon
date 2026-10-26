@@ -574,8 +574,8 @@
  :seon.config.render/similar 0
  ;; Unit: lines of each kind. The wiki sections, program functions and schema keys nearest the
  ;; task's plan (seon.context/related: its references and seon.vector/near on its vector, fused by
- ;; seon.vector/rrf) that the plan does not cite, each a line at summary depth in the screen form
- ;; (my.task/related), made again when the plan's vector changes; 0 shows none. Not
+ ;; seon.vector/rrf) that the plan does not cite, each a line at summary depth in the page's related part
+ ;; and (my.task/related), made again when the plan's vector changes; 0 shows none. Not
  ;; :seon.config.render/similar: that counts program functions in the task's data, the run's fixed
  ;; part (for the prompt cache), and is off by step 6's measurement; these follow the plan as it is
  ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
