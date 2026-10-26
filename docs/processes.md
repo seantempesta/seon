@@ -40,6 +40,12 @@ The flow-lab's wake hazards, each a proof:
 
 A replay that resumes a session must not trust a form whose effect is visible only through a helper, a form that reads a world that has moved on (the time, files, main), or a handle to a resource that died with the process.
 
+## A stalled agent
+
+An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `seon.agent-proc/stall-ms`, a clock named in [clocks](clocks.md)).
+
+Root writes it as the agent's `:seon.agent/stalled`, with what it waits on: the request root last sent it, its kind and form, and for a test run the test that started last (each test's start reaches root as a `:testing` frame from `seon.agent/run-tests-forked`). While the fact holds it is an open `:stalled` problem naming the agent and what it waits on (`seon.problems/stalled-agents`, under the agents area of root's page and `my.root/problems`), and it is in every ctx that holds the agent. The agent's next frame retracts it (`:spoke`), and so does its end.
+
 ## The socket and the agent proc
 
 Root and an agent speak length-prefixed frames over one Unix socket, read and written on the agent's side by its one thread with no pumps: `seon.sock`.

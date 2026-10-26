@@ -98,7 +98,7 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms])
+  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
   "What root records of agent entry a: its observed-keys, less :task for an agent a run started,
@@ -207,6 +207,8 @@
   (if-let [a (get-in st [:view :agents id])]
     (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
+               ;; a stall ends with the process
+               (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
                (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v x n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
@@ -521,11 +523,12 @@
       ;; an effect owner's failed outcome (seon.fx/owner-proc)
       :problem (problem st (err/occurrence (:error m) (:class m) {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])}
                                            (System/currentTimeMillis)))
-      ;; an agent's proc observed it stalled (seon.agent-proc :stall?)
-      :stalled (-> st (set-agent o (:agent m) {:stalled (:quiet-ms (:error m))})
-                   (problem (err/occurrence (:error m) :agent {:agent (:agent m) :task (get-in st [:view :agents (:agent m) :task])
-                                                               :form (get-in m [:error :last-op :form])}
-                                            (System/currentTimeMillis))))
+      ;; an agent's proc observed it stalled (seon.agent-proc :stall?): a fact on the agent, what it
+      ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
+      ;; frame (:spoke) or its end retracts it
+      :stalled (set-agent st o (:agent m) {:stalled (cond-> {:quiet-ms (:quiet-ms (:error m))}
+                                                       (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))})
+      :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
                      (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))

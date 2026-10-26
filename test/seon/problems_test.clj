@@ -223,7 +223,41 @@
     (testing "an effect outstanding is waiting on its owner, not stalled"
       (let [[st _] (#'ap/agent-proc st :from {:op :fx :k 1 :kind :model})
             st (assoc st :last-frame-ms 1000)]
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))
+    (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
+      (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
+            st (assoc st :last-frame-ms 1000)
+            [st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
+            [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
+        (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
+        (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
+
+(deftest a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
+  ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice an agent
+  ;; has been stuck"): a stall root observes is a fact on the agent, with what it waits on, so
+  ;; my.root/problems, root's page and every ctx holding the agent show it, until the agent's next
+  ;; frame or its end retracts it
+  (let [view {:agents {:a1 {:status :busy :pid 77 :task "t/x"}}}
+        waits {:kind :tests :form "#'app.t/hangs"}
+        stalled {:op :stalled :agent :a1
+                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
+                                        {:agent :a1 :quiet-ms 4000 :last-op waits})}
+        facts (fn [o] (into [] cat (writes o)))
+        retracts? (fn [o] (some #(and (vector? %) (= :seon.agent/stalled (last %))) (facts o)))
+        [st o1] (step (api view) :back stalled)]
+    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.agent/stalled %)) (facts o1)) "recorded on the agent, with what it waits on")
+    (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
+    (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
+
+(deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
+                                     :seon.agent/stalled {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
+                                    {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
+        rows (get-in (problems/health db) [:classes :stalled :rows])]
+    (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
+    (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
+    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stalled]])) [:classes :stalled :rows]))
+        "closed once the fact is retracted")))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"

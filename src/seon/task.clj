@@ -170,7 +170,8 @@
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
-   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
+   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms
+   :stalled :seon.agent/stalled})
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
@@ -200,7 +201,7 @@
 (defn agent-tx
   "What root observes of agent id in its boot, as facts on the agent's entity: the root that
   started it, and each member m holds of root's view (status, pid, memory, the form running,
-  its task's id or description, branch, when it forked and ended); a member m holds as nil is
+  its task's id or description, branch, when it forked and ended, a stall it shows); a member m holds as nil is
   no longer true, and retracted (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]

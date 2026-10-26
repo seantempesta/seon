@@ -125,6 +125,9 @@
   [st o m]
   (let [id (:id st)]
     (case (:op m)
+      ;; a test of its run started (seon.agent/run-tests-forked): what it waits on now, which a
+      ;; stall names
+      :testing (assoc st :last-op {:kind :tests :form (:test m)})
       :hello (do (when (:cloned-from m)
                    ;; a clone: its pid arrives here (the fork server never saw it)
                    (when (:kill? st) (lib/c-kill (:pid m) 9))
@@ -269,7 +272,8 @@
      :in (agent-in st m)
      ;; a value from the agent; nil: the end's :in closed (the process is gone)
      :from (let [o (volatile! {})
-                 ;; any frame is progress (the stall check reads it)
+                 ;; any frame is progress (the stall check reads it); the first after a stall ends it
+                 _ (when (and (:stall-seen st) (some? m)) (step/out! o :to-api {:op :spoke :agent (:id st)}))
                  st (agent-frame (assoc st :last-frame-ms (System/currentTimeMillis) :stall-seen false) o (if (nil? m) {:op :dead} m))]
              [st @o])
      [st nil])))
