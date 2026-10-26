@@ -426,4 +426,10 @@
     (is (str/includes? (:text r) ":uncontracted-definition") "printed in the text the agent reads")
     (is (= ['seon.repl-test.warned/warned-f 'seon.repl-test.warned/warned-g] (:uncontracted (first (:warnings r2))))
         "the next names every uncontracted definition so far, once")
-    (is (not (contains? r3 :warnings)) "a contracted definition warns nothing")))
+    (is (not (contains? r3 :warnings)) "a contracted definition warns nothing")
+    (let [[r4 _] (ev st0 "(defn warned-m [x] x) (defn warned-m {:malli/schema [:=> [:cat :int] :int]} [x] x)")]
+      (is (not (contains? r4 :warnings)) "one defined uncontracted, then armed in the same eval: the warning is the eval's end, none left"))
+    (let [[r5 _] (ev st0 "(defn bad-n {:malli/schema [:=> [:cat :no.such/schema] :int]} [x] x)")
+          f (first (:warnings r5))]
+      (is (= :invalid-contract (:seon.repl/finding f)) (pr-str r5))
+      (is (= 'seon.repl-test.warned/bad-n (:var f)) "naming the definition whose contract could not be armed"))))
