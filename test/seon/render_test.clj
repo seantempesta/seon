@@ -1169,15 +1169,32 @@
     (is (str/includes? (html-of branch (e-of "e6")) "seon-live") "its live tile")
     (is (not (str/includes? (html-of branch (e-of "e5")) "seon-live")) "the older as recorded")
     (is (not (str/includes? (html-of branch (e-of "e7")) "seon-live")) "a computed value as recorded")
+    (is (nil? (ui/live-key {:response {:value (assoc task :n 2)}})) "a map that adds a key of its own was computed")
     (let [branch' (d/db-with branch [{:seon.task/id "demo/g" :seon.task/plan "Make g faster still."}])]
       (is (str/includes? (html-of branch' (e-of "e6")) "Make g faster still.") "the record as it is now")
-      (is (not (str/includes? (html-of branch' (e-of "e5")) "faster still")) "the older eval keeps what it answered"))))
+      (is (not (str/includes? (html-of branch' (e-of "e5")) "faster still")) "the older eval keeps what it answered"))
+    (testing "the render proc draws it again because the transaction touched what it read, and nothing older"
+      (let [[st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
+            r (d/with branch [{:seon.task/id "demo/g" :seon.task/plan "Make g faster still."}])
+            touched (p/comps-touched st1 :task-demo-f (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r)))]
+        (is (some #(= (e-of "e6") (second %)) touched) (pr-str touched))
+        (is (not-any? #(#{(e-of "e5") (e-of "e7")} (second %)) touched) "the evals kept as recorded read nothing it wrote")))
+    (testing "@ctx: the newest is its agent's record on its branch now"
+      (let [b (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e8" "a3"
+                                                     {:code "@ctx" :line "ctx" :printed "ctx" :type "seon.ctx.Ctx" :schema :seon.ctx/ctx
+                                                      :basis {:t (:max-tx branch) :branch :task-demo-f} :response {:handle 'result/e8}} nil))
+            l (#'p/page-value (proc-state main b) :a3)
+            as (some (fn [u] (let [[_ e as] (:comp u)] (when (= e (:db/id (d/entity b [:seon.eval/id "e8"]))) as))) (:seon.render/units l))
+            html (h/html (ui/component b (:db/id (d/entity b [:seon.eval/id "e8"])) as))]
+        (is (true? (last as)))
+        (is (str/includes? html "@ctx as its branch holds it now") html)
+        (is (re-find #"ctx · \S*task-demo-f" html) "its block, built from the branch")))))
 
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
   ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
   ;; :ai face), shown whole, never computed again for the page
-  (let [l (#'p/debug-value {:context "{:seon-root \"the whole system\"}"} [:debug :root])
+  (let [l (#'p/debug-value {:context {:text "{:seon-root \"the whole system\"}" :tokens 7}} [:debug :root])
         u (some #(when (= "d-context" (:id %)) %) (:seon.render/units l))]
     (is (= :seon.render/root-context (:schema u)))
     (is (str/includes? (h/html (r/html (:input u) {:schema (:schema u) :unit "d-context"})) "the whole system"))

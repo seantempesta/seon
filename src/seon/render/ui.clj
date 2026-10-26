@@ -336,16 +336,16 @@
   page)."
   {:malli/schema [:=> [:cat :any :boolean] :any]}
   [focus debug?]
-  (let [base (if (= :root focus) "/" (str "/agent/" (kname focus)))
-        tab (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
+  (let [tab (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
                                      :aria-current (when on? "page")} label])]
     [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4" :seon/off-screen true}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      (when focus
-       [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
-        [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
-        (tab (not debug?) base "conversation")
-        (tab debug? (str (if (= :root focus) "/root" base) "/debug") "context")])]))
+       (let [base (if (= :root focus) "/" (str "/agent/" (kname focus)))]
+         [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
+          [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
+          (tab (not debug?) base "conversation")
+          (tab debug? (str (if (= :root focus) "/root" base) "/debug") "context")]))]))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -478,15 +478,21 @@
   nil)
 
 (defn- based-value
-  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db as of
-  t, seon.ctx/build), or nil: no basis, or no db to read it on."
-  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
-  [rec e db]
+  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db,
+  seon.ctx/build): as of its t, or, live?, as db holds it now; nil: no basis, or no db to read it
+  on."
+  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db] :boolean] [:maybe :map]]}
+  [rec e db live?]
   (when-let [{:keys [t branch]} (when db (:basis rec))]
     (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
-      ;; a value as of t never changes: its reads are not the component's (no later transaction
-      ;; touches them), so it is built when the component renders and never because the branch moved
-      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t)
+      (with-meta (if live?
+                   ;; now: its reads are the component's, so the render proc builds it again when
+                   ;; a transaction on its branch touches them
+                   (:tree (seon.ctx/build db k branch))
+                   ;; a value as of t never changes: its reads are not the component's (no later
+                   ;; transaction touches them), so it is built when the component renders and
+                   ;; never because the branch moved
+                   (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t))
         {:seon.render/schema (:schema rec)}))))
 
 (defn- branch-render
@@ -507,33 +513,35 @@
   [e handle db]
   (when-let [id (when db (:seon.agent/id (d/entity db (:db/id (:seon.eval/agent e)))))] {:agent id :handle handle}))
 
-(declare view)
+(declare view entity-node)
 
 (defn live-key
   "The record of the store eval record rec's value names, or nil (a value computed, kept as
-  recorded): [:ctx] for @ctx (recorded as its basis, seon.repl/record-details), [a v] for an
-  entity (a map holding its identity attribute a, an entity schema's upsert key)."
+  recorded): [:ctx] for @ctx (recorded as its basis, seon.repl/record-details); [a v] for an
+  entity's own data, a map holding its identity attribute a whose every key is an attribute of
+  that entity's schema (a map that adds any other key was computed). Map lookups only."
   {:malli/schema [:=> [:cat [:maybe :map]] [:maybe [:vector :any]]]}
   [rec]
   (let [v (get-in rec [:response :value])]
-    (cond (:basis rec) [:ctx]
-          (and (map? v) (not (contains? (:response rec) :values)))
-          (some (fn [[a x]] (when (and (keyword? a) (render/entity-schema {a x} nil) (some? x)) [a x])) v))))
+    (if (:basis rec)
+      [:ctx]
+      (when (and (map? v) (not (contains? (:response rec) :values)))
+        (when-let [[a s] (some (fn [a] (when-let [s (get render/identity-schemas a)] [a s])) (keys v))]
+          (when (and (some? (get v a)) (every? #(= s (get render/entity-schemas %)) (keys v)))
+            [a (get v a)]))))))
 
 (defn- live-now
   "The record eval e names (live-key k) as db holds it now, by its render: @ctx built from its
-  branch, an entity as its tile; nil when db holds none. Its reads are the component's, so the
-  render proc draws it again when a transaction touches them."
+  branch (based-value), an entity as a tile shows it (entity-node); nil when db holds none. Its
+  reads are the component's, so the render proc draws it again when a transaction touches them."
   {:malli/schema [:=> [:cat :map :map [:vector :any] :seon.host/db] :any]}
   [rec e k db]
   (if (= [:ctx] k)
-    (let [ak (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
-      (render/html (with-meta (:tree (seon.ctx/build db ak (get-in rec [:basis :branch]))) {:seon.render/schema (:schema rec)})
-                   {:as :block :schema (:schema rec) :handle (get-in rec [:response :handle]) :db db :drawer (drawer e (get-in rec [:response :handle]) db)}))
+    (when-let [v (based-value rec e db true)]
+      (let [h (get-in rec [:response :handle])]
+        (render/html v {:as :block :schema (:schema rec) :handle h :db db :drawer (drawer e h db)})))
     (when-let [eid (:db/id (d/entity db k))]
-      (let [own (d/pull db '[*] eid)
-            schema (render/entity-schema own nil)]
-        (view {:seon.render/schema schema :seon.render/value (dissoc own :db/id)} :tile)))))
+      (view (entity-node db eid) :tile))))
 
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
@@ -574,7 +582,7 @@
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
                  (render/html (print/read-rest form (:handle r) v) {:handle form})])])
-           (if-let [v (based-value rec e (:db opts))]
+           (if-let [v (based-value rec e (:db opts) false)]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
               (render/html v {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts) :drawer (drawer e (:handle r) (:db opts))})]
@@ -930,6 +938,18 @@
               now]))])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
 
+(defn- entity-node
+  "Entity eid on db as a page part draws it: its schema and its relevant attributes, less its units
+  (shown as their own parts), the pulled entity as its metadata's :own."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] :map]}
+  [db eid]
+  (let [own (d/pull db '[*] eid)
+        schema (render/entity-schema own nil)
+        units (:seon.render/units (contract/properties schema))]
+    (with-meta {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
+                :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}
+      {:own own})))
+
 (defn component
   "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
   turn on the debug page), its element id comp-id: what the render proc caches by what it read
@@ -948,15 +968,13 @@
     (let [{:seon.agent/keys [id status] root :seon.root/id} (d/pull db [:seon.agent/id :seon.agent/status :seon.root/id] eid)]
       ;; the user's own entry and root's link to their pages: off a screen
       [:li (cond-> {:id (comp-id eid as) :class "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850"} (or root (= :user id)) (assoc :seon/off-screen true))
+       ;; root's is lit: root is the process answering this page
        [:span {:class (if (or root (#{:busy :running} status)) "text-signal" "text-text-500")} (if (or root (#{:busy :running} status)) "●" "○")]
        [:a {:href (if root "/" (str "/agent/" (kname id))) :class "font-semibold text-text-100"} (if root "root" (kname id))]
        [:span {:class "text-2xs text-text-500"} (if root "main" (some-> status name))]])
     :else
-  (let [own (d/pull db '[*] eid)
-        schema (render/entity-schema own nil)
-        units (:seon.render/units (contract/properties schema))
-        nd {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
-            :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}]
+  (let [nd (entity-node db eid)
+        own (:own (meta nd))]
     (case as
       :row (let [evals (for [c (:seon.turn/calls own) :when (:eval c) :let [e (d/pull db '[*] [:seon.eval/id (:eval c)])] :when e]
                          {:seon.render/kind :entity :seon.render/eid (:db/id e) :seon.render/schema (render/entity-schema e :seon.eval/agent)

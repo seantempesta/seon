@@ -236,7 +236,7 @@
   (if (= :root (second view))
     ;; root has no model turn: what it reads is the system's AI face, held each pass (:context)
     (when-let [ctx (:context st)]
-      (ui/debug :root [] 0 {:id "d-context" :input {:text ctx :tokens (select/estimate ctx)} :schema :seon.render/root-context}))
+      (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
   (when-let [bdb (get-in st [:branches view :db])]
     (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
@@ -622,7 +622,7 @@
           ;; root's context: the system's AI face, also a unit of root's layout
           ctx (render/ai sys {:schema :seon.render/system})
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)})
-          st (assoc st :context ctx)
+          st (assoc st :context (:context sys))
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st) (map :view (vals (:screens st)))))
           st (assoc st :last-walked [])
           [st patches] (reduce (fn [[st ps] v]
@@ -864,7 +864,7 @@
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (page-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
-                          :context (do (step/out! o :to-web {:op :text :k (:k m) :text (:context st "")}) st)
+                          :context (do (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
                           :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open
