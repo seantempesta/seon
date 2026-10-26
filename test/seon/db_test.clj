@@ -749,6 +749,8 @@
      :n "evals referring to the agent"
      :work "the pattern compiled; one :avet descent to the agent's last referrer, five datoms read back, five members pulled"
      :growth :constant
-     ;; measured: 112, 114 and 122 KB, 23k, 23k and 26k ticks at 10, 1,000 and 100,000 (one more index level)
-     :fixed {:ticks 26000 :bytes 122000}
+     ;; measured: 112, 114 and 122 KB, 23k, 23k and 26k ticks at 10, 1,000 and 100,000 (one more index
+     ;; level); 100,000 because flat must hold at a collection an agent's history reaches (root's ask),
+     ;; and a prove run (cost-max-n 1,000) builds only the two smaller inputs
+     :fixed {:ticks 30000 :bytes 125000}
      :sizes [10 1000 100000]}))
