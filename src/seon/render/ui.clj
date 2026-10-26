@@ -922,6 +922,8 @@
             [:summary {:class "flex min-w-0 items-baseline gap-2 truncate"} (h/raw (or inline ""))]
             (h/raw html)]]
     (:message :turn) [:li {:id (:unit opts) :class "py-1"} (h/raw html)]
+    ;; whose drawing the page is: a unit, so the line goes when the agent's own parts arrive
+    :caption [:p {:id (:unit opts) :class "text-2xs text-text-500"} (h/raw html)]
     [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
      [:h2 {:class "kicker"} (str/join " " (map kname key))]
      (h/raw html)]))
@@ -951,13 +953,14 @@
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [a sides] (slot (comp-id (:eid a) :side)))]]
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head")
-        (when caption [:p {:class "text-2xs text-text-500"} caption])
+        (slot "p-caption")
         [:div {:id "c-older"} (slot (str "c-more-" (count on)))]
         [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [p on] (slot (part-id (:key p))))]
         (when input (slot "p-input"))]
        [:aside {:id "p-tiles" :class "grid content-start gap-2"} (for [p tiles] (slot (part-id (:key p))))]]]
      :seon.render/units
-     (vec (concat [{:id "p-head" :comp (conj (vec head) :block)}]
+     (vec (concat [{:id "p-head" :comp (conj (vec head) :block)}
+                   {:id "p-caption" :input {:key [:caption] :html (h/html (or caption ""))} :schema :seon.render/part-html}]
                   (for [a sides] {:id (comp-id (:eid a) :side) :comp [(:db a 0) (:eid a) :side] :container "#c-side"})
                   [{:id (str "c-more-" (count on)) :input {:older older :view view :click? true} :schema :seon.render/page-more :container "#c-older"}]
                   (for [p on] (unit p "#c-rows"))

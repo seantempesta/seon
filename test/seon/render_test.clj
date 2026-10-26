@@ -857,7 +857,9 @@
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
                   st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
-              (is (not (str/includes? (p/page-html st3 :a3) "has not answered yet")) "its own parts replace them"))))))
+              (is (not (str/includes? (p/page-html st3 :a3) "has not answered yet")) "its own parts replace them")
+              (is (some #(= "p-caption" (first %)) (mapcat :frags (filter #(= :patch (:op %)) (:to-web @o))))
+                  "and the open tab is sent the line that said whose drawing it was"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views :a3])))
