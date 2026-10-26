@@ -33,7 +33,7 @@ The rulings root holds for the owner.
 
 ## THE PLAN
 
-The destination is **E: a request worked design → implement → merge by Seon agents, end to end, measured as turns to green.** In order:
+The destination is **E: a request worked as one whole task by a Seon agent, end to end, measured as turns to green.** In order:
 
 1. **The agent loop** (done but resume): sessions continue across runs, every agent parks and wakes on a message, one delivery (main-first), the stage boundary as a message. Left: resume from any commit (rebuild ctx at that t).
 2. **Requests through the pipeline, measured** (in progress; one-go whole tasks for every run, owner 2026-10-26; the target is a request solved in one task in about 20 turns or fewer, and a run that caps is a context failure to fix: "If we can't give clear instructions and have an agent in one task solve the problem then we need to improve the context"): 2 of 5 requests merged end to end on 2026-10-26; the ten-request rerun measures each change.
