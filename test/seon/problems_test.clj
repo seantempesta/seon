@@ -279,7 +279,9 @@
     (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
     (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
     (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stall]])) [:classes :stalled :rows]))
-        "closed once the fact is retracted")))
+        "closed once the fact is retracted")
+    (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
+        "and by a new boot: an earlier boot's stall ended with its process")))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
