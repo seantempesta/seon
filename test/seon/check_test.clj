@@ -289,5 +289,5 @@
                     "echo go > ra; echo go > rb; wait $s; echo \"exit $?\"; echo \"$line\"; grep -c STALLED a.log; grep -c STALLED b.log; grep -c STALLED c.log\n")
         [ex line na nb nc] (str/split-lines (:out (clojure.java.shell/sh "zsh" "-c" script)))]
     (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
-    (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms" (str line)) "the quiet test past its own bound is named, with its quiet ms")
+    (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
     (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))

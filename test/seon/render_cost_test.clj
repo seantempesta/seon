@@ -189,6 +189,8 @@
      :growth :linear
      ;; measured 2026-10-24: 315 / 3,015 calls and 5.39 / 49.4 MB at 100 / 1,000 evaluations (before:
      ;; 526 / 5,026 calls and 4.19 / 41.1 MB, a datoms read per node for its transaction, the citation pass)
+     ;; 5.21 / 50.4 MB at 100 / 1,000: a ref unit read from the db's attribute index (datahike's ref?);
+     ;; d/schema rebuilt the schema map (0.8 MB, 365 attributes) on every `one`, 6.92 / 52.1 MB
      :per-n {:calls 3 :bytes 49500}
      :fixed {:calls 15 :bytes 600000}
      :sizes [100 1000 4000]}))

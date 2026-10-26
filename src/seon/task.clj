@@ -8,7 +8,7 @@
   them) and the one reader (pull shapes for the reconciler and the agent). From sessions R1
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
             [seon.print :as print] [seon.ref :as ref]))
 
 ;; ---- identity --------------------------------------------------------------------
@@ -52,11 +52,13 @@
   [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
 
 (defn- references-of
-  "The :seon.task/references a declaration states: the names its text cites (seon.ref/names),
-  derived and never authored; absent when it cites none."
+  "The :seon.task/references and :seon.task/sections a declaration states: the names and the wiki
+  sections its text cites (seon.ref/names, seon.ref/addresses), derived and never authored; each
+  absent when it cites none."
   {:malli/schema [:=> [:cat :seon.task/declaration] :map]}
   [decl]
-  (let [ns (set (ref/names (cited-text decl)))] (if (seq ns) {:seon.task/references ns} {})))
+  (let [text (cited-text decl) ns (set (ref/names text)) as (set (ref/addresses text))]
+    (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
@@ -133,12 +135,18 @@
 (defn earlier-agents-tx
   "A new boot's root is no longer the root of the agents an earlier boot started: their link to
   root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root); and a stall one showed is over,
-  its :seon.agent/stall retracted with its process (an open :stalled problem never outlives it)."
+  root's agents are this boot's (root's walk, :seon.agent/_root); one still shown live (:busy,
+  :idle, :spawning: a root that crashed or was stopped wrote no end) is :dead, its running form
+  retracted; and a stall one showed is over, its :seon.agent/stall retracted with its process (an
+  open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (into (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
-                    [:db/retract a :seon.agent/root r]))
-             (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))
+  [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
+             agents (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
+         (-> (vec (for [[a r] agents] [:db/retract a :seon.agent/root r]))
+             (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
+                                       [[:db/add a :seon.agent/status :dead] [:db.fn/retractAttribute a :seon.agent/running]])))
+                   agents)
+             (into (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))))
 
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
@@ -301,7 +309,7 @@
   the three dbs, read once."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:tx [:vector :any]] [:conflicts :seon.run/task-conflicts]]]}
   [base branch main]
-  (let [many (fn [a] (= :db.cardinality/many (get-in (d/schema main) [a :db/cardinality])))
+  (let [many (fn [a] (dbu/multival? main a))
         ;; each member's value: a set member's values as a set, a single member's value
         vs (fn [db] (reduce (fn [m [k v]] (if (many (second k)) (update m k (fnil conj #{}) v) (assoc m k v))) {}
                             (for [a (sort pm/carried-platform-attrs) dt (d/datoms db :aevt a)] [[(:e dt) a] (:v dt)])))
@@ -379,7 +387,8 @@
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/references t) (update :seon.task/references set)))
+    (:seon.task/references t) (update :seon.task/references set)
+    (:seon.task/sections t) (update :seon.task/sections set)))
 
 (def placeholder-assertion
   "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
@@ -530,7 +539,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/references
+   :seon.task/kind :seon.task/evidence :seon.task/references :seon.task/sections
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused

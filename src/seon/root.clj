@@ -211,19 +211,26 @@
                (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
                (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v x n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
-      (cond-> (assoc-in st [:view :agents id] (if (and (stopped-statuses (:status a)) (not (gone-statuses (:status a')))) (assoc a' :status (:status a)) a'))
+      ;; a gone process stays gone: a late live status (a request its proc took after its end) is not news
+      (cond-> (assoc-in st [:view :agents id] (if (and (gone-statuses (:status a)) (not (gone-statuses (:status a'))))
+                                                (assoc a' :status (:status a) :running nil)
+                                                a'))
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
-        (and (:ready m) (= :spawning (:status a))) (answer-spawn o id {:id id})
-        ;; the agents with an eval in flight: the stall check's set
-        (contains? m :running) (update ::busy (fnil (if (:running m) conj disj) #{}) id)))
+        ;; its hello answers the spawn, whatever a request sent before it made its status
+        (:ready m) (answer-spawn o id {:id id})
+        ;; the agents with an eval in flight: the stall check's set (a gone one never)
+        (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a run (seon.template/stall: one per
   agent and run, so a later stall of the same run writes none): written to main, held, worked by
   a Claude session through seon_attach (owner: \"a task that we can pre-fill with a template and we
-  can give root\"). A refused write is the agent's problem, as its facts' are."
+  can give root\"). With it, its evidence is asked while the process is stuck (seon.fx/stall-evidence,
+  the :evidence effect: sample, lsof, ps and its fiber dump, files under the runs directory's stalls/),
+  whose answer is written into the task's cause (back-op). A refused write is the agent's problem, as
+  its facts' are."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id s]
   (let [{:keys [run pid]} (get-in st [:view :agents id])
@@ -234,7 +241,15 @@
                  (task/create-tx db [decl]))]
         (cond (nil? tx) st
               (contract/error? tx) (problem st (err/occurrence tx :agent {:agent id :task (:task (get-in st [:view :agents id]))} (System/currentTimeMillis)))
-              :else (do (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}}) st)))
+              :else (let [tid (task/task-id (:seon.task/ns decl) (:seon.task/name decl))]
+                      (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
+                      ;; a hang is evidence: captured now, before a restart takes the process
+                      (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
+                        (step/out! o [:fx/evidence :in]
+                                   {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
+                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
+                                    :prio 0 :dest {:stall-evidence tid :agent id}}))
+                      st)))
       st)))
 
 (defn- to-agent
@@ -301,7 +316,12 @@
   graph (update! at the end of the step) and its branch's connection is released."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :map] :seon.root/api-state]}
   [st o {:keys [agent rid pid inflight]}]
-  (let [{:keys [branch]} (get-in st [:agents agent])
+  (let [;; every request to it the api holds: the proc's in flight, and one sent in the step it ended
+        ;; that never reached the proc or reached it after its end (each answered once: deliver-rid of an
+        ;; answered rid is nothing); a :prove names the agent but the test service answers it
+        inflight (into (vec inflight) (remove (set (conj inflight rid)))
+                       (sort (keep (fn [[r {a :agent k :kind}]] (when (and (= a agent) (not= :prove k)) r)) (:pending st))))
+        {:keys [branch]} (get-in st [:agents agent])
         v (get-in st [:view :agents agent])
         ;; stopped by root: a kill, or the end of its run (:ended); else it died
         stop (stopped-statuses (:status v))
@@ -455,6 +475,16 @@
                                true (deliver-rid o (:rid dest) (dissoc r :sync))))
         ;; the recorded errors' write was answered: the next window may write
         (:errors-flushed dest) (dissoc st ::errors-flight)
+        ;; a stall's evidence was captured (stall-task): its files on the stall task's cause, on main
+        (:stall-evidence dest) (let [tid (:stall-evidence dest) db (some-> (:conn st) deref)
+                                     cause (some-> db (d/entity [:seon.task/id tid]) :seon.task/cause)]
+                                 (cond (contract/error? r) (problem st (err/occurrence r :agent {:agent (:agent dest) :task tid} (System/currentTimeMillis)))
+                                       (and cause (not (:writer-closed st)))
+                                       (do (step/out! o :to-writer {:op :tx :branch :db :dest {:agent-facts [(:agent dest)]}
+                                                                    :tx-data [[:db/add [:seon.task/id tid] :seon.task/cause
+                                                                               (update cause :evidence merge (:files (:value r)))]]})
+                                           st)
+                                       :else st))
         (:rid dest) (deliver-rid st o (:rid dest) r)
         (:agent-facts dest) (cond-> st
                               (contract/error? r) (problem (err/occurrence r :agent {:agent (:agent-facts dest)} (System/currentTimeMillis))))
@@ -472,7 +502,13 @@
                       (view! update-in [:fork-server :agents-forked] (fnil inc 0))
                       (view! update-in [:stats :fork-ms] lib/push-window (:fork-ms m) 500)
                       (to-agent o (:agent m) {:op :forked :pid (:pid m)})))
-      :exit (let [st (if-let [aid (some (fn [[aid a]] (when (= (:pid m) (:pid a)) aid)) (get-in st [:view :agents]))]
+      ;; the agent the exit is of: the death waiting on its pid, a live agent with it, or the last
+      ;; one to end with it and no exit yet (stopped: none waits); never an entry whose exit is
+      ;; recorded, whose pid the OS has given again
+      :exit (let [mine (filter (fn [[_ a]] (= (:pid m) (:pid a))) (get-in st [:view :agents]))
+                  st (if-let [aid (or (first (get-in st [::dying (:pid m)]))
+                                      (some (fn [[aid]] (when (get-in st [:agents aid]) aid)) mine)
+                                      (some->> (remove (fn [[_ a]] (:exit a)) mine) seq (apply max-key (fn [[_ a]] (:ended-ms a 0))) key))]
                        (set-agent st o aid {:exit (:status m)})
                        st)]
               ;; a death waiting for its exit status: recorded now
