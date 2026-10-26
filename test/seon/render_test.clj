@@ -607,9 +607,11 @@
         [st _] (#'p/pass-view (proc-state main branch) :a3)
         e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
         touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))
-        ;; an entity of main the page did not read (ids from separate speculative d/with calls can
-        ;; repeat in a test; on a store they are issued once)
-        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))]
+        ;; an entity of main the page did not read, a form of the example program (ids from separate
+        ;; speculative d/with calls can repeat in a test; on a store they are issued once); not a
+        ;; namespace: related reads every namespace's file (seon.program/program-nss)
+        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :form/id]] main)))]
+    (is (some? unread) "a form the page did not read")
     (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
     (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
     (is (empty? (touched branch [{:db/id e1 :seon.eval/by "user"}]))
@@ -1099,7 +1101,9 @@
   ;; ordered keyed parts, pure in the ctx, with nothing in them that changes without meaning
   (let [[main branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        branch (d/db-with branch [{:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
+        ;; the cited var's namespace, the program's as a store records it (seon.program/program-names)
+        branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
+                                  {:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])

@@ -53,7 +53,8 @@
 
 (defn- references-of
   "The :seon.task/references and :seon.task/sections a declaration states: the program's names and
-  the wiki sections its text cites (seon.ref/names, seon.program/program-names, seon.ref/addresses),
+  the wiki sections its text cites (seon.ref/names,
+  seon.program/program-names, seon.ref/addresses),
   derived and never authored; each absent when it cites none."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
   [db decl]
