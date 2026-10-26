@@ -155,7 +155,8 @@
 (defn- keeps?
   "Whether a run of a task of kind, ended with outcome, keeps its process at its end (:diffed):
   the agent ended it on a park outcome, and the task is no merge (a merge's run ends its
-  process, as before). Its judge then parks it, or stops the kept process (stop-kept)."
+  process, as before; a whole task, which merges too (seon.task/merges?), keeps its process,
+  since its own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
@@ -274,7 +275,8 @@
         (mark :reap (and a (= :running st) (not live?)))
         (update :kill #(if kill (assoc % aid kill) (dissoc % aid)))
         (mark :judge (boolean (judged st)))
-        (mark :merging (and a (= :merge (:seon.task/kind t)) (or live? (= :ended st)))))))
+        ;; a merge run merges while it runs; a whole run (its own work first) once it ends
+        (mark :merging (and a (case (:seon.task/kind t) :merge (or live? (= :ended st)) :whole (= :ended st) false))))))
 
 (defn- settle
   "Re-derive after entities changed: tasks whose needs or proofs changed (and the tasks that
@@ -397,7 +399,7 @@
         failed (fn [aid id problem] {:op :hold :run aid :task id :problem problem})
         judged (for [aid (sort (:judge idx))
                      :let [a (att aid) id (:seon.run/task a) t (get-in idx [:tasks id])
-                           merge? (= :merge (:seon.task/kind t))]]
+                           merge? (task/merges? (:seon.task/kind t))]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :run aid}
                    (= :dead (:seon.run/status a))

@@ -32,6 +32,13 @@
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/id]}
   [ns-sym nm] (str ns-sym "/" nm))
 
+(defn merges?
+  "Whether a task of kind merges main into its branch at each green and its green branch into
+  main: a merge task, and a whole one (seon.template/request: one agent works the request
+  through)."
+  {:malli/schema [:=> [:cat [:maybe :keyword]] :boolean]}
+  [kind] (contains? #{:merge :whole} kind))
+
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."
   {:malli/schema [:=> [:cat :seon.task/id] :seon.task/branch]}

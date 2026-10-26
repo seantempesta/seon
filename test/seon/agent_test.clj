@@ -706,11 +706,12 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through the stages' one transaction
+  ;; (seon.template/stages, which a request no longer makes: a whole task has no next stage) and
   ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
-  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
+  (let [code (str "(let [_ @(seon.root/transact-main! sys (seon.template/request-tx @(:conn sys) (seon.template/stages {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})))"
                   " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
@@ -779,6 +780,15 @@
     (is (= [:cap 3] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))
     (is (some #(and (= :eval (first %)) (symbol? (:same-as (get % 2)))) (:value sent))
         (str "turn 2 sent turn 1's answer marked :same-as turn 0's: " (pr-str (:value sent))))))
+
+(deftest a-whole-tasks-work-turns-are-no-merge-turns
+  ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
+  ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
+  ;; whole task's turn is a merge turn only while what both sides changed is unresolved
+  (let [[end] (in-agent ["(seon.turn/work! {:task \"demo/w\" :run \"demo/w#1\" :max-turns 4})"]
+                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]
+                         :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
 
 (deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
