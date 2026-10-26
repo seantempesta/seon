@@ -142,8 +142,12 @@
             _ (stored! st o ops)]
         [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
          {:tx t :datoms (count ops)
-          ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites
-          :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %))) :files (source/changed-files (:db-after rep) (:ours (:r %)))}) (:members judged))}]))))
+          ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
+          ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
+          :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %)))
+                                            :files (source/changed-files (:db-after rep) (:ours (:r %)))
+                                            :unfiled (source/unfiled-forms (:db-after rep) (:ours (:r %)))})
+                         (:members judged))}]))))
 
 (defn- answer
   "The answer r for dest, as data on :to-api."

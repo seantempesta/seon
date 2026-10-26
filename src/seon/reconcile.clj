@@ -523,6 +523,14 @@
            (:run f) (assoc :run (:run f))
            stopped (assoc :run (:seon.run/id stopped))))))
 
+(defn- unfiled-error
+  "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
+  that name no source file (:unfiled): each namespace and the definitions it changed."
+  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of :symbol [:vector :seon.merge/def-key]]]]] :string]}
+  [r]
+  (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
+       (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
+
 (defn- cas-tx
   "Move run aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing
   observer that already moved it leaves it), with the observed members m."
@@ -931,12 +939,17 @@
       :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
                      paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                      back? (and (:source st) (seq paths))]
-                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (mapv first merged)}))
+                 (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                              aid (if back? :write-back :done)
                            (vec (mapcat (fn [{:keys [run]} r]
                                           (let [problem (str "merge refused: " (:seon.error/message r))]
                                             (cond
-                                              (:merged? r) (cas-tx run :ended :merged {:seon.run/merged-t (long (:tx r))})
+                                              (:merged? r) (cas-tx run :ended :merged
+                                                                    (cond-> {:seon.run/merged-t (long (:tx r))}
+                                                                      ;; source it changed that names no file: no write-back writes it, so this
+                                                                      ;; names it (beside the sha of what one wrote, when it wrote some)
+                                                                      (and (:source st) (seq (:unfiled r)))
+                                                                      (assoc :seon.run/commit-error (unfiled-error r))))
                                               (= :seon.merge/behind (:seon.error/type r)) (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r)
                                                                                                                           :seon.run/error r})
                                               :else (conj (hold-tx (task/run (:db st) run) problem)
@@ -947,7 +960,7 @@
                                                   :let [[kind x] (read-string k)]
                                                   :when (#{:var :form} kind)]
                                               (symbol (first (str/split (str x) #"/" 2))))))
-                       file (fn [n] (:ns/file (d/entity (:db r) [:ns/name n])))
+                       file (partial source/ns-file (:db r))
                        ;; a changed namespace with no file on the branch (made at the REPL, never
                        ;; written) cannot be put over the checkout: named, never dropped
                        unread (vec (for [n nss :when (nil? (file n))]
@@ -969,8 +982,10 @@
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
+                   ;; paths main holds no text for: no commit, named on each member's run
                    (if (empty? files)
-                     (done st)
+                     (one (write st aid :done (vec (for [{:keys [run]} members]
+                                                     {:seon.run/id run :seon.run/commit-error (str "the write-back read none of " (str/join ", " paths) " on main")}))))
                      (one (request st aid :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
