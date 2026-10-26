@@ -495,6 +495,22 @@
     (is (str/includes? task "What x does.") "the cited section's text, not only its address")
     (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
 
+(deftest a-cited-vars-tests-are-shown-past-its-callers-window
+  ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
+  ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are
+  ;; the cited render's own query (root's ruling (C)): three tests, then sixty newer callers
+  (let [db (reduce d/db-with (seeded 3)
+                   [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0}}
+                                          {:var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
+                                 (range 3)))
+                    (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0}}
+                                          {:var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
+                                 (range 60)))])
+        c (ctx/build db (aid db) :b)
+        tests (:tests (seon.render.ui/cited-of db (:tree c) 'app.x/f0))]
+    (is (< (seon.config/value :seon.config.ctx/callers) 61) "more newer callers than the window holds")
+    (is (every? #(contains? tests %) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) (str "every test, past the window: " (pr-str tests)))))
+
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can
   ;; easily update it and just add more data and render functions"): its key registered with a
