@@ -46,7 +46,7 @@
      ;; 10.2 MB (the :form/src scan)
      :per-n {:ticks 1150.0 :bytes 1400.0}
      :fixed {:ticks 41000.0 :bytes 200000.0}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (deftest recording-a-form-is-flat-in-the-program
   (cost/proof
@@ -61,7 +61,7 @@
      ;; contracted calls: record-tx, account-tx, eid x2, form-of, the tempid makers x6, method/impl
      ;; keys none here: 12, whatever n
      :fixed {:ns 18000 :bytes 8000 :calls 12}
-     :sizes [100 1000 10000]
+     :sizes [100 300 1000 10000]
      ;; measured 2026-10-21 (source mode, load 5): 105 -> 114 us and 121 -> 138 KB from 100 to
      ;; 10k forms, on the whole process's count. Re-measured 2026-10-23 on the proof's own thread
      ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
@@ -88,14 +88,20 @@
      :ops {:map/assoc 3 :map/get 4 :sort/compare 1 :vec/conj 2 :set/conj! 2}
      ;; itself, and the depth-first sort once for the namespaces and once per namespace (one here)
      :fixed {:calls 3}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
-(def ^:private divergence-sizes "The sizes divergence's proof measures." [100 1000 10000])
+(def ^:private divergence-sizes "The sizes divergence's proof measures." [100 300 1000 10000])
+
+(def ^:private process-token
+  "This test process's own: two shards' proofs (divergence's here, diff-plan's in
+  seon.program-diff-test) built and removed one store at one path while both ran, and one read
+  the other's branch (\"Branch already exists\")."
+  (str (random-uuid)))
 
 (defn- on-disk-path
-  "Where divergence's proof keeps its store of size n."
+  "Where divergence's proof keeps its store of size n, in this process's own directory."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" n))
+  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" process-token "-" n))
 
 (defn on-disk-diverged-of
   "divergence's arguments on a store on disk of its own (the last resort: Datahike's
@@ -167,7 +173,7 @@
      ;; ticks measured 2026-10-23 (seon.cost's once): 12.9k at 100, 153k at 1,000
      :per-n {:ticks 160 :bytes 1100 :calls 0}
      :fixed {:ticks 2000 :bytes 2000 :calls 1}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn knotted
   "components' arguments of size n: n nodes, each pointing to the next and to the one five back
@@ -187,7 +193,7 @@
      ;; ticks measured 2026-10-23 (seon.cost's once): 54k at 100, 559k at 1,000
      :per-n {:ticks 560 :bytes 2000 :calls 0}
      :fixed {:ticks 2000 :bytes 2000 :calls 1}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn keyed-chain
   "reach-index's arguments: a branch holding n forms (app.pc/f0..fn-1, each calling the one
@@ -211,7 +217,7 @@
      ;; ticks measured (seon.cost's once): 15.6M at 100, 47.2M at 1,000, 192.2M at 5,000
      :per-n {:ticks 36000 :bytes 185000}
      :fixed {:ticks 12500000 :bytes 62000000}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn changed-top
   "reach-update's arguments: the reach graph of a branch holding n forms (app.pc/f0..fn-1,
@@ -239,7 +245,7 @@
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      :fixed {:ticks 350000 :bytes 4000000 :calls 16}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn- calls-form
   "A defn of m whose body is n steps, each (assoc m :k<i> (str \"s<i>\" (:name m))): a
@@ -279,7 +285,7 @@
      ;; calls before
      :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
      :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn- keyword-form
   "calls-form with each step's key qualified (assoc m :app.acct/k<i> ...), as a program's facts
@@ -315,7 +321,7 @@
      ;; predicate was 989: one call an element)
      :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
      :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn account-of
   "account's argument: calls-form n in app.acct as read, its text and its unit's account."
@@ -337,7 +343,7 @@
      ;; and 2.4k ticks before
      :per-n {:ticks 1400.0 :bytes 13300.0}
      :fixed {:ticks 20000.0 :bytes 60000.0 :calls 7.0}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn literals-of
   "eval's argument: a defn whose body is a vector of n fn literals, each closing over the
@@ -380,7 +386,7 @@
      ;; the test db's schema entries); 0.79M / 5.0 MB on the standing root's main (2699 forms, 660 entries)
      :per-n {:ticks 235.0 :bytes 1160.0}
      :fixed {:ticks 93000.0 :bytes 465000.0}
-     :sizes [100 1000 10000]}))
+     :sizes [100 300 1000 10000]}))
 
 (defn meaning-input
   "The cost proof's input at n: a db of n vars each with a docstring, and tx-data redefining each with another."
