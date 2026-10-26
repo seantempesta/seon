@@ -468,47 +468,49 @@
                      code req))
           (finally (swap! agent/state assoc :eval outer))))))
 
-(defn- draw-part
-  "Part p's faces through memo m (seon.render/drawn), or its error's render when its render throws
-  (an agent's own render, unmerged: the boundary that answers it, so the page always has the part
-  and the agent goes on). Answers [m' faces]."
-  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [m p]
-  (try (render/drawn m p)
-       (catch Throwable e (let [err (agent/error-map e)]
-                            [m {:html (render/html {} err) :inline (render/html {:as :inline} err)}]))))
+(defn- layout
+  "The layout this branch draws its page with: the var :seon.render/render-ctx declares, an agent's own
+  when its branch defines one."
+  {:malli/schema [:=> [:cat] :any]}
+  [] (requiring-resolve (render/declared :seon.render/render-ctx)))
 
-(defn- drawn-parts
-  "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
-  @ctx, with the renders that read the branch's db), drawn here under its branch's schemas, each
-  through the part memo this process holds (:drawn)."
-  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector [:tuple :seon.render/part :seon.render/faces]]]]]}
-  []
-  (with-branch-schemas
-    #(let [c (ctx/record)
-           [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
-                              [(:drawn @agent/state {}) []] (render/html (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx) c))]
-       ;; the memo holds the parts this page has now, none it dropped
-       (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
-       {:t (get-in c [:tree :t] 0) :parts out})))
-
-(defn parts
-  "This agent's page as its parts' html (root's render proc asks, its {:op :render}:
-  seon.render.proc/ask-parts): {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their
-  order. Records nothing."
-  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
-  []
-  (let [{:keys [t parts]} (drawn-parts)] {:t t :parts (mapv (fn [[p f]] (render/part-html p f)) parts)}))
-
-(defn page
-  "This agent's page as the model reads it: its :task region (seon.render/render-ctx), each part's hiccup
-  exactly as its render returned it, by part key, in the page's order, the same hiccup the page
-  shows (`parts`); the chat and the tiles left out, which the transcript carries. What the model's
-  request holds is the same page re-derived at each turn's commit (seon.context/page, world)."
+(defn- the-walk
+  "This agent's walk of its page (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
+  branch's db), made once and held in its state: the one cache of its components."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])
-                           (filter (comp #{:task} :region first) (:parts (drawn-parts))))))
+  (or (:walk @agent/state)
+      (let [w (render/walker {:ref ctx/ctx :changes ctx/changes} agent/db [(layout) {}])]
+        (swap! agent/state assoc :walk w)
+        w)))
+
+(defn- framed
+  "This agent's walk drawn as of now (seon.render/frame!), under its branch's schemas: what changed
+  since the last frame re-run (the reactions ctx's patch reached, the db components the datoms
+  touched since the db last framed)."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (with-branch-schemas
+    #(let [w (the-walk) db (agent/db) db0 (:walk-db @agent/state)]
+       (render/frame! w (when (and db0 db (not (identical? db0 db))) (ctx/moved db0 db nil)))
+       (swap! agent/state assoc :walk-db db)
+       w)))
+
+(defn parts
+  "This agent's page as its components' html (root's render proc asks, its {:op :render}:
+  seon.render.proc/ask-parts): {:t its ctx's t :units [{:id :container :rev :html}]}, each
+  component in the list it is placed in, its revision moved only when its output changed. Records
+  nothing."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:units [:vector :map]]]]}
+  []
+  {:t (or (:t @ctx/ctx) 0) :units (render/page-units (framed))})
+
+(defn page
+  "This agent's page as the model reads it: its task's list, each component's hiccup exactly as its
+  render returned it, by its element id, in the page's order, the same hiccup the page shows
+  (`parts`); the conversation and the tiles left out, which the transcript carries."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (apply array-map (mapcat identity (render/page-hiccup (framed) "#p-task"))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
@@ -529,7 +531,9 @@
      ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
      ;; schemas by the renders it defines, answered as HTML, and nothing recorded
      (= :render (:op m))
-     [st {:sock [{:op :reply :id (:id m) :response (parts)}]}]
+     ;; the facts main holds of its own entities taken first (an eval a reader opened): what it draws is them
+     [st {:sock [{:op :reply :id (:id m) :response (do (when-let [tx (seq (agent/untaken-facts))] (agent/transact! (vec tx)) (agent/commit!))
+                                                       (parts))}]}]
      (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began

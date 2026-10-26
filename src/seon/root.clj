@@ -939,7 +939,7 @@
 
 (defn request
   "The op (named as its fn below: spawn! clone! submit! run-tests! kill!
-  merge-main! message! release!) on agent id with args, as the api request it is: one table for these fns
+  merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
   only through a merge task (seon.reconcile's octopus merge)."
@@ -956,6 +956,8 @@
       message! {:op :message :id id :from :owner :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
+      ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!)
+      opened! {:op :write :req {:op :tx :branch :db :tx-data [{:seon.agent/key (:key args) :seon.agent/opened #{(:eval args)}}]}}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (absent a id))
@@ -1178,7 +1180,7 @@
   writes on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts), so its
   context and its page read it from the same data. Never retracted. A promise of the writer's answer."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/key :seon.eval/id] :seon.host/promise]}
-  [sys key eval-id] (transact-main! sys [{:seon.agent/key key :seon.agent/opened #{eval-id}}]))
+  [sys key eval-id] (request! sys 'opened! nil {:key key :eval eval-id}))
 
 (defn interrupt!
   "Interrupt the agent's evaluation in progress: SIGUSR1, run by Chez at the agent's next

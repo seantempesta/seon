@@ -351,37 +351,43 @@
       ;; the agent's two components (its head, its line in the sidebar of root's agents), whatever the rows
       (clojure.test/is (= 2 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) (str n " rows: the agent's components rendered, nothing else")))))
 
-(defn ctx-of
-  "The input of size n: an agent's held record (seon.ctx/build's shape) of one run, its task with one proof,
-  one turn, and n evals, each a record of a short form and its value; and the renders a view reads
-  the db through, as a map lookup each (the db's own cost is theirs, not the view's)."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+(defn change-of
+  "The input of size n: an agent's page walked live (seon.render/walker over a reactive atom holding
+  its ctx: n evals, each a record of a short form and its value, by eid newest first, as
+  seon.ctx/build holds them) and drawn once, then one eval's value changed (the atom reset! as the
+  patch does, the eval's component queued by its reaction): what frame! draws."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
   [n]
-  [(let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
-     {:db (ts/test-db) :cites (constantly []) :task-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})
-   {:tree {:t n :branch :b
-    :runs {"t/x#1" {:db/id 1 :seon.run/id "t/x#1" :seon.run/status :running
-                    :task {:db/id 2 :seon.task/id "t/x" :seon.task/plan "Make x." :seon.task/proofs #{'t/x-test}}
-                    :turns {"t/x#1/0" {:db/id 3 :seon.turn/id "t/x#1/0" :seon.turn/n 0 :seon.turn/basis {:max-turns 8 :observed {:results {'t/x-test :pass}}}}}}}
-    :evals (into {} (for [i (range n) :let [id (str "e" i)]]
-                      [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
-                           :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}])
+  (let [evals (into (sorted-map-by @#'seon.ctx/newest-first)
+                    (for [i (range n) :let [id (str "e" i)]]
+                      [(+ 10 i) {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
+                                 :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))
+        a (seon.ratom/atom {:db/id 1 :seon.agent/key "b/a1" :seon.agent/id :a1 :evals evals})
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly (ts/test-db)) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
+    (seon.render/frame! w nil)
+    [w a]))
 
-(deftest a-view-costs-its-parts
-  ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its
-  ;; members, the conversation sorted once
+(defn redraw!
+  "One change drawn: eval 10 opened or closed in the atom (each call a change, as a patch reset!s ctx:
+  each component watching it asked whether one of its read paths moved), then the walk's frame."
+  {:malli/schema [:=> [:cat :map :seon.host/deref] [:vector :any]]}
+  [w a]
+  (swap! a update-in [:evals 10 :seon.eval/opened] not)
+  (seon.render/frame! w nil))
+
+(deftest a-change-costs-its-components
+  ;; task seon.render/a-page-is-its-components: a change draws the components whose read paths it
+  ;; reaches, and nothing else of the page
   (cost/proof
-    {:of 'seon.render/render-ctx :input 'seon.render-cost-test/ctx-of
+    {:of 'seon.render-cost-test/redraw! :input 'seon.render-cost-test/change-of
      :n "evals in the agent's ctx"
-     :work (str "one pass over ctx's members: the task's, the proofs' and the run's parts (a few contracted calls, "
-                "fixed), then a part per eval, each its record less its id, and the conversation sorted by entity "
-                "id once (n log n comparisons, no contracted call), and each eval asked once whether its value has a render "
-                "of its own (its tile: four contracted calls): linear in the evals")
+     :work (str "the one eval's component, drawn again (its record printed in one line), and nothing else: the "
+                "layout's reads (the evals' ids and their values) are not reached by an eval opened. The reset! runs "
+                "ctx's diff once (seon.ctx/changes) and looks up the components its changed paths reach by index: the "
+                "walk's part is flat (137 contracted calls, about 100 KB, measured 100 to 4,000); the diff walks every "
+                "key of the changed collection, about 3.2 KB an eval (seon.ctx/changes alone: 268 KB at 100, 12.8 MB "
+                "at 4,000), which is linear")
      :growth :linear
-     ;; measured: 4 calls and 244 KB at 100 evals before the tiles; each eval now asks once whether its
-     ;; value has a render of its own (its tile: render-of, own-key, schema-of, declared), 404 calls and
-     ;; 372 KB at 100; 407 with the task's part made from its own attributes (own-values,
-     ;; own-attributes: its joins' members left out)
-     :per-n {:calls 4 :bytes 3700}
-     :fixed {:calls 7 :bytes 10000}
+     :per-n {:calls 0 :bytes 3400}
+     :fixed {:calls 140 :bytes 150000}
      :sizes [100 1000 4000]}))

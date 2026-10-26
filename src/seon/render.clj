@@ -23,7 +23,7 @@
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
+            [clojure.string :as str] [clojure.walk] [datahike.api :as d] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile]))
 
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...])."
@@ -140,131 +140,243 @@
       own
       ((or (render-of v (:schema opts)) print-html) opts v))))
 
-;;; --- parts: a ctx as the page and the model are drawn from it --------------------------------
+;;; --- the walk: a page of components (docs/render.md#components) -------------------------------
 
-(defn- relevant-of
-  "Entity value m as its schema s shows it: its declared relevant keys (:seon.render/keys), else
-  every key, never its :db/id."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
-  [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
+(defn- opts-form
+  "The opts schema form of render var v's contract (its first argument), or nil."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (when (var? v)
+    (let [s (:malli/schema (meta v)) arity (if (= :function (first s)) (second s) s)]
+      (when (vector? arity) (second (second arity))))))
 
-(defn- own-attributes
-  "Entity node m without its joins' members (ks, the keys its pattern joins under: seon.ctx's
-  record names them, its :ix's :spec): its own attributes, what a part drawn from m alone shows
-  and is made from, so a member's change leaves the part's memo as it was."
-  {:malli/schema [:=> [:cat :map [:sequential :keyword]] :map]}
-  [m ks] (apply dissoc m ks))
+(defn declares?
+  "Does render var v's opts contract name key k (:seon.ctx/ctx, :seon.db/db)? A render that
+  declares either is a component: the walk keeps it in its cache and fills that key in."
+  {:malli/schema [:=> [:cat :any :qualified-keyword] :boolean]}
+  [v k] (boolean (some #{k} (tree-seq vector? seq (opts-form v)))))
 
-(defn- own-values
-  "Entity node m's own attribute values (own-attributes), by key in order: a part's :from."
-  {:malli/schema [:=> [:cat :map [:sequential :keyword]] [:vector :any]]}
-  [m ks] (let [o (own-attributes m ks)] (mapv o (sort-by str (keys o)))))
+(defn component?
+  "Is call head f a component (a render var declaring :seon.ctx/ctx or :seon.db/db)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [f] (or (declares? f :seon.ctx/ctx) (declares? f :seon.db/db)))
 
-(defn render-ctx
-  "The agent page's layout (the declared html render of :seon.render/render-ctx, which an agent
-  overrides on its branch like any render, drawn through `html`): an agent's held record
-  ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its parts, each a keyed call of a
-  sub-render over its slice of ctx, in order, each in its region of the page (:region): :task, the
-  task and what it works with, which the model reads too (seon.repl/page); :chat, the conversation;
-  :tiles, each eval whose value has a render of its own, newest first. With what reads the db beside it (fs, seon.context/renders over the branch's db
-  as of the record's t): [:task], the task, drawn by seon.render.ui/task-page as the task's data
-  (seon.context/task-data over the db) less the vars it cites, compared in the memo by its task key;
-  [:task :cites sym] for each var its plan cites (seon.context/cites), drawn by
-  seon.render.ui/cited, compared by its own key, so a cited var's edit is that part's change
-  alone; [:related], drawn by
-  seon.render.ui/related (seon.context/related), compared by its related key; [:status], what the
-  newest turn (a model's or an outside read's) observed, as (my.task/status) answers it (seon.render.ui/status: each proof
-  with its failures, source and calls, the done rule's reasons, the turn of how many, what the
-  merge will carry, the last reply); [:run], the newest run's relevant keys and the turns it took;
-  [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
-  its units and the environment), named by that key, which is its schema; then the conversation:
-  [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (each member's first transaction, (:first-t fs)); an eval's value is
-  drawn only once ctx holds it opened (:seon.eval/opened: the person opened it, a fact that reaches
-  the branch by take!), else its one line; [:tile id] per eval whose value has a declared render,
-  newest first. Nothing derived is
-  computed here: a part that reads the db carries its key (:read) and the db its render draws on,
-  and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
-  on (ids, the turns' bases but the newest's observation, the agent's own counters)."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:map [:tree :map] [:ix {:optional true} :seon.ctx/ix]]] [:vector :seon.render/part]]}
-  [fs {c :tree ix :ix}]
-  (let [t-of #((:first-t fs) (:db/id %))
-        run (last (sort-by t-of (vals (:runs c))))
-        task (:task run)
-        ;; the keys the task's pattern joins under (its record's walk state names them)
-        tjoins (map :key (get-in ix [:spec (:db/id task) :joins]))
-        ;; the newest turn of either origin (a model's, or an outside read's: each records what it
-        ;; observed), in the order written, and the model turn before it (its last reply)
-        ts (vec (sort-by t-of (vals (:turns run))))
-        turn (peek ts)
-        prev (last (filter #(= :model (:seon.turn/origin %)) (butlast ts)))
-        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
-                         :opened (boolean (:seon.eval/opened e))
-                         :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})
-        ;; what the task's parts read, each key made once: related reads the plan's reference graph too
-        tk (when task ((:task-key fs) task))
-        cks (when task (into (array-map) (for [v ((:cites fs) task)] [v ((:cited-key fs) v)])))]
-    (-> []
-        (cond-> task (conj {:key [:task] :from (own-values task tjoins) :value (relevant-of :seon.task/task-fact (own-attributes task tjoins)) :region :task
-                            :schema :seon.render/task-page :read tk :db (:db fs)})
-                task (into (for [[v ck] cks]
-                             {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ck :db (:db fs)}))
-                task (conj {:key [:related] :from [task] :value {:task (:db/id task)} :region :task
-                            :schema :seon.render/related :read [tk (vec (vals cks)) ((:related-key fs) (:db/id task))] :db (:db fs)})
-                ;; what the newest turn observed, as (my.task/status) answers it: drawn over the turn's
-                ;; recorded basis and the one before it (its last reply), both ctx's
-                (and task turn) (conj {:key [:status] :from [task turn prev] :region :task :schema :seon.render/status :db (:db fs)
-                                       :value (cond-> {:task (:seon.task/id task) :turn (:db/id turn)} prev (assoc :last (:db/id prev)))})
-                run (conj {:key [:run] :from [run] :region :task :schema :seon.run/run-fact :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
-        (into (for [k (sort-by str (keys c))
-                    :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
-                {:key [k] :from [(get c k)] :value (get c k) :schema k :region :task}))
-        ;; in the order written: each member's first transaction (first-t), then its key
-        (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [[(t-of e) (:seon.eval/id e)] (entry :eval e)])
-                                                  (for [t (vals (:turns run))] [[(t-of t) (:seon.turn/id t)] (entry :turn t)])
-                                                  (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)]))))
-        ;; the tiles: each eval whose value has a render of its own, newest first; plain data has none
-        (into (for [e (sort-by (comp - #(or % 0) t-of) (vals (:evals c)))
-                    :let [v (get-in e [:seon.eval/record :response :value])]
-                    :when (and (some? v) (render-of v nil))]
-                {:key [:tile (:seon.eval/id e)] :from [e] :value v :region :tiles})))))
+(defn- child-key
+  "A child as its component's key names it: a view by its path, an entity by its id, a name or
+  number as itself, any other value by its hash."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x]
+  (cond (ratom/view? x) (vec (.-path x))
+        (and (map? x) (:db/id x)) (:db/id x)
+        (or (keyword? x) (symbol? x) (string? x) (number? x) (nil? x) (boolean? x)) x
+        :else (hash x)))
 
-(defn part-faces
-  "Part p's faces, {:html hiccup :inline hiccup}: its hiccup by the render its value's schema
-  declares, else the one printer's, which the page shows and the model reads alike; a part that
-  reads the db (:db) is drawn on it. An eval of the conversation is its one line (:inline, :as
-  :inline), and its html only when opened (:opened): nothing is drawn until someone looks."
-  {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
-  [{:keys [value schema] :as p}]
-  (if (= :eval (first (:key p)))
-    (cond-> {:inline (html {:as :inline :chat true :schema schema} value)}
-      (:opened p) (assoc :html (html {:schema schema} value)))
-    {:html (html (cond-> {:schema schema} (:db p) (assoc :db (:db p))) value)}))
+(defn comp-key
+  "Component call [f opts & children]'s key: its var's name and its children's keys."
+  {:malli/schema [:=> [:cat :any [:sequential :any]] [:vector :any]]}
+  [f children] (into [(symbol f)] (map child-key) children))
 
-(defn part-html
-  "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
-  serialized."
-  {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
-  [p f] (cond-> {:key (:key p)}
-          (:region p) (assoc :region (:region p))
-          (:html f) (assoc :html (h/html (:html f)))
-          (:inline f) (assoc :inline (h/html (:inline f)))))
+(defn key-id
+  "Key k as its component's root element id: its render's name and its children's keys, DOM-safe
+  (seon.render.ui/eval-item over eid 1753 -> \"eval-item-1753\")."
+  {:malli/schema [:=> [:cat [:vector :any]] :string]}
+  [k]
+  (apply str (name (first k))
+         (for [c (rest k)] (str "-" (str/replace (if (keyword? c) (str (namespace c) (when (namespace c) "/") (name c)) (str c)) #"[^A-Za-z0-9_-]" "_")))))
 
-(defn drawn
-  "Part p's faces through memo {key [fs from faces read]}: the held faces when the functions that
-  draw p (fs: its declared render as its var holds it now, and the printer) and what
-  p was made from (its :from, the ctx members view read, else its value) are identical to those
-  it was drawn with (a redefined render draws again; a member a transaction changed is a new
-  object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
-  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [memo {:keys [key value schema from read opened] :as p}]
-  (let [fs [(render-of value schema) @#'print/print-value]
-        src (or from [value])
-        [fs0 src0 out read0] (get memo key)]
-    ;; a part that reads the db (its :read key) draws again when that key moves
-    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)) (= [read opened] read0))
-      [memo out]
-      (let [out (part-faces p)] [(assoc memo key [fs src out [read opened]]) out]))))
+(defn walker
+  "A page's walk: its source (src, {:ref r :changes f}: the reference ctx is, seon.ctx/ctx, and its
+  one diff, seon.ctx/changes), the db its db renders read (db-fn, called when one runs) and its
+  root call. Holds, in this process, the one cache: each component's reaction, args, output and
+  db reads ({key entry}), its render queue (the keys a change reached), mount counter and ledger
+  (calls, hits, misses and allocation by render var). A cold walk (root drawing a branch) is a
+  walker drawn once."
+  {:malli/schema [:=> [:cat :map :seon.host/fn [:vector :any]] :map]}
+  [src db-fn root]
+  {:src src :db db-fn :root root :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
+   :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{})})
+
+(defn- led!
+  "Count k (:hit, :miss, :same) for render var f in w's ledger, with the ticks and bytes a run took."
+  {:malli/schema [:=> [:cat :map :any :keyword [:maybe :int] [:maybe :int]] :nil]}
+  [w f k ticks bytes]
+  (vswap! (:ledger w) update (symbol f) #(-> (or % {}) (update k (fnil inc 0)) (update :ticks (fnil + 0) (or ticks 0)) (update :bytes (fnil + 0) (or bytes 0))))
+  nil)
+
+(declare emit unmount!)
+
+(defn- with-id
+  "Hiccup hc with its root element's id id (a component's key)."
+  {:malli/schema [:=> [:cat :any :string] :any]}
+  [hc id]
+  (if (and (vector? hc) (keyword? (first hc)))
+    (let [[tag & more] hc]
+      (if (map? (first more)) (into [tag (assoc (first more) :id id)] (rest more)) (into [tag {:id id}] more)))
+    [:div {:id id} hc]))
+
+(defn render!
+  "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
+  cache. Skipped when its children are = to last time's (views by source and path) and nothing it
+  read changed: no reaction queued it and no transaction (w's :datoms) touched its db reads;
+  otherwise run in its reaction (seon.ratom/run-in-reaction), opts filled with the view of ctx
+  (:seon.ctx/ctx) and the db (:seon.db/db) it declares, a db render under d/with-reads, and its
+  output drawn (emit) with its root element's id its key. An output = to last time's is the
+  same (:same), and moves its revision only when it differs. A render that throws draws its error's
+  render in its place (docs/failure-points.md: a component's render); every other component draws."
+  {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
+  [w f opts children env]
+  (let [k (comp-key f children) prev (get @(:cache w) k)]
+    (vswap! (:children env) conj k)
+    (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
+             (every? true? (map ratom/view= children (:args prev)))
+             (not (contains? @(:queue w) k))
+             (not (and (:reads prev) (seq (:datoms env)) (d/reads-touched? (:reads prev) (:datoms env)))))
+      (do (led! w f :hit nil nil) [::child k])
+      (let [args (mapv ratom/fresh children)
+            db? (declares? f :seon.db/db)
+            o (cond-> opts
+                (declares? f :seon.ctx/ctx) (assoc :seon.ctx/ctx (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w)))))
+                db? (assoc :seon.db/db ((:db w))))
+            order (or (:order prev) (vswap! (:mounts w) inc))
+            kids (volatile! [])
+            id (key-id k)
+            reads (volatile! nil)
+            draw #(let [hc (try (if db?
+                                  (let [[hc rs] (d/with-reads (fn [] (let [x (apply f o args)] (if (seq? x) (doall x) x))))] (vreset! reads rs) hc)
+                                  (apply f o args))
+                                (catch Throwable e
+                                  [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
+                                                                                (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]))]
+                    (with-id (emit w hc (assoc env :children kids)) id))
+            a0 (profile/alloc-bytes)
+            [out rx] (if-let [rx (:rx prev)]
+                       (do (ratom/-set! rx :f draw) [(ratom/-run rx false) rx])
+                       (ratom/run-in-reaction draw k (fn [k] (vswap! (:queue w) conj k)) {}))
+            bytes (- (profile/alloc-bytes) a0)
+            children @kids
+            same? (and prev (= out (:out prev)))]
+        (vswap! (:queue w) disj k)
+        (doseq [c (:children prev) :when (not (some #{c} children))] (unmount! w c))
+        (led! w f (if same? :same :miss) nil bytes)
+        (vswap! (:cache w) assoc k {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
+                                    :reads (some-> @reads seq d/reads-index)})
+        ;; the components that read the db: the ones a transaction's datoms are matched against
+        (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
+        [::child k]))))
+
+(defn unmount!
+  "Component k gone from walk w: its reaction disposed, its children with it."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :nil]}
+  [w k]
+  (when-let [c (get @(:cache w) k)]
+    (some-> (:rx c) ratom/dispose!)
+    (vswap! (:cache w) dissoc k)
+    (vswap! (:queue w) disj k)
+    (vswap! (:db-keys w) disj k)
+    (doseq [ch (:children c)] (unmount! w ch)))
+  nil)
+
+(defn emit
+  "Hiccup hc drawn in walk w: an element's children drawn; a component call rendered (render!) to
+  its marker; any other call kept as written, its arguments real values (seon.ratom/realize: a
+  call of the printer prints the value, and the model reads the call); a view at a value's place
+  its real value drawn by its render (html)."
+  {:malli/schema [:=> [:cat :map :any :map] :any]}
+  [w x env]
+  (cond
+    (or (nil? x) (string? x) (number? x) (boolean? x) (keyword? x) (char? x) (h/raw? x)) x
+    (ratom/view? x) (html {} (ratom/unwrap x))
+    (seq? x) (doall (map #(emit w % env) x))
+    (and (vector? x) (keyword? (first x)))
+    (let [[tag & more] x attrs (when (map? (first more)) (first more)) kids (if attrs (rest more) more)]
+      (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids))
+    (and (vector? x) (component? (first x))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
+    (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
+    :else (ratom/realize x)))
+
+(defn resolved
+  "Component k's output in walk w with every child's marker replaced by that child's output: the
+  page's hiccup below k."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
+  [w k]
+  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x)) x))
+                         (:out (get @(:cache w) k))))
+
+(defn frame!
+  "Walk w drawn as of now: its root on the first frame, then each component a change queued (a
+  reaction's, after seon.ratom/flush!: Reagent's batching, one frame a commit) or whose db reads
+  datoms touch, in mount order, parents first. Answers the root's key."
+  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:vector :any]]}
+  [w datoms]
+  (let [env {:children (volatile! []) :datoms datoms}]
+    (if-let [root @(:out w)]
+      (do (ratom/flush!)
+          (when (seq datoms)
+            (doseq [k @(:db-keys w) :let [c (get @(:cache w) k)] :when (d/reads-touched? (:reads c) datoms)]
+              (vswap! (:queue w) conj k)))
+          (loop []
+            (when-let [k (first (sort-by #(:order (get @(:cache w) %)) (filter #(contains? @(:cache w) %) @(:queue w))))]
+              (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
+              (recur)))
+          root)
+      (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
+        (vreset! (:out w) k)
+        k))))
+
+(defn page-units
+  "Walk w's page as the units root's render proc lays out (seon.render.proc's agent page): each
+  component placed directly in a container of the root's output (an element with an id: its list),
+  in order, {:id :container :rev :html}: its element id, its container's selector, its revision
+  (moved only when its output changed) and its html (seon.web.html, its children's resolved)."
+  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:rev :int] [:html :string]]]]}
+  [w]
+  (let [root (get @(:cache w) @(:out w))
+        found (volatile! [])]
+    (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
+                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)))]
+                                      (vswap! found conj [(str "#" (:id (second x))) (second m)])))
+                            x)
+                          (:out root))
+    (vec (for [[sel k] @found :let [c (get @(:cache w) k)]]
+           {:id (:id c) :container sel :rev (:rev c) :html (h/html (resolved w k))}))))
+
+(defn page-hiccup
+  "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as
+  [[id hiccup]]: each one's output with its children's resolved, exactly as its render returned it
+  (a call of the printer kept as the call: the model reads the data)."
+  {:malli/schema [:=> [:cat :map :string] [:vector [:tuple :string :any]]]}
+  [w sel]
+  (let [root (get @(:cache w) @(:out w))
+        found (volatile! [])]
+    (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (= sel (str "#" (:id (second x)))))
+                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)))]
+                                      (vswap! found conj (second m))))
+                            x)
+                          (:out root))
+    (vec (for [k @found] [(:id (get @(:cache w) k)) (resolved w k)]))))
+
+(defn draw
+  "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
+  diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
+  (page-units, page-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
+  model's page at a commit."
+  {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]}
+  [t changes db root-var]
+  (let [w (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}])]
+    (frame! w nil)
+    w))
+
+(defn ledger
+  "Walk w's ledger: by render var, its :miss (ran, output new), :same (ran, output =) and :hit
+  (skipped) counts and the bytes its runs allocated."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [w] @(:ledger w))
+
+(defn dispose-walk!
+  "Every component of walk w disposed: a cold walk's end."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [w] (when-let [k @(:out w)] (unmount! w k)) nil)
 
 ;; ---- the walk: an entity and the units its schema declares (docs/render.md#the-walk) ----
 

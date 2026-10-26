@@ -153,6 +153,5 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
 - `seon.render.proc/pass`: root's context keeps the newest `:seon.config.render.list/stream` events; its events section (`seon.render.system`'s events section) says how many older it did not keep.
 - `seon.render.ui/chat`: an agent's page renders the newest parts of its conversation its tab has scrolled to (`:shown`, as `seon.render.ui/page`), the older counted at its top.
-- `seon.render.ui/parts-page`: an agent's page lays out the newest conversation parts its tab has scrolled to (`:shown`, as `seon.render.ui/chat`), the older counted at its top.
 - `seon.render.proc/debug-value`: the debug page renders the newest rows its tab has scrolled to (`:shown`, as `seon.render.ui/page`), the rest counted by its list's end.
 - `seon.render.ui/page`: a page renders the newest rows its tab has scrolled to (`:seon.config.render.list/history` at first, as many more each time its end scrolls into view); its end (`seon.render.ui/more`) counts the older ones, unrendered.
