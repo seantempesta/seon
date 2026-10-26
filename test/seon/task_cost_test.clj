@@ -104,8 +104,8 @@
                 "dbs, one map entry each, a set member's cardinality read from the db's attribute index "
                 "(datahike.db.utils/multival?), and the compare per member; nothing is written for an unchanged task")
      :growth :linear
-     ;; measured: 3.09 / 28.8 MB at 100 / 1,000 tasks, 2 calls; it was 774 MB at 100 when each datom's
+     ;; measured: 0.46 / 3.09 / 28.8 MB at 10 / 100 / 1,000 tasks, 2 calls; it was 774 MB at 100 when each datom's
      ;; cardinality read (d/schema main), which rebuilds the whole schema map
      :per-n {:bytes 31000}
      :fixed {:calls 2 :bytes 300000}
-     :sizes [100 1000]}))
+     :sizes [10 100 1000]}))
