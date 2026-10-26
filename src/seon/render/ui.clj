@@ -950,20 +950,27 @@
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
-  its newest callers): its source; its tests, the callers that are tests, each with its last result
-  on main as db holds it (its :seon.proof/latest's status, which only main's runs write, so a branch
-  holds main's as of its base; :none when there is none); then the other callers, v itself left
-  out. nil when the task cites no v. What the cited component draws, and the form its cut names."
+  its newest callers): its source; its tests, the newest :seon.config.ctx/callers deftests whose
+  form names v, read here by one query (ctx's callers window holds callers of any kind, so newer
+  callers would push them out), each with its last result on main as db holds it (its
+  :seon.proof/latest's status, which only main's runs write, so a branch holds main's as of its
+  base; :none when there is none); then ctx's other callers, v itself left out. nil when the task
+  cites no v. What the cited component draws, and the form its cut names."
   {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol] [:maybe :map]]}
   [db c v]
   (when-let [cv (some #(when (= v (:var/name %)) %) (vals (get-in (second (the-run c)) [:task :cited])))]
     (let [;; each caller form's var: the var whose :var/form it is (a ref, in :avet)
           vars (for [f (vals (:callers cv)) dt (d/datoms db :avet :var/form (:db/id f))
                      :let [m (d/pull db [:var/name :var/kind] (:e dt))] :when (not= v (:var/name m))] m)
-          {tests true others false} (group-by #(= :test (:var/kind %)) vars)
+          others (remove #(= :test (:var/kind %)) vars)
+          ;; its tests by one query, the join reaching them through :var/kind (176k ticks at 60 newer
+          ;; callers, 330k at 600; ctx's window filtered by kind read 3.8M at 600), newest first
+          ;; (forms written in one transaction tie on it: their names break the tie, so the cut is fixed)
+          tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
+                     (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
           status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
       (cond-> {:source (print/code (str (get-in cv [:form :form/src])))}
-        (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [{n :var/name} tests] [n (status n)])))
+        (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
