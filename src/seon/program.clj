@@ -66,6 +66,20 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [n] (case (:op n) :const (:val n) :quote (:form n) ::expr))
 
+(def ^:private resolvers
+  "The clojure.core functions that look a var up by its name at run time: a constant symbol
+  passed to one is a reference, as a symbol in code is."
+  '#{clojure.core/resolve clojure.core/ns-resolve clojure.core/requiring-resolve})
+
+(defn- resolved
+  "The var a call of resolver f names with its literal arguments args (datum): the qualified
+  symbol it is passed, or ns-resolve's namespace and name; nil when they are no literal names."
+  {:malli/schema [:=> [:cat :qualified-symbol [:sequential :any]] [:maybe :qualified-symbol]]}
+  [f args]
+  (let [s (last args) n (first args)]
+    (cond (qualified-symbol? s) s
+          (and (= 'clojure.core/ns-resolve f) (simple-symbol? s) (simple-symbol? n)) (symbol (name n) (name s)))))
+
 (defn- invoked
   "The var an :invoke node calls, or nil."
   {:malli/schema [:=> [:cat :map] [:maybe :qualified-symbol]]}
@@ -182,8 +196,12 @@
                                  (coll? x) (vswap! acc #(-> % (update :quoted into (quoted-names x))
                                                             (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
-         :invoke (when (and (= 'clojure.core/deref (invoked n)) (= 3 (count (:args n))))
-                   (vswap! acc update :timeouts conj 'clojure.core/deref))
+         :invoke (let [f (invoked n)]
+                   (when (and (= 'clojure.core/deref f) (= 3 (count (:args n))))
+                     (vswap! acc update :timeouts conj 'clojure.core/deref))
+                   ;; (resolve 'ns/x): the var it looks up by name is one it references
+                   (when-some [s (when (resolvers f) (resolved f (mapv datum (:args n))))]
+                     (vswap! acc update :refs conj s)))
          nil)
        (case (:op n)
          :invoke (when-not in-fn?
