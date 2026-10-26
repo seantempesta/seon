@@ -45,12 +45,15 @@
     (is (= :seon.task/refused (:seon.error/type (tpl/request-tx after (tpl/stages (assoc req :seon.task/needs #{"demo/nothing"})))))
         "an error answers as it is, and nothing is written")))
 
-(deftest the-fit-tasks-are-requests-a-user-would-write
-  ;; root, 2026-10-25 (the clean path): the five fit tasks restated as a user's problem
-  ;; descriptions, each a request with no proof given (the agent writes its own, red), short
-  (doseq [d fx/fit-requests]
+(deftest the-measured-requests-are-a-users-with-their-reproduction
+  ;; the capped runs of 2026-10-26: four of ten requests were already done on main and nothing on
+  ;; the page said so; each request now carries the one form that reproduces it, run on main first
+  (is (= 10 (count fx/requests)))
+  (is (apply distinct? (map :seon.task/name fx/requests)) "ten different requests")
+  (doseq [d fx/requests]
     (is (not (contains? d :seon.task/proofs)) "no proof given: the agent writes its own")
-    (is (< (count (:seon.task/plan d)) 300) (str "a short description: " (:seon.task/name d)))
+    (is (re-find #"Reproduce: \(.*\) answers .*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
+    (is (< (count (:seon.task/plan d)) 1000) (str "short: " (:seon.task/name d)))
     (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
 
 (deftest a-request-is-its-design-build-task-and-its-merge
