@@ -137,13 +137,22 @@
                {:id mid :from (:seon.message/from m) :body (:seon.message/body m)}))
         messages))
 
+(defn- program-vars
+  "Of citations, those of the program's vars (seon.program/program-names), in their order: what a
+  task's page cites as vars, and what its related search starts from."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
+  [db cites]
+  (let [vars (filterv #(= :var (docs/citation-kind db %)) cites)
+        names (set (program/program-names db (mapv :seon.ref/name vars)))]
+    (filterv (comp names :seon.ref/name) vars)))
+
 (defn- not-written
-  "What proof p should assert, by the plan's own words: its sentences that name it, else the
-  plan whole."
+  "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
+  it, or that it is not written yet when none does (the plan is on the page already)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
   [p plan]
-  (let [ss (str/split plan #"(?<=[.!?])\s+")]
-    (or (not-empty (str/join " " (filter #(str/includes? % (name p)) ss))) plan)))
+  (let [ss (filter #(str/includes? % (name p)) (str/split plan #"(?<=[.!?])\s+"))]
+    (if (seq ss) (str "not written yet; it should assert what the plan says: " (str/join " " ss)) "not written yet")))
 
 (defn similar
   "The program functions nearest task entity te's plan by meaning (its vector: seon.vector/near,
@@ -208,7 +217,7 @@
     (when (and (pos? k) (vector/vector-of db te))
       (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id (d/pull db [:seon.task/id] te))))
             cites (ref/references db plan)
-            vars (filterv #(= :var (docs/citation-kind db %)) cites)
+            vars (program-vars db cites)
             fns (into #{} (keep :seon.ref/name) vars)
             ;; a wiki page's section only: a cited file is read whole by its view
             secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
@@ -306,7 +315,7 @@
   ([db t write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        refs (filterv #(= :var (docs/citation-kind db %)) cites)
+        refs (program-vars db cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)
         near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) (map :seon.ref/name) refs))]
@@ -324,7 +333,7 @@
                              (for [p proofs]
                                [p (if (docs/source-of db p)
                                     (list 'my.agent/prove #{p})
-                                    (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
+                                    (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
       near (assoc :similar near)
       (not write-set?) (dissoc :write-set)))))
@@ -346,15 +355,16 @@
     ()))
 
 (defn cites
-  "The vars task m's plan cites beside its proofs, in the plan's order, each once: each is its own
+  "The program's vars task m's plan cites beside its proofs (program-vars: not a
+  reproduction's test helper, library call or handle), in the plan's order, each once: each is its own
   part of the task's page ([:task :cites sym], seon.render/render-ctx, drawn by `cited`), so a cited
   var's edit changes that part alone."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :qualified-symbol]]}
   [db m]
   (let [t (task/task db (:seon.task/id m))
         {:keys [plan proofs]} (:seon.task/accumulated t)]
-    (into [] (comp (filter #(= :var (docs/citation-kind db %))) (map :seon.ref/name) (remove (set proofs)) (distinct))
-          (ref/references db (str plan "\n" (:seon.task/instructions t))))))
+    (into [] (comp (map :seon.ref/name) (remove (set proofs)) (distinct))
+          (program-vars db (ref/references db (str plan "\n" (:seon.task/instructions t)))))))
 
 (defn cited
   "Var v as the task's page shows it: its source and its callers (docs/callers), or that it

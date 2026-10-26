@@ -12,7 +12,7 @@ Every text Seon reads as prose (a task's plan, a wiki page, a docstring) goes th
 
 The delimiter around a citation decides how much of what it cites is pulled.
 
-- A bare word holding a `/` is its **summary**, and counts only when it names something.
+- A bare word holding a `/` is its **summary**, and counts only when it names something. A var's `#'` before it is punctuation, so `#'seon.context/printed-run` cites the var. A word read inside a `"..."` string is data, as quoted output is, never a citation: a reproduction's `"docs/flow.md"` names no page (`seon.ref-test/a-string-literal-in-prose-cites-nothing`). A code span between quotes is still a citation.
 - One backtick, or a link, is its **doc**.
 - Three or more backticks are its **code**.
 - Two backticks are a literal, never a reference: write ``ns/name`` to mention a name without citing it.
@@ -33,7 +33,9 @@ One parse is linear in the text. Most of its allocation is reading each candidat
 
 A task's references are the names its plan and instructions cite, derived by the task writer and never authored.
 
-```seon.task/create-tx``` stores them as `:seon.task/references` (the set from ```seon.ref/names```, taken from the plan and instructions; no names, no key), and ```seon.task/load-tx``` restates them from the declaration when a plan changes, so the context and the write set read one derivation. A citation that resolves to nothing is a problem on the task, never an error (v1's rule, TASK-CHAIN §3): ```seon.task/citation-problems``` answers `{:task id :name sym :problem :unresolved}` for each, and `my.root/create!` and `my.root/load-tasks!` carry them as `:problems` beside the write, so whoever wrote the plan sees it when they write it. In the agent's context the same name shows `:unresolved true` with `:problem`, the message from ```seon.ref/problem-messages```: it resolves to nothing on the branch, what the task intends is its plan's to say, and two backticks mention a name without citing it. A plan that cites the function its proof calls, not the task's own name, is the cheapest way to a good context. A reference to another task by its id is shown by its plan (`seon.ref/task-view`) and is not a var of the write set.
+```seon.task/create-tx``` stores them as `:seon.task/references` (the program's names from ```seon.ref/names```, taken from the plan and instructions; no names, no key), and ```seon.task/load-tx``` restates them from the declaration when a plan changes, so the context and the write set read one derivation. A citation that resolves to nothing is a problem on the task, never an error (v1's rule, TASK-CHAIN §3): ```seon.task/citation-problems``` answers `{:task id :name sym :problem :unresolved}` for each, and `my.root/create!` and `my.root/load-tasks!` carry them as `:problems` beside the write, so whoever wrote the plan sees it when they write it. In the agent's context the same name shows `:unresolved true` with `:problem`, the message from ```seon.ref/problem-messages```: it resolves to nothing on the branch, what the task intends is its plan's to say, and two backticks mention a name without citing it. A plan that cites the function its proof calls, not the task's own name, is the cheapest way to a good context. A reference to another task by its id is shown by its plan (`seon.ref/task-view`) and is not a var of the write set.
+
+The names are the program's (```seon.program/program-names```: a namespace the program holds). A reproduction's test helper, library call and handle (`result/e1`) are its entry and data, not its subject, so the task cites none of them, and the page's cited vars (```seon.context/cites```) are the same set (`seon.task-test/the-writer-cites-the-programs-names-not-the-reproductions`). A name in a namespace the program does not hold yet is not cited until it is. A test the plan names on purpose is its proof (`:seon.task/proofs`), shown with its status, not a cited var.
 
 ## The wiki in the store
 
