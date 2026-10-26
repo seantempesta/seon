@@ -675,7 +675,8 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through the stages' one transaction and
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through the stages' one transaction
+  ;; (seon.template/stages, which a request no longer makes: a whole task has no next stage) and
   ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them

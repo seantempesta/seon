@@ -9,9 +9,10 @@
     from the merge template (kind :merge, on the work task's branch, needing it, its plan
     and proofs inherited). A task that needs another's work needs its merge, so it starts
     from a main that holds that work.
-  - `request`: a request (one declaration: what the user asked) becomes design ->
-    implement -> merge on design's branch, so each step holds the last one's work, and
-    `request-tx` writes the whole linked set released in one transaction (DECISIONS, A
+  - `request`: a request (one declaration: what the user asked) becomes one :whole task that
+    one agent works through on its own branch; `stages`, which it replaced, makes design ->
+    implement -> merge on design's branch, so each step holds the last one's work; and
+    `request-tx` writes either set released in one transaction (DECISIONS, A
     request's whole linked task set is one transaction on main, before any agent forks): the
     reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
@@ -111,8 +112,9 @@
        (update :seon.task/branch #(or % (task/default-branch (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))))])
 
 (defn stages
-  "Request decl as the staged tasks that `request` replaced, each stage an agent of its own: decl's name as the design step, then <name>-implement needing
-  it, then <name>-merge needing that, all on the design step's branch (so implement holds
+  "Request decl as the staged tasks that `request` replaced, each stage an agent of its own.
+  Decl's name is the design step, then <name>-implement needing it, then <name>-merge needing
+  that, all on the design step's branch (so implement holds
   design's schemas, stubs and red proofs, and merge holds both). The request's proofs are
   design's and accumulate along :needs (seon.task/accumulate)."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}

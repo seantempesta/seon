@@ -155,7 +155,8 @@
 (defn- keeps?
   "Whether a run of a task of kind, ended with outcome, keeps its process at its end (:diffed):
   the agent ended it on a park outcome, and the task is no merge (a merge's run ends its
-  process, as before). Its judge then parks it, or stops the kept process (stop-kept)."
+  process, as before; a whole task, which merges too (seon.task/merges?), keeps its process,
+  since its own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 

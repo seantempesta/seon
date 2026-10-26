@@ -6,7 +6,7 @@ All work is task entities on main, linked by `:needs`; a template turns what som
 
 A request becomes its whole linked task set in one transaction on main, released, and the reconciler forks the set's first agent only from a main that holds all of it, so every agent of it reads the same data from its first form.
 
-```seon.template/request``` makes it one task of kind `:whole` on its own branch, which one agent works through in one session: it writes the red proof, makes it green, merges main at each green and keeps it green, and its green branch merges into main as a merge task's does (```seon.task/merges?```); its runs start as work does, not one at a time as merges do. It replaces the stages (the owner, 2026-10-26: "switch to one-go for all tests until we figure out a better solution"; one agent against three merged as many of the same ten requests at half the dollars).
+```seon.template/request``` makes it one task of kind `:whole` on its own branch, which one agent works through in one session: it writes the red proof, makes it green, merges main at each green and keeps it green, and its green branch merges into main as a merge task's does (```seon.task/merges?```); its runs start as work does, not one at a time as merges do. It replaces the stages ([decisions](decisions.md#one-go-for-every-request)).
 
 ```seon.template/stages``` makes the set it replaced, from the same declaration:
 - the request itself as the **design** step (kind `:design`, its plan the request's words);
