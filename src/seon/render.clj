@@ -24,7 +24,7 @@
   A nested value renders by a call ([render v opts] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
-            [clojure.string :as str] [datahike.api :as d]))
+            [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
 
 (def faces "Each face's key." {:html :seon.render/html :ai :seon.render/ai})
 
@@ -188,8 +188,10 @@
   "An agent's ctx c as its parts, in order: [:task], the task's relevant keys; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
   rule's reasons when it gave any; [:run], the newest run's relevant keys and the turns it took;
-  then the conversation, [:eval id] per eval and [:message id] per message to the run, in the
-  order they were written (their entity ids). Pure in c: it reads no db and no config. What a
+  [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
+  its units and the environment), named by that key, which is its schema; then the conversation:
+  [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
+  the order they were written (their entity ids). Pure in c: it reads no db and no config. What a
   part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
   observation, the agent's own counters): a change without meaning is a data defect, fixed here."
   {:malli/schema [:=> [:cat :map] [:vector :seon.render/part]]}
@@ -198,31 +200,44 @@
         task (:task run)
         turn (last (sort-by :seon.turn/n (vals (:turns run))))
         {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
-        failure (into {} (for [r reds] [(:test r) (select-keys r [:expected :actual :got])]))
-        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e))] :value (dissoc e :db/id :seon.eval/agent :seon.message/to)})]
+        failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
+        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))]
+                         :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
         (cond-> task (conj {:key [:task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})
                 (seq (:seon.task/proofs task))
-                (conj {:key [:proofs] :value (into (sorted-map-by #(compare (str %1) (str %2)))
-                                                   (for [t (:seon.task/proofs task)]
-                                                     [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))})
+                (conj {:key [:proofs] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
+                                                              (for [t (:seon.task/proofs task)]
+                                                                [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
+                                                  {:seon.render/schema :seon.render/proofs})})
                 (seq reasons) (conj {:key [:verdict] :value reasons})
                 run (conj {:key [:run] :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
+        (into (for [k (sort-by str (keys c))
+                    :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
+                {:key [k] :value (get c k) :schema k}))
         (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [(:db/id e) (entry :eval e)])
+                                                  (for [t (vals (:turns run))] [(:db/id t) (entry :turn t)])
                                                   (for [m (vals (:messages run))] [(:db/id m) (entry :message m)])))))))
 
 (defn part-faces
-  "Part p's two faces, {:html hiccup :text string}: each by the render its value's schema declares
-  for that face, else the one printer's, both from one selection under one budget
+  "Part p's faces, {:html hiccup :text string :inline hiccup}: each by the render its value's schema
+  declares for that face, else the one printer's, html and text from one selection under one budget
   (seon.print.select/show with :outputs #{:text :hiccup}), so the page and the model never differ
-  in what was cut."
+  in what was cut; :inline, its html in one line (:as :inline), what a folded part shows."
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
-  [{:keys [value]}]
-  (let [h (render-of value :html nil) a (render-of value :ai nil)
+  [{:keys [value schema]}]
+  (let [h (render-of value :html schema) a (render-of value :ai schema)
         both (when-not (and h a)
                (print/print-value value (assoc (printer-opts {}) :outputs #{:text :hiccup} :render nested-html)))]
-    {:html (if h (html value {}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
-     :text (if a (ai value {}) (or (:text both) (:seon.error/message both) ""))}))
+    {:html (if h (html value {:schema schema}) (or (:html both) [:span {:class "seon-print-refused"} (str (:seon.error/message both))]))
+     :text (if a (ai value {:schema schema}) (or (:text both) (:seon.error/message both) ""))
+     :inline (html value {:as :inline :schema schema})}))
+
+(defn part-html
+  "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
+  serialized."
+  {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
+  [p f] {:key (:key p) :html (h/html (:html f)) :inline (h/html (:inline f))})
 
 (defn drawn
   "Part p's faces through memo {key [fs value faces]}: the held faces when the functions that
@@ -230,8 +245,8 @@
   value are identical to those it was drawn with (a redefined render draws again), else drawn
   now. Answers [memo' faces]."
   {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [memo {:keys [key value] :as p}]
-  (let [fs [(render-of value :html nil) (render-of value :ai nil) @#'print/print-value]
+  [memo {:keys [key value schema] :as p}]
+  (let [fs [(render-of value :html schema) (render-of value :ai schema) @#'print/print-value]
         [fs0 v0 out] (get memo key)]
     (if (and out (identical? v0 value) (every? true? (map identical? fs fs0)))
       [memo out]

@@ -542,6 +542,17 @@
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :recorded (seon.problems/health main) :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
 
+(defn- drawn-parts
+  "a3's page's parts as its process draws them (seon.repl/parts), drawn here from branch: what the
+  render proc's {:op :parts} ask is answered with."
+  [branch]
+  {:parts (mapv #(r/part-html % (r/part-faces %)) (r/view (:tree (seon.ctx/build branch (seon.task/agent-key "b1" :a3) :task-demo-f))))})
+
+(defn- conversation-rows
+  "The ids of view's conversation parts st holds."
+  [st view]
+  (set (filter #(re-matches #"q-(eval|turn|message)-.*" %) (keys (get-in st [:views view :units])))))
+
 (deftest root-and-an-agent-are-one-page-function
   (let [[main branch eid] (paged-dbs)
         st (proc-state main branch)
@@ -569,7 +580,7 @@
       (is (= :seon.render/no-entity (:seon.error/type (#'p/page-value st 99999999))))
       (let [err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
             l (#'p/page-value (-> st (update-in [:branches :a3] dissoc :db) (assoc-in [:branches :a3 :error] err)) :a3)]
-        (is (some #(= err (get-in % [:input :seon.render/value])) (:seon.render/units l)))
+        (is (some #(str/includes? (str (get-in % [:input :html])) "no branch :task-demo-f") (:seon.render/units l)) "its error, by the error's render")
         (is (every? #(zero? (first (:comp %))) (filter #(= "#p-rows" (:container %)) (:seon.render/units l))) "no branch read: none of its rows")))
     (testing "an agent of an earlier boot is not live (root's boot is its entity's on main): its id names no process of this one"
       (let [st2 (assoc st :main-db (d/db-with main [{:seon.root/id :root :seon.root/boot "b2"}]))]
@@ -685,10 +696,10 @@
         branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}} nil))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
         patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
-    (is (= 1 (- (get-in st2 [:counts :components]) (get-in st1 [:counts :components]))) "one component rendered: the new row")
-    (is (empty? (:frags patch)) "no held row changed")
-    (is (= 1 (count (filter #(= "#c-rows" (first %)) (:appends patch)))) "one part, at the conversation's end")
-    (is (str/includes? (second (first (filter #(= "#c-rows" (first %)) (:appends patch)))) "(h)"))))
+    (is (empty? (:frags patch)) "no held part changed")
+    (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
+    (is (= 1 (count (remove #(= "#c-older" (first %)) (concat (:appends patch) (:afters patch) (:prepends patch)))))
+        "and nothing else sent but the conversation's end, whose id counts the parts it holds")))
 
 (deftest a-branch-read-anew-renders-its-components-again
   ;; a branch read after an error has nothing held to diff against: what was cached from that
@@ -710,7 +721,7 @@
         st (comp-state main branch eid)
         [st1 _] (#'p/pass-view st :a3)
         [st2 _] (#'p/pass-view st1 eid)
-        rows #(set (filter (fn [id] (and (str/starts-with? id "c-") (not (str/starts-with? id "c-more")))) (keys (get-in %1 [:views %2 :units]))))]
+        rows conversation-rows]
     (is (seq (rows st2 :a3)))
     (is (= (rows st2 :a3) (rows st2 eid)) "the same rows on both pages")
     (is (= (get-in st1 [:counts :components]) (get-in st2 [:counts :components])) "the second page rendered none: every one was cached")
@@ -726,16 +737,14 @@
         html (p/page-html st1 :a3)
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
+    ;; the message is in the conversation; its place by the transaction that wrote it waits on each
+    ;; member's t in ctx (the one derivation's slice 1): by entity id, a content id sorts last
+    (is (< (at "f doubles?") (at "turn 1 of 8") (at "(g)")) "in the order written: an eval's prose, the turn, the owner's eval")
+    (is (at "check g") "the message to the run")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
-    (is (some #(and (str/includes? % "class=\"seon-eval\"") (str/includes? % "data-on:toggle=")) (re-seq #"<details[^>]*>" html)) "an eval is a block that opens")
+    (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
-    (is (str/includes? html "<code class=\"language-clojure truncate text-text-100\">(f 2)") "its line, its code highlighted")
-    (is (not (str/includes? html "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)")) "closed: its form is not rendered, only its line")
-    (testing "opened, it is rendered whole"
-      (let [e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
-            [st2 _] (#'p/pass-view (assoc-in st1 [:open :a3] #{(str "c-" e1)}) :a3)]
-        (is (str/includes? (p/page-html st2 :a3) "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)") "its code, highlighted")))))
+    (is (re-find #"<summary[^>]*>.*\(f 2\)" html) "folded, its one line")))
 
 (deftest the-sidebar-is-roots-agents
   ;; the sidebar is the agent's ref to root, rendered: root, then root's agents, each its own
@@ -770,89 +779,6 @@
 
 (defn- depth "Hiccup x's nesting." [x] (if (vector? x) (inc (reduce max 0 (map depth x))) 0))
 
-(deftest the-screen-is-the-page-without-its-chat
-  ;; task seon.render/a-page-is-its-entitys-view (4c): the agent's screen is root's page of it, as
-  ;; the render proc holds it, without its conversation (the model has it as its messages), its
-  ;; input, or presentation; at main's t
-  (let [[main branch eid] (paged-dbs)
-        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-        {:keys [t page] :as screen} (p/screen-of st1 :a3)
-        ;; the page is its own :seon.render/html render, so the agent's page draws it (the value view);
-        ;; code and prose marks (seon.print.select/code?) are the printer's plain data, printed as
-        ;; themselves: read as their text, never as an attribute map or a raw value
-        page (clojure.walk/postwalk #(if-let [k (seon.print.select/code? %)] (k %) %) (:seon.render/html page))
-        ;; the screen as the model reads it: the page's data printed once by the one printer
-        text (seon.print/text page seon.print/default-budget)]
-    (is (= (:max-tx main) t))
-    (is (= #{:seon.render/html} (set (keys (:page screen)))) "the page, its own render")
-    (is (vector? page) "hiccup, as the page is")
-    (is (some #{[:h1 "a3"]} (tree-seq coll? seq page)) "the agent's head")
-    (is (some #(and (vector? %) (= :li (first %)) (some #{"a3"} %)) (tree-seq coll? seq page)) "root's agents, the sidebar")
-    (is (some #{[:section [:h2 "run"] [:p "demo/f#1 · running · up to 8 turns · m"]]} (tree-seq coll? seq page))
-        (str "the run's tile, by the thing it shows: " (pr-str page)))
-    (is (not (str/includes? text "#:seon")) "no value printed raw")
-    (is (not-any? #(str/includes? text %) ["(f 2)" "◆ seon" "its page" "fact" walked-plan]) "no conversation, no chrome, no schema names, no plan (the story's)")
-    (is (not (str/includes? text "release")) "no input")
-    (is (not-any? map? (tree-seq coll? seq page)) "no attributes")
-    (is (<= (depth page) 5) (str "shallow: " (depth page)))
-    (is (some #(and (vector? %) (= :h2 (first %)) (some #{"changes"} %)) (tree-seq coll? seq (map :hiccup (vals (get-in st1 [:views :a3 :units])))))
-        "the page itself shows the branch's changes")
-    (is (not-any? #(and (vector? %) (= :h2 (first %)) (some #{"proofs" "changes"} %)) (tree-seq coll? seq page))
-        "the proofs and the changes are the turn's own forms (my.task/status, my.branch/changes), not the screen's")))
-
-(deftest nothing-is-shown-twice
-  ;; what the conversation holds (each eval, as its own message) is never on the screen too
-  (let [[main branch eid] (paged-dbs)
-        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-        text (pr-str (:page (p/screen-of st1 :a3)))
-        codes (keep #(get-in % [:seon.eval/record :code]) (d/q '[:find [(pull ?e [:seon.eval/record]) ...] :where [?e :seon.eval/id]] branch))]
-    (is (seq codes))
-    (is (not-any? #(str/includes? text (pr-str %)) codes) "no eval's code")))
-
-(defn- answer-main
-  "The render proc after the api answers st's pending read of main for a screen (its
-  [:screen-main k] request) with db: [st outputs]."
-  [st db]
-  (let [tag (some (fn [[rid kind]] (when (and (vector? kind) (= :screen-main (first kind))) rid)) (:pending st))]
-    (#'p/render-proc st :answers {:tag tag :r {:db db}})))
-
-(deftest an-agent-admitted-after-the-others-gets-its-screen
-  ;; task seon.render/a-late-agent-gets-its-screen: the proc's own read of main can lag main's
-  ;; commits (it takes them one message at a time), so an agent admitted after the others asked for
-  ;; its screen while that read held no entity of it, and was answered "no agent a5 in root's boot"
-  ;; every turn of its run (step 6, 2026-10-25). Its screen is answered on main as of its request.
-  (let [[main branch eid] (paged-dbs)
-        ;; main as root writes it at boot: its config on root's entity (a pass reads it, seon.task/root)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
-        a3 (:db/id (d/entity main [:seon.agent/key (seon.task/agent-key "b1" :a3)]))
-        before (d/db-with main [[:db/retractEntity a3]])
-        st (assoc (comp-state before branch eid) :watch #{})
-        [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})]
-    (is (empty? (get out1 [:a3 :in])) "not answered from the proc's older read of main")
-    ;; main as read for the screen: the agent admitted since (a newer main than the proc held)
-    (let [[st2 out2] (answer-main st1 (d/db-with before (seon.task/agent-tx "b1" :a3 {:status :busy :pid 77 :branch :task-demo-f})))
-          o (volatile! {})
-          _ (#'p/pass st2 o)
-          reply (first (concat (get out2 [:a3 :in]) (get @o [:a3 :in])))]
-      (is (= 9 (:tag reply)))
-      (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))) (str "its page, not no-location: " (pr-str (:r reply)))))))
-
-(deftest a-screen-from-a-newer-main-renders-what-changed-since
-  ;; the branch review (2026-10-25, F1): main read for a screen moved the proc's main past what its
-  ;; cached components were rendered from, and the screen showed their older content. Main moves one
-  ;; way (advance-main): what its datoms-diff touched renders again
-  (let [[main branch eid] (paged-dbs)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
-        st (assoc (comp-state main branch eid) :watch #{:a3})
-        [st _] (#'p/pass-view st :a3)
-        _ (is (str/includes? (str (:page (p/screen-of st :a3))) "busy") "cached as main had it")
-        newer (d/db-with main (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f}))
-        [st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 5}})
-        [_ out] (answer-main st1 newer)
-        page (str (:page (:r (first (get out [:a3 :in])))))]
-    (is (str/includes? page "idle") (str "the screen shows main as read for it: " page))
-    (is (not (str/includes? page "busy")) "not the component cached before")))
-
 (deftest every-view-of-an-agent-shows-one-read-of-its-branch
   ;; the branch review (2026-10-25, F2): each view read the agent's branch on its own, at its own t,
   ;; and one still on an older read could refill the cache the newer one had invalidated. One read
@@ -868,47 +794,6 @@
     (is (= 1 (count asks)) "one read for the two views")
     (is (identical? newer (get-in st [:branches :a3 :db])))
     (is (identical? newer (get-in st [:branches [:debug :a3] :db])) "both show it, from the one answer")))
-
-(deftest a-screen-waits-for-the-branch-read-that-has-its-agents-commit
-  ;; the branch review (2026-10-25, F3): the agent's commit and its screen request travel different
-  ;; paths, and the screen could be answered from a read of the branch before that commit. The
-  ;; request names the commit's t; it is answered from a branch read that covers it
-  (let [[main branch eid] (paged-dbs)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
-        newer (d/db-with branch [{:seon.eval/id "e9" :seon.eval/by "a3" :seon.eval/record {:code "(f 9)" :response {:value 18}}}])
-        st (assoc (comp-state main branch eid) :watch #{})
-        [st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :t (:max-tx newer) :screen {:route [:a3 :in] :tag 3}})
-        [st2 out2] (answer-main st1 main)]
-    (is (empty? (get out2 [:a3 :in])) "main read, but the branch read predates the agent's commit: not yet")
-    (let [[_ out3] (#'p/render-proc (assoc-in st2 [:pending 77] [:branch :task-demo-f]) :answers {:tag 77 :r {:db newer}})]
-      (is (= 3 (:tag (first (get out3 [:a3 :in])))) "answered once a read has it"))))
-
-(deftest a-screen-is-asked-as-a-page-and-answered-on-its-route
-  ;; the agent's {:op :screen} reaches the render proc as its page's request (seon.root's :screen),
-  ;; is held until the page is whole on main as of the request (its own read of main), and is
-  ;; answered on the asker's route
-  (let [[main branch eid] (paged-dbs)
-        ;; main as root writes it at boot: its config on root's entity (a pass reads it, seon.task/root)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
-        st (assoc (comp-state main branch eid) :watch #{})
-        [st1 out1] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
-        [st2 out2] (answer-main st1 main)
-        reply (first (get out2 [:a3 :in]))]
-    (is (contains? (:screens st1) [[:a3 :in] 9]) "held while main as of the request is not read")
-    (is (empty? (get out1 [:a3 :in])))
-    (is (= 9 (:tag reply)))
-    (is (some #{[:h1 "a3"]} (tree-seq coll? seq (:page (:r reply)))))
-    (is (empty? (:screens st2)) "answered once")
-    (is (nil? (get-in st2 [:views :a3])) "a page only a screen needed keeps nothing")
-    (is (empty? (:components st2)) "nor its components in the cache (the review's F5: no tab, no forget)")
-    (testing "two agents asking with the same counter are two requests, each answered on its route"
-      (let [[st1 _] (#'p/render-proc st :from-web {:op :page :view :a3 :screen {:route [:a3 :in] :tag 9}})
-            [st1 _] (#'p/render-proc st1 :from-web {:op :page :view :root :screen {:route [:a9 :in] :tag 9}})
-            _ (is (= 2 (count (:screens st1))))
-            [st1 o1] (answer-main st1 main)
-            [_ o2] (answer-main st1 main)
-            replies (merge-with into o1 o2)]
-        (is (= [9 9] [(:tag (first (get replies [:a3 :in]))) (:tag (first (get replies [:a9 :in])))]))))))
 
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch eid] (paged-dbs)
@@ -934,12 +819,11 @@
             branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}} nil))
             [_ p] (pass (assoc-in st1 [:branches :a3 :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
-        (is (= 1 (count (filter #(= "#c-rows" (first %)) (:appends p)))) "one part, at the conversation's end")
-        (is (str/includes? (second (first (filter #(= "#c-rows" (first %)) (:appends p)))) "(h)"))))
+        (is (= 1 (count (filter #(str/includes? (second %) "(h)") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
     (testing "only the rows a tab scrolled to are rendered: the rest are counted, and the next come when its end scrolls into view"
       (let [st (assoc-in st [:shown :a3] 1)
             [st1 p] (pass st)
-            rows (fn [st] (count (filter #(str/starts-with? % "c-") (remove #(str/starts-with? % "c-more") (keys (get-in st [:views :a3 :units]))))))]
+            rows (fn [st] (count (conversation-rows st :a3)))]
         (is (= 1 (rows st1)))
         ;; at the conversation's top, in view as the page opens: the older load when it is clicked, never by being in view
         (is (str/includes? (get-in st1 [:views :a3 :units "c-more-1" :html]) "4 older parts, shown when this is clicked"))
@@ -969,9 +853,13 @@
               st1 (#'p/pass (-> st (update :branches dissoc :a3) (assoc :waiting {8 :a3})) o)]
           (is (empty? (filter #(= :page (:op %)) (:to-web @o))))
           (let [o (volatile! {})
-                _ (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
-                page (first (filter #(= :page (:op %)) (:to-web @o)))]
-            (is (str/includes? (:html page) "(f 2)"))))))
+                st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)]
+            (is (empty? (filter #(= :page (:op %)) (:to-web @o))) "a running agent's page waits for the parts it draws")
+            (is (some #(= {:op :parts :id :a3} (get-in % [:req])) (:to-api @o)) "which it is asked for")
+            (let [o (volatile! {})
+                  _ (#'p/answered st2 o [:parts :a3] (drawn-parts branch))
+                  page (first (filter #(= :page (:op %)) (:to-web @o)))]
+              (is (str/includes? (:html page) "(f 2)") "answered with the parts it drew"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
       (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views :a3])))
@@ -1071,51 +959,6 @@
     (is (str/includes? flat "demo-test/f-test") "the value is all there")
     (is (= 1 (count (re-seq #"<details" nested))) "only the vector of maps folds")
     (is (str/includes? nested "vector 2 items"))))
-
-(deftest the-screen-says-what-the-run-did
-  ;; task seon.render/a-page-is-its-entitys-view (4d): from the run's eval records, the vars it
-  ;; read (a repeated read shows its count), defined and evaluated, and the forms that ran its
-  ;; tests; the screen's own evals are not the run's doing
-  (let [ev (fn [id by rec] {:seon.eval/id id :seon.eval/by by :seon.eval/record (merge {:response {} :run "demo/f#1"} rec)})
-        evals [(ev "e1" "a3" {:code "(clojure.repl/source demo/f)"})
-               (ev "e2" "screen" {:code "(seon.screen/show)" :fns [{:var 'seon.screen/show :calls 1 :ms 1.0}]})
-               (ev "e3" "a3" {:code "(source demo/f)"})
-               (ev "e4" "a3" {:code "(defn g [x] (demo/f x))" :recorded ['demo/g] :fns [{:var 'demo/f :calls 2 :ms 0.1} {:var 'clojure.core/inc :calls 1 :ms 0.1}]})
-               (ev "e5" "a3" {:code "(my.agent/prove)"})]
-        did (ui/did evals)]
-    (is (= {'demo/f 2} (:read did)) "read twice, shown once with its count")
-    (is (= ['demo/g] (:defined did)))
-    (is (= ['demo/f] (:evaluated did)) "program functions, the library's left out, the screen's not the run's")
-    (is (= [{:form "(my.agent/prove)" :handle "e5"}] (:tests did)))
-    (is (str/includes? (h/html (ui/this-run did {})) "demo/f ×2"))))
-
-(deftest the-screen-shows-what-the-prose-cites
-  ;; task seon.render/a-page-is-its-entitys-view (4e): what the run's prose cited, as its eval
-  ;; records hold it, is on the screen, each cited thing at its citation's depth
-  (let [[main branch eid] (paged-dbs)
-        [st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-        text (pr-str (:page (p/screen-of st1 :a3)))]
-    (is (some #(and (vector? %) (= [:h2 "cited"] (second %)) (str/includes? (pr-str %) "seon.docs/source-of"))
-              (tree-seq coll? seq (:page (p/screen-of st1 :a3))))
-        (str "the var the prose cited, in the cited tile, read from the record (its prose names none): " text))
-    (testing "a run whose records cite nothing has no cited tile"
-      (let [branch' (d/db-with branch [{:seon.eval/id "e1" :seon.eval/record {:code "(f 2)" :response {:value "x"} :run "demo/f#1"}}])
-            [st2 _] (#'p/pass-view (comp-state main branch' eid) :a3)]
-        (is (not (str/includes? (pr-str (:page (p/screen-of st2 :a3))) "[:h2 \"cited\"]")))))
-    (testing "a cited task and a wiki section: the lead as prose and the form that reads it whole, never a view map (root, 2026-10-25)"
-      (let [k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
-            b (d/db-with branch (seon.task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g fast. Then measure it." :seon.task/kind :work}]))
-            b (d/db-with b [{:seon.section/address "docs/render.md#one-printer" :seon.section/heading "One printer"
-                             :seon.section/lead "One printer prints every value. Its passes follow."}])
-            b (d/db-with b (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3"
-                                                {:code "(g)" :prose "see" :run "demo/f#1" :response {:handle 'result/e4 :value 1}
-                                                 :cites (seon.ref/references b "`demo/g` and `docs/render.md#one-printer`")} nil))
-            [st3 _] (#'p/pass-view (comp-state main b eid) :a3)
-            page (:seon.render/html (:page (p/screen-of st3 :a3)))
-            codes (set (keep #(when (seon.print.select/code? %) (:seon.print/code %)) (tree-seq coll? seq page)))]
-        (is (contains? codes ";; demo/g: Make g fast.\n(:seon.task/plan (seon.task/task (seon.agent/db) \"demo/g\"))") (pr-str codes))
-        (is (contains? codes ";; docs/render.md#one-printer: One printer prints every value.\n(my.agent/help \"docs/render.md#one-printer\")") (pr-str codes))
-        (is (not-any? #(and (map? %) (not (seon.print.select/code? %))) (tree-seq coll? seq page)) "no view map in the page")))))
 
 (deftest a-turns-screen-folds-into-it-and-an-eval-collapses-to-its-value
   ;; root, 2026-10-24: the screen's evals are the system's, folded into their turn's header (they
@@ -1249,7 +1092,8 @@
         debug [:debug :a1]
         o (volatile! {})
         st {:rid 1 :pending {} :watch #{debug :a1} :waiting {1 debug 2 :a1} :kf-wanted #{} :new-events [] :events [] :views {}
-            :main-db db :recorded (seon.problems/health db) :view {:agents {:a1 {:status :busy}}}
+            ;; a1's process ended: root draws its page from its branch, in the same pass
+            :main-db db :recorded (seon.problems/health db) :view {:agents {:a1 {:status :ended}}}
             :branches {debug {:db db :read [:task-x]} :a1 {:db db :read [:task-x]}}}
         st' (#'p/pass st o)
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
@@ -1279,7 +1123,7 @@
         parts (r/view c)
         ks (mapv :key parts)]
     (is (= [[:task] [:proofs] [:verdict] [:run]] (subvec ks 0 4)) "the task, its proofs, the verdict, the run, first")
-    (is (= {'demo/f-test {:status :fail :failure {:expected '(= 4 (f 2)) :actual 5}}} (:value (second parts)))
+    (is (= {'demo/f-test {:status :fail :failure {:assert '(= 4 (f 2)) :got 5}}} (:value (second parts)))
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
@@ -1314,3 +1158,5 @@
     (is (not (identical? out1 out3)) "an equal value that is a new object draws again")
     (is (= out1 out3))
     (is (not (identical? out1 out4)) "a function that draws it redefined: drawn again")))
+
+

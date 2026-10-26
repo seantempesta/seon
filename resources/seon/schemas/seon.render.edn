@@ -15,9 +15,8 @@
                     ;; shown :as :page: the page's walk, its dbs and its tab's state (seon.render.proc/page-value)
                     [:page {:optional true} :map]
                     ;; the db the value was read on (an agent's branch, for a value recorded as its basis),
-                    ;; and who draws what that agent's own renders draw (seon.render.ui/ctx)
+                    ;; read as of its basis (seon.render.ui/based-value)
                     [:db {:optional true} [:maybe :seon.host/db]]
-                    [:drawer {:optional true} [:maybe [:map [:agent :keyword] [:handle :any]]]]
                     ;; the face (:html, the default, or :ai), when rendering through seon.render/render
                     [:face {:optional true} :seon.render/face]
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
@@ -64,19 +63,9 @@
                      [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
                      [:seon.render/db {:optional true} :seon.render/db]]
- ;; an agent's page's tiles beside its conversation (seon.render.ui/agent): its proofs as its newest
- ;; turn measured them (test -> {:status :failure}), what its branch changes
- ;; against main's head (seon.program/divergence; the fork point is not the render proc's to read,
- ;; so what main gained since shows too, and the tile says so)
+ ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
+ ;; part (seon.render/view)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
- ;; what a run did, from its eval records (seon.render.ui/did): vars read (each with how many
- ;; times), defined and evaluated, and the forms that ran its tests (their eval ids)
- ;; what a run's prose cites (seon.render.ui/agent), from its eval records' :cites: each as its
- ;; citation reached it on the branch (seon.docs/cited)
- :seon.render/cited [:vector {:seon.render/html seon.render.ui/cited} :any]
- :seon.render/this-run [:map {:seon.render/html seon.render.ui/this-run} [:read [:map-of :symbol pos-int?]] [:defined [:vector :symbol]]
-                        [:evaluated [:vector :symbol]] [:tests [:vector [:map [:form :string] [:handle :string]]]]]
- :seon.render/changes [:map {:seon.render/html seon.render.ui/changes} [:against :string] [:changes :map]]
  ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
  ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
  :seon.render/problems [:and :seon.problems/report [:map [:open [:set :string]]]]
@@ -115,8 +104,10 @@
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
  ;; a ctx as the page and the model are drawn from it (seon.render/view, faces, drawn)
- :seon.render/part [:map [:key [:vector :any]] [:value :any]]
- :seon.render/faces [:map [:html :any] [:text :string]]
+ :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword]]
+ :seon.render/faces [:map [:html :any] [:text :string] [:inline :any]]
+ ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
+ :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:html :string] [:inline {:optional true} :string]]
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]

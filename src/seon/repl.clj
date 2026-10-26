@@ -29,7 +29,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
+            [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
@@ -457,21 +457,35 @@
        (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                 code req)))))
 
-(defn draw
-  "Value v drawn as HTML by the render its schema k names on this branch (root's render proc asks:
-  seon.render.ui/ctx), under the branch's schemas, recording nothing: {:html s}, or {:error e}
-  when the render throws (an agent's own render, unmerged: the boundary that answers it, so the
-  asker always has an answer and the agent goes on)."
-  {:malli/schema [:=> [:cat :any :keyword] [:or [:map [:html :string]] [:map [:error :map]]]]}
-  [v k]
-  (try {:html (with-branch-schemas #(h/html (render/html v {:schema k})))}
-       (catch Throwable e {:error (agent/error-map e)})))
+(defn- draw-part
+  "Part p's html through memo m (seon.render/drawn), or its error's render when its render throws
+  (an agent's own render, unmerged: the boundary that answers it, so the page always has the part
+  and the agent goes on). Answers [m' {:key :html :inline}]."
+  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/part-html]]}
+  [m p]
+  (try (let [[m f] (render/drawn m p)] [m (render/part-html p f)])
+       (catch Throwable e (let [err (agent/error-map e)]
+                            [m {:key (:key p) :html (h/html (render/html err {})) :inline (h/html (render/html err {:as :inline}))}]))))
+
+(defn parts
+  "This agent's page as its parts' html, drawn here under its branch's schemas (root's render proc
+  asks, seon.render.proc/ask-parts), each through the part memo this process holds (:drawn):
+  {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their order (seon.render/view).
+  Records nothing."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
+  []
+  (with-branch-schemas
+    #(let [c @ctx/ctx
+           [memo out] (reduce (fn [[m acc] p] (let [[m d] (draw-part m p)] [m (conj acc d)]))
+                              [(:drawn @agent/state {}) []] (render/view c))]
+       (swap! agent/state assoc :drawn memo)
+       {:t (:t c 0) :parts out})))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
   "The agent as a step-fn, run on its one thread by seon.step/run-loop: requests in on
-  :sock (an eval as {:op :eval :id :forms}, a value to draw as {:op :render :id :schema :value},
+  :sock (an eval as {:op :eval :id :forms}, its page's parts as {:op :parts :id},
   Seon's ops as {:op k ...}), replies out on
   :sock; :pause, :resume, :stop and :ping are taken by the loop. Its REPL state is the
   process's one state map (seon.agent/state), which the code it evaluates reads, so the
@@ -483,10 +497,10 @@
   ([st _] st)
   ([st _ m]
    (cond
-     ;; root's render proc asks for a value drawn by a render this agent defines (seon.render.ui/ctx):
-     ;; drawn here under its branch's schemas, answered as HTML, and nothing recorded
-     (= :render (:op m))
-     [st {:sock [{:op :reply :id (:id m) :response (draw (:value m) (:schema m))}]}]
+     ;; root's render proc asks for this agent's page: its parts, drawn here under its branch's
+     ;; schemas by the renders it defines, answered as HTML, and nothing recorded
+     (= :parts (:op m))
+     [st {:sock [{:op :reply :id (:id m) :response (parts)}]}]
      (= :eval (:op m))
      (do
        ;; an interrupt left from before this request is not its; then root hears that it began

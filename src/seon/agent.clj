@@ -513,20 +513,6 @@
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
     (await-reply! k))))
 
-(defn screen
-  "This agent's screen: its page as root's render proc holds it (seon.render.proc/screen-of), without
-  its conversation and without presentation, at main's t: {:t :page}. Asked of root on its request
-  channel, after committing what it applied, with that commit's t (root answers from a read of its
-  branch that covers it); root renders it, never this process (an agent cannot draw its own view)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  ;; what it applied is committed first, and the request names that commit's t: root answers from
-  ;; a read of the branch that has it (the branch review's F3)
-  (commit!)
-  (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :screen :k k :t (:max-tx (db))})) (lib/c-exit 0))
-    (await-reply! k)))
-
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
   stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic

@@ -20,7 +20,7 @@
   its record, (swap! ctx assoc :seon.agent/screen [...]), and seon.turn runs those instead:
   rewriting its own interface is an eval, so (my.agent/related \"its words\") in place of the last
   form follows its own query."
-  ["(seon.screen/show)" "(my.task/status)" "(my.branch/changes)" "(my.task/related)"])
+  ["(my.task/status)" "(my.branch/changes)" "(my.task/related)"])
 
 (defn diff
   "What changed from before to after, by path (get-in's): {:changed {path value} :unchanged [path
@@ -44,28 +44,6 @@
                      (reduce (fn [acc i] (walk acc (conj path i) (nth b i) (nth a i) true)) acc (range (count a)))
                      :else (assoc-in acc [:changed path] a)))]
     (into {} (remove (comp empty? val)) (walk {:changed {} :unchanged [] :removed []} [] before after false))))
-
-(defn- last-screen
-  "The value agent key k's screen form code answered at its newest screen eval of transaction t or
-  before it, on db, or ::none."
-  {:malli/schema [:=> [:cat :seon.host/db :string :string :int] :any]}
-  [db k code t]
-  (let [[_ r] (last (sort-by first (d/q '[:find ?tx ?r :in $ ?k ?code ?t :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a ?tx] [(<= ?tx ?t)]
-                                          [?e :seon.eval/by "screen"] [?e :seon.eval/record ?r] [(get ?r :code) ?c] [(= ?c ?code)]]
-                                        db k code t)))]
-    (if r (get-in r [:response :value] ::none) ::none)))
-
-(defn show
-  "The agent's screen: its page as root's render proc holds it, without its conversation (the model
-  has it as its messages) and without presentation, at main's t (seon.agent/screen): its task, its
-  proofs and its branch's changes as the page's tiles, root's agents. Asked of root, never drawn
-  here. With {:since t}, what changed since this agent's screen at db t (`diff` from that screen
-  eval's page, whole when there was none)."
-  {:malli/schema [:function [:=> [:cat] :any] [:=> [:cat [:map [:since :int]]] :any]]}
-  ([] (agent/screen))
-  ([{:keys [since]}]
-   (let [now (agent/screen) before (last-screen (agent/db) (:key @agent/state) "(seon.screen/show)" since)]
-     (if (= ::none before) now (diff before now)))))
 
 (defn input
   "What this turn's screen forms read (my.task/status): {:task :input}, the task and the turn

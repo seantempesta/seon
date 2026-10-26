@@ -824,21 +824,23 @@
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
 
-(deftest a-parked-agent-draws-its-own-render-and-a-gone-one-answers-at-once
-  ;; root, 2026-10-25: a key of @ctx whose render the branch defines is drawn by its agent while the
-  ;; page is viewed (seon.render.ui/ctx, the render proc's {:op :render} ask): an agent parked between
-  ;; requests answers it with its render's HTML, recording nothing; a request to an agent that is
-  ;; gone is answered at once, so the page shows the key's structure and never waits
+(deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
+  ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :parts} ask is
+  ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders
+  ;; drawn by that render, recording nothing; a request to an agent that is gone is answered at
+  ;; once, so its page is drawn by root from its branch and never waits
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
-        [_ _ before drawn after gone]
+        [_ _ _ before drawn after gone]
         (in-agent ["(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])])"
+                   "(swap! ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id (first (keys (:agents @(seon.root/call! sys {:op :state}))))]"
-                               " @(seon.root/call! sys {:op :render :id id :schema :lab.ctx/steps :value [\"read the plan\" \"write the test\"]}))")}
+                               " @(seon.root/call! sys {:op :parts :id id}))")}
                    n
-                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone :schema :lab.ctx/steps :value []})"}])]
-    (is (= {:html "<ol><li>read the plan</li><li>write the test</li></ol>"} (:value drawn)) (pr-str drawn))
+                   {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :parts :id :gone})"}])
+        steps (some #(when (= [:lab.ctx/steps] (:key %)) %) (:parts (:value drawn)))]
+    (is (= "<ol><li>read the plan</li><li>write the test</li></ol>" (:html steps)) (pr-str drawn))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
