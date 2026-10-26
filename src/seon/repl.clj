@@ -366,11 +366,10 @@
 
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
-  session (root's server), a context read, the screen (the forms run before each model
-  request, seon.turn), else the agent itself (its model's turn)."
+  session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
   {:malli/schema [:=> [:cat [:maybe :keyword]] :string]}
   [origin]
-  (case origin :ui "user" :outside "outside" :context "context" :screen "screen" (name (or (:id @agent/state) :root))))
+  (case origin :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
 
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
@@ -450,7 +449,7 @@
    (let [answers (volatile! [])
          handle (symbol "result" (str "e" (eval-n!)))
          ;; the writes its forms make and its record name it (seon.agent/transact!'s tx-meta); an
-         ;; eval inside it (the screen's, a context read's) names its own, then this one's again
+         ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
      (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
@@ -463,8 +462,7 @@
                                   (answered))))
                 recorded (into [] (mapcat :recorded) @answers)]
             (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-            ;; the screen's responses are replaced each request: no later response reads them
-            (when-not (= :screen (:origin req)) (swap! agent/state update :seen print/seen r))
+            (swap! agent/state update :seen print/seen r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
             (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -472,30 +470,46 @@
           (finally (swap! agent/state assoc :eval outer))))))
 
 (defn- draw-part
-  "Part p's html through memo m (seon.render/drawn), or its error's render when its render throws
+  "Part p's faces through memo m (seon.render/drawn), or its error's render when its render throws
   (an agent's own render, unmerged: the boundary that answers it, so the page always has the part
-  and the agent goes on). Answers [m' {:key :html :inline}]."
-  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/part-html]]}
+  and the agent goes on). Answers [m' faces]."
+  {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
   [m p]
-  (try (let [[m f] (render/drawn m p)] [m (render/part-html p f)])
+  (try (render/drawn m p)
        (catch Throwable e (let [err (agent/error-map e)]
-                            [m {:key (:key p) :html (h/html (render/html err {})) :inline (h/html (render/html err {:as :inline}))}]))))
+                            [m {:html (render/html err {}) :inline (render/html err {:as :inline})}]))))
 
-(defn parts
-  "This agent's page as its parts' html, drawn here under its branch's schemas (root's render proc
-  asks, its {:op :render}: seon.render.proc/ask-parts), each through the part memo this process holds (:drawn):
-  {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their order (seon.render/view).
-  Records nothing."
-  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
+(defn- drawn-parts
+  "This agent's page as [part faces] in the page's order (seon.render/render-ctx of the held record,
+  @ctx, with the renders that read the branch's db), drawn here under its branch's schemas, each
+  through the part memo this process holds (:drawn)."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector [:tuple :seon.render/part :seon.render/faces]]]]]}
   []
   (with-branch-schemas
-    ;; the held record (@ctx), drawn with the renders that read the branch's db
     #(let [c (ctx/record)
-           [memo out] (reduce (fn [[m acc] p] (let [[m d] (draw-part m p)] [m (conj acc d)]))
-                              [(:drawn @agent/state {}) []] (render/view c (context/renders (agent/db))))]
+           [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
+                              [(:drawn @agent/state {}) []] (render/html c (assoc (context/renders (agent/db)) :schema :seon.render/render-ctx)))]
        ;; the memo holds the parts this page has now, none it dropped
-       (swap! agent/state assoc :drawn (select-keys memo (map :key out)))
+       (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
        {:t (get-in c [:tree :t] 0) :parts out})))
+
+(defn parts
+  "This agent's page as its parts' html (root's render proc asks, its {:op :render}:
+  seon.render.proc/ask-parts): {:t its ctx's t :parts [{:key :html :inline}]}, the parts in their
+  order. Records nothing."
+  {:malli/schema [:=> [:cat] [:map [:t :int] [:parts [:vector :seon.render/part-html]]]]}
+  []
+  (let [{:keys [t parts]} (drawn-parts)] {:t t :parts (mapv (fn [[p f]] (render/part-html p f)) parts)}))
+
+(defn page
+  "This agent's page as the model reads it: its :task region (seon.render/render-ctx), each part's hiccup
+  exactly as its render returned it, by part key, in the page's order, the same hiccup the page
+  shows (`parts`); the chat and the tiles left out, which the transcript carries. What the model's
+  request holds is the same page re-derived at each turn's commit (seon.context/page, world)."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])
+                           (filter (comp #{:task} :region first) (:parts (drawn-parts))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

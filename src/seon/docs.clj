@@ -367,7 +367,7 @@
   "The program vars whose recorded definition names x on db, sorted, x itself left out: a var by
   its :form/refs (calls it) or its :form/quoted (names it as data: a render, a proc, a form sent
   to an agent), a qualified keyword (an attribute, config key or schema entry) by its
-  :form/keywords, the data it operates on. The one query my.agent/callers and the task story ask."
+  :form/keywords, the data it operates on. The one query my.agent/callers and the task's data ask."
   {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :qualified-symbol]]}
   [db x]
   (vec (sort (disj (into #{} (mapcat #(d/q '[:find [?v ...] :in $ ?a ?s :where [?f ?a ?s] [?f :form/defines ?e] [?e :var/name ?v]] db % x))
@@ -492,7 +492,7 @@
   (when-let [b (seq (:seon.ref/below nv))] (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b))))
 
 (defn cited-code
-  "What the screen shows of citation c on db, as Clojure is written in a file (DECISIONS,
+  "What the page shows of citation c on db, as Clojure is written in a file (DECISIONS,
   code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
   namespace as its ns form's head, its docstring as written, then its public names; each as code

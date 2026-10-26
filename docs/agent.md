@@ -9,7 +9,7 @@ This is the help page: what an agent reads when it asks, beside the short system
 You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call.
 
 - Evaluate a little, read the answer, then take the next step. Each eval call takes ``prose`` first, then ``code``: in the prose, say what you are doing and what you expect to see. The user sees all your prose, rendered as markdown.
-- A reference in your prose is looked up and shown on your screen at your next turn: a var written as ``ns/name`` shows its source and docstring, a task (``ns/task-name``) its plan and proofs, a wiki section (``docs/page.md#section``) its text, as docs/references.md reads them. Name what you want to see.
+- A reference in your prose is looked up and shown by `(my.task/status)` at your next turn: a var written as ``ns/name`` shows its source and docstring, a task (``ns/task-name``) its plan and proofs, a wiki section (``docs/page.md#section``) its text, as docs/references.md reads them. Name what you want to see.
 - A call's forms run in order, as ``load-string`` runs them, and stop at the first exception. Its response is ``{:handle :values :value :out :err :ex :redefined}``: each form's value in order (`:values`, when the call has more than one form; the values before an exception stay), the last form's value (`:value`, as `*1` holds it), what the forms wrote, the exception that stopped them, and each existing var whose contract or docstring the call changed (`:redefined`: what it was, what it is now, and the wiki sections citing it with the form that reads each, the text to update); each key only when present. Its handle, ``result/e12``, holds it, so ``(:value result/e12)`` is the last value again and ``(get-in result/e12 [:values 0])`` the first.
 - A reply with no eval call is a message to the user: your turn ends there, and the run waits for the user's answer. Finishing is an eval, not a reply.
 - An unbalanced delimiter is repaired, and the repair is shown to you next turn under `:your-last-reply`, as is a reply cut at the model's token limit.
@@ -21,7 +21,7 @@ Your context comes in two parts: the run's, sent once and unchanged while you wo
 
 The run's part:
 - `:task`: its id, kind and instructions, and its plan as it accumulated along its needs, prerequisites first.
-- `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A long source is cut where it is printed, like any value: the cut says what it left and the form that reads the rest, through `(my.task/story)`, which answers this whole story as data.
+- `:write-set`: each var the plan cites, the code you are likely to change: its source and `:callers`, the program vars whose definitions name it. A long source is cut where it is printed, like any value: the cut says what it left and the form that reads the rest, through `(my.task/data)`, which answers this whole task data as data.
 - `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:similar`: a few program functions nearest the plan in meaning that it does not name, a line each (name and first sentence); often a helper the task needs.

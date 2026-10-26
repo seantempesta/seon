@@ -106,7 +106,7 @@
   "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
   over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
   Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
-  screen's related lists fuse their reference graph with meaning by it (seon.context/related)."
+  page's related part fuses their reference graph with meaning by it (seon.context/related)."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
   (let [k (cfg/value :seon.config.vector/rrf-k)
@@ -124,7 +124,7 @@
   "Each embedded kind: the attribute holding its text, and the text the model reads."
   {:form/src (fn [src] (str document-prompt src))
    :seon.section/text (fn [text] (str document-prompt text))
-   ;; a schema's form, so the screen's related schema keys are found by meaning too
+   ;; a schema's form, so the related part's schema keys are found by meaning too
    ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
    :schema/form (fn [form] (str document-prompt form))
    :seon.task/plan (fn [plan] (str query-prompt plan))})

@@ -77,7 +77,7 @@
   [st m]
   (case (:op m)
     ;; an answer to this agent's ask on the api's reply route (the test service's, seon.prove; its
-    ;; screen's, the render proc's)
+    ;; the render proc's)
     nil [(to-proc! st {:op :reply :k (:tag m) :result (:r m)}) nil]
     :req (let [{:keys [rid msg kind]} m]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))

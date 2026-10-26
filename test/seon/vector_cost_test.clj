@@ -74,7 +74,7 @@
         ;; the query asks for five (its own setting, as a task's :seon.task/config is: off by default)
         [(d/db-with db [{:db/id q :seon.config.render/similar 5}]) q #{}]))
 
-(deftest the-story-ranks-every-form-once
+(deftest similar-ranks-every-form-once
   ;; the owner's ruling (2026-10-24, DECISIONS "Embeddings join the context"): :similar is an
   ;; exact search, measured
   (cost/proof

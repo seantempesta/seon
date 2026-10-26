@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  runs and the events into the system value (:seon.render/system), whose :ai face is
+  runs and the events into the system value (:seon.render/system), whose printed value (seon.render.system/system-data) is
   root's context. Each page a tab watches is an entity's (seon.render/walk: / root's, /agent/{id}
   an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
   branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
@@ -27,8 +27,8 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db]
+            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.system :as system] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -234,7 +234,7 @@
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (if (= :root (second view))
-    ;; root has no model turn: what it reads is the system's AI face, held each pass (:context)
+    ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
     (when-let [ctx (:context st)]
       (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
   (when-let [bdb (get-in st [:branches view :db])]
@@ -281,8 +281,11 @@
 (defn- agent-page
   "View's page when it names an agent (entity eid on main db): its parts as its process drew them
   (ask-parts), else, with no process to ask or none that answered, as root draws them from its
-  branch (seon.ctx/build, seon.render/view) with main's renders, the page saying so; its run and
-  root's agents (the sidebar) as root's chrome, read on main; its input (seon.render.ui/parts-page)."
+  branch (seon.ctx/build, render-ctx: seon.render/render-ctx) with main's renders, the page saying so.
+  Everything the page shows of the agent is its ctx: its run's status and verdict reach its branch
+  by take!, never read here on main. An eval the person opened in this tab (its unit in :open) that
+  ctx does not hold opened yet is drawn here from the branch, the tab's own state, until take!
+  brings the fact. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/parts-page)."
   {:malli/schema [:=> [:cat :map :any :seon.host/db pos-int?] :map]}
   [st view db eid]
   (let [[e id] (agent-of db view)
@@ -290,26 +293,24 @@
         own? (and (live? st id) (vector? (:parts held)))
         berr (get-in st [:branches view :error])
         bdb (get-in st [:branches view :db])
+        open (get-in st [:open view] #{})
+        ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
+        ;; when root reads it (take-read), and the branch's reads are not main's
+        branch-parts (fn [] (binding [datahike.index.interface/*reads* nil]
+                              (render/html (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (assoc (context/renders bdb) :schema :seon.render/render-ctx))))
+        drawn (fn [p] (render/part-html p (render/part-faces p)))
         parts (if own?
                 (:parts held)
-                (cond bdb (mapv #(render/part-html % (render/part-faces %))
-                                (render/view (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e)) (context/renders bdb)))
+                (cond bdb (mapv drawn (branch-parts))
                       ;; a branch that could not be read: its error, by the error's render
-                      berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} (assoc f :text "")))]))
-        root (:db/id (d/entity db [:seon.root/id :root]))
-        ;; its run is root's chrome, read on main as the sidebar is: main writes a run's status,
-        ;; turns and end after the agent's branch forked, so its branch's copy never has them
-        run (some->> (d/q '[:find ?r ?tx :in $ ?a :where [?r :seon.run/agent ?a ?tx]] db eid) (sort-by second) last first
-                     (d/pull db (:seon.render/keys (contract/properties :seon.run/run-fact))))
-        ;; the turns it took are the agent's, written on its branch
-        run (cond-> run (and (seq run) bdb)
-              (assoc :turns-taken (count (d/q '[:find ?t :in $ ?id :where [?r :seon.run/id ?id] [?t :seon.turn/run ?r]] bdb (:seon.run/id run)))))
-        run-part (when (seq run) (let [p {:key [:run] :value run}] (render/part-html p (render/part-faces p))))
-        ;; in its place among the tiles: where the agent's own run part was, else before its conversation
-        conv? #(#{:eval :turn :message} (first (:key %)))
-        parts (cond (nil? run-part) parts
-                    (some #(= [:run] (:key %)) parts) (mapv #(if (= [:run] (:key %)) run-part %) parts)
-                    :else (let [[tiles conv] (split-with (complement conv?) parts)] (vec (concat tiles [run-part] conv))))]
+                      berr [(let [f {:html (render/html berr {}) :inline (render/html berr {:as :inline})}] (render/part-html {:key [:branch] :value berr} f))]))
+        ;; the evals this tab opened that are drawn closed: drawn opened from the branch
+        unopened (into #{} (keep #(when (and (= :eval (first (:key %))) (nil? (:html %)) (open (ui/part-id (:key %)))) (:key %))) parts)
+        parts (if (and (seq unopened) bdb)
+                (let [opened (into {} (for [p (branch-parts) :when (unopened (:key p))] [(:key p) (drawn (assoc p :opened true))]))]
+                  (mapv #(get opened (:key %) %) parts))
+                parts)
+        root (:db/id (d/entity db [:seon.root/id :root]))]
     (ui/parts-page (:seon.agent/id e)
                    {:parts (or parts []) :shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view) :head [0 eid]
                     ;; never a wait: drawn from its branch until its process answers, the page says so
@@ -364,7 +365,7 @@
           (let [opts {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view)
                       :agents (get-in st [:view :agents] {}) :recorded (:recorded st)}
                 {:seon.render/keys [value schema]} (:seon.render/root w)
-                own (when (render/declared schema :html)
+                own (when (render/declared schema)
                       (render/html value {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))}))]
             (if (and (map? own) (:seon.render/units own)) own (ui/page w opts))))))))
 
@@ -638,8 +639,9 @@
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
           sys (system-value st t0 now-ms)
-          ;; root's context: the system's AI face, also a unit of root's layout
-          ctx (render/ai sys {:schema :seon.render/system})
+          ;; root's context: the system as one value, printed once, also a unit of root's layout
+          ctx (let [r (print/print-value (system/system-data sys) {:budget (config/value :seon.config.render/root-context-budget)})]
+                (or (:text r) (:seon.error/message r)))
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)})
           st (assoc st :context (:context sys))
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
@@ -743,9 +745,9 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile [:vector :any] :any] :map]}
   [st o [_ v agent form] r]
   (let [err (:seon.error/message r)
-        ;; its text as the REPL answers it: the error's render, else the answer's (the
-        ;; stream's row cuts it to a cell, seon.render.ui/event-detail)
-        detail (if err (render/ai r {}) (:text (render/printed r nil)))]
+        ;; its text as the REPL answers it, by the one printer (the stream's row cuts it to a
+        ;; cell, seon.render.ui/event-detail)
+        detail (print/text r)]
     (when form
       (let [rec (repl/record-details (:main-db st) form (if err {:ex r} {:value r}) {} nil)]
         (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}

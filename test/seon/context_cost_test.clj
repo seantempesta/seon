@@ -120,15 +120,15 @@
      :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
      :sizes [100 1000 10000]}))
 
-(defn task-of
-  "seon.context/render-task-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."
+(defn task-key-of
+  "seon.context/task-key's arguments at n wiki sections with vectors: the task demo/r as ctx holds it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
   [n] (let [[db te] (related-of-changed n)] [db {:seon.task/id "demo/r" :db/id te}]))
 
-(deftest a-task-renders-key-costs-what-the-plan-names
-  ;; the task render's memo key reads the task, its plan's references and a seek per entity they name:
+(deftest a-task-key-costs-what-the-plan-names
+  ;; the task data's memo key reads the task, its plan's references and a seek per entity they name:
   ;; nothing of the wiki or program it does not cite, so it is flat in their size
-  (cost/proof {:of 'seon.context/render-task-key :input 'seon.context-cost-test/task-of
+  (cost/proof {:of 'seon.context/task-key :input 'seon.context-cost-test/task-key-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan (task/task), the plan's references parsed (seon.ref), a seek per entity they name (none here): fourteen contracted calls, flat in the wiki"
                :growth :constant
@@ -149,24 +149,26 @@
                :sizes [10 100 1000]}))
 
 (deftest related-key-is-one-seek-beside-the-tasks
-  ;; related's memo key: render-task-key, the count, and the newest vector by one seek of the
-  ;; indexed :seon.vector/text-t, flat in how many vectors there are
+  ;; related's own memo key: the count and the newest vector by one seek of the indexed
+  ;; :seon.vector/text-t, flat in how many vectors there are (render-ctx composes it with the
+  ;; task's key and its cited vars' keys, made once a view)
   (cost/proof {:of 'seon.context/related-key :input 'seon.context-cost-test/first-t-of
                :n "wiki sections with vectors"
-               :work "render-task-key (the plan's references and a seek per entity they name), the count through the resolver, one reverse seek of the vectors' text transactions: sixteen contracted calls, render-task-key's fourteen among them, flat in the vectors"
+               :work "the count through the resolver, one reverse seek of the vectors' text transactions: two contracted calls, flat in the vectors"
                :growth :constant
-               :fixed {:calls 16}
+               :fixed {:calls 2}
                :sizes [10 100 1000]}))
 
-(defn rendered-task-of
-  "seon.context/render-task's arguments at n wiki sections with vectors: the task demo/r."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
-  [n] (let [[db _] (related-of-changed n)] [db (task/task db "demo/r")]))
+(defn task-data-of
+  "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
+  without its write set, as the task part draws it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :boolean]]}
+  [n] (let [[db _] (related-of-changed n)] [db (seon.task/task db "demo/r") false]))
 
-(deftest a-task-render-costs-what-the-plan-names
-  ;; the task rendered as of t, as a view draws it each time until its memo by render-task-key
-  ;; lands: what the plan cites read and resolved, flat in the wiki's size
-  (cost/proof {:of 'seon.context/render-task :input 'seon.context-cost-test/rendered-task-of
+(deftest task-data-costs-what-the-plan-names
+  ;; the task's data (task-data over the task as of t), as the task part draws it when its key moves
+  ;; (seon.render/drawn): what the plan cites read and resolved, flat in the wiki's size
+  (cost/proof {:of 'seon.context/task-data :input 'seon.context-cost-test/task-data-of
                :n "wiki sections with vectors"
                :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
                :growth :constant

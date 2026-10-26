@@ -193,7 +193,7 @@
         (is (= [] (writes o)))))))
 
 (deftest root-records-what-went-wrong-in-an-agent
-  ;; the one producer of what is wrong (seon.render.ai/problems reads only what is recorded):
+  ;; the one producer of what is wrong (seon.render.system/problems reads only what is recorded):
   ;; root records a red run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
@@ -579,9 +579,7 @@
       (testing "the section exists now: closed, with nothing written to close it"
         (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
         (is (false? (:open? (row after))))
-        (is (= 1 (:count (row after))) "the record is kept"))
-      (testing "the context marks it closed"
-        (is (str/includes? (render/ai (problems/report after) {}) ":closed true"))))
+        (is (= 1 (:count (row after))) "the record is kept")))
     (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
       (let [dbc (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
             err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1

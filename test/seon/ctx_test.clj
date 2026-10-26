@@ -188,7 +188,7 @@
         h (render/html c {})
         rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))]
                         [(last (nth x 2)) (last (nth x 3))]))]
-    (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil) :html)) "@ctx's value names its block")
+    (is (= 'seon.render.ui/ctx (render/declared (render/schema-of c nil))) "@ctx's value names its block")
     (is (= [":evals" ":seon.render/proofs"] (sort (keys rows))) "a row per key, its environment above them")
     (is (= (render/html proofs {:schema :seon.render/proofs}) (rows ":seon.render/proofs")) "a key whose schema declares a render draws by it")
     (is (= (render/html {"e1" {:seon.eval/id "e1"}} {:schema nil}) (rows ":evals")) "a key with none draws as the printer's structure")))
@@ -201,18 +201,18 @@
   (let [w (fn [db branch more tx] (:db-after (d/with db tx (pdb/tx-meta branch more))))
         db (-> (ts/test-db)
                (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
-               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/screen ["(seon.screen/show)"]}])
+               (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/description "Works the screen."}])
                (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/answered-t 3}]))
         e (:db/id (d/entity db [:seon.agent/key k]))
         by (fn [a] (dissoc (ctx/made-by db e a) :t))]
-    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/screen)) "written by an eval: that eval, on the agent's branch")
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/description)) "written by an eval: that eval, on the agent's branch")
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
     (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/answered-t)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
     (let [h (render/html (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}) {:db db})
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
-      (is (= {":seon.agent/screen" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
-             (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
+      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
+             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/answered-t"]))
           "the page names who made each key"))))
 
 (defn- replay
@@ -319,6 +319,13 @@
       (is (re-find #":lab.ctx/steps" (:printed rec)) "the model's text is the one printer's, as it read it")
       (is (= "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>" (:html steps))
           "the agent draws its key, a part of its page, by the render its branch names, recording nothing")
+      (testing "the page the model reads (seon.repl/page, the screen) is the page the user sees (seon.repl/parts), hiccup for html"
+        (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/parts) (seon.repl/page)]
+                                (finally (reset! seon.agent/state nil)))
+              shown (remove (comp #{:eval :turn :message} first :key) (:parts parts))]
+          (is (= (map :key shown) (keys page)) "every part but the conversation's, in the page's order")
+          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each part's hiccup is the html the page shows, byte for byte")
+          (is (vector? (get page [:lab.ctx/steps])) "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
               h (seon.web.html/html (seon.render.ui/evaluation (d/pull db '[*] [:seon.eval/id "e9"]) {:db db}))]
