@@ -12,7 +12,7 @@
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (related "text" k)        the k wiki sections nearest the text, a line each, and how to read one:
-                              refine what the screen's (my.task/related) showed
+                              refine what the page's related part showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
@@ -135,8 +135,8 @@
   "The wiki sections nearest x by meaning, a text (embedded as a search's query by root's :embed
   effect) or a var's definition, k of them (:seon.config.render/related unless given), each a
   line at summary depth with the forms that read one whole and search further
-  (seon.context/related-view): how an agent refines, in its own words, what its screen's
-  (my.task/related) showed. A var with no vector yet says so; a failed embedding answers its
+  (seon.context/related-view): how an agent refines, in its own words, what its page's related
+  part showed. A var with no vector yet says so; a failed embedding answers its
   error."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}

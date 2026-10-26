@@ -96,7 +96,7 @@
     (is (contract/error? none) "no live agent a9: refused, as root refuses")))
 
 (deftest the-context-op-answers-what-a-model-is-sent
-  ;; dogfood 2026-10-25: an outside agent read the story and turn sections only, not the system
+  ;; dogfood 2026-10-25: an outside agent read the task's data and turn sections only, not the system
   ;; prompt and screen a model is sent, and its (my.task/status) answered :seon.turn/not-observed.
   ;; Its context read is its turn: the screen's forms run as a model turn's do, and the read
   ;; answers the request's text, system prompt first, screen last
@@ -106,8 +106,8 @@
                                                     " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?t :seon.turn/sent _] [?t :seon.turn/n ?n]] db))")}])
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (clojure.string/includes? text "(my.task/status)") "the screen's forms, as a model's request ends with them")
-    (is (clojure.string/includes? text "(my.branch/changes)"))
+    (is (clojure.string/includes? text "(seon.repl/page)") "the screen's form, the page, as a model's request ends with it")
+    (is (clojure.string/includes? text "[:task]") "the page by part key")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))

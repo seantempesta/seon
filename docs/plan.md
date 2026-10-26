@@ -16,13 +16,13 @@ What each working session is doing now and takes next; every session is linked t
 
 | Session | Now | Next |
 |---|---|---|
-| **Agent view r3** | slice 2b on jolt/view-parts: `:render` answers the parts; a page never waits (root draws it from the branch, the agent's parts patch it in); the memo keys on each part's ctx members; process tests and prove running | design revision 4 (the wire, the byte-stable spine, enrichments as renders); slice 4c; slice 5 (task seon.render/every-page-is-its-parts: every page off the walk) |
-| **ctx-atom** | slice 1 merged (620fb31dd) | slices with agent view |
-| **Related sections** | waits for slice 1 | slice 3 (one diff by part key) and 4b's request side (history cut, folds, as-sent into the request's assembly) |
-| **Agent loop** | Jolt: timer errors no longer swallowed (approved), the double-fork failure | messages and outside changes as inbox entries carrying ctx-shaped diffs (slice 6); resume rebuilds ctx at a commit |
-| **Root as one system** (stability lead), top priority | the zygote: load, then fork, then threads, in shippable pieces | one mode for forking processes (every thread a fiber), the fork-alone codes deleted |
-| **Live agents** | design-plan-after-proof ready | the ten-request rerun on main; then measures each one-derivation slice against the 2026-10-26 baselines |
-| **full-run-reds**, stability | LMDB EINVAL: macOS ftok collisions share SysV semaphore sets between stores; fix in a seantempesta/lmdb fork (PostgreSQL's way) | the leaked sets, after root sees the list |
+| **Agent view** | revision 4.2 (jolt/design-rev42); stopped from building a projection the owner ruled out; measuring the unprojected page against 6,043 tokens | after root's go: delete `:seon.render/ai` and the ai faces; the request reads the page and the two diffs |
+| **ctx-atom** | jolt/ctx-atom (WIP): derived members deleted, ctx is the pull patched; task data, related and first-t as renders' keys; `:seon.vector/text-t` indexed in place | the turn's ctx diff as a pure (diff ctx0 ctx1) |
+| **Agent loop** | slice 6′: a person's messages and root's stages as entries read from main; a red verdict wakes on new reasons; tests running | the busy-with-no-process defect (filed to it) |
+| **Root as one system** (stability lead), top priority | zygote piece 1 on jolt/zygote-one-mode (Jolt 3f58bd5e on main's 5cc7458e): final checks running | one mode for forking processes |
+| **full-run-reds** | jolt/an-asker-records-its-effects-error-once: each root asker records its outcome and error in one transaction | the next full run on a clean main |
+| **Live agents** | jolt/one-go: whole-task runs (fix 62cd450f8, queued) against the staged run (3 of 10 merged, 88.6% cached) | measure each one-derivation slice |
+| Related sections (idle) | its slice 3 and 4b work is superseded by revision 4.2 | archive, owner's call |
 
 ## Waiting on the owner
 
@@ -37,7 +37,7 @@ The destination is **E: a request worked design → implement → merge by Seon 
 
 1. **The agent loop** (done but resume): sessions continue across runs, every agent parks and wakes on a message, one delivery (main-first), the stage boundary as a message. Left: resume from any commit (rebuild ctx at that t).
 2. **Requests through the pipeline, measured** (in progress): 2 of 5 requests merged end to end on 2026-10-26; the ten-request rerun measures each change.
-3. **One derivation** (approved, building in slices): ctx → view → parts → html / ai → diff; changes arrive as inbox messages carrying ctx-shaped diffs; an eval's answer carries its ripple effects; the request is a pure function of the db at the session's t's. Slice order: 1 ctx facts (merged); 2 parts and the page; 3 one diff by part key; 6′ every outside change an inbox entry carrying its ctx diff (folds take! and "since your last turn" into one mechanism); 4b the request (starting page, tool answers, inbox entries, byte stable from db t); 4c debug as the re-derived request; 5 every page off the walk; then enrichments out of seon.repl into renders.
+3. **One derivation** (revision 4.2, building in slices): ctx is the agent's data pulled from the db, nothing derived; renders (memoized by value) draw it as one page; the agent gets two outputs: each eval's data, and the page as hiccup exactly as rendered, whole on the first turn, then ctx's diff and the page's diff each turn; no ai face; the request is a pure function of the db at the session's t's. Today four paths remain side by side (seon.context's request assembly, seon.render.ai's faces, seon.screen, the page); this step collapses them into one, and nothing new gets its own path. Designs come from REPL experiments on live agents first. The page is `render-ctx`, the render of ctx (task column, prose chat with evals drawn when opened, tiles for values with a render); everything shown comes through ctx, outside facts by `take!`. Slice order: 1 ctx facts (merged); 2 parts and the page; 3 one diff by part key; 6′ every outside change an inbox entry carrying its ctx diff (folds take! and "since your last turn" into one mechanism); 4b the request (starting page, tool answers, inbox entries, byte stable from db t); 4c debug as the re-derived request; 5 every page off the walk; then enrichments out of seon.repl into renders.
 4. **Root is main, one system:** root's work as tasks, root as an agent with its ctx and page; the zygote and one process mode for every forking process.
 5. **Self-modifying environment:** agents change their own ctx (swap!), renders and layout, seen at once; docs in the db at levels.
 

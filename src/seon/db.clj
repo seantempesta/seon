@@ -158,7 +158,8 @@
   :seon.tx/runtime alone when it is missing (the one transaction that cannot name its
   runtime, since it installs the attribute), then the rest in one transaction carrying
   tx-meta (an attribute it holds as another value type is refused, :seon.db/types-differ:
-  a value type is fixed once installed): a kept store seeded before an attribute existed gains it when a root
+  a value type is fixed once installed; one it holds without its declared content id or index
+  gains it): a kept store seeded before an attribute existed gains it when a root
   opens it, and a branch cut before one existed when its agent resumes it (seon.agent's
   resume: a branch keeps the schema it was cut with; Datahike accepts new attribute
   definitions at any time). Nothing missing writes nothing."
@@ -176,9 +177,12 @@
                                      :seon.error/fix "An attribute's value type is fixed once installed: open a store made with this schema (a fresh one), or keep running the build that made this store."})]
               (throw (ex-info (:seon.error/message e) e))))
         ;; an identity a kept store holds without its content id gains it (Datahike admits
-        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids)
+        ;; adding :db/contentId: its entities keep their ids, new ones mint at content ids), and an
+        ;; attribute held without its declared index gains it (Datahike admits adding :db/index in
+        ;; place: its datoms are in the AVET index at once)
         missing (vec (remove #(and (contains? have (:db/ident %))
-                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId])))
+                                   (= (:db/contentId %) (get-in have [(:db/ident %) :db/contentId]))
+                                   (or (not (:db/index %)) (get-in have [(:db/ident %) :db/index])))
                              schema))]
     (let [[tx-attrs others] ((juxt filter remove) #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) missing)]
       (when (seq tx-attrs) (d/transact conn {:tx-data (vec tx-attrs)}))
@@ -300,18 +304,52 @@
   {:malli/schema [:=> [:cat :string] :boolean]}
   [path] (boolean (posix/exists? (str path "/data.mdb"))))
 
+(defn- make!
+  "A store made whole at path, or none (task seon.db/a-store-is-made-whole-or-not-at-all): built
+  in a sibling directory, path.making-<uuid> (created, seeded with about n datoms, synced, its
+  connection released so its env closes), then renamed to path, which is atomic on one
+  filesystem. A store is named by the id it records, never its path (store-cfg), so it opens
+  where it lands. A create that fails or is killed leaves only its own directory, never a data
+  file holding no database at path (which every later open read as \"Database does not exist\");
+  a killed one's directory is garbage, nothing kept. A rename that finds a store at path lost a
+  race to another creator: its directory goes and the winner's store is opened. One that finds
+  anything else there is :seon.db/store-unplaced (docs/failure-points.md). Answers whether this
+  call's store is at path."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int] :boolean]}
+  [backend path n]
+  (let [tmp (str path ".making-" (random-uuid))
+        tcfg (store-cfg backend tmp)
+        placed (volatile! false)]
+    (try
+      (d/create-database (made-cfg tcfg))
+      (let [conn (d/connect tcfg)] (try (seed! conn n) (sync! tcfg) (finally (d/release conn))))
+      (let [[rc errno] (posix/c-rename tmp path)]
+        (vreset! placed (zero? rc))
+        (when-not (or @placed (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path)))
+          (let [e (contract/error :seon.db/store-unplaced #'seon.db/make!
+                                  (str "a store made at " tmp " could not be renamed to " path ": " (ffi/errno-message errno))
+                                  {:path path :errno errno
+                                   :seon.error/fix "Remove what stands at the path (it holds no store: no data file), then open the store again."})]
+            (throw (ex-info (:seon.error/message e) e)))))
+      @placed
+      (finally
+        ;; a create that threw midway may hold its env (Datahike releases the store only at its end)
+        (when-not @placed
+          (when (= backend :lmdb) (klmdb/close-env! tmp))
+          (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. tmp)))))))))
+
 (defn open!
-  "Root's main on the durable store at path. A store that does not exist is created and
-  seeded with about n datoms on :db; main (a branch name) is made from :db's head when the
-  store has no such branch, or recovered when it has. Answers {:cfg (naming main) :conn
-  :recovered? (main existed) :seeded? (this call made the store)}."
+  "Root's main on the durable store at path. A store that does not exist is made, whole or not
+  at all (make!), seeded with about n datoms on :db; main (a branch name) is made from :db's
+  head when the store has no such branch, or recovered when it has. Answers {:cfg (naming
+  main) :conn :recovered? (main existed) :seeded? (this call made the store)}."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
   [backend path n main]
-  (let [cfg (store-cfg backend path)
-        exists? (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))]
-    (when-not exists?
-      (d/create-database (made-cfg cfg))
-      (let [conn (d/connect cfg)] (seed! conn n) (d/release conn)))
+  (let [made? (and (not (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))) (make! backend path n))
+        ;; a store this call did not make: found there, or made by a creator that won the rename
+        exists? (not made?)
+        ;; read once the store is there: it records the id it was made with (store-cfg)
+        cfg (store-cfg backend path)]
     (let [[conn existed?] (open-main! cfg main)
           _ (ids! conn)
           added (install-missing! conn)

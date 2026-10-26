@@ -1,10 +1,9 @@
 ;; Renders (seon.render, session W2; W1's render contract, notes/option3-W1-render.md §1): a
-;; render is a function of a value and its opts (props) answering its result for one face. A schema declares its
-;; renders in its own properties ({:seon.render/html sym :seon.render/ai sym}); selection is
+;; render is a function of a value and its opts (props) answering its hiccup. A schema declares its
+;; render in its own properties ({:seon.render/html sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
 ;; else the one value printer (seon.print). The values below are what root's web renders.
-{:seon.render/face [:enum :ai :html]
- ;; how a value is shown: in one line, as the page's main pane, a tile of its column, a row of its
+{;; how a value is shown: in one line, as the page's main pane, a tile of its column, a row of its
  ;; list (an entity schema's {:seon.render/as :row} puts its entities in the page's list, newest first)
  ;; :page, the whole page of the entity (opts :walk, its walk, and :dbs): a view that answers a layout
  ;; ({:seon.render/html :seon.render/units}) lays out its entity's page (an agent's, its conversation)
@@ -17,12 +16,12 @@
                     ;; the db the value was read on (an agent's branch, for a value recorded as its basis),
                     ;; read as of its basis (seon.render.ui/based-value)
                     [:db {:optional true} [:maybe :seon.host/db]]
-                    ;; the face (:html, the default, or :ai), when rendering through seon.render/render
-                    [:face {:optional true} :seon.render/face]
                     ;; the room it is shown in: one line (a chat stream, a table cell), a full panel
                     ;; (the default), a compact live tile
                     [:as {:optional true} :seon.render/as]
-                    ;; tokens for the printer (the AI face's budget, and the HTML face's)
+                    ;; shown in an agent page's chat: an eval's one line leads with the agent's prose
+                    [:chat {:optional true} :boolean]
+                    ;; tokens for the printer
                     [:budget {:optional true} pos-int?]
                     ;; what a cut reads the value through: its result handle (result/h3) or a form
                     [:handle {:optional true} :any]
@@ -32,8 +31,6 @@
                     [:unit {:optional true} [:maybe :string]]
                     ;; an eval row's cuts opened on the page, each its continuation form as EDN text (seon.web/open-form read it)
                     [:opened {:optional true} [:set :string]]]
- ;; an :ai render's result: its text, and whether it cut (each cut names what it left and how to read it)
- :seon.render/text [:map [:text :string] [:truncated? {:optional true} :boolean]]
  ;; ---- the walk (seon.render/walk): an entity and its units one hop away, the default view of any entity ----
  ;; a schema whose values are prose ({:seon.render/prose true}: a plan, a message, a reply) renders as markdown
  ;; what a node is: an entity, or a value of the walked entity; what a citation reached
@@ -64,7 +61,7 @@
                      [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
                      [:seon.render/db {:optional true} :seon.render/db]]
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
- ;; part (seon.render/view)
+ ;; part (seon.render/render-ctx)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
  ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
  ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
@@ -83,9 +80,9 @@
                                                     [:seon.error/in {:optional true} :symbol] [:class {:optional true} :string]]]
  ;; ---- what root's context reads: the whole system as one value ----
  ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and runs, the series and the events. Its AI face is root's
- ;; context (a budgeted text); the page is root's entity's (seon.render/walk), not this value's.
- :seon.render/system [:map {:seon.render/ai seon.render.ai/system}
+ ;; proc's health, main's tasks and runs, the series and the events, as root's context reads it
+ ;; (seon.render.system); the page is root's entity's (seon.render/walk), not this value's.
+ :seon.render/system [:map
                       [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
                       [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
  ;; ---- the parts of a page (seon.render.ui/page): each unit's input, its render declared here ----
@@ -96,22 +93,36 @@
  :seon.render/sent-request [:map {:seon.render/html seon.render.ui/sent-request} [:turn :int] [:run :string] [:view :string] [:refs :int]
                             [:added [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:same {:optional true} [:map [:turn :int] [:parts :int]]]
-                            [:split {:optional true} [:map [:system nat-int?] [:story nat-int?] [:conversation nat-int?] [:screen nat-int?]]]
+                            [:split {:optional true} [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
  :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
- ;; a ctx as the page and the model are drawn from it (seon.render/view, faces, drawn)
- :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]]
- :seon.render/faces [:map [:html :any] [:text :string] [:inline {:optional true} :any]]
+ ;; a ctx as the page and the model are drawn from it (seon.render/render-ctx, faces, drawn)
+ :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]
+                    ;; a part that reads the db: what its memo compares, and the db its render draws on
+                    [:read {:optional true} :any] [:db {:optional true} :seon.host/db]
+                    ;; its region of the page (seon.render/render-ctx), and, for an eval, whether ctx holds it opened
+                    [:region {:optional true} [:enum :task :chat :tiles]] [:opened {:optional true} :boolean]]
+ ;; render-ctx: the agent page's layout, a render of the record (seon.render/render-ctx), which a branch may override
+ :seon.render/render-ctx [:map {:seon.render/html seon.render/render-ctx} [:tree :map]]
+ ;; the task, drawn as the task's data (seon.context/task-data over the db), and its related
+ :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
+ :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
+ ;; what the newest model turn observed (seon.render.ui/status over its basis): the task, the turn, the one before it
+ :seon.render/status [:map {:seon.render/html seon.render.ui/status} [:task :seon.task/id] [:turn pos-int?] [:last {:optional true} pos-int?]]
+ ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)
+ :seon.render/cited [:map {:seon.render/html seon.render.ui/cited} [:var :symbol]]
+ :seon.render/faces [:map [:html {:optional true} :any] [:inline {:optional true} :any]]
  ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
- :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:html :string] [:inline {:optional true} :string]]
+ :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:region {:optional true} [:enum :task :chat :tiles]]
+                         [:html {:optional true} :string] [:inline {:optional true} :string]]
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
- ;; what root reads (seon.render.proc/debug-value): the system's AI face as the render proc holds it
+ ;; what root reads (seon.render.proc/debug-value): the system's value printed, as the render proc holds it
  :seon.render/root-context [:map {:seon.render/html seon.render.ui/root-context} [:text :string] [:tokens nat-int?]]
  ;; the input at the top of an agent's page: its REPL, its messages, its held task's release
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]

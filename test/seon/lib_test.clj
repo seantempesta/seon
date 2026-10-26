@@ -53,10 +53,13 @@
 (deftest a-wait-for-a-line-parks-the-fiber
   ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
   ;; on the main carrier (the agent's one thread) a poll(2) of the pipe held every other fiber
-  ;; of the agent for that long. The wait parks through the io poller: a fiber ticking on a
-  ;; timer keeps ticking while the reader waits for a line a thread writes 200 ms later, in a
-  ;; child forked from a main carrier, the reader on the child's own fiber
-  (is (= {:exit 0} (fork-case "line-parks")) "the ticker ran while the reader waited"))
+  ;; of the agent for that long. The wait parks through the io poller: a fiber queued before the
+  ;; wait runs while the reader waits (the carrier is free only then), so it ran before the line
+  ;; came. A poll(2) holding the carrier lets it run only after the read returns: false. The
+  ;; line comes from a thread (no fiber could write it while the carrier is held), 200 ms on, the
+  ;; end of a held carrier's wait; the verdict is which happened first, never how long it took.
+  ;; In a child forked from a main carrier, the reader on the child's own fiber
+  (is (= {:exit 0} (fork-case "line-parks")) "a fiber ran while the reader waited"))
 
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what

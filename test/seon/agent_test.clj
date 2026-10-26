@@ -675,8 +675,8 @@
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
-  ;; story in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
-  ;; the reconciler, the implement's first turn, on the design's session, sends the design's story
+  ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! and
+  ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"})"
@@ -690,7 +690,7 @@
         {:keys [design implement boundary]} (:value r)
         last-design (peek design) first-implement (first implement)]
     (is (and (seq design) (seq implement) boundary) (pr-str r))
-    (is (= (second (first design)) (second first-implement)) "the design's story, in the same place")
+    (is (= (second (first design)) (second first-implement)) "the design's task data, in the same place")
     (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
     (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
 
@@ -729,14 +729,13 @@
   (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
                               (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
                                    "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
-                                   "   :read (count (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))"
-                                   "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
+                                   "   :read (mapv :content (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task story, the screen's three evals (status, changes, related)")
-    (is (str/includes? (str (:screen (:value turn))) ":turn \"1 of 1\"") (str "the screen's first eval, the task's status: " (:screen (:value turn))))
-    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 5 (:read (:value turn))) "read back from its records")))
+    (is (= [:section :page] (:sent (:value turn))) "the help page, then the page whole")
+    (is (= 2 (count (:read (:value turn)))) "read back from its records")
+    (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
+    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
 (deftest code-sent-again-is-told-on-its-answer
   ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
@@ -836,9 +835,11 @@
 (deftest related-is-an-eval-of-the-plan-and-of-any-text
   ;; my.task/related (the screen form) and my.agent/related (the agent's own words), in a test-mode
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
-  (let [[db _ dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+  (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
+        ;; the agent working the task, as a session holds it: its entity and its running run
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
         old @agent/state]
-    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r"})
+    (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
       (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
           "the screen form: the sections nearest the plan, the cited one left out")

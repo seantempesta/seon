@@ -242,6 +242,7 @@
   '{[seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store clojure.core.async/timeout] "a go block's timeout is the behaviour forked; its child's verdict is its exit status"
+    [seon.lib-test/a-wait-for-a-line-parks-the-fiber Thread/sleep] "the end of a held carrier's wait (only a thread can write the line then); the verdict is whether a fiber ran before the line came, an order, never a duration"
     [seon.lib-test/probe-ms seon.profile/now-ns] "the probe's cost as a wall ratio of medians: open, FINDINGS (no counted measure of kernel time)"
     [seon.lib-test/probe-ms seon.profile/ms-since] "the same"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
@@ -917,15 +918,12 @@
    #(in-child
       (fn []
         (let [[r w] (sock/socketpair)
-              ticks (volatile! 0) stop (volatile! false)
-              _ (a/go-loop [] (when-not @stop (a/<! (a/timeout 5)) (vswap! ticks inc) (recur)))
+              ran (volatile! false)
+              _ (a/go (vreset! ran true))
               _ (future (Thread/sleep 200) (sock/write-line! w "done"))
               rd (sock/line-reader r)
-              before @ticks
-              lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))
-              during (- @ticks before)]
-          (vreset! stop true)
-          (and (= ["done"] lines) (pos? during)))))
+              lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
+          (and (= ["done"] lines) @ran))))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
