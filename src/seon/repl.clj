@@ -374,12 +374,12 @@
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it
   (:seon.eval/by), its details in one EDN attribute (the lean record: nothing queries them
-  apart): `record-details`; and the agent's answered t. Who is the one upsert, by its identity: an
+  apart): `record-details`. Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, seon.task/agent-key) or root's ({:seon.root/id :root})."
-  {:malli/schema [:=> [:cat :map :string :string :map [:maybe :int]] :seon.db/tx-data]}
-  [who id by details t-basis]
+  {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
+  [who id by details]
   [{:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by :seon.eval/record details}
-   (cond-> (assoc who :db/id "agent") t-basis (assoc :seon.agent/answered-t t-basis))])
+   (assoc who :db/id "agent")])
 
 (defn record-details
   "What an eval's record holds (:seon.eval/record): its code, its response whole, its value
@@ -428,8 +428,7 @@
     (swap! agent/state dissoc :defs)
     (if (and contract/record? (= :agent (:mode @agent/state)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run]))
-                                                 (:max-tx (agent/db)))))
+                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
           (assoc r :record id))
       r)))
 
