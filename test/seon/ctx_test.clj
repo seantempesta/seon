@@ -49,10 +49,13 @@
   (let [db (:db-after (d/with (ts/test-db) (into [{:seon.agent/key k :seon.agent/id :a1}
                                                    {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
-                                                    :seon.task/references #{'app.x/f0 'app.x/f1}
+                                                    :seon.task/references #{'app.x/f0 'app.x/f1} :seon.task/sections #{"docs/x.md#the-x"}
                                                     :seon.task/execution :running :seon.task/branch :main/lab-ctx}
                                                    {:db/id "f0" :form/id "app.x/f0-1" :form/src "(defn f0 [x] x)"} {:var/name 'app.x/f0 :var/form "f0"}
-                                                   {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}]
+                                                   {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
+                                                   {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/text "What x does."}
+                                                   {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is}}
+                                                   {:var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
                                                   (run-tx "lab/ctx#1" 0))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
@@ -81,7 +84,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 22)
+    (case (.nextInt r 23)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -107,6 +110,10 @@
            [[:db/retractEntity [:var/name 'app.x/f1]]]
            [{:db/id "f" :form/id (str "app.x/f1-" i) :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
       18 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/references (symbol "app.x" (str "f" (.nextInt r 3)))]]
+      ;; a cited section's text edited, or the section another task cites written
+      22 (if (.nextBoolean r)
+           [[:db/add [:seon.section/address "docs/x.md#the-x"] :seon.section/text (str "What x does, " i ".")]]
+           [{:seon.section/address (str "docs/y.md#y" i) :seon.section/text "Y."} [:db/add [:seon.task/id "lab/ctx"] :seon.task/sections (str "docs/y.md#y" i)]])
       ;; the agent edits its pattern: a narrower window of its evals, or its schema's again
       19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
            (if (.nextBoolean r)
@@ -533,6 +540,22 @@
        [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
        (finally (reset! seon.agent/state nil))))
 
+(deftest a-tasks-record-holds-what-its-work-needs
+  ;; the 20-turn context (shared note context-for-20-turns): the cited sections' text (D3), the
+  ;; cited vars whole with their forms (D2) and their callers, the tests among them (D1), and
+  ;; what each proof calls, by name (D5: its form's :form/refs)
+  (let [db (seeded 10)
+        t (get-in (:tree (ctx/build db (aid db) :b)) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task])
+        f0 (get-in t [:cited (id db [:var/name 'app.x/f0])])]
+    (is (= ["What x does."] (names (:sections t) :seon.section/text)) "D3: the cited section's text, by its address")
+    (is (= "(defn f0 [x] x)" (get-in f0 [:form :form/src])) "D2: the cited var's source")
+    (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
+    (let [t0 (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"])])]
+      (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, held whole at its first path (a caller)")
+      (is (= {:db/id (:db/id t0)} (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :form]))
+          "and {:db/id} under :proved, which reaches it later with the same pattern, so nothing is lost")
+      (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
+
 (deftest a-symbol-joins-by-name
   ;; :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a
   ;; task holds joins the var it names by a lookup ref, [:var/name sym], and a var's callers join by
@@ -544,16 +567,22 @@
     (is (= #{'app.x/f0 'app.x/f1} (:seon.task/references (t c))) "the references, the author's symbols")
     (is (= ['app.x/f0] (names (:cited (t c)) :var/name)) "app.x/f0 joined by name; app.x/f1, written by nobody yet, not")
     (is (= "(defn f0 [x] x)" (get-in (t c) [:cited (id db [:var/name 'app.x/f0]) :form :form/src])) "the var whole, its form joined")
-    (is (= ["app.x/c-1"] (names (get-in (t c) [:cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
+    (is (some #{"app.x/c-1"} (names (get-in (t c) [:cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
     (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
           c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
       (is (= ['app.x/f0 'app.x/f1] (sort-by str (names (:cited (t c')) :var/name))) "written, the var joins by its name")
       (is (= c' (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) "as a build holds it"))
     (let [db (reduce (fn [db i] (:db-after (d/with db [{:form/id (str "app.x/c" i) :form/src (str "(defn c" i " [] (f0 " i "))") :form/refs #{'app.x/f0}}])))
                      db (range 2 9))]
-      (is (= #{"app.x/c8" "app.x/c7" "app.x/c6" "app.x/c5" "app.x/c4"}
-             (set (names (get-in (:tree (ctx/build db (aid db) :b)) [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)))
-          "its callers' window: the newest five by when each was written (a form's id is its content's)"))
+      (is (= #{"app.x/c8" "app.x/c7" "app.x/c6"}
+             (set (names (get-in (:tree (ctx/build (:db-after (d/with db [[:db/add [:seon.agent/key k] :seon.ctx/pattern
+                                                                             [(symbol "*") {[:seon.run/_agent :as :runs :limit 5 :reverse true]
+                                                                                            [(symbol "*") {[:seon.run/task :as :task]
+                                                                                                           [(symbol "*") {[:seon.task/references :by :var/name :as :cited]
+                                                                                                                          [(symbol "*") {[:form/_refs :by :var/name :as :callers :limit 3 :reverse true] [(symbol "*")]}]}]}]}]]]))
+                                                   (aid db) :b))
+                                 [:runs (id db [:seon.run/id "lab/ctx#1"]) :task :cited (id db [:var/name 'app.x/f0]) :callers]) :form/id)))
+          "a callers' window of three: the newest three by when each was written (a form's id is its content's)"))
     (let [refused (fn [p] (:seon.error/type (try (render/pattern p) (catch clojure.lang.ExceptionInfo e (ex-data e)))))]
       (is (= :seon.ctx/invalid-pattern (refused '[* {[:seon.task/references :via :var/name] [*]}])) "an option neither pull's nor :by: refused, naming it")
       (is (= :seon.ctx/invalid-pattern (refused '[* (:seon.agent/key :limit 3)])) "a clause that is no '*, attribute or join")
