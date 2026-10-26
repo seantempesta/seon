@@ -647,9 +647,9 @@
                  :parent (fn [pid]
                            (lib/c-close w)
                            (forked pid)
-                           (let [rd (lib/line-reader r)
+                           (let [rd (sock/line-reader r)
                                  line (loop [line nil]
-                                        (let [ls (rd -1)]
+                                        (let [ls (rd)]
                                           (if (= ls :eof) line (recur (or (peek ls) line)))))
                                  st (lib/wait-status pid)]
                              (lib/c-close r)

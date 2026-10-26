@@ -4,7 +4,7 @@
   probe (native/probe.c, built by bin/build), small stats. From proto/flow f2-final
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [jolt.ffi :as ffi] [jolt.scheme :as scm] [clojure.string :as str]
+  (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked]] [seon.config :as config]))
 
 (def ^:private c-schemas
@@ -57,7 +57,6 @@
     (c-setrlimit 8 b)
     (c-getrlimit 8 b)
     (ffi/read b :uint64 0)))
-(defc poll1 "e13_poll1" [:int :int] :long {:blocking true})
 (defc kq-new "e13_kq_new" [] :long)
 (defc kq-watch "e13_kq_watch" [:int :int] :long)
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
@@ -109,28 +108,6 @@
                     (try [n (slurp f)]
                          (catch java.io.FileNotFoundException _ nil))))))
         (or (seq (.listFiles (java.io.File. dir))) [])))
-
-(defn line-reader
-  "A fn of a wait in ms (negative: until something arrives) that answers the complete
-  lines that arrived (a vector, maybe empty) or :eof. A signal ending the wait (EINTR)
-  answers [] and the caller waits again."
-  {:malli/schema [:=> [:cat :seon.lib/fd] :seon.host/fn]}
-  [fd]
-  (let [cap 1048576 buf (ffi/alloc cap) pending (volatile! (byte-array 0))]
-    (fn [ms]
-      (if (<= (poll1 fd ms) 0)
-        []
-        (let [r (c-read fd buf cap)]
-          (if (<= r 0)
-            :eof
-            (let [more (ffi/read-array buf r) ^bytes p @pending q (byte-array (+ (alength p) r))]
-              (System/arraycopy p 0 q 0 (alength p))
-              (System/arraycopy more 0 q (alength p) r)
-              (let [nl (loop [k (dec (alength q))] (cond (< k 0) -1 (= 10 (aget q k)) k :else (recur (dec k))))]
-                (if (neg? nl)
-                  (do (vreset! pending q) [])
-                  (do (vreset! pending (java.util.Arrays/copyOfRange q (inc nl) (alength q)))
-                      (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8"))))))))))))))
 
 (defn decode-status {:malli/schema [:=> [:cat :int] :seon.lib/exit-status]}
   [st]

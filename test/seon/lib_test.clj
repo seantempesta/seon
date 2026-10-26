@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer and what they cost."
   (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.java.shell] [seon.lib :as lib]
-            [konserve.jolt.lmdb-ffi :as lmdb] [clojure.core.async :as a] [datahike.api :as d]))
+            [konserve.jolt.lmdb-ffi :as lmdb] [clojure.core.async :as a] [datahike.api :as d] [seon.sock :as sock]))
 
 (defn- probe-ms
   "The median time of 9 calls of lib/mp-probe, ms."
@@ -49,6 +49,27 @@
   [f]
   (lib/fork! {:child #(lib/c-exit (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1)))
               :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+
+(deftest a-wait-for-a-line-parks-the-fiber
+  ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
+  ;; on the main carrier (the agent's one thread) a poll(2) of the pipe held every other fiber
+  ;; of the agent for that long. The wait parks through the io poller: a fiber ticking on a
+  ;; timer keeps ticking while the reader waits for a line a thread writes 200 ms later
+  (is (= {:exit 0}
+         (in-child (fn []
+                     (jolt.host/main-carrier-run!
+                       (fn []
+                         (let [[r w] (sock/socketpair)
+                               ticks (volatile! 0) stop (volatile! false)
+                               _ (a/go-loop [] (when-not @stop (a/<! (a/timeout 5)) (vswap! ticks inc) (recur)))
+                               _ (future (Thread/sleep 200) (sock/write-line! w "done"))
+                               rd (sock/line-reader r)
+                               before @ticks
+                               lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))
+                               during (- @ticks before)]
+                           (vreset! stop true)
+                           (and (= ["done"] lines) (pos? during))))))))
+      "the ticker ran while the reader waited"))
 
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
