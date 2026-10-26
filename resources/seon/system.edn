@@ -65,6 +65,8 @@
   :tests {:perform seon.fx/run-tests :workers 1}
   ;; the wiki's history from git: what each section was last written against (seon.docs/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
+  ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded
+  :evidence {:perform seon.fx/stall-evidence :workers 1}
   ;; the model provider is only root's: the agents never hold the key
   ;; the embedding model in process (seon.vector/open: llama.cpp, root only, ggml starts threads); a
   ;; batch kind: a step embeds every queued request's texts in one call

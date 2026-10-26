@@ -382,7 +382,13 @@
         ;; one error each: a request stops at its first
         r1 [@(c/submit! sys a "(/ 1 0)") @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
             @(c/submit! sys a "(my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})")]
-        r2 @(c/submit! sys a "(Thread/sleep 2500) :awake")
+        ;; a stall (1,000 ms bound): an open :stalled problem while it sleeps, closed once it answers
+        stalled-rows #(get-in (seon.problems/health %) [:classes :stalled :rows])
+        r2p (c/submit! sys a "(Thread/sleep 2500) :awake")
+        during (seon.root/await-db sys #(seq (stalled-rows %)))
+        stall (first (some-> during stalled-rows))
+        r2 @r2p
+        after (seon.root/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
         _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))
@@ -405,11 +411,12 @@
                 :died (select-keys (:example died) [:exit :stderr :last-op])
                 :red (select-keys red [:run :test :assertions :evidence])
                 :cost (select-keys cost-row [:run :test :verdict])
+                :stalled (select-keys stall [:agent :message])
                 :ms (- (System/currentTimeMillis) t0)}
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
                 :platform (contains? (types :platform) :seon.root/proc-defect)
-                :stalled (contains? (types :agent) :seon.agent/stalled)
+                :stalled (and (= a (:agent stall)) (re-find #"Thread/sleep 2500" (str (:message stall))) (not (contract/error? after)))
                 :died (and died (= {:exit 3} (get-in died [:example :exit])) (re-find #"D2 boom" (str (get-in died [:example :stderr]))))
                 :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
                 :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))}}))))

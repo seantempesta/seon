@@ -1,0 +1,31 @@
+#!/bin/zsh
+# bin/stalls MS BOUNDS LOG:PID ... — name a stalled test, never end it: while any PID runs, each LOG
+# (a shard's, bin/test) whose last test line is "started <test>" (no "ended" since) and no write for longer than
+# that test's bound prints and records "STALLED <test> <quiet ms> (LOG)", once per test. A test's
+# bound is its line in BOUNDS ("<test> <ms>": :seon.config.proofs/stall-factor times its own last
+# run, the plan's out/stall-bounds), else MS (:seon.config.agent/stall-ms, the floor). It judges by
+# wall time, which load can triple, so each name carries the 5-minute load, and it never ends a test.
+# Exits when
+# every PID has. An observation of time, named in docs/clocks.md.
+MS=$1 BOUNDS=$2; shift 2
+typeset -A seen bound; local pair log pid t age alive b line
+[[ -r $BOUNDS ]] && while read -r line; do bound[${line%% *}]=${line##* }; done < $BOUNDS
+while true; do
+  alive=0
+  for pair in "$@"; do
+    log=${pair%:*} pid=${pair##*:}
+    kill -0 $pid 2>/dev/null || continue
+    alive=1
+    # the shard's last test line: a test still running only after "started" (an "ended" test is done)
+    t=$(grep -E '^(started|ended) ' "$log" 2>/dev/null | tail -1)
+    [[ $t == started\ * ]] || continue
+    t=${t#started }
+    [[ ${seen[$log]} != $t ]] || continue
+    b=${bound[$t]:-$MS}
+    age=$(( ($(date +%s) - $(stat -f %m "$log")) * 1000 ))
+    # wall time, which load stretches: the 5-minute load is named beside it, to read the name by
+    (( age > b )) && { seen[$log]=$t; echo "STALLED $t $age ms (bound $b ms, load $(sysctl -n vm.loadavg | awk '{print $3}'), $log)" | tee -a "$log" }
+  done
+  (( alive )) || exit 0
+  sleep 1
+done

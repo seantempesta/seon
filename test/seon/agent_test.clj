@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -750,6 +750,36 @@
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
+(deftest a-stall-task-closes-when-its-conditions-hold
+  ;; owner, 2026-10-26: root's stall task (seon.template/stall) is done when its boundary
+  ;; conditions hold, which are its proofs (seon.stall-proofs): red while the agent is stalled and
+  ;; no cause is recorded; green once main retracts the stall and the worker records the cause
+  ;; with its evidence and decides it is no bug, through my.task/update!
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [k (task/agent-key "boot-1" :a1)
+           stall (tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})
+           _ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Work." :seon.task/proofs #{}} stall]))
+           _ (d/transact conn (task/run-start-tx "demo/t#1" "demo/t" "boot-1" :a1 {:branch :task-demo-t :model nil :max-turns 4} 1000 "Work."))
+           _ (d/transact conn [{:seon.agent/key k :seon.agent/stall {:quiet-ms 4000}}])
+           ab (pdb/on-main (:branch cfg) :stall-task)
+           _ (d/branch! conn (:branch cfg) ab)
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state
+           proofs (fn [] (let [reps (atom [])]
+                           (binding [clojure.test/report (fn [m] (swap! reps conj (:type m)))]
+                             (doseq [v (sort tpl/stall-proofs)] ((:test (meta (resolve v))))))
+                           (frequencies @reps)))]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :task "root/stall-a1-demo-t-1" :db @store-conn})
+         (is (pos? (:fail (proofs) 0)) "red: the agent is stalled, no cause is recorded")
+         (d/transact conn [[:db.fn/retractAttribute [:seon.agent/key k] :seon.agent/stall]])
+         (my.task/update! :seon.task/cause merge {:what "a test child parked on a pipe nobody wrote" :evidence {:sample "..." :lsof "..."} :bug? false})
+         (agent/commit!)
+         (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
 (deftest an-agents-transactions-name-their-runtime
   ;; task seon.db/each-commit-names-its-runtime: what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
@@ -829,15 +859,26 @@
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
   (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"st\" :seon.task/plan \"Make st.\"} seon.template/stages)"
-                  " _ (seon.root/await-db sys \"the implement parked\" #(= :parked (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/st-implement#1\"]))))"
+                  ;; the implement parked, or a stage ended without it: its run judged (past :ended), the design's
+                  ;; stopped short of done (parked, dead, lost), or a stage's task is held; a fact either way,
+                  ;; so a red answers red rather than waiting
+                  " _ (seon.root/await-db sys \"the implement parked, or a stage ended\""
+                  "      #(let [held? (fn [id] (= :held (:seon.task/execution (datahike.api/entity % [:seon.task/id id]))))"
+                  "             status (fn [id] (:seon.run/status (datahike.api/entity % [:seon.run/id id])))]"
+                  "         (or (not (contains? #{nil :running :ended} (status \"demo/st-implement#1\")))"
+                  "             (not (contains? #{nil :running :ended :done} (status \"demo/st#1\")))"
+                  "             (held? \"demo/st\") (held? \"demo/st-implement\"))))"
+                  " ended (into {} (for [id [\"demo/st#1\" \"demo/st-implement#1\"]]"
+                  "                  [id (when-let [e (datahike.api/entity @(:conn sys) [:seon.run/id id])] {:status (:seon.run/status e) :outcome (:seon.run/outcome e) :reason (:seon.run/reason e)})]))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
                   " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"demo/st-implement#1\"] [?m :seon.message/to ?r] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
-                  " {:design (sent \"demo/st#1\") :implement (sent \"demo/st-implement#1\") :boundary boundary})")
+                  " {:ended ended :design (sent \"demo/st#1\") :implement (sent \"demo/st-implement#1\") :boundary boundary})")
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
                         {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
-        {:keys [design implement boundary]} (:value r)
+        {:keys [ended design implement boundary]} (:value r)
         last-design (peek design) first-implement (first implement)]
+    (is (= :parked (get-in ended ["demo/st-implement#1" :status])) (str "the implement parked; the stages' runs: " (pr-str ended)))
     (is (and (seq design) (seq implement) boundary) (pr-str r))
     (is (= (second (first design)) (second first-implement)) "the design's task data, in the same place")
     (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
