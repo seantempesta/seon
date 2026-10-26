@@ -63,11 +63,14 @@
                     (do (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
                         (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms)))))
               [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
-    (ts/stop-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
-    (when-let [a (and (map? out) (::attach-made-no-agent out))]
-      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a)) {:attach a})))
+    (let [stopped (ts/stop-root! root)]
+      (ts/drop-main! store main)
+      (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
+      ;; root's log (its fork server's stderr says why it died) is read at its stop, before the
+      ;; runs directory goes
+      (when-let [a (and (map? out) (::attach-made-no-agent out))]
+        (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) "\nroot's log:\n" (:log stopped))
+                        {:attach a :log (:log stopped)}))))
     (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
 
 (defn- root-ended
