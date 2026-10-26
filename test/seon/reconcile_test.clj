@@ -980,9 +980,10 @@
   ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
   ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
   ;; read a db without the run start :spawned wrote, found no earlier run on its agent, and wrote
-  ;; no :stage entry. An answer main has not reached waits for main's commit of its t
+  ;; no :stage entry. An answer main has not reached waits for main's commit of its t. A commit's
+  ;; :ns is 0: the proc measures a stat from it, which nothing here reads (no clock in the test)
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns 0}))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
         env {:branch (task/default-branch "demo/d") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}
         ;; the session's earlier stage: demo/d's run on the agent the spawn will answer
