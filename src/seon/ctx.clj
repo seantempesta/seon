@@ -226,16 +226,21 @@
           (and o (not (touched x))) [o r]
           :else (let [r (if (and (map? old) (not o)) (forget r old p) r)] (node db x (:sub j) p r o touched)))))))
 
+(defn- same-node?
+  "Does rebuilt node n hold what o held, every key's value the same object (identical?)?"
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :boolean]}
+  [o n] (and (map? o) (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)))
+
 (defn- node
   "Entity e as ctx holds it under pattern spec s at path p: its own attributes, and each join's
   members (join) under the join's key (a ref attribute's value, {:db/id}, gives way to them; a
   :by join's symbols stay, its members beside them under its :as); [m r], r the record's state
   (:seon.ctx/ix: :held {e path}, :at {e #{path}}, :spec {e s}, :watch {[a v] #{[e key]}} and its
   reverse :watching; during a patch :patching, and :relocate when the patch must build anew)
-  gaining it. An
-  entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
+  gaining it. An entity is held once, at the first path the walk reaches it by (the pattern's order, a newest-
   first collection's newest member first); any other path holds {:db/id e}. old, e's value
-  before, keeps each join no touched datom changed (identical?), its entries in r as they were."
+  before, keeps each join no touched datom changed (identical?), its entries in r as they were,
+  and each attribute equal to before; a node equal to old in every value is old."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
   (let [r (update-in r [:at e] (fnil conj #{}) p)
@@ -245,16 +250,23 @@
       [{:db/id e} (cond-> r (:patching r) (assoc :relocate true))]
       (let [old (when-not (stub? old) old)
             r (-> r (assoc-in [:held e] p) (assoc-in [:spec e] s))
-            m (if (and old (not (touched e))) (apply dissoc old (map :key (:joins s))) (own db e s))
-            refs (get (dbi/-rschema db) :db.type/ref #{})]
-        (reduce (fn [[n r] j]
-                  (let [k (:key j)
-                        [v r] (if (and old (not (touched [e k])))
-                                [(get old k) r]
-                                (join db e m j (conj p k) (get old k) r touched))
-                        n (if (or (= k (:attr j)) (contains? refs (:attr j))) (dissoc n (:attr j)) n)]
-                    [(if (or (nil? v) (and (map? v) (empty? v) (many? db j))) (dissoc n k) (assoc n k v)) r]))
-                [m r] (:joins s))))))
+            m (cond (and old (not (touched e))) (apply dissoc old (map :key (:joins s)))
+                    ;; pulled again: an attribute equal to before keeps the object it was
+                    old (let [pulled (own db e s)]
+                          (reduce-kv (fn [m k v] (let [o (get old k ::none)] (if (and (not (identical? o v)) (= o v)) (assoc m k o) m)))
+                                     pulled pulled))
+                    :else (own db e s))
+            refs (get (dbi/-rschema db) :db.type/ref #{})
+            [n r] (reduce (fn [[n r] j]
+                            (let [k (:key j)
+                                  [v r] (if (and old (not (touched [e k])))
+                                          [(get old k) r]
+                                          (join db e m j (conj p k) (get old k) r touched))
+                                  n (if (or (= k (:attr j)) (contains? refs (:attr j))) (dissoc n (:attr j)) n)]
+                              [(if (or (nil? v) (and (map? v) (empty? v) (many? db j))) (dissoc n k) (assoc n k v)) r]))
+                          [m r] (:joins s))]
+        ;; a node holding what it held, every value the same object, is the node it was
+        [(if (same-node? old n) old n) r]))))
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
@@ -314,11 +326,6 @@
                 (if s (reduce #(add %1 %2 d) t (for [j (:joins s) :when (and (not (:rev? j)) (= a (:attr j)))] [e (:key j)])) t)))
             {} datoms)))
 
-(defn- same-node?
-  "Does rebuilt node n hold what o held, every key's value the same object (identical?)?"
-  {:malli/schema [:=> [:cat [:maybe :map] :map] :boolean]}
-  [o n] (and (map? o) (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)))
-
 (defn- share
   "Map n with every subtree equal to old's at its path old's object (identical?): a fresh build
   shares what it did not change with the record it replaces, children first, so a node whose
@@ -327,11 +334,7 @@
   [o n]
   (cond (identical? o n) o
         (and (map? o) (map? n))
-        ;; built anew in n's order (into its empty, its comparator kept), not by assoc: Jolt's
-        ;; sorted-map assoc keeps the value it holds when the new one is = to it (Clojure's replaces
-        ;; it unless identical). A workaround, deleted when Jolt's fix is pinned (task
-        ;; seon.ctx/share-assocs-what-it-shares)
-        (let [n (into (empty n) (map (fn [[k v]] [k (share (get o k) v)])) n)]
+        (let [n (reduce-kv (fn [m k v] (let [x (share (get o k) v)] (if (identical? x v) m (assoc m k x)))) n n)]
           (if (and (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)) o n))
         (= o n) o
         :else n))
@@ -366,8 +369,8 @@
                                     (if (or (nil? o) (stub? o) (not= e (:db/id o)))
                                       [tree r]
                                       (let [[n r] (node db e (get-in r [:spec e]) h (assoc r :patching true) o touched)]
-                                        ;; a rebuild that changed nothing keeps the node it rebuilt (the same object)
-                                        [(if (same-node? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
+                                        ;; a rebuild that changed nothing is the node it was (node): the tree as it was
+                                        [(if (identical? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
                                 [(:tree c) r] sites)]
         (if (or (:relocate r) (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
           (fresh)
