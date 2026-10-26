@@ -176,7 +176,7 @@
   ;; The facts are read by a form of their own: a form reads the db as it began.
   (let [ask (str "(let [r @(c/prove! sys nil '#{seon.patterns-test})"
                  "      again @(c/prove! sys nil '#{seon.patterns-test})]"
-                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r)}))")
+                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r) :refused (when (seon.contract/error? r) r)}))")
         read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
                   "      green (filter seon.proofs/green? (vals (seon.proofs/stored-results @(:conn sys) (map last facts))))]"
@@ -184,7 +184,7 @@
                   "           :latest (vec (sort (map first (d/q '[:find ?l :where [?e :seon.proof/latest ?l]] @(:conn sys)))))}))")
         [r1 r2] (at/in-agent [{:op :eval :agent "root" :code ask} {:op :eval :agent "root" :code read}])
         v (merge (clojure.edn/read-string (:value r1)) (clojure.edn/read-string (:value r2)))]
-    (is (map? v) (pr-str r1 r2))
+    (is (and (every? :value [r1 r2]) (nil? (:refused v))) (pr-str r1 r2))
     (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
     (is (pos? (:pass v)))
     (is (= (:key v) (:again v)) "asked again: the same run's answer, nothing runs")

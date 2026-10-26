@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.repl :as repl] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
+            [seon.fx :as fx] [seon.task :as task] [seon.repl :as repl] [test-runner :as runner] [seon.context-test] [my.task] [my.agent]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -563,6 +563,38 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
              "so the agent's :will-merge carries none of main's changes")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest merge-main-brings-the-task-content-main-carried
+  ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
+  ;; brought only the program, so the task content main had carried since the fork (another
+  ;; session's design: its plan and registered proof) read at the run's end as this branch
+  ;; reverting it, and seon.task/carry-tx wrote that revert onto main; the other session's
+  ;; implement was then judged :no-proofs
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{}}]))
+           ab (pdb/on-main (:branch cfg) :agent-carried)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)
+           ;; main: another session's design carried onto demo/x, and a program change (what makes merge-main! commit)
+           _ (d/transact conn [[:db/add [:seon.task/id "demo/x"] :seon.task/proofs 'demo-test/x-design-wrote-test]
+                               [:db/add [:seon.task/id "demo/x"] :seon.task/plan "Make x. The design: f1 adds 100."]
+                               {:db/id "f1'" :form/id "app.m0/f1-carried" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]])
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :db @store-conn :base forked})
+         (agent/merge-main! #{})
+         (let [x (task/task (agent/db) "demo/x")]
+           (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
+           (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
+         (is (= [] (:tx (task/carry-tx (:base @agent/state) (agent/db) @conn)))
+             "so the run's end carries nothing of it back onto main")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest an-agents-transactions-name-their-runtime

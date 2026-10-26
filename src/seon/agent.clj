@@ -272,8 +272,12 @@
   "git merge main into this agent's branch, in this process (it owns the branch's writes):
   main's changes since the merge base that do not conflict apply in one merge commit with
   main as parent, each conflict stays on the branch as an unmerged entry, and the changed
-  definitions load here. data-attrs: the data that merges beside the program. Answers
-  {:ok :applied :conflicts :t}."
+  definitions load here. The task content main carried since the base (seon.task/carry-tx,
+  the other way: another session's design, root's edit) comes in the same commit, since the
+  base moves to main's head and a member main changed would otherwise read, at the run's end,
+  as this branch reverting it (live finding F3); one both changed keeps the branch's and is
+  answered in :task-conflicts. data-attrs: the data that merges beside the program. Answers
+  {:ok :applied :conflicts :task-conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
   (commit!)
@@ -284,8 +288,10 @@
         r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [rep (d/merge-db conn #{main-b} (into (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
-                                              (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+      (let [carried (task/carry-tx (:base @state) main head)
+            rep (d/merge-db conn #{main-b} (-> (pm/merge-tx head (:base @state) main (:apply r) data-attrs)
+                                               (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
+                                               (into (:tx carried)))
                              (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
             ops (pdb/report->tx rep)
             errs (program/load-changes! (:db-after rep) ops)]
@@ -293,6 +299,7 @@
         (swap! state assoc :db @conn :base (pdb/branch-base conn main-b (:branch @state)))
         (send! {:op :committed :t (:max-tx @conn) :txs 1})
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
+          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
