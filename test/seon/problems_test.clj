@@ -271,6 +271,28 @@
         "a later stall of the same run writes none")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no run: none")))
 
+(deftest a-stall-tasks-evidence-is-captured-while-it-is-stuck
+  ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
+  ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
+  ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
+  (let [db (ts/test-db)
+        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"}}}
+        st (assoc (api view) :conn (atom db) :system {:procs {:fx/evidence {}}})
+        stalled {:op :stalled :agent :a1
+                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
+                                        {:agent :a1 :quiet-ms 4000})}
+        [st o1] (step st :back stalled)
+        [ask] (get o1 [:fx/evidence :in])
+        db (d/db-with db (vec (filter :seon.task/id (into [] cat (writes o1)))))
+        files {:sample "/x/sample.txt" :lsof "/x/lsof.txt"}
+        [_ o2] (step (assoc st :conn (atom db)) :back {:dest (:dest ask) :r {:value {:dir "/x" :files files}}})
+        [[_ _ attr cause]] (filter #(and (vector? %) (= :seon.task/cause (nth % 2 nil))) (into [] cat (writes o2)))]
+    (is (= 77 (get-in ask [:req :pid])) "asked for the stuck process")
+    (is (str/ends-with? (get-in ask [:req :dir]) "/stalls/stall-a1-demo-t-1") "its files under the runs directory's stalls/, by the task")
+    (is (= :seon.task/cause attr))
+    (is (= files (:evidence cause)) "the evidence's files on the task's cause")
+    (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
+
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
   (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
                                      :seon.agent/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
@@ -282,6 +304,60 @@
         "closed once the fact is retracted")
     (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
         "and by a new boot: an earlier boot's stall ended with its process")))
+
+(defn- gone-ended? [r] (= :seon.root/ended (:seon.error/type r)))
+
+(deftest a-late-live-status-leaves-a-gone-agent-gone
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path A
+  (testing "A: a late live status leaves a gone agent gone, out of the stall check's set"
+    (let [[st _] (step (api {:agents {:a1 {:status :dead :pid 77 :ended-ms 5}}}) :back {:op :status :agent :a1 :set {:status :busy :running {:form "(work!)" :since-ms 6}}})]
+      (is (= [:dead nil] ((juxt :status :running) (get-in st [:view :agents :a1]))))
+      (is (not (contains? (:seon.root/busy st) :a1))))))
+
+(deftest an-ending-agents-every-request-is-answered
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path A
+  (testing "A: an ending agent's every request the api holds is answered, one that never reached its proc too; a prove is the test service's"
+    (let [p (promise) q (promise)
+          st (-> (api {:agents {:a1 {:status :killed :pid 77}}}) (assoc-in [:agents :a1] {:branch :b1})
+                 (assoc-in [:pending 5] {:p p :kind :eval :agent :a1}) (assoc-in [:pending 6] {:p q :kind :prove :agent :a1}))
+          o (volatile! {})
+          st' (#'root/end-agent st o {:op :ended :agent :a1 :rid nil :pid 77 :inflight []})]
+      (is (gone-ended? (deref p 0 nil)) "the eval sent as it ended: answered")
+      (is (= ::unanswered (deref q 0 ::unanswered)) "the prove: left to the service that answers it")
+      (is (contains? (:pending st') 6)))))
+
+(deftest a-stopped-agents-exit-is-recorded-on-it
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path B
+  (testing "B: a stopped agent's exit, which no death waits on, is still recorded on it"
+    (let [[st _] (step (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1 :exit {:exit 0}} :a1 {:status :killed :pid 77 :ended-ms 9}}})
+                       :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
+      (is (= [{:exit 0} {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1]))))))
+
+(deftest an-exit-goes-to-the-death-waiting-on-its-pid
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path B
+  (testing "B: an exit goes to the death waiting on its pid, never to an ended agent's entry with the same pid"
+    (let [died (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1 :pid 77})
+          st (-> (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1} :a1 {:status :dead :pid 77 :ended-ms 9}}})
+                 (assoc :seon.root/dying {77 [:a1 died []]}))
+          [st _] (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
+      (is (= [nil {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1])))
+      (is (empty? (:seon.root/dying st)) "the death recorded"))))
+
+(deftest the-hello-answers-the-spawn-whatever-its-status
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path D
+  (testing "D: the hello answers the spawn though an eval sent before it made the agent busy"
+    (let [p (promise)
+          st (-> (api {:agents {:a1 {:status :busy :pid 77}}}) (assoc-in [:seon.root/spawning :a1] p))
+          _ (step st :back {:op :status :agent :a1 :set {:ready true}})]
+      (is (= {:id :a1} (deref p 0 nil))))))
+
+(deftest a-new-boot-ends-an-earlier-boots-live-agents
+  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path C
+  (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
+    (let [db (d/db-with (ts/test-db) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/id :a1 :seon.agent/root "r"
+                                                            :seon.agent/status :busy :seon.agent/running "(work!)"}])
+          db (d/db-with db (seon.task/earlier-agents-tx db))]
+      (is (= [:dead nil] ((juxt :seon.agent/status :seon.agent/running) (d/entity db [:seon.agent/key "b0/a1"])))))))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
