@@ -53,9 +53,13 @@
                 ;; the agent's :ready event, tapped before the attach that spawns it and awaited
                 ;; after: its hello (a ping of :agents until idle was a poll)
                 (eval-root "(def ready-ev (c/events sys))")
-                (ask {:op :attach :task "demo/t"})
-                (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
-                (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))
+                ;; an attach answers its agent ({:agent :task :run}); one that made none (refused:
+                ;; its fork server lost) is the answer, never a wait for a hello that cannot come
+                (let [attach (ask {:op :attach :task "demo/t"})]
+                  (if-not (:agent attach)
+                    [attach]
+                    (do (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
+                        (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms)))))
               [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
     (ts/stop-root! root)
     (ts/drop-main! store main)
