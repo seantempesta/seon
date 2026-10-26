@@ -261,6 +261,20 @@
      :fixed {:calls 25 :bytes 165000}
      :sizes [100 1000 3000]}))
 
+(deftest a-ref-asserted-back-leaves-its-member-as-it-was
+  ;; the regression the generator's draw hid (main red from Jolt f561902a, a sorted-map assoc that
+  ;; replaces an equal value): an eval whose ref to the agent is retracted and asserted again in one
+  ;; transaction is touched (its own datoms) and rebuilt, and came back a new object of equal value;
+  ;; a rebuilt entity keeps every attribute equal to before, and a node equal in every value is the
+  ;; node it was (seon.ctx/node)
+  (let [db (seeded 30) c (ctx/build db (aid db) :b) e26 (id db [:seon.eval/id "e26"])
+        rep (d/with db [[:db/retract e26 :seon.eval/agent [:seon.agent/key k]] [:db/add e26 :seon.eval/agent [:seon.agent/key k]]])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (identical? (get-in (:tree c) [:evals e26]) (get-in (:tree c') [:evals e26])) "the member: the same object")
+    (is (identical? (:evals (:tree c)) (:evals (:tree c'))) "and its window")
+    (is (= [] (ctx/changes c c')) "nothing changed")
+    (is (= c' (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) "as a build holds it")))
+
 (deftest a-fresh-build-shares-what-it-did-not-change
   ;; task seon.ctx/share-assocs-what-it-shares: a fresh build (a relocation's) is handed back the
   ;; record's own objects wherever it holds the same values, by assoc into its collections (sorted
