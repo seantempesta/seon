@@ -538,6 +538,19 @@
     (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
           (d/datoms db :aevt :ns/file))))
 
+(defn program-name?
+  "Is qualified symbol n the program's own, what a task's page cites as a var: its namespace is one
+  of nss (program-nss), or db holds no namespace of that name and it shares its first segment with
+  one of them (new work: a namespace the task will make). A test's or a test helper's, a library's,
+  and a name of nothing (a reproduction's handle, result/e1) are not: they are the reproduction's
+  entry and data, not its subject."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :symbol] :qualified-symbol] :boolean]}
+  [db nss n]
+  (let [ns (symbol (namespace n))
+        root #(first (str/split (str %) #"\."))]
+    (boolean (or (contains? nss ns)
+                 (and (nil? (d/entity db [:ns/name ns])) (some #(= (root ns) (root %)) nss))))))
+
 (defn live?
   "Is form entity e part of the program: it defines nothing (a text form: a declare, a
   require, a comment kept from its file), or some definition it made still points to it."

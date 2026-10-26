@@ -7,6 +7,13 @@
             [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
+(defn- ns-fact
+  "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
+  test's under test/ (seon.program/program-name? reads which)."
+  [v]
+  (let [n (namespace v)]
+    {:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str (if (str/ends-with? n "-test") "test/" "src/") (str/replace n "-" "_") ".clj")}))
+
 (defn- db-with-program []
   (let [db (ts/test-db)]
     ;; recorded definitions, each its form (seon.program's facts), written as data
@@ -14,7 +21,7 @@
                                  [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
                                   {:db/id (str "form " v) :form/id (str v) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                                    :form/defines [(str v)]}
-                                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                                  (ns-fact v)])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
                                  [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
@@ -321,7 +328,7 @@
                   (cond-> {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                            :form/defines [(str v)]}
                     (seq refs) (assoc :form/refs (vec refs)))
-                  {:db/id (str "ns " (namespace v)) :ns/name (symbol (namespace v))}])
+                  (ns-fact v)])
                defs)))
 
 (defn- turn-of

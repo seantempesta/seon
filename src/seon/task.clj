@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -52,12 +52,13 @@
   [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
 
 (defn- references-of
-  "The :seon.task/references and :seon.task/sections a declaration states: the names and the wiki
-  sections its text cites (seon.ref/names, seon.ref/addresses), derived and never authored; each
-  absent when it cites none."
-  {:malli/schema [:=> [:cat :seon.task/declaration] :map]}
-  [decl]
-  (let [text (cited-text decl) ns (set (ref/names text)) as (set (ref/addresses text))]
+  "The :seon.task/references and :seon.task/sections a declaration states: the program's names and
+  the wiki sections its text cites (seon.ref/names, seon.program/program-name?, seon.ref/addresses),
+  derived and never authored; each absent when it cites none."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
+  [db decl]
+  (let [text (cited-text decl) nss (program/program-nss db)
+        ns (into #{} (filter #(program/program-name? db nss %)) (ref/names text)) as (set (ref/addresses text))]
     (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems
@@ -113,7 +114,7 @@
                 (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
                 evidence (assoc :seon.task/evidence evidence)
                 (seq config) (merge config)
-                true (merge (references-of decl))))
+                true (merge (references-of db decl))))
             ids decls))))
 
 (defn execution-tx
@@ -590,7 +591,7 @@
                (mapcat (fn [[id d]]
                          ;; what it states now: members, config flattened, references derived, branch
                          ;; defaulted, needs as entity ids (a task new in this write by its tempid, its id)
-                         (let [want (-> (merge (dissoc d :seon.task/ns :seon.task/name :seon.task/config) (:seon.task/config d) (references-of d))
+                         (let [want (-> (merge (dissoc d :seon.task/ns :seon.task/name :seon.task/config) (:seon.task/config d) (references-of db d))
                                         (update :seon.task/branch #(or % (default-branch id)))
                                         (assoc :seon.task/needs (into #{} (map #(or (pdb/eid db :seon.task/id %) %)) (:seon.task/needs d))))]
                            (cond-> (conj (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want) (declared id d))

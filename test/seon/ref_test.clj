@@ -128,6 +128,22 @@
   (is (= [['seon.ref/parse nil nil nil :doc]]
          (kinds nil "Use `seon.ref/parse`, not `seon.ref/view docs/flow.md` or `foo/bar baz` or `docs/flow.md and more`."))))
 
+(deftest a-var-quoted-name-is-cited
+  ;; audit item 2b: a reproduction calls a private var through its var, #'ns/name; the form is
+  ;; the var's name as written, so it cites the var
+  (is (= '[seon.context/printed-run] (ref/names "Reproduce: (#'seon.context/printed-run db run) answers one.")))
+  (is (= [['seon.context/printed-run nil nil nil :summary]] (kinds nil "Reproduce: (#'seon.context/printed-run db run)."))))
+
+(deftest a-string-literal-in-prose-cites-nothing
+  ;; audit item 2c: a reproduction's string literals are its data, as quoted output is: a path or a
+  ;; name inside "..." is no citation, while the call around it is; a code span inside quotes is
+  ;; still the code span it is (the wiki's own citations)
+  (is (= '[seon.docs/load-tx] (ref/names "Reproduce: (seon.docs/load-tx db \"docs\" {\"docs/flow.md\" \"# Flow\"}).")))
+  (is (= [] (kinds nil "It answers \"docs/flow.md\" and \"seon.ref/parse\".")) "a quoted path or name, as data")
+  (is (= '[seon.ref/names] (ref/names "Reproduce: (seon.ref/names \"Callers of seon.print.emit/foo are listed.\") answers [].")) "nor any word of a quoted sentence")
+  (is (= '[seon.ref/parse] (ref/names "The owner: \"use `seon.ref/parse` for it\".")) "a code span between quotes is a citation still")
+  (is (= '[seon.ref/parse] (ref/names "Quotes \"closed\" then seon.ref/parse.")) "and a word after the string closes is prose again"))
+
 (deftest a-citation-ending-in-a-wildcard-is-prose
   (is (= [['seon.ref/parse nil nil nil :doc]]
          (kinds nil "`seon.ref/parse`, not `:seon.render.unknown/*` and `seon.task.run/*` and seon.task.run/*"))))

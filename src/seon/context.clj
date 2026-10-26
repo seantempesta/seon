@@ -208,7 +208,8 @@
     (when (and (pos? k) (vector/vector-of db te))
       (let [{:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id (d/pull db [:seon.task/id] te))))
             cites (ref/references db plan)
-            vars (filterv #(= :var (docs/citation-kind db %)) cites)
+            nss (program/program-nss db)
+            vars (filterv #(and (= :var (docs/citation-kind db %)) (program/program-name? db nss (:seon.ref/name %))) cites)
             fns (into #{} (keep :seon.ref/name) vars)
             ;; a wiki page's section only: a cited file is read whole by its view
             secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
@@ -306,7 +307,8 @@
   ([db t write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
-        refs (filterv #(= :var (docs/citation-kind db %)) cites)
+        nss (program/program-nss db)
+        refs (filterv #(and (= :var (docs/citation-kind db %)) (program/program-name? db nss (:seon.ref/name %))) cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)
         near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) (map :seon.ref/name) refs))]
@@ -346,14 +348,17 @@
     ()))
 
 (defn cites
-  "The vars task m's plan cites beside its proofs, in the plan's order, each once: each is its own
+  "The program's vars task m's plan cites beside its proofs (seon.program/program-name?: not a
+  reproduction's test helper, library call or handle), in the plan's order, each once: each is its own
   part of the task's page ([:task :cites sym], seon.render/render-ctx, drawn by `cited`), so a cited
   var's edit changes that part alone."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :qualified-symbol]]}
   [db m]
   (let [t (task/task db (:seon.task/id m))
-        {:keys [plan proofs]} (:seon.task/accumulated t)]
-    (into [] (comp (filter #(= :var (docs/citation-kind db %))) (map :seon.ref/name) (remove (set proofs)) (distinct))
+        {:keys [plan proofs]} (:seon.task/accumulated t)
+        nss (program/program-nss db)]
+    (into [] (comp (filter #(= :var (docs/citation-kind db %))) (map :seon.ref/name) (filter #(program/program-name? db nss %))
+                   (remove (set proofs)) (distinct))
           (ref/references db (str plan "\n" (:seon.task/instructions t))))))
 
 (defn cited

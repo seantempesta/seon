@@ -126,32 +126,35 @@
                         t (if (and (< t end) (> t after) (#{\" \' \(} (.charAt text t))) (some-> (title-end t end) (skip-space end)) t)]
                     (when (and t (< t end) (= \) (.charAt text t)))
                       [close df dt (inc t)]))))))
-          (word [out slash? from to line]
-            ;; out with the prose word between from and to when it holds a /
-            (cond-> out (and slash? (< from to)) (conj! {:seon.ref/word (subs text from to) :seon.ref/line line})))
+          (word [out slash? quoted? from to line]
+            ;; out with the prose word between from and to when it holds a /, marked when it was read
+            ;; inside a "..." string (a reproduction's data, as quoted output is)
+            (cond-> out (and slash? (< from to)) (conj! (cond-> {:seon.ref/word (subs text from to) :seon.ref/line line} quoted? (assoc :seon.ref/quoted true)))))
           (inlines [from to line]
-            ;; each code span, link destination (then its text's inlines) and prose word holding a /, in order
-            (loop [i from line line wstart from slash? false out (transient [])]
+            ;; each code span, link destination (then its text's inlines) and prose word holding a /, in
+            ;; order; q, inside a "..." string; wq, the word being read was inside one or holds a quote
+            (loop [i from line line wstart from slash? false q false wq false out (transient [])]
               (if (>= i to)
-                (persistent! (word out slash? wstart to line))
+                (persistent! (word out slash? wq wstart to line))
                 (let [c (.charAt text i)]
                   (case c
-                    \newline (recur (inc i) (inc line) (inc i) false (word out slash? wstart i line))
-                    (\space \tab \return) (recur (inc i) line (inc i) false (word out slash? wstart i line))
-                    \/ (recur (inc i) line wstart true out)
-                    \\ (recur (if (and (< (inc i) to) (punct? (.charAt text (inc i)))) (+ i 2) (inc i)) line wstart slash? out)
+                    \newline (recur (inc i) (inc line) (inc i) false q q (word out slash? wq wstart i line))
+                    (\space \tab \return) (recur (inc i) line (inc i) false q q (word out slash? wq wstart i line))
+                    \" (recur (inc i) line wstart slash? (not q) true out)
+                    \/ (recur (inc i) line wstart true q wq out)
+                    \\ (recur (if (and (< (inc i) to) (punct? (.charAt text (inc i)))) (+ i 2) (inc i)) line wstart slash? q wq out)
                     \` (let [k (run-end i to \`) n (- k i) e (closer k to n)]
                          (if e
-                           (recur (+ e n) (+ line (newlines k e)) (+ e n) false
-                                  (conj! (word out slash? wstart i line) {:seon.ref/code (code-content k e) :seon.ref/width n :seon.ref/line line}))
-                           (recur k line wstart slash? out)))
+                           (recur (+ e n) (+ line (newlines k e)) (+ e n) false q q
+                                  (conj! (word out slash? wq wstart i line) {:seon.ref/code (code-content k e) :seon.ref/width n :seon.ref/line line}))
+                           (recur k line wstart slash? q wq out)))
                     \[ (if-let [[close df dt after] (link-at i to)]
                          (let [image? (and (> i from) (= \! (.charAt text (dec i))))
-                               out (cond-> (word out slash? wstart i line)
+                               out (cond-> (word out slash? wq wstart i line)
                                      (not image?) (conj! {:seon.ref/link (unescape (subs text df dt)) :seon.ref/line (+ line (newlines i df))}))]
-                           (recur after (+ line (newlines i after)) after false (reduce conj! out (inlines (inc i) close line))))
-                         (recur (inc i) line wstart slash? out))
-                    (recur (inc i) line wstart slash? out))))))
+                           (recur after (+ line (newlines i after)) after false q q (reduce conj! out (inlines (inc i) close line))))
+                         (recur (inc i) line wstart slash? q wq out))
+                    (recur (inc i) line wstart slash? q wq out))))))
           (heading-text [from to]
             ;; code spans as their content, links as their text, emphasis stars dropped, escapes resolved
             (let [sb (StringBuilder.)]
@@ -369,21 +372,22 @@
           (assoc c :seon.ref/path (str (when (str/starts-with? joined "/") "/") (str/join "/" parts))))))))
 
 (defn- trim-word
-  "A prose word without the punctuation around it, or nil when nothing is left."
+  "A prose word without the punctuation around it (a var's #' among it), or nil when nothing is left."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [^String word]
   (let [n (count word)
-        from (loop [i 0] (if (and (< i n) (str/index-of "([{\"'`*_<" (str (.charAt word i)))) (recur (inc i)) i))
+        from (loop [i 0] (if (and (< i n) (str/index-of "([{\"'`*_<#" (str (.charAt word i)))) (recur (inc i)) i))
         to (loop [j n] (if (and (> j from) (str/index-of ".,;:!?)]}\"'`*_>" (str (.charAt word (dec j))))) (recur (dec j)) j))]
     (when (< from to) (subs word from to))))
 
 (defn- candidate
   "One inline as a citation at the depth its delimiter asks for (a prose word its summary,
   one backtick or a link its doc, three or more backticks its code; two backticks wrap a
-  literal), or nil. A prose word is resolve-only."
+  literal), or nil. A prose word is resolve-only; one read inside a string literal cites nothing."
   {:malli/schema [:=> [:cat [:maybe :string] :seon.ref/span] [:maybe :seon.ref/citation]]}
-  [doc-path {:seon.ref/keys [code width link word line]}]
+  [doc-path {:seon.ref/keys [code width link word quoted line]}]
   (let [[c depth] (cond link [(link-candidate doc-path link) :doc]
+                        quoted nil
                         word [(some-> (trim-word word) span-candidate (assoc :seon.ref/resolve-only true)) :summary]
                         (= 1 width) [(span-candidate code) :doc]
                         (<= 3 width) [(span-candidate code) :code])]
