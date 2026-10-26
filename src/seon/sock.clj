@@ -14,7 +14,7 @@
     collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config] [jolt.io-poller :as poller]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config] [jolt.io-poller :as poller] [clojure.string :as str]))
 
 (ffi/load-library)
 
@@ -255,6 +255,30 @@
   [fd s]
   (let [^bytes b (.getBytes (str s "\n") "UTF-8") n (alength b)]
     (with-mem [p n] (ffi/write-array p b 0 n) (write-all! fd p n))))
+
+(defn line-reader
+  "A fn of no arguments that answers the complete lines that arrived on fd (a vector, maybe
+  empty) or :eof. It reads what is there (MSG_DONTWAIT) and, when nothing is, parks until fd
+  is readable (poller/wait-ready: a fiber's park, so on a main carrier the process's other
+  fibers run while it waits; a thread's wait elsewhere), then answers [] and the caller asks
+  again: an agent waits on its test child for the whole test run (seon.agent/run-tests-forked)."
+  {:malli/schema [:=> [:cat :seon.lib/fd] :seon.host/fn]}
+  [fd]
+  (let [cap 1048576 buf (ffi/alloc cap) pending (volatile! (byte-array 0))]
+    (fn []
+      (let [r (c-recv-nb fd buf cap MSG-DONTWAIT)]
+        (cond
+          (neg? r) (do (poller/wait-ready fd :read) [])
+          (zero? r) :eof
+          :else
+          (let [more (ffi/read-array buf r) ^bytes p @pending q (byte-array (+ (alength p) r))]
+            (System/arraycopy p 0 q 0 (alength p))
+            (System/arraycopy more 0 q (alength p) r)
+            (let [nl (loop [k (dec (alength q))] (cond (< k 0) -1 (= 10 (aget q k)) k :else (recur (dec k))))]
+              (if (neg? nl)
+                (do (vreset! pending q) [])
+                (do (vreset! pending (java.util.Arrays/copyOfRange q (inc nl) (alength q)))
+                    (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8")))))))))))))
 
 (defn send-frame!
   "Write frame bytes f to fd; with pass-fd, the descriptor travels with them

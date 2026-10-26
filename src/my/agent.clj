@@ -25,7 +25,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -48,18 +48,38 @@
   {:malli/schema [:=> [:cat :qualified-symbol] :qualified-symbol]}
   [sym] (let [v (ns-resolve *ns* sym)] (if (var? v) (named v) sym)))
 
-(defn- no-var
-  "The error for sym when it names no var on db nor in this process (a library's var is one), else
-  nil: an asked name that is nothing is said, never answered as no callers; with the form for the
-  registry key of that name when db has one (an attribute, a config key or a schema entry)."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :my.agent/no-var]]}
+(defn no-var
+  "The one answer for a name sym that is no var on db nor in this process (a library's var is
+  one), else nil: what callers, callees and source say of it, never [] or silence. It names the
+  nearest existing names by Jolt's own did-you-mean ranking (jolt.analyzer/suggestions-for): the
+  definitions of sym's namespace, or, when that namespace is none, the nearest namespaces; the form
+  for the registry key of that name when db has one; and \"write it\" only when this agent's task
+  cites sym in its plan (a plan's new function, not yet written; in-ns makes a new namespace).
+  A namespace's name that names one is not missing (source answers what it records)."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :my.agent/no-var]]}
   [db sym]
-  (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym)))
-    (let [k (keyword (namespace sym) (name sym))
-          key? (or (contains? (d/schema db) k) (pdb/eid db :schema/key k))]
+  (when-not (or (pdb/eid db :var/name sym) (var? (ns-resolve *ns* sym))
+                (and (not (namespace sym)) (or (find-ns sym) (pdb/eid db :ns/name sym))))
+    (let [nsym (some-> (namespace sym) symbol)
+          view (some->> nsym (#(ref/namespace-view db % :doc)))
+          near (fn [s xs] (mapv symbol (jolt.analyzer/suggestions-for s (map str xs))))
+          nss (fn [] (concat (map ns-name (all-ns)) (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)))
+          nearest (cond view (near (str sym) (map :seon.ref/address (:seon.ref/below view)))
+                        nsym (near (str nsym) (nss))
+                        :else (near (str sym) (concat (nss) (keys (ns-map *ns*)))))
+          k (when nsym (keyword (namespace sym) (name sym)))
+          key? (and k (or (contains? (d/schema db) k) (pdb/eid db :schema/key k)))
+          ;; the plan as it stands (a design rewrites it with update!), read by the one parser
+          cited? (contains? (set (some->> (:task @agent/state) (task/task db) :seon.task/plan ref/names)) sym)]
       (contract/error :my.agent/no-var (symbol #'no-var)
-                      (str sym " names no var on this branch" (when key? (str "; " k " is a registry key: (my.agent/callers " k ")")))
-                      (cond-> {:name sym} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
+                      (str sym (cond view " names no var on this branch"
+                                         nsym (str " names no namespace on this branch (" nsym ")")
+                                         :else " names no var or namespace here")
+                           (when (seq nearest) (str "; nearest: " (str/join ", " nearest)))
+                           (when view (str "; every definition of " nsym ", a line each: (source " nsym ")"))
+                           (when key? (str "; " k " is a registry key: (my.agent/callers " k ")"))
+                           (when cited? (str "; your task cites it, so write it: (in-ns '" nsym ") (defn " (name sym) " ...)")))
+                      (cond-> {:name sym :nearest nearest} key? (assoc :ask (str "(my.agent/callers " k ")")))))))
 
 (defn callers
   "The program vars whose recorded definition names x on this branch, sorted, x itself left out
@@ -178,19 +198,6 @@
         (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
           (str head (some->> (docs/definition-lines (ref/namespace-view db sym :doc)) (str "\n"))))))))
 
-(defn not-found
-  "What source prints for sym when it names nothing: Clojure's words; when its namespace part
-  names a namespace, that no such var is defined here or recorded on this branch (a name a
-  plan gives a function to write is not one yet: step E's paid run 4, whose design and
-  implement asked the source of a planned function until they ended :no-progress), how to
-  write it there, and the form that lists that namespace's definitions."
-  {:malli/schema [:=> [:cat :symbol] :string]}
-  [sym]
-  (if-let [n (some-> (namespace sym) symbol find-ns)]
-    (str "Source not found for " sym ": no such var is defined or recorded on this branch. If your plan names it as new, "
-         "write it: (in-ns '" (ns-name n) ") (defn " (name sym) " ...). Every definition of its namespace, a line each: (source " (ns-name n) ")")
-    (str "Source not found for " sym)))
-
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
   root's judge never run them, root's gate runs them when root asks (my.root/gate!; DECISIONS,
@@ -217,7 +224,8 @@
   evaluated to the symbol or var it holds, as the call reads naturally."
   [sym]
   (let [x (if (and (symbol? sym) (not (contains? &env sym))) (list 'quote sym) sym)]
-    `(let [s# (named ~x)] (println (or (source-fn s#) (not-found s#))))))
+    `(let [s# (named ~x)]
+       (println (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#))))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
