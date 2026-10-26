@@ -664,9 +664,9 @@
          (is (= [] (agent/untaken-entries)) "once its branch holds it, it is taken")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest a-run-status-on-main-reaches-the-agents-ctx-at-its-next-take
+(deftest a-runs-outcome-on-main-reaches-the-agents-ctx-at-its-next-take
   ;; owner, 2026-10-26: take! is the one way outside facts reach the agent's branch, and so its
-  ;; ctx. Root writes its session's runs' status, outcome and reason on main, and a reader's opened
+  ;; ctx. Root writes its session's runs' outcome and reason on main, and a reader's opened
   ;; eval as the agent's :seon.agent/opened; the copy take! transacts (untaken-facts) puts each on
   ;; the branch, and @ctx, which follows the branch, holds it; a second copy has nothing to add
   (ts/test-branch!
@@ -674,27 +674,31 @@
      (let [_ (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Wait." :seon.task/proofs #{}}]))
            ab (pdb/on-main (:branch cfg) :agent-taken)
            k (task/agent-key "boot-1" :a1)
-           _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch :agent-taken :model nil :max-turns 4} 1000 "Wait."))
+           ;; as in production: the branch is made, the run starts on main, and the branch holds
+           ;; the run by reference only, as its turns record it
            _ (d/branch! conn (:branch cfg) ab)
+           _ (d/transact conn (task/run-start-tx "demo/w#1" "demo/w" "boot-1" :a1 {:branch :agent-taken :model nil :max-turns 4} 1000 "Wait."))
            store-conn (d/connect (assoc cfg :branch ab))
-           _ (d/transact store-conn [{:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
-           ;; on main, after the branch was made: what root decided of the run, and the page's open
+           _ (d/transact store-conn [{:seon.run/id "demo/w#1" :seon.run/task [:seon.task/id "demo/w"]}
+                                     {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "1" :response {}}}])
+           ;; on main: what root decided of the run, and the page's open
            _ (d/transact conn [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                                {:seon.agent/key k :seon.agent/opened #{"e1" "e9"}}])
            [a b] (sock/socketpair)
            old @agent/state]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
-         (is (= :running (get-in @seon.ctx/ctx [:runs "demo/w#1" :seon.run/status])) "before the take, the branch's own")
-         (is (= [{:seon.run/id "demo/w#1" :seon.run/status :parked :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
+         (is (nil? (get-in @seon.ctx/ctx [:runs "demo/w#1" :seon.run/outcome])) "before the take, nothing of main's")
+         (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
          (agent/transact! (agent/untaken-facts))
          (agent/commit!)
-         (is (= [:parked :waiting "waiting for a message"]
+         (is (= [nil :waiting "waiting for a message"]
                 (mapv #(get-in @seon.ctx/ctx [:runs "demo/w#1" %]) [:seon.run/status :seon.run/outcome :seon.run/reason]))
-             "the run's status on main is in its ctx after the take")
+             "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
+         (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
          (is (true? (get-in @seon.ctx/ctx [:evals "e1" :seon.eval/opened])) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))

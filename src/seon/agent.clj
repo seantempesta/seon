@@ -129,7 +129,9 @@
 (def taken-attributes
   "The attributes of the runs of an agent's session that root writes on main and its turn copies
   onto its branch (seon.turn/take!), so its ctx holds them: those whose schema says
-  {:seon.db/taken true}, read here once."
+  {:seon.db/taken true}, read here once. Its outcome and reason, never its status: a branch
+  holds its run by reference (the agent's own record), and a status there says the branch holds
+  the whole run (seon.task/run, seon.task/running read it so)."
   (into #{} (filter #(:seon.db/taken (contract/properties %))) (keys contract/forms)))
 
 (defn untaken-facts
