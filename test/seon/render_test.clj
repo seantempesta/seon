@@ -1127,10 +1127,10 @@
         "each proof's status as the newest turn observed it, with its first failure")
     (is (= ["demo/f-test is red"] (:value (nth parts 2))))
     (let [task (first parts)]
-      (is (contains? (:value task) :to-prove) "the model reads the stage's story (seon.context/story)")
+      (is (contains? (:value task) :to-prove) "the model reads the task rendered (seon.context/render-task)")
       (is (= "demo/f" (:seon.task/id (:page task))) "the page draws the task itself")
       (is (str/includes? (h/html (:html (r/part-faces task))) "demo/f") "by its own render")
-      (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the story's"))
+      (is (str/includes? (:text (r/part-faces task)) ":to-prove") "while the model's text is the task rendered"))
     (is (not-any? #(= [:related] %) ks) "no related part when the run has none")
     (is (= 2 (:turns-taken (:value (nth parts 3)))))
     (is (= [[:message "m-1"] [:eval "e1"] [:eval "e2"] [:turn "demo/f#1/0"] [:eval "e3"] [:turn "demo/f#1/1"]] (filterv #(#{:eval :turn :message} (first %)) ks))
@@ -1164,9 +1164,9 @@
         [_ fs2] (draw m1)
         c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
         [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2 (seon.context/renders branch)))]
-    ;; the task's part is made from its story, rendered on each view (seon.context/story): drawn again
+    ;; the task's part is made from its render of now (seon.context/render-task): drawn again
     (is (every? true? (map identical? (rest fs1) (rest fs2))) "the same ctx: every part but the task's from the memo")
-    (is (not (identical? (first fs1) (first fs2))) "the task's, from its story rendered now, drawn again")
+    (is (not (identical? (first fs1) (first fs2))) "the task's, from its render of now, drawn again")
     (is (= 1 (count (remove true? (map identical? (rest fs1) (rest fs3))))) "one member changed: that part alone drawn again")))
 
 (deftest a-part-draws-once-per-value
