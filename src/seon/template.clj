@@ -70,13 +70,13 @@
               "merge task brings main's work in after you.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
                "work merged in. First reproduce what the plan says is wrong in one eval and read its output: if the output is "
-               "already right, the premise is false, so fail the task with that output at once "
+               "already right, the premise is false: fail the task with that output at once "
                "(``(my.task/fail! \"why\" evidence)``). Once the output is wrong, stop reading: write it as a deftest beside the "
                "function's existing tests, in their namespace (``(my.agent/callers 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, "
-               "then the deftest: you write no file), its input built as theirs are (their helpers and fixtures, never the live "
-               "db, vector literals where order matters), register "
+               "then the deftest: no file), its input built as theirs are (their helpers and fixtures, never the live db, "
+               "vector literals where order matters), register "
                "it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red (``(my.agent/prove)``). Then make it pass by "
-               "redefining what it needs in its own namespace, keeping its contracts, with a cost proof "
+               "redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
                "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to pass. Your "
                "status's :merge says what main changed under you and what merging would conflict on: redefine each such "
                "var for both sides. Once :merge says :ready, your run ends and root merges your branch.")
