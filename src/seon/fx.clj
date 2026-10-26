@@ -123,8 +123,7 @@
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
   inputs only for a binary built from this very tree.
-  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error,
-  whose subject (:seon.error/subject) is root's :seon.root/source."
+  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs binary-tree]} :req}]
   (try
@@ -143,8 +142,7 @@
                                                   [p sha])))
         (and binary-tree head) (assoc :inputs (inputs base)
                            :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
-    ;; its subject is root's :seon.root/source, the fact only a good import writes: the next one closes it
-    (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root :seon.error/subject :seon.root/source}))))
+    (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would

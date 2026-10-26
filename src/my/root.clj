@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -113,31 +113,40 @@
               (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
 (defn tasks-read-tx
-  "The write of a good read of n task files on main db: root's :seon.root/tasks, its reads
-  counted, so each good read is a new fact whether or not it changed a declaration. A refused
-  read's error names it as its subject (load-answer), so this write closes it."
-  {:malli/schema [:=> [:cat :seon.host/db nat-int?] [:vector :map]]}
-  [db n]
-  (let [held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
-    [{:seon.root/id :root :seon.root/tasks {:reads (inc (:reads held 0)) :files n}}]))
+  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files :digest} or
+  {:error}), on root. A refusal's error names it as its subject and is written with it, in one
+  transaction; the first read whose outcome differs closes it, and the same outcome again
+  writes no datom."
+  {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
+  [outcome] [{:seon.root/id :root :seon.root/tasks outcome}])
 
 (defn load-answer
   "Answer r of a read of the task files, as load-tasks! answers it: a refusal (a file's or the
-  reconcile's) names :seon.root/tasks as its subject, the fact only a good read writes."
+  reconcile's) names :seon.root/tasks as its subject, the read's outcome."
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
+
+(defn refusal-tx
+  "The write of load error e at ms on main db: a :platform error (seon.root/platform-tx) and, in
+  the same transaction, the outcome its subject holds (a task-file refusal's, tasks-read-tx)."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms]
+  (cond-> (root/platform-tx db e ms)
+    (= :seon.root/tasks (:seon.error/subject e)) (into (tasks-read-tx {:error (:seon.error/message e)}))))
 
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write no declaration. A good read writes
-  root's :seon.root/tasks (tasks-read-tx). Answers the writer's answer with the counts, or the
-  error (load-answer). Releasing stays run!'s."
+  its outcome, root's :seon.root/tasks (tasks-read-tx); a refused one answers its error
+  (load-answer), whose recorder writes both (refusal-tx). Answers the writer's answer with the
+  counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
    (let [files (if dir (task-files dir) (task-files))
          r (load-answer (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))]
-     (when-not (contract/error? r) @(root/transact-main! sys (tasks-read-tx @(:conn sys) (count files))))
+     (when-not (contract/error? r)
+       @(root/transact-main! sys (tasks-read-tx {:files (count files) :digest (seon.error/digest (sedn/encode files))})))
      r)))
 
 (defn load-docs!
@@ -267,7 +276,7 @@
                                 ;; a loader's typed error (a refused task file) is a recorded :platform error; the
                                 ;; problems the load made true are shown by health, and the last are kept in the fact
                                 (doseq [e (load-errors loaded)]
-                                  @(root/transact-main! sys (root/platform-tx @(:conn sys) e (System/currentTimeMillis))))
+                                  @(root/transact-main! sys (refusal-tx @(:conn sys) e (System/currentTimeMillis))))
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]

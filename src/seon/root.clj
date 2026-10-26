@@ -681,40 +681,31 @@
   reads the same imports nothing. Either way the fact is this boot's (:boot), holding the
   inputs only when the running binary was built from this very tree (target/seon.tree,
   written by bin/build) and why not otherwise (:unshared), so agents never key results by a
-  previous root's inputs or by code the binary does not run, and its :reads counted, so each
-  good import is a new fact. A read or write that fails writes :seon.root/source-error
-  instead and leaves the fact as it was: the effect's error names :seon.root/source as its
-  subject, so the next good import closes it, and removes the source error. Answers the fact
-  written, the source error's otherwise."
+  previous root's inputs or by code the binary does not run. Answers the fact in force."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
   (let [t0 (profile/now-ns)
         r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
         files (:value r)
         digest (when files (err/digest (sedn/encode [files (:pins r)])))
-        {held :seon.root/source held-error :seon.root/source-error} (d/pull @(:conn sys) [:seon.root/source :seon.root/source-error] [:seon.root/id :root])
-        same? (and digest (= digest (:digest held)))
-        tx (when (and files (not same?)) (source/replace-tx @(:conn sys) files))
-        w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
-        failed (first (filter contract/error? [r w]))
+        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
-        this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys) :reads (inc (:reads held 0)))
+        this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
                                built? (assoc :inputs (:inputs r))
                                (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
                                                                                        ", the source is tree " (:tree (:inputs r))))))
-        fact (if same?
+        fact (if (and digest (= digest (:digest held)))
                (this-boot held)
-               (this-boot (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
-                            (:commit r) (assoc :commit (:commit r))
-                            (seq (:pins r)) (assoc :pins (:pins r))
-                            w (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx))))))]
-    (if failed
-      (let [source-error {:boot (:boot sys) :message (:seon.error/message failed)}]
-        @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source-error source-error}]}})
-        source-error)
-      (do @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> [{:seon.root/id :root :seon.root/source fact}]
-                                                                        held-error (conj [:db.fn/retractAttribute [:seon.root/id :root] :seon.root/source-error]))}})
-          fact))))
+               (let [tx (when files (source/replace-tx @(:conn sys) files))
+                     w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
+                 (this-boot (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
+                              (:commit r) (assoc :commit (:commit r))
+                              (seq (:pins r)) (assoc :pins (:pins r))
+                              (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
+                              (contract/error? r) (assoc :error (:seon.error/message r))
+                              (contract/error? w) (assoc :error (:seon.error/message w))))))]
+    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source fact}]}})
+    fact))
 
 (defn platform-tx
   "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch), as the

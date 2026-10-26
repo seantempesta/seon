@@ -4,7 +4,7 @@
   watcher that dies is a :platform error on main. Run: bin/test seon.watch-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [clojure.java.io :as io]
             [seon.watch :as watch] [my.root :as mr] [seon.root :as root] [seon.problems :as problems] [seon.contract :as contract]
-            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell] [seon.config] [clojure.string :as str] [seon.fx] [seon.error]))
+            [datahike.api :as d] [seon.task] [seon.docs] [clojure.java.shell] [seon.config] [clojure.string :as str] [seon.fx]))
 
 (deftest a-record-is-its-kind-then-its-path
   (is (= [:path "/a/b\nc.md"] (watch/record (.getBytes "p/a/b\nc.md" "UTF-8"))) "a newline is part of the path: NUL ends a record")
@@ -134,40 +134,24 @@
   ;; found on the standing root 2026-10-26: "task file my.task.edn: not readable EDN" stayed open ~21
   ;; hours after the file read again. Put back as it was, the good read changed no declaration, so
   ;; load-tasks! wrote nothing, and the refusal named no subject that anything could write
-  (let [db0 (ts/test-db)
-        bad (mr/load-answer (seon.task/file-declarations 'my.task "[{:seon.task/name \"a\" :seon.task/plan}]"))
-        refused #(d/db-with % (root/platform-tx % bad 1000))
-        good #(d/db-with % (mr/tasks-read-tx % 3))
+  (let [bad (mr/load-answer (seon.task/file-declarations 'my.task "[{:seon.task/name \"a\" :seon.task/plan}]"))
+        good {:files 1 :digest "d1"}
+        read #(d/db-with % (mr/tasks-read-tx good))
+        refused #(d/db-with % (mr/refusal-tx % bad 1000))
         open? #(not (false? (:open? (first (get-in (problems/report %) [:classes :platform :rows])))))
-        db (refused db0)]
+        before (read (ts/test-db))
+        db (refused before)]
+    (is (= :seon.root/tasks (:seon.error/subject bad)) "the refusal names the read's outcome")
     (is (= [:seon.task/refused] (mapv :type (get-in (problems/report db) [:classes :platform :rows]))))
-    (is (open? db) "refused: open")
+    (is (open? db) "refused, its outcome written with it: open")
     (is (open? (d/db-with db [{:seon.root/id :root :seon.root/boot "b2"}])) "a write of root's other facts says nothing of the task files")
-    (let [read (good db)]
-      (is (not (open? read)) "the next good read, though it changed no declaration: closed, nothing written to close it")
-      (is (open? (refused read)) "refused again: open again")
-      (is (not (open? (good (refused read)))) "and the good read after it closes it again: each good read is a new fact"))))
-
-(deftest a-failed-source-read-closes-at-the-next-good-import
-  ;; found beside the task file's on the standing root 2026-10-26: an :effect seon.fx/read-source
-  ;; io-error ("git add -A: fatal: unable to stat ...", a note removed while the read ran) stayed
-  ;; open after every later import read the tree. It named no subject; root's :seon.root/source is
-  ;; the fact only a good import writes (seon.root/import-source!), so it is the subject
-  (let [db0 (ts/test-db)
-        co (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-unreadable-" (random-uuid)) "src") (.mkdirs))
-        _ (doto (io/file co "a.clj") (spit "(ns a)") (.setReadable false))
-        e (seon.fx/read-source {:req {:root (.getParent co) :dirs ["src"]}})
-        failed #(d/db-with % (second (seon.error/flush-tx (seon.error/fold {} (seon.error/occurrence e :effect {} 1000)) %)))
-        imported #(d/db-with % [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1.0}}])
-        open? #(not (false? (:open? (first (get-in (problems/report %) [:classes :effect :rows])))))
-        db (failed db0)]
-    (is (= :seon.fx/io-error (:seon.error/type e)) "a file the read cannot open is the effect's typed error")
-    (is (= :seon.root/source (:seon.error/subject e)) "it names the fact a good import writes")
-    (is (open? db))
-    (is (not (open? (imported db))) "the next good import writes the source fact: closed")
-    (is (open? (failed (imported db))) "a failed read again: open again")
-    (.setReadable (io/file co "a.clj") true)
-    (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
+    (let [again (refused db)]
+      (is (open? again) "the same refusal again: open")
+      (is (= (count (d/datoms db :aevt :seon.root/tasks)) (count (d/datoms again :aevt :seon.root/tasks))) "and its outcome, the same value, wrote no datom"))
+    (let [fixed (read db)]
+      (is (not (open? fixed)) "a good read of the same bytes as before the refusal: closed, nothing written to close it")
+      (is (not (open? (read fixed))) "a good read again writes nothing and it stays closed")
+      (is (open? (refused fixed)) "refused again: open again"))))
 
 (deftest a-file-gone-when-its-batch-reads-it-is-a-change
   ;; task seon.watch/a-vanished-file-is-a-fact: a git merge or bin/update removes a file for a moment
