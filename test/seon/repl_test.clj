@@ -27,24 +27,6 @@
       (is (contains? e :ex)))
     (is (not (contains? (ev "(+ 1 2)") :values)) "one form answers its value alone")))
 
-(deftest a-call-in-another-namespace-leaves-the-repls-own
-  ;; the thinking-off designs of 2026-10-26: (in-ns 'ns.x-test) for a deftest left the REPL there,
-  ;; so the scratch functions after it landed in the test namespace as contract gaps. A call that
-  ;; names its namespace (nREPL's eval :ns) evaluates there, and the REPL's own namespace stays
-  (let [old @agent/state
-        r (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-               [(repl/eval-string "(def proof-here 1) (str *ns*)" {"ns" "seon.repl-ns-test-target"})
-                (repl/eval-string "(str *ns*)" {})
-                (repl/eval-string "(in-ns 'seon.repl-ns-test-moved) (str *ns*)" {})
-                (repl/eval-string "(str *ns*)" {})]
-               (finally (reset! agent/state old)))
-        [named after moved after-moved] r]
-    (is (= "seon.repl-ns-test-target" (:value named)) "its forms ran in the namespace it named")
-    (is (some? (ns-resolve 'seon.repl-ns-test-target 'proof-here)) "and defined there")
-    (is (= "user" (:value after)) "the next call is back in the REPL's own")
-    (is (= "seon.repl-ns-test-moved" (:value after-moved)) "an in-ns with none named moves it, as a Clojure REPL does")
-    (is (= (:value moved) (:value after-moved)))))
-
 (deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
   ;; agent's reply to root carries the text, never the live values (which no wire encodes)

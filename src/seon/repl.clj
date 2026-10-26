@@ -53,9 +53,7 @@
 
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
-  under seon.intr/run, in the request's \"ns\", else the agent's own, which the request's
-  forms move (an in-ns holds for its next request) unless it named one: nREPL's eval :ns, as an
-  editor sends a file's namespace with each form, leaves the REPL's own as it was. Answers each form,
+  under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
   with its exact text (:repl/src), the ; comments its writer put before it (:lead, which a
   definition keeps as its leading comment) and what it wrote to *out* and *err*; the first
   error or an interrupt stops the request (one pending since its asker cleared it included:
@@ -71,11 +69,11 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))]
-    (loop [ns (or (some-> (get req "ns") symbol create-ns) (:ns @agent/state)) prev 0]
+    (loop [ns (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) prev 0]
       (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
         (cond
           (= ::eof form)
-          (do (when-not (get req "ns") (swap! agent/state assoc :ns ns))
+          (do (swap! agent/state assoc :ns ns)
               (reply {"status" ["done"]}))
 
           (instance? Throwable form)
@@ -108,7 +106,7 @@
                   (recur ns' end))
               (do (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])}))
-                  (when-not (get req "ns") (swap! agent/state assoc :ns ns))
+                  (swap! agent/state assoc :ns ns)
                   (reply {"status" ["done"]})))))))))
 
 ;; ---- middleware -------------------------------------------------------------------
@@ -407,7 +405,6 @@
       (:reasoning req) (assoc :reasoning (:reasoning req))
       (:content req) (assoc :content (:content req))
       (:call-prose req) (assoc :call-prose (:call-prose req))
-      (:call-ns req) (assoc :call-ns (:call-ns req))
       run (assoc :run run)
       (seq (:fns r)) (assoc :fns (:fns r))
       (seq (:recorded r)) (assoc :recorded (:recorded r)))))

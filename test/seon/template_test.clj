@@ -66,7 +66,7 @@
   ;; live agents round 3 (2026-10-25, notes/live-2026-10-25.md A2): a design agent that was told
   ;; to write deftests but not how found the checkout on disk, appended its deftest to the test file
   ;; and load-file'd it; a deftest is evaluated in its namespace, recorded on the branch
-  (is (str/includes? (:design tpl/instructions) "the call's ns set to its test namespace") "design says where a proof is evaluated, the REPL kept in its own")
+  (is (str/includes? (:design tpl/instructions) "(in-ns 'ns.x-test)") "design says where a proof is evaluated")
   ;; the thinking-off designs of 2026-10-26 registered a red proof at turns 7, 12 and 21, then
   ;; tried the fix until the cap and never wrote the plan
   (is (str/includes? (:design tpl/instructions) "Once the proof is red, write the plan") "the plan follows the red proof")
