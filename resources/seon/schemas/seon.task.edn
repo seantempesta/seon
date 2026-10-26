@@ -44,6 +44,7 @@
                  [:seon.task/kind :seon.task/kind]
                  [:seon.task/evidence {:optional true} :seon.task/evidence]
                  [:seon.task/references {:optional true} :seon.task/references]
+                 [:seon.task/sections {:optional true} :seon.task/sections]
                  [:seon.task/failure {:optional true} :seon.task/failure]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
