@@ -416,12 +416,15 @@
     (is (= {:symbol 'ctx-depth/tri :source (print/code "(defn tri \"Triples x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))")} (by 'ctx-depth/tri))
         "three backticks: the source, as code")))
 
-(deftest a-long-source-is-whole-for-the-model-and-cut-on-the-page
-  ;; the clipping audit (2026-10-25, P4): a cited source is whole in the task's data, never swapped
-  ;; for its doc by size. Its part returns it as a call of the printer with the budget and the
-  ;; form that reads it ([#'seon.render/html value opts]): the page's writer cuts it there, saying
-  ;; so with that form; the model reads the call as returned, the value whole (root's ruling pending:
-  ;; whether the printer prints a call's value at its own budget)
+(deftest a-long-source-is-cut-by-the-printer-where-it-is-shown
+  ;; the clipping audit (2026-10-25, P4) and the owner, 2026-10-26: "we don't need to and
+  ;; shouldn't be printing thousands of items anywhere. The value printer is made to show as much
+  ;; of the structure that is possible and to have ellipses for data that just continues so the
+  ;; agent can know what's there and can dig into it". A cited source is whole in its data, never
+  ;; swapped for its doc by size; its part returns it as a call of the printer with its budget and
+  ;; the form that reads it ([#'seon.render/html value opts]), and the printer prints that call's
+  ;; value at that budget for the model as the page's writer does for the page: the same cut,
+  ;; naming the form that reads the rest
   (binding [*ns* *ns*]
     (eval '(ns ctx-big))
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
@@ -429,12 +432,15 @@
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
         hiccup (seon.render.ui/cited {:var 'ctx-big/big} {:db db})
-        html (seon.web.html/html hiccup)]
+        html (seon.web.html/html hiccup)
+        model (print/text (vary-meta hiccup assoc :seon.print/full true))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "seon.context/cited") "and its cut names the form that reads the rest")
-    (is (str/includes? (print/text (vary-meta hiccup assoc :seon.print/full true)) "(inc 1) (inc 1)") "the model reads the value whole, in the call")))
+    (is (str/includes? html "seon.context/cited") "its cut names the form that reads the rest")
+    (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the call's budget: " (select/estimate model) " tokens"))
+    (is (str/includes? model "#'seon.render/html") "the call as returned")
+    (is (str/includes? model "seon.context/cited") "and the cut names the form that reads the rest")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]

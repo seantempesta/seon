@@ -939,7 +939,7 @@
   [{:keys [task]} opts]
   (let [r (when-let [db (:db opts)] (context/related db task))]
     [:section {:class "tile"} [:h2 {:class "kicker"} "related"]
-     (if r [#'render/html r {:handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
+     (if r [#'render/html r {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)}] [:p {:class "muted"} "nothing related yet"])]))
 
 (defn part-id
   "The element id of an agent page's part by its key ([:eval \"e12\"] -> \"q-eval-e12\")."
