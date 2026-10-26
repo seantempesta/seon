@@ -86,6 +86,66 @@ Agent view with ctx-atom, for root's second review. It implements the owner's na
   - `seon.screen/diff` (screen.clj:25, 23) and `seon.context/as-diff` (446, 8);
   - the render proc's read-set index: `comp-entry` (proc.clj:368, 22, its `d/with-reads`), `unindex`/`index`/`index-each`/`reindex`/`touched`/`db-key` (327–367, 41), `comps-touched`/`comps-of`/`drop-comps`/`invalidate`/`advance-main`/`hold-comps` (401–462, 55), `walk?` (319, 8) and `ready?` (291, 13).
 
+## The wire: one meaning per role
+The owner: "Have we optimized it down to just tool calls and prose and we know all the different roles that make it so the agent understand what the format is, it's consistent and they aren't confused about what to do?"
+
+Today, the screen forms arrive as user messages shaped like evals (`{:by "screen" :code … :response …}`). They are evals the agent never made, sent as if from "the user". The task lives in two places: the story fixed at the top, and the status on the screen. That is the root of A1.
+
+| role | carries | changes |
+|---|---|---|
+| system | the rules: the help page | never |
+| user, first | the page as of the session's start: `[:task]`, `[:status]`, `[:changes]`, `[:related]`, …, each `[key]` then its ai text | never: the cached prefix |
+| assistant | prose plus eval tool calls: the agent's own evals, the only tool calls | appended |
+| tool | each call's answer | appended |
+| user, from a person | a message, labelled with its sender (`message from user:`, `message from root:`) | appended |
+| user, last each turn | "Changed since your last turn:", then each changed part `[key]` and its new ai text, a new conversation part, or a part sent whole because its base is out of view; "nothing" when nothing changed | appended, never rewritten |
+
+- A replayed form is no longer an eval the model sees, either as a call or as a user message. It is a part whose changes appear in the last message.
+- A stage switch is the `[:task]` part's new value in that message.
+- The page shows the same parts with the same keys.
+
+### One recorded turn, both ways (a1, this worktree's root, its newest context read)
+Today, after the system prompt (538 tokens):
+```
+user  Your task and what it cites, the same for this whole run:
+      {:task #:seon.task{:kind :work, :id "seon.render/a-render-defect-…", :plan "Seen 2026-10-26 …"} …}      4,545
+user  {:by "screen" :code "(seon.screen/show)" :response {:handle result/e49, :value {:t …, :page {:seon.render/html [[:aside [:h2 "agents"] …]]}}}}   672
+user  {:by "screen" :code "(my.task/status)" :response {:handle result/e50, :value {:proofs [{:test seon.render-test/… :status :pass}] …}}}   100
+user  {:by "screen" :code "(my.branch/changes)" :response {:handle result/e51, :value {}}}        26
+user  {:by "screen" :code "(my.task/related)" :response {:handle result/e52, :value {:read … :sections […]}}}   700
+```
+This, after the same system prompt:
+```
+user  Your page as of this session's start: each part is [key] and its value. Later, the last message of each turn lists only what changed.
+      [:task]
+      {:task #:seon.task{:kind :work, :id "seon.render/a-render-defect-…", :plan "Seen 2026-10-26 …"} …}
+      [:status] (my.task/status), kept current
+      {:proofs [{:test seon.render-test/… :status :pass}] …}
+      [:changes] (my.branch/changes), kept current
+      {}
+      [:related] (my.task/related), kept current
+      {:read … :sections […]}
+…assistant / tool: the agent's own evals, as today…
+user  Changed since your last turn:
+      [:status] (my.task/status)
+      {:proofs [{:test seon.render-test/… :status :fail}] …}
+```
+
+| tokens (characters ÷ 3.2) | today | this |
+|---|---|---|
+| first send (story + screen) | 6,043 (4,545 + 1,498) | 5,362 |
+| each later turn, screen | 1,498 whole for a1; 4,458 as diffs on the recorded a-map model run | 12 when nothing changed; 92 when the status changed |
+| the page's hiccup printed for the model | 672 per turn | 0 |
+
+The later-turn numbers for this design are the diff's text for a1's parts. A model run's numbers (turns to green, cache share, tokens per turn) are slice 4's to measure before merge.
+
+**What it deletes:**
+- the screen's eval-shaped user messages: `seon.context/screen-message` (591, 10) and the `{:by "screen" …}` entries `printed-run` folds;
+- the story's duplicate of the task: `run-message` (583, 8), now the `[:task]` part;
+- the per-turn print of the page, `seon.screen/show`.
+
+These are already in the deletion table. What's new is the last message's text (+10).
+
 ## Where it runs: one render site (ruling 4)
 - **The agent renders its own page.** Its ctx and its render fns are in its process already. Root's page for an agent asks it for the parts' html (the `:render` op from ctx slice 1, `ask-draws` proc.clj:390). A parked agent answers (part 3).
 - **An agent with no process** is rendered by root from its record with main's defaults: the same `(ctx db e)` and `(view ctx)` on its branch, once, unpatched, with the structure render captioned "drawn with main's defaults". No second patched ctx lives in root.
@@ -159,7 +219,7 @@ Deletions are measured function sizes on main. Additions are estimates, ±50%.
 - The `:ai` faces in `seon.render.ai` are kept (ruling 1), so nothing is claimed there.
 
 ## The agents' help text
-> Your page is `(view @ctx)`: keyed parts, in order. Each part has two faces, html for the user and ai for you, and both default to the one printer, so any value reads well with no render. To change how a key looks on the page, register its schema with `{:seon.render/html f}` (f: value → hiccup); to change what you read, `{:seon.render/ai f}` (value → text); the layout is `:seon.ctx/ctx`'s view. Forms in `:seon.agent/screen` re-run every turn; every other eval shows what it answered. You get each part whole once, then only the parts that changed; a part folded away is sent whole again.
+> Your page is `(view @ctx)`: keyed parts, in order, sent to you whole at the start of your session. After that, the last message each turn is what changed: each changed part's key and its new value. Each part has two faces, html for the user and ai for you, and both default to the one printer, so any value reads well with no render. To change how a key looks on the page, register its schema with `{:seon.render/html f}` (f: value → hiccup); to change what you read, `{:seon.render/ai f}` (value → text); the layout is `:seon.ctx/ctx`'s view. Forms in `:seon.agent/screen` are kept current every turn; your tool calls are your own evals, and a message from a person says who sent it.
 
 **Its proof:** a fresh agent `swap!`s a key no schema names (a vector of maps). It reads a table in its text and sees one on the page. It then registers an html render for that key and sees it on the page at once, with its own text unchanged.
 
