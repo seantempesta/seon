@@ -490,7 +490,7 @@
   (with-branch-schemas
     #(let [c (ctx/record)
            [memo out] (reduce (fn [[m acc] p] (let [[m f] (draw-part m p)] [m (conj acc [p f])]))
-                              [(:drawn @agent/state {}) []] (render/view c (context/renders (agent/db))))]
+                              [(:drawn @agent/state {}) []] (render/layout c (context/renders (agent/db))))]
        ;; the memo holds the parts this page has now, none it dropped
        (swap! agent/state assoc :drawn (select-keys memo (map (comp :key first) out)))
        {:t (get-in c [:tree :t] 0) :parts out})))
@@ -504,14 +504,14 @@
   (let [{:keys [t parts]} (drawn-parts)] {:t t :parts (mapv (fn [[p f]] (render/part-html p f)) parts)}))
 
 (defn page
-  "This agent's page as the model reads it: each part's hiccup exactly as its render returned it,
-  by part key, in the page's order, the same hiccup the page shows (`parts`); the conversation's
-  parts ([:eval id], [:turn id], [:message id]) left out, which the transcript carries. The
-  screen's one form (seon.screen/forms): the first turn reads it whole, each later one its diff."
+  "This agent's page as the model reads it: its :task region (seon.render/view), each part's hiccup
+  exactly as its render returned it, by part key, in the page's order, the same hiccup the page
+  shows (`parts`); the chat and the tiles left out, which the transcript carries. The screen's one
+  form (seon.screen/forms): the first turn reads it whole, each later one its diff."
   {:malli/schema [:=> [:cat] :map]}
   []
   (apply array-map (mapcat (fn [[p f]] [(:key p) (:html f)])
-                           (remove (comp #{:eval :turn :message} first :key first) (:parts (drawn-parts))))))
+                           (filter (comp #{:task} #(:region % :task) first) (:parts (drawn-parts))))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

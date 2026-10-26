@@ -946,16 +946,17 @@
 (defn agent-part
   "A part of an agent's page as its agent drew it (the declared html render of
   :seon.render/part-html; seon.repl/parts): an eval of the conversation folded to its one line (its
-  html :inline), its whole as drawn when opened; a model turn or a message as drawn; any other part a tile under its
-  key's name when its render does not name itself. input {:key :html :inline}."
+  html :inline) behind an arrow, its value drawn only once opened (opening it tells the render
+  proc, /open, which draws it); a model turn or a message as drawn; any other part a tile under
+  its key's name when its render does not name itself. input {:key :html :inline}."
   {:malli/schema [:=> [:cat :seon.render/part-html :seon.render/opts] :any]}
   [{:keys [key html inline]} opts]
   (case (first key)
     ;; a handle printed anywhere on the page links to its eval's block, open or not (eval-eN)
     :eval [:li {:id (:unit opts)}
-           [:details {:class "seon-eval" :id (str "eval-" (second key))}
+           [:details (cond-> (merge {:class "seon-eval" :id (str "eval-" (second key))} (toggle (part-id key))) html (assoc :open true))
             [:summary {:class "flex min-w-0 items-baseline gap-2 truncate"} (h/raw (or inline ""))]
-            (h/raw html)]]
+            (when html (h/raw html))]]
     (:message :turn) [:li {:id (:unit opts) :class "py-1"} (h/raw html)]
     ;; whose drawing the page is: a unit, so the line goes when the agent's own parts arrive
     :caption [:p {:id (:unit opts) :class "text-2xs text-text-500"} (h/raw html)]
@@ -966,20 +967,22 @@
 
 (defn parts-page
   "Agent id's page laid out from its parts as its agent drew them (seon.repl/parts; for an agent
-  with no process, root drew them from its branch: caption): the sidebar, root's agents (sides,
-  each a component read on main: page chrome, never the agent's); its head; its conversation parts
-  oldest first, the newest opts :shown of them laid out and the older counted at the top; its input;
-  its other parts as tiles beside it. Each part a unit whose input is its html, so the render proc
+  with no process, root drew them from its branch: caption), each in its region (render-ctx,
+  seon.render/view): the sidebar, root's agents (sides, each a component read on main: page
+  chrome, never the agent's); its head; its :task parts; its :chat parts oldest first, the newest
+  opts :shown of them laid out and the older counted at the top; its input; its :tiles in the
+  scrollable column beside it. Each part a unit whose input is its html, so the render proc
   sends one only when its bytes changed. opts {:parts [{:key :html :inline}] :shown :view :input :sides
   :head [db eid] :caption}."
   {:malli/schema [:=> [:cat :keyword :map] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
   [id {:keys [parts shown view input sides head caption]}]
-  (let [conv? #(conversation-keys (first (:key %)))
-        listed (filterv conv? parts)
-        tiles (remove conv? parts)
+  (let [in (fn [r] (filterv #(= r (:region % :task)) parts))
+        listed (in :chat)
+        task (in :task)
+        tiles (in :tiles)
         on (vec (take-last shown listed))
         older (- (count listed) (count on))
-        unit (fn [p c] {:id (part-id (:key p)) :input (select-keys p [:key :html :inline]) :schema :seon.render/part-html :container c})]
+        unit (fn [p c] {:id (part-id (:key p)) :input (select-keys p [:key :region :html :inline]) :schema :seon.render/part-html :container c})]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
       (top-bar id false)
@@ -990,10 +993,11 @@
        [:main {:class "flex min-w-0 flex-col gap-3"}
         (slot "p-head")
         (slot "p-caption")
+        [:div {:id "p-task" :class "flex flex-col gap-2"} (for [p task] (slot (part-id (:key p))))]
         [:div {:id "c-older"} (slot (str "c-more-" (count on)))]
         [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [p on] (slot (part-id (:key p))))]
         (when input (slot "p-input"))]
-       [:aside {:id "p-tiles" :class "grid content-start gap-2"} (for [p tiles] (slot (part-id (:key p))))]]]
+       [:aside {:id "p-tiles" :class "grid content-start gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto"} (for [p tiles] (slot (part-id (:key p))))]]]
      :seon.render/units
      (vec (concat [{:id "p-head" :comp (conj (vec head) :block)}
                    {:id "p-caption" :input {:key [:caption] :html (h/html (or caption ""))} :schema :seon.render/part-html}]
@@ -1001,6 +1005,7 @@
                   [{:id (str "c-more-" (count on)) :input {:older older :view view :click? true} :schema :seon.render/page-more :container "#c-older"}]
                   (for [p on] (unit p "#c-rows"))
                   (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
+                  (for [p task] (unit p "#p-task"))
                   (for [p tiles] (unit p "#p-tiles"))))}))
 
 (defn agent

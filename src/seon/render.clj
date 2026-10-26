@@ -149,8 +149,12 @@
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
 (defn view
-  "An agent's held record ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its
-  parts, in order, with what reads the db beside it (fs, seon.context/renders over the branch's db
+  "render-ctx, the agent page's layout (the declared html render of :seon.render/ctx-page, which an
+  agent overrides on its branch like any render; `layout` resolves it): an agent's held record
+  ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its parts, each a keyed call of a
+  sub-render over its slice of ctx, in order, each in its region of the page (:region): :task, the
+  task and what it works with, which the model reads too (seon.repl/page); :chat, the conversation;
+  :tiles, each eval whose value has a render of its own, newest first. With what reads the db beside it (fs, seon.context/renders over the branch's db
   as of the record's t): [:task], the task, drawn by seon.render.ui/task-page as the stage's story
   (seon.context/story over the db) less the vars it cites, compared in the memo by its story key;
   [:task :cites sym] for each var its plan cites (seon.context/cites), drawn by
@@ -162,7 +166,10 @@
   [k] for each key the agent added to its ctx (any key outside its own :seon.agent/* attributes,
   its units and the environment), named by that key, which is its schema; then the conversation:
   [:eval id] per eval, [:turn id] per model turn of the run and [:message id] per message to it, in
-  the order they were written (each member's first transaction, (:first-t fs)). Nothing derived is
+  the order they were written (each member's first transaction, (:first-t fs)); an eval's value is
+  drawn only once ctx holds it opened (:seon.eval/opened: the person opened it, a fact that reaches
+  the branch by take!), else its one line; [:tile id] per eval whose value has a declared render,
+  newest first. Nothing derived is
   computed here: a part that reads the db carries its key (:read) and the db its render draws on,
   and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
   on (ids, the turns' bases but the newest's observation, the agent's own counters)."
@@ -174,46 +181,61 @@
         turn (last (sort-by :seon.turn/n (vals (:turns run))))
         {:keys [results reds reasons]} (get-in turn [:seon.turn/basis :observed])
         failure (into {} (for [r reds] [(:test r) {:assert (:expected r) :got (if (contains? r :got) (:got r) (:actual r))}]))
-        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
+        entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e] :region :chat
+                         :opened (boolean (:seon.eval/opened e))
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs))
+        (cond-> task (conj {:key [:task] :from [task] :value (relevant-of :seon.task/task-fact (dissoc task :turns :runs)) :region :task
                             :schema :seon.render/task-page :read ((:story-key fs) task) :db (:db fs)})
                 task (into (for [v ((:cites fs) task)]
-                             {:key [:task :cites v] :from [task] :value {:var v} :schema :seon.render/cited :read ((:cited-key fs) v) :db (:db fs)}))
-                task (conj {:key [:related] :from [task] :value {:task (:db/id task)}
+                             {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ((:cited-key fs) v) :db (:db fs)}))
+                task (conj {:key [:related] :from [task] :value {:task (:db/id task)} :region :task
                             :schema :seon.render/related :read ((:related-key fs) (:db/id task)) :db (:db fs)})
                 (seq (:seon.task/proofs task))
-                (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
+                (conj {:key [:proofs] :from [task turn] :region :task :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
                                                               (for [t (:seon.task/proofs task)]
                                                                 [t (cond-> {:status (get results t :not-run)} (failure t) (assoc :failure (failure t)))]))
                                                   {:seon.render/schema :seon.render/proofs})})
-                (seq reasons) (conj {:key [:verdict] :from [turn] :value reasons})
-                run (conj {:key [:run] :from [run] :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
+                (seq reasons) (conj {:key [:verdict] :from [turn] :value reasons :region :task})
+                run (conj {:key [:run] :from [run] :region :task :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
-                {:key [k] :from [(get c k)] :value (get c k) :schema k}))
+                {:key [k] :from [(get c k)] :value (get c k) :schema k :region :task}))
         ;; in the order written: each member's first transaction (first-t), then its key
         (into (map second) (sort-by first (concat (for [e (vals (:evals c))] [[(t-of e) (:seon.eval/id e)] (entry :eval e)])
                                                   (for [t (vals (:turns run))] [[(t-of t) (:seon.turn/id t)] (entry :turn t)])
-                                                  (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)])))))))
+                                                  (for [m (vals (:messages run))] [[(t-of m) (:seon.message/id m)] (entry :message m)]))))
+        ;; the tiles: each eval whose value has a render of its own, newest first; plain data has none
+        (into (for [e (sort-by (comp - #(or % 0) t-of) (vals (:evals c)))
+                    :let [v (get-in e [:seon.eval/record :response :value])]
+                    :when (and (some? v) (render-of v nil))]
+                {:key [:tile (:seon.eval/id e)] :from [e] :value v :region :tiles})))))
+
+(defn layout
+  "The agent page's parts: render-ctx, the render :seon.render/ctx-page declares under the schemas
+  in force (an agent's branch's, which may override it, or main's), of record c over fs (`view`'s)."
+  {:malli/schema [:=> [:cat [:map [:tree :map]] :map] [:vector :seon.render/part]]}
+  [c fs] ((or (render-of c :seon.render/ctx-page) view) c fs))
 
 (defn part-faces
   "Part p's faces, {:html hiccup :inline hiccup}: its hiccup by the render its value's schema
-  declares, else the one printer's, which the page shows and the model reads alike; :inline, its
-  html in one line (:as :inline), what a folded part shows; a part that reads the db (:db) is drawn
-  on it."
+  declares, else the one printer's, which the page shows and the model reads alike; a part that
+  reads the db (:db) is drawn on it. An eval of the conversation is its one line (:inline, :as
+  :inline), and its html only when opened (:opened): nothing is drawn until someone looks."
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
   [{:keys [value schema] :as p}]
-  (cond-> {:html (html value (cond-> {:schema schema} (:db p) (assoc :db (:db p))))}
-    ;; a folded part's one line: the conversation's evals fold (seon.render.ui/agent-part)
-    (= :eval (first (:key p))) (assoc :inline (html value {:as :inline :schema schema}))))
+  (if (= :eval (first (:key p)))
+    (cond-> {:inline (html value {:as :inline :schema schema})}
+      (:opened p) (assoc :html (html value {:schema schema})))
+    {:html (html value (cond-> {:schema schema} (:db p) (assoc :db (:db p))))}))
 
 (defn part-html
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line
   serialized."
   {:malli/schema [:=> [:cat :seon.render/part :seon.render/faces] :seon.render/part-html]}
-  [p f] (cond-> {:key (:key p) :html (h/html (:html f))} (:inline f) (assoc :inline (h/html (:inline f)))))
+  [p f] (cond-> {:key (:key p) :region (:region p :task)}
+          (:html f) (assoc :html (h/html (:html f)))
+          (:inline f) (assoc :inline (h/html (:inline f)))))
 
 (defn drawn
   "Part p's faces through memo {key [fs from faces read]}: the held faces when the functions that
@@ -222,14 +244,14 @@
   it was drawn with (a redefined render draws again; a member a transaction changed is a new
   object, ctx's patch leaving every other one as it was), else drawn now. Answers [memo' faces]."
   {:malli/schema [:=> [:cat :map :seon.render/part] [:tuple :map :seon.render/faces]]}
-  [memo {:keys [key value schema from read] :as p}]
+  [memo {:keys [key value schema from read opened] :as p}]
   (let [fs [(render-of value schema) @#'print/print-value]
         src (or from [value])
         [fs0 src0 out read0] (get memo key)]
     ;; a part that reads the db (its :read key) draws again when that key moves
-    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)) (= read read0))
+    (if (and out (= (count src) (count src0)) (every? true? (map identical? src src0)) (every? true? (map identical? fs fs0)) (= [read opened] read0))
       [memo out]
-      (let [out (part-faces p)] [(assoc memo key [fs src out read]) out]))))
+      (let [out (part-faces p)] [(assoc memo key [fs src out [read opened]]) out]))))
 
 ;; ---- the walk: an entity and the units its schema declares (docs/render.md#the-walk) ----
 

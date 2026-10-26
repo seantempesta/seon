@@ -101,15 +101,20 @@
  ;; a ctx as the page and the model are drawn from it (seon.render/view, faces, drawn)
  :seon.render/part [:map [:key [:vector :any]] [:value :any] [:schema {:optional true} :qualified-keyword] [:from {:optional true} [:vector :any]]
                     ;; a part that reads the db: what its memo compares, and the db its render draws on
-                    [:read {:optional true} :any] [:db {:optional true} :seon.host/db]]
+                    [:read {:optional true} :any] [:db {:optional true} :seon.host/db]
+                    ;; its region of the page (seon.render/view), and, for an eval, whether ctx holds it opened
+                    [:region {:optional true} [:enum :task :chat :tiles]] [:opened {:optional true} :boolean]]
+ ;; render-ctx: the agent page's layout, a render of the record (seon.render/view), which a branch may override
+ :seon.render/ctx-page [:map {:seon.render/html seon.render/view} [:tree :map]]
  ;; the task, drawn as the stage's story (seon.context/story over the db), and its related
  :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
  :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
  ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)
  :seon.render/cited [:map {:seon.render/html seon.render.ui/cited} [:var :symbol]]
- :seon.render/faces [:map [:html :any] [:inline {:optional true} :any]]
+ :seon.render/faces [:map [:html {:optional true} :any] [:inline {:optional true} :any]]
  ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
- :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:html :string] [:inline {:optional true} :string]]
+ :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:region {:optional true} [:enum :task :chat :tiles]]
+                         [:html {:optional true} :string] [:inline {:optional true} :string]]
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
