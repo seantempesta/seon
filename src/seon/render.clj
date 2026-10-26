@@ -200,7 +200,7 @@
                 ;; recorded basis and the one before it (its last reply), both ctx's
                 (and task turn) (conj {:key [:status] :from [task turn prev] :region :task :schema :seon.render/status :db (:db fs)
                                        :value (cond-> {:task (:seon.task/id task) :turn (:db/id turn)} prev (assoc :last (:db/id prev)))})
-                run (conj {:key [:run] :from [run] :region :task :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
+                run (conj {:key [:run] :from [run] :region :task :schema :seon.run/run-fact :value (assoc (relevant-of :seon.run/run-fact run) :turns-taken (count (:turns run)))}))
         (into (for [k (sort-by str (keys c))
                     :when (and (qualified-keyword? k) (not (#{"seon.agent" "db"} (namespace k))))]
                 {:key [k] :from [(get c k)] :value (get c k) :schema k :region :task}))

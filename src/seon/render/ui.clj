@@ -903,8 +903,9 @@
    (when-let [db (:db opts)]
      ;; its plan as prose here, the rest of its data by the printer (each cited var is its own part)
      (let [data (context/task-data db (task/task db id) false)]
-       (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part))])
-             (render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget)}))))])
+       ;; a cut names the form that answers the whole at the agent's REPL
+       (list (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
+             (render/html (dissoc data :task) {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set)}))))])
 
 (defn cited
   "A var the task's plan cites (the declared html render of :seon.render/cited): its source and
@@ -912,7 +913,8 @@
   {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
   [{:keys [var]} opts]
   [:section {:class "tile"} [:h2 {:class "kicker"} (str "cites " var)]
-   (when-let [db (:db opts)] (render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)}))])
+   (when-let [db (:db opts)] (render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)
+                                                                   :handle (list 'seon.context/cited '(seon.agent/db) (list 'quote var))}))])
 
 (defn status
   "What the newest model turn of the task observed (the declared html render of
@@ -926,7 +928,7 @@
           lst (when last (d/pull db [:seon.turn/truncated :seon.turn/calls] last))]
       [:section {:class "tile"} [:h2 {:class "kicker"} "status"]
        (render/html (context/turn-state db (task/task db task) (context/turn-input db b lst))
-                    {:budget (config/value :seon.config.render/value-budget)})])))
+                    {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)})])))
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (the declared html render of
