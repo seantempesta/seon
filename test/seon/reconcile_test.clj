@@ -439,9 +439,10 @@
                :fixed {:ticks 8500000.0 :bytes 65000000.0}
                :per-n {:ticks 3000.0 :bytes 8000.0}
                ;; below 1,000 the growth is smaller than the fixed part's layout variance between builds,
-               ;; measured (8.18M ticks at 10 on main's tree, 8.33M with one more schema attribute; n=10
-               ;; allocates more than n=100 on both): task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed
-               :sizes [10 1000]}))
+               ;; measured (8.18M ticks at 10 on main's tree, 8.33M with one more schema attribute; n=500 costs
+               ;; less than n=10 on both, 7.9M ticks and 52 MB): no size but 1,000 sees the work, so 100 is left
+               ;; out until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
+               :sizes [10 500 1000]}))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
