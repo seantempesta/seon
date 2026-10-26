@@ -237,6 +237,43 @@
       (is (= [:seon.model/rate-limited 429 "too many" 2000] ((juxt :seon.error/type :status :body :retry-after-ms) e))))
     (is (= :seon.model/provider-error (:seon.error/type (#'model/provider-error "HTTP 500" 500 {:body "oops"}))))))
 
+;; root code records its own failed effect with its fact, once (root, 2026-10-26); before, root's api
+;; counted it in a transaction of its own, which raced the asker's write of the fact, so a row naming
+;; the fact could not close at the next good outcome
+(deftest an-askers-failed-effect-is-one-row-closed-by-its-next-good-outcome
+  (let [co (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-unreadable-" (random-uuid)) "src") (.mkdirs))
+        _ (doto (java.io.File. co "a.clj") (spit "(ns a)") (.setReadable false))
+        ;; the source's read failed, as its owner answers it: stamped with when (seon.fx/worker-proc)
+        failed (assoc (fx/read-source {:req {:root (.getParent co) :dirs ["src"]}}) :seon.fx/at-ms 1000)
+        rows #(get-in (problems/report %) [:classes :effect :rows])
+        open? #(not (false? (:open? (first (rows %)))))
+        import (fn [db r fact] (d/db-with db (err/asked-tx db r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])))
+        bad {:root "/c" :files 0 :forms 0 :ms 1.0 :error (:seon.error/message failed)}
+        good {:root "/c" :files 1 :forms 1 :ms 2.0 :digest "d"}]
+    (is (= :seon.fx/io-error (:seon.error/type failed)) "an unreadable file fails the read")
+    (testing "a failed import, then a good one"
+      (let [db (import (ts/test-db) failed bad)]
+        (is (= 1 (count (rows db))) "one row for the failure")
+        (is (open? db) "its fact is written in the same transaction: open")
+        (let [again (import db failed bad)]
+          (is (open? again) "the same failure again: open")
+          (is (= [2] (map :count (rows again))) "one row, counted twice"))
+        (let [fixed (import db {:value {}} good)]
+          (is (= 1 (count (rows fixed))) "still one row")
+          (is (false? (:open? (first (rows fixed)))) "the good import writes another fact: closed"))))
+    (testing "the reconciler's commit: a failed :git, then the next merge's sha"
+      (let [git (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "git commit: index.lock exists" {}) :seon.fx/at-ms 2000)
+            db0 (ts/test-db)
+            db (d/db-with db0 (err/asked-tx db0 git :seon.run/commit [{:seon.run/id "r1" :seon.run/commit-error (:seon.error/message git)}]))
+            fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.run/commit [{:seon.run/id "r2" :seon.run/commit "abc"}]))]
+        (is (= 1 (count (rows db))))
+        (is (open? db) "a failed commit writes no sha: open")
+        (is (false? (:open? (first (rows fixed)))) "the next merge's commit writes one: closed")))
+    (testing "an error the asker made itself (no owner's stamp) writes its fact alone"
+      (is (= [{:a 1}] (err/asked-tx (ts/test-db) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.run/deferred-results [{:a 1}]))))
+    (.setReadable (java.io.File. co "a.clj") true)
+    (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
+
 ;; ---- the read -----------------------------------------------------------------------------
 
 (defn- seeded

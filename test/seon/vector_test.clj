@@ -6,7 +6,7 @@
   only in root (it starts threads), so these use made vectors; bin/check vectors proves the
   pyramid's recall on the checkout's own forms, embedded by the model."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts]
-            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent]))
+            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems]))
 
 (defn- unit [v] (let [n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
 
@@ -133,6 +133,29 @@
           [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o4))) :r e})
           [_ o5] (vector/vectors-proc st :main {:t 12 :db db})]
       (is (empty? (:to-api o5)) "texts the model could not encode are set aside: nothing else is due, so nothing is asked"))))
+
+(deftest a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+  ;; root code records its own failed effect (seon.error/asked-tx): the :effect row names the vectors'
+  ;; :seon.vector/model, closed by the next vectors written; the row's own commit starts no round,
+  ;; or an idle main would ask, fail and write for ever
+  (let [db (db-due-only)
+        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
+        e (assoc (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"}) :seon.fx/at-ms 1000)
+        [st o2] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r e})
+        w (first (:to-api o2))
+        rows (fn [db] (get-in (seon.problems/report db) [:classes :effect :rows]))
+        db2 (d/db-with db (get-in w [:req :req :tx-data]))]
+    (is (= {:op :tx :branch :db} (select-keys (get-in w [:req :req]) [:op :branch])) "the failure is written to main")
+    (is (= [[:seon.vector/model-unopened :seon.vector/model]] (map (juxt :type #(get-in % [:example :seon.error/subject])) (rows db2)))
+        "as one :effect row naming the vectors' attribute")
+    (let [[st o3] (vector/vectors-proc st :main {:t 11 :db db2})
+          _ (is (empty? (:to-api o3)) "a notice while the write is out is kept")
+          [st o4] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 11}})
+          _ (is (empty? (:to-api o4)) "the kept notice is the row's own commit: no round")
+          [st o5] (vector/vectors-proc st :main {:t 11 :db db2})
+          _ (is (empty? (:to-api o5)) "nor when it arrives after")
+          [_ o6] (vector/vectors-proc st :main {:t 12 :db db2})]
+      (is (= :embed (get-in (first (:to-api o6)) [:req :kind])) "a later commit tries again"))))
 
 (deftest rrf-fuses-rankings-by-reciprocal-rank
   ;; kept for exploration (owner, 2026-10-24): an item in both rankings beats one high in only one

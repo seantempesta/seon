@@ -36,6 +36,25 @@
     (is (= :seon.fx/defect (get-in out [:outcome :seon.error/type])))
     (is (= {:agent :a1 :op :fx-reply :k 1} (:dest out)))))
 
+(deftest a-failure-is-roots-problem-only-when-an-agent-asked
+  ;; the asker records its outcome once (root, 2026-10-26): root code records its own failed effect
+  ;; with its fact (seon.error/asked-tx), so root's count takes an agent's alone, whose facts are on
+  ;; its branch
+  (let [st (fx/worker-proc {:kind :t :perform (fn [_] (contract/error :seon.fx/io-error 'seon.fx/t "no such file" {})) :owner :fx/t})
+        [_ o] (fx/worker-proc st :work (assoc (req 1) :in-ns 0 :taken-ns 0))
+        failed (:outcome (first (get o [:fx/t :done])))
+        [_ ok] (fx/worker-proc (fx/worker-proc {:kind :t :perform (fn [_] {:value 1}) :owner :fx/t}) :work (assoc (req 2) :in-ns 0 :taken-ns 0))
+        done (fn [dest] (second (fx/owner-proc (first (fx/owner-proc (owner 1) :in (assoc (req 1) :dest dest))) :done {:dest dest :outcome failed})))
+        problems #(filter :op (:out %))]
+    (is (int? (:seon.fx/at-ms failed)) "a failed outcome carries when it failed, as its asker records it")
+    (is (nil? (:seon.fx/at-ms (:outcome (first (get ok [:fx/t :done]))))) "a good one carries no such time")
+    (let [o (done {:agent :a1 :op :fx-reply :k 1})]
+      (is (= [:effect] (map :class (problems o))) "an agent asked: root's problem, of class :effect")
+      (is (= [{:dest {:agent :a1 :op :fx-reply :k 1} :r failed}] (remove :op (:out o))) "and the agent is answered"))
+    (let [o (done {:rid 7})]
+      (is (empty? (problems o)) "root code asked: not root's count, the asker records it")
+      (is (= [{:dest {:rid 7} :r failed}] (:out o)) "it is answered the error"))))
+
 ;; ---- a batch kind and a held host object (seon.vector's :embed) ------------------------
 
 (deftest a-batch-kind-takes-what-is-queued
