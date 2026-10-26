@@ -619,7 +619,7 @@
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
             turn! (fn [run b] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/n 0 :seon.turn/origin :model
                                                  :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
-                    (context/render @conn b))
+                    (let [r (context/render @conn b)] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/sent (:sent r)}]) r))
             _ (run! "demo/d#1" "demo/d")
             _ (ev! "e0" "a1" "demo/d#1")
             b0 (basis "demo/d" "demo/d#1")
@@ -739,7 +739,9 @@
                                           :origin :model :observed observed :agent "b/a1"}]
                                    (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n n :seon.turn/origin :model
                                                              :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1} more)])
-                                   [b (:messages (context/render @conn b))]))
+                                   (let [{:keys [messages sent]} (context/render @conn b)]
+                                     (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
+                                     [b messages])))
             [b0 r0] (request 0 {:seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]})
             _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
             [_ r1] (request 1 {})]
