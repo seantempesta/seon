@@ -100,14 +100,14 @@
                 "reconciler's index over their own attributes, the config one pull of root's entity, the "
                 "problems their own indexes; a record is never walked")
      :growth :constant
-     ;; the contracted calls a read of main makes, whatever main holds: 32 (the reconciler's
+     ;; the contracted calls a read of main makes, whatever main holds: 33 (the reconciler's
      ;; index, the task rows, the config, the problems by area and their parts, and
-     ;; seon.problems/uncited-tasks, one call however many tasks), never one per
+     ;; seon.problems/uncited-tasks and stalled-agents, one call each however many), never one per
      ;; record; and its bytes, which a walk over every datom would grow with the records (measured
      ;; 2026-10-23 at 100 units of 20 records: 3.6 MB, 0.79M ticks).
      ;; Timed 2026-10-23 at 1k / 10k / 50k records (8k / 35k / 155k datoms): 1.8 / 1.4 / 1.6 ms,
      ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
-     :per-n {:calls 32 :bytes 4000000}
+     :per-n {:calls 33 :bytes 4000000}
      :sizes [100 400 1000]}))
 
 (defn agent-of
@@ -189,6 +189,8 @@
      :growth :linear
      ;; measured 2026-10-24: 315 / 3,015 calls and 5.39 / 49.4 MB at 100 / 1,000 evaluations (before:
      ;; 526 / 5,026 calls and 4.19 / 41.1 MB, a datoms read per node for its transaction, the citation pass)
+     ;; 5.21 / 50.4 MB at 100 / 1,000: a ref unit read from the db's attribute index (datahike's ref?);
+     ;; d/schema rebuilt the schema map (0.8 MB, 365 attributes) on every `one`, 6.92 / 52.1 MB
      :per-n {:calls 3 :bytes 49500}
      :fixed {:calls 15 :bytes 600000}
      :sizes [100 1000 4000]}))

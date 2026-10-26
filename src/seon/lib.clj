@@ -5,7 +5,8 @@
   proto.lib (itself e13.lib, trimmed)."
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
-            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]))
+            [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config] [jolt.io-poller :as poller]
+            [seon.edn :as sedn]))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -243,7 +244,7 @@
         (try (when (or (not double?) (zero? (c-fork))) (child))
              (vreset! status 0)
              (catch Throwable e
-               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (pr-str (ex-data e))) (flush)))
+               (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (sedn/encode (ex-data e))) (flush)))
              ;; a finally is a winder, run on any exit from the try (a fiber's park drops it)
              (finally (c-exit @status))))
       (do (some-> fd c-close)

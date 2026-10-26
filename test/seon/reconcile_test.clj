@@ -292,6 +292,7 @@
         tx (get-in (first outs) [:req :req :tx-data])]
     (is (some #(= [:db/cas [:seon.run/id "demo/a#2"] :seon.run/status :running :lost] %) tx) "the wake's run is lost")
     (is (some #(some-> (:seon.run/reason %) (str/includes? "agent a-a1 ended")) tx) "with why")
+    (is (some #(= :lost (:seon.run/outcome %)) tx) "and its outcome, so it reads as ended")
     (is (= [(spawn "a" 3)]
            (actions-for (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :waiting) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]
                                                            (run "a" 2 :lost)
@@ -324,7 +325,7 @@
         [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
     (is (= {:op :kill :id :a1 :ended true} (:req (first outs))))
     (is (= [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended]
-            {:seon.run/id "demo/a#1" :seon.run/reason "no branch :demo/a" :seon.run/error no}]
+            {:seon.run/id "demo/a#1" :seon.run/outcome :error :seon.run/reason "no branch :demo/a" :seon.run/error no}]
            (update (get-in (second outs) [:req :req :tx-data]) 1 dissoc :seon.run/end-ms)))
     (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 
@@ -437,7 +438,11 @@
                ;; measured 2026-10-24: 8.51M ticks / 67.7 MB at 10, 8.23M / 61.1 MB at 100, 11.3M / 68.7 MB at 1,000
                :fixed {:ticks 8500000.0 :bytes 65000000.0}
                :per-n {:ticks 3000.0 :bytes 8000.0}
-               :sizes [10 100 1000]}))
+               ;; below 1,000 the growth is smaller than the fixed part's layout variance between builds,
+               ;; measured (8.18M ticks at 10 on main's tree, 8.33M with one more schema attribute; n=500 costs
+               ;; less than n=10 on both, 7.9M ticks and 52 MB): no size but 1,000 sees the work, so 100 is left
+               ;; out until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
+               :sizes [10 500 1000]}))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -785,6 +790,32 @@
           (is (not (:quiet st4)))
           (is (nil? (report-in outs4))))))))
 
+(deftest every-way-a-run-leaves-running-writes-its-outcome
+  ;; root, 2026-10-26: a run with no outcome is a running run (an agent's ctx and its page's run
+  ;; tile read it so: outcome and reason are what the agent's take copies), so every way root
+  ;; moves a run off :running writes one with its reason: a reap (root restarted), a kill of a
+  ;; live run, a death, the writer refusing to read its branch; a refused spawn and a lost wake
+  ;; (their own tests), and the judge's end (the agent's, or :no-end)
+  (let [db (db-of [(decl "a")] :extra (run "a" 1 :running))
+        st {:db db :boot "boot-1" :rid 0 :pending {} :flights {}}
+        flight {:act {:op :spawn :run "demo/a#1" :task "demo/a" :env {:branch :task-demo-a}} :agent :a-a1}
+        outcome (fn [[_ outs]] (some :seon.run/outcome (mapcat #(get-in % [:req :req :tx-data]) outs)))
+        died (contract/error :seon.agent/died 'seon.root/end-agent "agent a-a1 died" {:agent :a-a1})]
+    (is (= :lost (outcome (#'r/start st {:op :reap :run "demo/a#1"}))) "a reap: lost")
+    (is (= :killed (outcome (#'r/start st {:op :kill :run "demo/a#1" :reason :cancelled}))) "a kill of a live run: killed")
+    (is (= :dead (outcome (#'r/advance (assoc-in st [:flights "demo/a#1"] (assoc flight :died died)) "demo/a#1" :dead-read {:db nil})))
+        "a death: dead")
+    (is (= :error (outcome (#'r/advance (assoc-in st [:flights "demo/a#1"] flight) "demo/a#1" :diffed
+                                        (contract/error :seon.writer/refused 'seon.writer/refused "no branch :task-demo-a" {}))))
+        "the writer refused its branch: error")))
+
+(deftest a-stall-task-starts-no-agent
+  ;; owner, 2026-10-26: "Hold off launching paid agents for now": root's stall task is created and
+  ;; shown, and worked by a Claude session through seon_attach; the reconciler forks nothing for it
+  (let [db (db-of [(tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})] :released [])]
+    (is (some? (task/task db "root/stall-a1-demo-t-1")) "the task is on main")
+    (is (not-any? #(#{:spawn :wake} (:op %)) (actions-for db)) "and no agent is started for it")))
+
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 (deftest a-refused-spawn-writes-a-refused-run
@@ -800,6 +831,7 @@
     (is (some? asked) "the first pass asks for the spawn")
     (is (= :refused (:seon.run/status run)) "the refused answer is written as the run")
     (is (= held-why (:seon.run/reason run)) "with root's reason")
+    (is (= :refused (:seon.run/outcome run)) "and its outcome, so it reads as ended")
     (is (= [(spawn "a" 2)] (actions-for (d/db-with db written))) "the next pass starts the task again")))
 
 (deftest a-refused-task-asks-again-when-main-moves
@@ -941,6 +973,36 @@
     (is (str/includes? body "demo-test/i-test") "and its proofs")
     (is (nil? (#'r/stage-boundary db "demo/d#1")) "a session's first run opens with none")
     (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
+
+(deftest a-step-reads-the-db-its-own-write-made
+  ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
+  ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
+  ;; read a db without the run start :spawned wrote, found no earlier run on its agent, and wrote
+  ;; no :stage entry. An answer main has not reached waits for main's commit of its t
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
+        env {:branch (task/default-branch "demo/d") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}
+        ;; the session's earlier stage: demo/d's run on the agent the spawn will answer
+        d1 (update (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a1 env 1000 "Make d true.") 0 assoc :seon.run/status :done :seon.run/outcome :green)
+        db (db-of [(decl "d") (decl "i")] :released ["demo/i"] :extra d1)
+        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (reqs outs)))
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:id :a1}})
+        w (first (filter #(= :write (get-in % [:req :op])) (reqs outs2)))
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        ;; the answer first, as the writer sends it, then main's commit
+        [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true :t (:max-tx db2) :datoms (count ops2)}})
+        [st4 outs4] (main st db2 ops2)
+        ;; a commit main's buffer has not brought yet: a later one takes the answer too
+        [db3 ops3] (commit db2 [{:seon.task/id "demo/d" :seon.task/plan "Make d true, again."}])
+        [_ outs5] (main st db3 ops3)
+        stage (fn [outs] (filter #(and (= :message (get-in % [:req :op])) (= :stage (get-in % [:req :kind]))) (reqs outs)))]
+    (is (= "demo/i" (get-in asked [:req :opts :task])) "the next stage's spawn")
+    (is (empty? (reqs outs3)) "its write's answer waits: main has not reached the write")
+    (is (= 1 (count (stage outs4))) "main's commit of it takes the answer: the stage's entry, read off the db holding the run")
+    (is (empty? (:behind st4)) "and holds it no longer")
+    (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well")))
 
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes

@@ -693,10 +693,13 @@
   by, so a process the child forked that holds the write end cannot keep the run waiting.
   Parks on seon.lib/wait-fd-or-exit (r's input or the exit). After the exit, what is left in
   the pipe is read: a read that found nothing there (its wait called) with the pipe still open
-  means it is held, and a read that ended on part of a line goes on. Answers {:line :held?}, or
+  means it is held, and a read that ended on part of a line goes on. Each whole line is given to
+  seen as it is read (the tests as they start, run-tests-forked). Answers {:line :held?}, or
   :seon.lib/unwatched."
-  {:malli/schema [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]}
-  [r pid]
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:or [:map [:line [:maybe :string]] [:held? :boolean]] :seon.lib/unwatched]]]}
+  ([r pid] (read-to-exit r pid (fn [_] nil)))
+  ([r pid seen]
   (let [w (lib/wait-fd-or-exit r pid)]
     (if (contract/error? w)
       w
@@ -712,12 +715,12 @@
             (let [ls (rd)]
               (cond (= ls :eof) {:line line :held? false}
                     @failed @failed
-                    (seq ls) (recur (peek ls))
+                    (seq ls) (do (run! seen ls) (recur (peek ls)))
                     ;; nothing there yet, or part of a line: read again
                     (or (not @exited) (not @waited)) (recur line)
                     ;; exited, and a read found nothing there: the pipe is still open, held
                     :else {:line line :held? true})))
-          (finally (close)))))))
+          (finally (close))))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
@@ -810,7 +813,8 @@
                  :parent (fn [pid]
                            (lib/c-close w)
                            (forked pid)
-                           (let [read (read-to-exit r pid)
+                           ;; each test as it starts goes to root: what this agent waits on, which a stall names
+                           (let [read (read-to-exit r pid #(when-let [t (:seon.test/started (sedn/decode %))] (send! {:op :testing :test t})))
                                  st (lib/wait-status pid)]
                              (lib/c-close r)
                              (if (contract/error? read)
