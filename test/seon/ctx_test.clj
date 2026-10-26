@@ -512,6 +512,22 @@
     (is (contains? (nth (second (calls (part "app.x_2Ff0"))) 2) :tests) "then the tests, under their own budget")
     (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
 
+(deftest a-component-is-styled-by-its-renders-name
+  ;; the owner's styling ruling (DECISIONS, compact hiccup): a component's root element carries one
+  ;; class, its render's name; the page's html adds the Tailwind classes its render's var states
+  ;; (:seon.render/style), and what the model reads holds the name only
+  (let [db (seeded 3)
+        as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (reset! seon.agent/state nil)))
+        hiccup (into {} (as seon.repl/render-ctx-hiccup))
+        units (:units (as seon.repl/render-ctx))
+        task-id (some #(when (str/starts-with? % "task-data-") %) (keys hiccup))
+        style (:seon.render/style (meta #'seon.render.ui/task-data))]
+    (is (string? style) "the render's var states its style")
+    (is (= "task-data" (:class (second (hiccup task-id)))) "its root's one class is its render's name")
+    (is (not (str/includes? (pr-str hiccup) style)) "the model reads no style")
+    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task-data " (first (str/split style #" "))))
+        "the page's html has the name, then its var's classes")))
+
 (deftest a-cited-vars-tests-are-shown-past-its-callers-window
   ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
   ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are

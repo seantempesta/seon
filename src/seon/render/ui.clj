@@ -915,6 +915,13 @@
   "A tile: a value on its own, scrolled when wide."
   "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto")
 
+(defn- form-src
+  "The source of form f as ctx holds it: its :form/src, or, where ctx holds the form whole at another
+  path and {:db/id e} at this one (an entity is held once: docs/ctx.md), read on db by its id; nil
+  with no form."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] [:maybe :string]]}
+  [db f] (or (:form/src f) (some->> (:db/id f) (d/pull db [:form/src]) :form/src)))
+
 (defn- the-run
   "ctx c's newest run, [eid run] (its runs by eid, newest first), or nil."
   {:malli/schema [:=> [:cat :map] [:maybe [:tuple :int :map]]]}
@@ -932,9 +939,7 @@
   [{c :seon.ctx/ctx db :seon.db/db} rid]
   (let [{:seon.task/keys [id kind execution] :as t} (get-in c [:runs rid :task])
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
-        ;; (a form ctx holds whole at another path is {:db/id e} here: read by its id)
-        sources (into {} (for [v (vals (:proved t)) :let [src (or (get-in v [:form :form/src]) (some->> (get-in v [:form :db/id]) (d/pull db [:form/src]) :form/src))]
-                               :when src] [(:var/name v) (print/code src)]))]
+        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))]
     [:section
      [:h2 "task"]
      [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
@@ -953,9 +958,9 @@
                     (list [:h3 heading " " [:code address]]
                           [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})])))
              ;; the rest of its data, an empty entry left out (no proof yet is no :to-prove)
-             (let [rest (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections))]
-               (when (seq rest)
-                 [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} rest])))))]))
+             (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections))]
+               (when (seq shown)
+                 [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown])))))]))
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
@@ -978,9 +983,7 @@
           tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
                      (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
           status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))
-          ;; ctx holds an entity whole at the first path it reaches it by, {:db/id e} at every other (a form
-          ;; that is also another cited var's caller): its source read by its id there
-          src (or (get-in cv [:form :form/src]) (some->> (get-in cv [:form :db/id]) (d/pull db [:form/src]) :form/src))]
+          src (form-src db (:form cv))]
       (cond-> {}
         src (assoc :source (print/code src))
         (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
@@ -994,11 +997,11 @@
   [{c :seon.ctx/ctx db :seon.db/db} _ var]
   (let [whole (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))
         {:keys [source] :as data} (cited-of db c var)
-        rest (dissoc data :source)
+        others (dissoc data :source)
         budget (config/value :seon.config.render/value-budget)]
     (cond-> [:section [:h2 (str "cites " var)]]
       source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
-      (seq rest) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} rest]))))
+      (seq others) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} others]))))
 
 (defn status
   "What the newest turn of the run observed, a model's or an outside read's (a component over ctx

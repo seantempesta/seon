@@ -215,7 +215,8 @@
 
 (defn- with-id
   "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
-  its render's name as its one class (docs/render.md#style)."
+  its render's name as its one class, in place of any class the render gave its root (its style is
+  its var's :seon.render/style: `styled`)."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [hc attrs]
   (if (and (vector? hc) (keyword? (first hc)))
