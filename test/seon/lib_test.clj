@@ -83,7 +83,7 @@
 (deftest a-forked-child-runs-go-blocks-and-makes-a-store
   ;; fork(2) copies only the calling thread, so the child inherits the runtime's bookkeeping and
   ;; none of its threads or waits: jolt.host/after-fork-child! drops them, or every go parked
-  ;; forever (the step E dry run's design agent hung making a test store, 2026-10-22)
+  ;; forever (the step E dry run's design agent hung making a test store)
   (let [r (fork-case "go-blocks")]
     (is (= 41 (:parent r)) (str "the parent's go blocks run before it forks: " (pr-str r)))
     (is (= {:exit 0} (:go r)) "a go block that parks is resumed in the child")

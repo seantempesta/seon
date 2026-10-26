@@ -794,7 +794,7 @@
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :preload-ms preload-ms :load-ms load-ms
-                :program program :program-ms program-ms :contracts contracts}))))))
+                  :program program :program-ms program-ms :contracts contracts}))))))
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of

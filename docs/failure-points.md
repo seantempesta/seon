@@ -125,7 +125,9 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   (measured, scale 20: the fork server's 806 MB resident is 276 MB its own); the run's return
   makes root an ordinary process, its carriers, timer and poller threads started for what the
   boot left (Jolt `main-carrier-returns-test.clj`), and root's own threads follow. A process boots
-  root once: its threads outlive `stop!`, so a second `start!` there is refused by name
+  root once: its threads outlive `stop!`, so a second `start!` there is refused by name (as is
+  a `start!` after a boot that threw: the boot's failure raises with its cause, and the process
+  is not booted again)
   (```seon.root-test/a-second-boot-in-one-process-is-refused```), and the checks that cycle root
   boot each root in a process of its own (`seon.check/cycles`). The fork server stays on the
   main carrier it was forked on and reads and writes its socket itself (`seon.sock`), and an
