@@ -713,7 +713,7 @@
   ;; a merged member whose changed forms name no source file: no write-back runs, so its run
   ;; holds a commit-error naming them, never silence; one that changed no source stays silent
   (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
-        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns 0})
         st (assoc st :source {:branch "jolt/seon-merges"})
         asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
         answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
