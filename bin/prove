@@ -48,9 +48,10 @@ merge_verdict() {
 [[ ${1:-} == --merge-verdict ]] && { merge_verdict "$2" "$3" "$4" "$5"; exit $? }
 MERGE=0
 [[ ${1:-} == --merge ]] && { MERGE=1; shift }
-if (( MERGE )) && [[ -z ${SEON_MAIN_FIRST_HELD:-} ]]; then
-  # this verification run again under the main checkout's lock (bin/env's main_hold): its steps
-  # are the holder's, and every other heavy run waits for it
+if (( MERGE )) && [[ -z ${SEON_MAIN_FIRST_HELD:-} ]] && ( . "$ROOT/bin/env"; is_main_tree ); then
+  # main's verification run again under the main checkout's lock (bin/env's main_hold): its steps
+  # are the holder's, and every other heavy run waits for it. A worktree's --merge holds nothing:
+  # it runs on here, and its steps wait for main's like any run
   ( . "$ROOT/bin/env"; main_hold "pid $$, $(git -C "$ROOT" rev-parse --short HEAD) in $ROOT, since $(date '+%H:%M:%S')" "$0" --merge "$@" )
   exit $?
 fi
