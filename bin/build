@@ -141,7 +141,8 @@ build_native() {
 # SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
 # open (measured 2026-10-21; docs/failure-points.md#lmdb-robust-locks). Robust, it uses SysV
 # semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
-# (native/lmdb_kill.c) is its proof, a bin/check step.
+# (native/lmdb_kill.c) is its proof, a bin/check step; target/lmdb-sem (native/lmdb_sem.c), that
+# each env has a semaphore set of its own (our fork's jolt/sysv-sem-identity), another.
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
 build_lmdb() {
   [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
@@ -153,6 +154,8 @@ build_lmdb() {
     "$LMDB_SRC/mdb.c" "$LMDB_SRC/midl.c" "$LMDB_SRC/module.c" > "$T/lmdb-build.log" 2>&1 || die "lmdb build failed; see target/lmdb-build.log"
   cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-kill" "$ROOT/native/lmdb_kill.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
     die "lmdb-kill (native/lmdb_kill.c) build failed"
+  cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-sem" "$ROOT/native/lmdb_sem.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
+    die "lmdb-sem (native/lmdb_sem.c) build failed"
   echo "$pin" > "$T/lmdb.stamp"
 }
 
