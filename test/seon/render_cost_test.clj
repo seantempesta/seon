@@ -284,7 +284,7 @@
      :n "model turns the debug page already holds"
      :work (str "the new turn's row, a component (seon.render.ui/component, as [:debug ...]), read back from its "
                 "records (its two evals, each by seon.context/eval-messages), its request sized from those parts "
-                "(seon.context/sent-split: system, story, conversation, screen), and rendered once: the contracted calls, "
+                "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
                 "flat in the turns held. A real turn also reads back its help page and its task story as of their t "
                 "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the story's run "
                 "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
@@ -364,7 +364,7 @@
                       [id {:db/id (+ 10 i) :seon.eval/id id :seon.eval/by "a1"
                            :seon.eval/record {:code (str "(inc " i ")") :response {:handle (symbol "result" id) :value (inc i)}}}]))}}
    (let [born (into {1 1 2 1 3 2} (for [i (range n)] [(+ 10 i) (+ 3 i)]))]
-     {:db (ts/test-db) :story-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
+     {:db (ts/test-db) :cites (constantly []) :story-key (constantly [:k]) :cited-key (constantly [:k]) :related-key (constantly [:k]) :first-t #(get born %)})])
 
 (deftest a-view-costs-its-parts
   ;; task seon.render/a-ctx-is-shown-as-its-parts: an agent's ctx as its parts, one pass over its

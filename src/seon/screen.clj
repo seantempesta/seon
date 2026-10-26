@@ -1,32 +1,26 @@
 (ns seon.screen
-  "The agent's screen: what the user's screen shows of it, as forms the system evaluates in the
-  agent's REPL just before each model request (`forms`). Each is an eval like any other,
-  recorded by the screen (:seon.eval/by \"screen\"), and sent as the request's last user
-  messages, replaced by the next request's (seon.turn, seon.context/request), so they
-  never repeat in the conversation. The agent's page joins them as a read of root's cached
-  view."
+  "The agent's screen: its page, as the forms the system evaluates in the agent's REPL just before
+  each model request (`forms`). Each is an eval like any other, recorded by the screen
+  (:seon.eval/by \"screen\"), and sent whole the first time and as its diff from the one before
+  after (`diff`; seon.turn, seon.context/request), so the page is told once and each change once."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent]))
 
 (def forms
-  "The screen's forms, evaluated in order before each model request: the agent's page, as root
-  shows it (`show`: its peers, status, plan and this run), then its task's live state run fresh
-  (my.task/status: the turn of how many, each proof's status, first failing assertion and how to
-  run it), then what its branch changes against main (my.branch/changes), then what its plan's
-  work is likely to need beyond what it cites (my.task/related: the sections, functions and schema
-  keys nearest it, a line each, and the forms that read one and search further): the turn's live
-  state is REPL forms, run fresh each turn, and the references explicit evals refined as the
-  session goes (the owner's rulings). These are the platform's: an agent changes what it is shown in
-  its record, (swap! ctx assoc :seon.agent/screen [...]), and seon.turn runs those instead:
-  rewriting its own interface is an eval, so (my.agent/related \"its words\") in place of the last
-  form follows its own query."
-  ["(my.task/status)" "(my.branch/changes)" "(my.task/related)"])
+  "The screen's forms, evaluated in order before each model request: the agent's page as the model
+  reads it (seon.repl/page: each part's hiccup as its render returned it, the task with what it
+  cites, related, proofs, verdict and run; the same hiccup the page shows), whole on the session's
+  first turn and as its diff by part key after (notes/one-derivation-design-rev42.md §1, §4). These
+  are the platform's: an agent changes what it is shown in its record, (swap! ctx assoc
+  :seon.agent/screen [...]), and seon.turn runs those instead: rewriting its own interface is an
+  eval."
+  ["(seon.repl/page)"])
 
 (defn diff
   "What changed from before to after, by path (get-in's): {:changed {path value} :unchanged [path
-  ...] :removed [path ...]}, the empty ones left out. A map is compared key by key, a vector of
-  the same count item by item (a page's tiles; a vector inside one is whole), anything else
-  whole; each unchanged path is the highest one, so an equal value is {:unchanged [[]]}. Paths
+  ...] :removed [path ...]}, the empty ones left out. A map is compared key by key, anything else
+  whole (a page's part, its hiccup, is changed whole by its key); each unchanged path is the
+  highest one, so an equal value is {:unchanged [[]]}. Paths
   follow each map's own order, the same on every read of one stored value (a record's). Each
   screen eval is sent as its diff from the previous one of the same form (the owner's ruling,
   docs/render.md#the-screen-is-sent-as-diffs)."
@@ -34,16 +28,14 @@
                                          [:unchanged {:optional true} [:vector [:vector :any]]]
                                          [:removed {:optional true} [:vector [:vector :any]]]]]}
   [before after]
-  (let [walk (fn walk [acc path b a in-vec?]
+  (let [walk (fn walk [acc path b a]
                (cond (= b a) (update acc :unchanged conj path)
                      (and (map? b) (map? a))
                      ;; in the map's own order: one stored value iterates the same way every time
                      (let [acc (reduce-kv (fn [acc k _] (if (contains? a k) acc (update acc :removed conj (conj path k)))) acc b)]
-                       (reduce-kv (fn [acc k v] (walk acc (conj path k) (get b k ::none) v false)) acc a))
-                     (and (vector? b) (vector? a) (= (count b) (count a)) (not in-vec?))
-                     (reduce (fn [acc i] (walk acc (conj path i) (nth b i) (nth a i) true)) acc (range (count a)))
+                       (reduce-kv (fn [acc k v] (walk acc (conj path k) (get b k ::none) v)) acc a))
                      :else (assoc-in acc [:changed path] a)))]
-    (into {} (remove (comp empty? val)) (walk {:changed {} :unchanged [] :removed []} [] before after false))))
+    (into {} (remove (comp empty? val)) (walk {:changed {} :unchanged [] :removed []} [] before after))))
 
 (defn input
   "What this turn's screen forms read (my.task/status): {:task :input}, the task and the turn

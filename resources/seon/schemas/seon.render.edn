@@ -105,6 +105,8 @@
  ;; the task, drawn as the stage's story (seon.context/story over the db), and its related
  :seon.render/task-page [:map {:seon.render/html seon.render.ui/task-page}]
  :seon.render/related [:map {:seon.render/html seon.render.ui/related} [:task pos-int?]]
+ ;; a var the task's plan cites, its own part of the task's page (seon.context/cited over the db)
+ :seon.render/cited [:map {:seon.render/html seon.render.ui/cited} [:var :symbol]]
  :seon.render/faces [:map [:html :any] [:inline {:optional true} :any]]
  ;; a part of an agent's page as its agent drew it (seon.repl/parts, seon.render.ui/agent-part)
  :seon.render/part-html [:map {:seon.render/html seon.render.ui/agent-part} [:key [:vector :any]] [:html :string] [:inline {:optional true} :string]]

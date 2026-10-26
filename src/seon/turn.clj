@@ -42,8 +42,7 @@
     (:turn @agent/state)
     (let [db (agent/db)]
       ;; the run is this session's on its own branch too (root writes it on main): the
-      ;; conversation finds the messages its runs took, and the story its first stage's, by it
-      ;; (seon.context/records, session-first-run read the branch)
+      ;; conversation finds the messages its runs took by it (seon.context/records reads the branch)
       (agent/transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @agent/state)}}])
       (:turn (swap! agent/state assoc :turn {:run run
                                              :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))

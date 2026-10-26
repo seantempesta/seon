@@ -907,8 +907,8 @@
 (defn task-page
   "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
   kind and execution, then the stage's story (seon.context/story over opts :db, the branch as of
-  the record's t): its plan as prose, then what the plan cites with each var's source and callers,
-  what to prove, the sections and the similar, drawn by the one printer as the data it is."
+  the record's t): its plan as prose, then what to prove, the sections and the similar, drawn by
+  the one printer as the data it is. Each var the plan cites is a part of its own (`cited`).
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.task/keys [id kind execution] :as task} opts]
   [:section {:class "tile"}
@@ -917,7 +917,15 @@
    (when-let [story (some-> (:db opts) (context/story task))]
      ;; the story's task is this one: its plan as prose here, the rest of the story by the printer
      (list (when-let [plan (get-in story [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part))])
-           (render/html (dissoc story :task) {:budget (config/value :seon.config.render/value-budget)})))])
+           (render/html (dissoc story :task :write-set) {:budget (config/value :seon.config.render/value-budget)})))])
+
+(defn cited
+  "A var the task's plan cites (the declared html render of :seon.render/cited): its source and
+  callers, seon.context/cited over opts :db, drawn by the one printer."
+  {:malli/schema [:=> [:cat :seon.render/cited :seon.render/opts] :any]}
+  [{:keys [var]} opts]
+  [:section {:class "tile"} [:h2 {:class "kicker"} (str "cites " var)]
+   (when-let [db (:db opts)] (render/html (context/cited db var) {:budget (config/value :seon.config.render/value-budget)}))])
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (the declared html render of
@@ -1134,14 +1142,13 @@
    [:pre {:class "whitespace-pre-wrap break-words text-text-100"} text]])
 
 (defn- source
-  "What made part ref of a sent request, as a line: the help page or the task as of a t, an eval,
+  "What made part ref of a sent request, as a line: the help page as of a t, an eval,
   an eval sent collapsed to its line, a message, the history the budget left out: every ref kind
   seon.context/request names (:seon.turn/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t]]
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
-    :task (str "the task story: task entity " x "'s run sections as of t " t)
     :eval (str "eval " x)
     :line (str "eval " x ", sent as its one line")
     :message (str "message " x)
@@ -1178,7 +1185,7 @@
   request (:added, each part beside the record that made it), a line naming what it sends as the
   turn before it in its run did (:same), and its whole request in a <details> that is rendered
   only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
-  tokens went (:split, seon.context/sent-split of its parts: system, story, conversation, screen). input {:turn
+  tokens went (:split, seon.context/sent-split of its parts: system, conversation, screen). input {:turn
   :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
   (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
@@ -1195,7 +1202,7 @@
      ;; where its tokens went, as the printer sizes what it sent
      (when split
        [:p {:class "tabular-nums text-text-400"}
-        (str/join " · " (for [[k w] [[:system "system"] [:story "story"] [:conversation "conversation"] [:screen "screen"]]]
+        (str/join " · " (for [[k w] [[:system "system"] [:conversation "conversation"] [:screen "screen"]]]
                           (str w " " (group3 (get split k 0)))))])
      ;; a call that failed: its typed error, by its render
      (when error [:div {:class "rounded border border-error p-2"} (render/html error {})])
