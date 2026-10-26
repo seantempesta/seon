@@ -69,14 +69,23 @@
           (is (= #{:source} (watch-kinds co refs own (filterv #{[:path own]} b))))))
       (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" tmp)))))
 
+(defn- covers?
+  "Does record [kind path] report a change to file f in dir: f's own path, or a rescan or a
+  moved root at dir or above it (FSEvents coalesced or dropped what happened under it, and root
+  reads the subtree again: my.root/batch-keys)?"
+  [dir f [kind path]]
+  (or (= [:path f] [kind path])
+      (and (#{:rescan :root} kind) (or (= path dir) (str/starts-with? dir (str path "/"))))))
+
 (deftest a-change-arrives-and-a-dead-watcher-is-a-platform-error
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
+        f (str dir "/x.md")
         got (promise) dead (promise)
-        w (watch/start! [dir] (fn [b] (when (some #(= [:path (str dir "/x.md")] %) b) (deliver got b))) #(deliver dead %))]
+        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got b))) #(deliver dead %))]
     (is (not (contract/error? w)) (pr-str w))
-    (spit (str dir "/x.md") "# X\n")
-    (testing "a file written under a watched root arrives as its path"
-      (is (some #(= [:path (str dir "/x.md")] %) @got)))
+    (spit f "# X\n")
+    (testing "a file written under a watched root arrives as its path, or as a rescan over it"
+      (is (some #(covers? dir f %) @got)))
     (testing "the watcher killed (not stopped): its death goes to on-exit as :seon.watch/died"
       (.destroy (:process w))
       (let [e @dead]
@@ -89,6 +98,23 @@
       (let [dead2 (promise) w2 (watch/start! [dir] (fn [_]) #(deliver dead2 %))]
         (watch/stop! w2)
         (is (not (realized? dead2)))))))
+
+(deftest a-change-made-at-ready-arrives
+  ;; target/watch said ready once FSEventStreamStart returned, but fseventsd delivers to a stream
+  ;; only once it is registered, later: a change made just after ready was lost (1 in 600 under
+  ;; load, measured on the binary alone), and a-change-arrives-and-a-dead-watcher-is-a-platform-
+  ;; error waited on it forever at 0% CPU. Ready is now the stream's synchronization cookie come
+  ;; back (native/watch.c), so a change made the moment start! answers arrives, every time. 50
+  ;; watchers in turn; there is no clock to end a wait, so the old watcher's red is a hang here
+  (let [base (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid))) (.mkdirs)))
+        arrived (vec (for [i (range 50)]
+                  (let [dir (.getCanonicalPath (doto (io/file (str base "/" i)) (.mkdirs)))
+                        f (str dir "/x.md")
+                        got (promise)
+                        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got true))) (fn [_]))]
+                    (spit f "# X\n")
+                    (let [r @got] (watch/stop! w) r))))]
+    (is (= 50 (count (filter true? arrived))))))
 
 (deftest a-throw-in-the-batch-handler-is-a-recorded-death
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
