@@ -249,6 +249,7 @@
     [seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
     [seon.procs-test/reconciler seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.procs-test/a-wait-on-main-is-answered-at-the-reconcilers-quiet seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
     [seon.profile-test/a-measures-time-is-what-its-thread-does Thread/sleep] "the wait whose absence from CPU time is the subject (1000x margin)"
     [seon.profile-test/a-measures-time-is-what-its-thread-does seon.profile/now-ns] "the same"
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
@@ -528,7 +529,8 @@
                 (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
                      (= :dead (get-in (c/state sys) [:agents a :status])))
                 "a refused transaction is the response's :ex" (and (:ex r2) (re-find #"refused" (str (:text r2))))
-                "huge and infinite values print within the printer's budget" (and (< (count (:text (first r3))) 25000) (< (count (:text (second r3))) 25000))
+                "huge and infinite values print within the printer's budget" (let [chars (seon.print.select/estimate-chars (seon.config/value :seon.config.render.agent/token-budget))]
+                                                                 (every? #(and (string? (:text %)) (<= (count (:text %)) chars)) r3))
                 "a read error is the response's :ex" (= :read (get-in r4 [:ex :phase]))
                 "a test that never ends stops at its tick budget, naming the test; the agent lives"
                 (and (= 1 (:error t5)) (= "2" (printed r5))
