@@ -1,55 +1,40 @@
 # The plan
 
-What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents fixing problems in the system); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history.
+What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents doing real work, measured as turns to green); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history (`notes/merge-log.md` names every merge and how it was verified).
 
-## Now (2026-10-25, morning)
+## Now (2026-10-26)
 
-Pins: see docs/forks.md (chez fa6a4c73, datahike 6dc9ce64 since 2026-10-25) · paid runs ~$1 of the $50 budget · standing root on 7888/7777 (`runs/store`, test data). Root's working notes for this phase: `notes/root-handoff-2026-10-25.md`; the research behind every decision: `notes/research-2026-10-25/`.
+Pins (docs/forks.md): Chez fa6a4c73, Jolt 2ceb680e (main carrier, load's own `*ns*`, suggestions-for public), Datahike 336de2ab (a report carries a card-one replacement's retraction), http-client e866277d (a fiber-aware read). Paid runs: ~$1.2 of the owner's $30 for 2026-10-25/26. Standing root on 7888/7777 (`runs/store`, test data).
 
-**Goal:** real Seon agents doing real work (THE PLAN's step E), measured as turns to green.
-**Where it stands:** the agent's view and context are on main as renders of its record (design `notes/design-agent-view-2026-10-24.md` r3): a function-calling conversation with prose-first evals, screen evals, the short system prompt (405 tokens), render once per set of reads, `/agent/{id}` and `/agent/{id}/debug`. Measured (step 6, thinking off, hand-prepared tasks): turns to green at parity with the old context (8/15, 7/15 vs 7/15); prompt tokens -45% since.
-**How work moves now:** sessions self-review and report to root; root merges verified fixes (owner, 2026-10-24), comparing `bin/prove`'s plan line with main's (AGENTS §3). Rulings: docs/decisions.md, "2026-10-24 rulings" and "2026-10-25 rulings".
+**Where it stands.** Agents work requests design → implement → merge on main. Measured on 2026-10-26 (notes/live-baselines-2026-10-26.md): implement turns 84-92% cached (was 24-31%); designs 7/10 green with thinking off, 2/3 on the long design after "plan after the red proof"; repeats near zero with the repeat rule deleted for its causes; an agent spawns in ~37 ms; the full suite runs in ~8 min with no hang.
+**The direction.** One derivation: the agent's record is pulled once as `@ctx`, and the page and the agent's context are both renders of it, re-derivable byte for byte from the db at given t's (notes/one-derivation-2026-10-26.md; the approved design notes/one-derivation-joint-design.md, built in slices).
+**How work moves.** Sessions build on worktrees, self-review, and report to root; root merges one branch (or a small batch) at a time after verifying it on main: `bin/prove` (its plan line compared), the process tests the change reaches **by name, including `seon.main-test` (the laws, which bin/prove leaves out)**, and smoke. A red merge is reverted or fixed within the hour. Never edit or commit tracked files while a verification runs (the binary goes stale).
 
 ## In flight
 
-Updated 2026-10-25 by root. Sessions are linked to root's session (list_sessions linked).
-
-| Session | Now (overnight 2026-10-25) | Then |
+| Session | Now | Next |
 |---|---|---|
-| **Agent loop** | part 3 park and wake: runs, report | part 4: resume from any commit, the screen as diffs |
-| **Root as one system** (stability lead) | the thread that survives stop!; jolt/fork-guard ready (Chez f6a45c9d, Jolt 115f00cf: fork-alone, main-carrier wake fix) | reach the same however the store was made; the six waits tasks; read the ~20 old branches (delete nothing) |
-| **Agent view r3** | the value view: highlight.js, browser check, prove, ready | grep ranks definitions first |
-| **Related sections** | (a) :form/keywords: runs, ready | seon.vector/one-scan-ranks-every-kind |
-| **ctx atom** | build step 0 (vectors in schemas), then step 1 (read-only ctx), each reported | steps 2-6; the standing store erased when a stored type changes, at a quiet moment (owner's go) |
-| **Live agents** | look first, dogfood, then 5 paid runs on today's main (up to $1/round, two rounds) | findings → fixes → re-measure turns to green |
-
-Machine: all cylinders overnight (up to three heavy runs while load < ~8). Root merges verified branches as they report, runs the daily full run (bin/test --all, bin/check 100) on a clean main once the merges settle, and files every red with an owner.
-
-Baseline: `notes/baseline-2026-10-25.md`.
+| **Agent view r3** | one-derivation slice 2b: the agent page from its parts (`:render` answers parts; a dead agent renders from its record) | slice 4c (debug view re-derived), slice 5 (every page off the walk) |
+| **ctx-atom** | one-derivation slice 1: ctx carries every fact view needs; the patch reports changed paths and first t | slices with agent view |
+| **Related sections** | waits for slice 1 | slice 3 (one diff by part key) and 4b's request side (history cut, folds, as-sent into the request's assembly) |
+| **Agent loop** | park/wake proofs merged | messages and outside changes as inbox entries carrying ctx-shaped diffs (slice 6); resume rebuilds ctx at a commit |
+| **Root as one system** (stability lead) | the zygote: load, then fork, then threads; measure what is parked when boot returns | one mode for forking processes (every thread a fiber), the fork refusals deleted |
+| **Live agents** | design-plan-after-proof ready | the ten-request rerun on main; then measures each one-derivation slice against the 2026-10-26 baselines |
+| full-run-reds (idle) | the full run's reds fixed and merged | the next full run's reds |
 
 ## Waiting on the owner
 
-What waits on the owner's ruling or go before the work can move.
-
-- The agent loop's rulings: eviction (owner chose always park), new attributes (agent key, `:continues`, `:ns`, message refs, `:parked`, `:seon.run/taken`, `:seon.eval/calls`, `:seon.resume/*`), the name `my.agent/message!`, the design's open questions.
-- Go for the request pilot and measurement (~$0.50): the five fit tasks as user requests through design, implement and merge (`seon.fixtures/fit-requests`).
-- The ideas of 2026-10-25 (handoff "New ideas"): a `ctx` atom mirroring the agent's data, self-modifying views, simple tasks from a fork, docs in the db at levels of detail.
-
-## Open owner questions
-
-The ones that block THE PLAN; the full list (19) is at the end of [decisions](decisions.md).
-- What a merge carries and who wins a conflict (main wins, `:seon.merge/kept`, or an explicit `:seon.task/carry`), with D6's names and D7's task config.
-- Changed-since: a Datahike tree diff by node address, or a `:seon.tx/changed` stamp? Prototype the tree diff first (task `seon.merge/program-cost-follows-what-changed`).
-- No progress: does a byte-identical repeated reply end the run (``jolt/dry-run`` builds `:no-progress`), or is it only recorded?
-- Where each fork lives: the fork repos named in `.gitmodules` lack the newest pinned commits (they exist only in the main tree's submodule clones); self-contained plans the homes.
+- Delete jolt/evaluations, jolt/acts-by-second-move and jolt/flow-lab (carried forward or superseded; notes/branch-merit-2026-10-26.md); carry or delete examples, wiki, unitflake, one-content-keyed-derivation.
+- The repeat rule was deleted for its causes; confirm, or bring back a bound beyond the turn cap.
 
 ## THE PLAN
 
 The destination is **E: a request worked design → implement → merge by Seon agents, end to end, measured as turns to green.** In order:
 
-1. **The agent loop** (design on ``jolt/agent-loop``): sessions that continue across messages, every agent parked and woken by a message, one send for everyone (the user is an agent), resume from any commit, the screen as diffs.
-2. **Requests through the pipeline, measured:** the five fit requests through design, implement and merge, thinking off first; the debug page shows each turn.
-3. **Root is main, one system:** root's own work as tasks run on main's current commit; root as an agent on main.
-4. **Self-modifying environment:** agents and the user improve their own views and context (the `ctx` idea), docs pulled from the db at levels of detail, dogfooded through MCP.
+1. **The agent loop** (done but resume): sessions continue across runs, every agent parks and wakes on a message, one delivery (main-first), the stage boundary as a message. Left: resume from any commit (rebuild ctx at that t).
+2. **Requests through the pipeline, measured** (in progress): 2 of 5 requests merged end to end on 2026-10-26; the ten-request rerun measures each change.
+3. **One derivation** (approved, building in slices): ctx → view → parts → html / ai → diff; changes arrive as inbox messages carrying ctx-shaped diffs; an eval's answer carries its ripple effects; the request is a pure function of the db at the session's t's.
+4. **Root is main, one system:** root's work as tasks, root as an agent with its ctx and page; the zygote and one process mode for every forking process.
+5. **Self-modifying environment:** agents change their own ctx (swap!), renders and layout, seen at once; docs in the db at levels.
 
 Beside E, the missing and partial rows of `docs/parity.md` are the parity backlog; the task files hold the rest of the work.
