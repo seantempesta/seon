@@ -736,13 +736,15 @@
   namespace it holds (the binary's own; test/ is imported but not built in), every var it
   defines bound there? A form imported into a namespace loaded earlier (a test namespace
   loaded at boot, then a re-import adding a deftest) defines a var this process does not
-  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx). Each var is found by its
+  name (find-var), as a deftype's type is: Jolt binds it without interning it (ns-interns, as
+  Clojure's, lists no type)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
   [db f]
   (boolean (and (:form/source (d/entity db (:e f)))
-                (when-let [n (find-ns (:ns f))]
-                  (every? (fn [[k s]] (or (not= :var k) (some-> (get (ns-interns n) (symbol (name s))) bound?)))
-                          (:defines f))))))
+                (find-ns (:ns f))
+                (every? (fn [[k s]] (or (not= :var k) (some-> (find-var s) bound?)))
+                        (:defines f)))))
 
 (defn- requiring
   "The form entities of namespace nsym and of every namespace a form requires it from: where

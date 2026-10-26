@@ -945,13 +945,14 @@
         db (d/db-with db (vec (for [i (range 5)] {:seon.section/address (anchors i) :seon.section/heading (str "S" i)
                                                   :seon.section/lead (str "Section " i " says one thing. And more.")
                                                   :seon.section/text (str "Section " i " says one thing. And more.")})))
+        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
+        ;; held before the task cites them: a name in a namespace the program does not hold is not cited
+        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
         ;; a function beside the plan by meaning, and a schema key its plan names
-        ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss)
-        db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
         db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
                           {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
@@ -1144,7 +1145,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c"
                                               :seon.task/plan "Reproduce: (let [x (demo-test/f-test)] (demo/f (clojure.string/trim x))) answers result/e1."}]))]
     ;; the cited set is the task's references (ctx's :cited joins them by :var/name)
-    (is (= #{'demo/f} (:seon.task/references (d/pull db [:seon.task/references] [:seon.task/id "demo/c"]))))))
+    (is (= #{'demo/f} (set (:seon.task/references (d/pull db [:seon.task/references] [:seon.task/id "demo/c"])))))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
