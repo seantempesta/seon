@@ -279,7 +279,7 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            calls (vec (map-indexed (fn [i {:keys [id code prose]}]
+            calls (vec (map-indexed (fn [i {:keys [id code prose ns]}]
                                       (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
                                             shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))]
                                         {:id id :code code :prose shown
@@ -288,6 +288,8 @@
                                                                        shown (assoc :prose shown)
                                                                        content (assoc :content content)
                                                                        (not (str/blank? prose)) (assoc :call-prose prose)
+                                                                       ;; the call's own namespace (nREPL's eval :ns): its forms there, the REPL's own kept
+                                                                       ns (assoc "ns" ns :call-ns ns)
                                                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))}))
                                     (:tool-calls c)))
             rs (mapv :response calls)

@@ -96,6 +96,8 @@
               ;; prose first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
                            :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}
+                                                  ;; nREPL's eval :ns, as an editor sends a file's namespace with each form
+                                                  :ns {:type "string" :description "The namespace these forms are evaluated in, when not your own (a test namespace, for a deftest); your REPL stays in its own."}
                                                   :code {:type "string" :description "Clojure forms"})
                            :required ["prose" "code"]}}})
 
@@ -108,9 +110,9 @@
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
-    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code prose]}]
+    (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code prose ns]}]
                                                 ;; the call's arguments as it sent them, prose first
-                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (if prose (array-map :prose prose :code code) {:code code}))}})
+                                                {:id id :type "function" :function {:name "eval" :arguments (json/write-str (cond-> (array-map) prose (assoc :prose prose) ns (assoc :ns ns) true (assoc :code code)))}})
                                               tool-calls))
     tool-call-id (assoc :tool_call_id tool-call-id)))
 
@@ -146,14 +148,16 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- call-code
-  "An eval call's code and prose: the `code` and `prose` of its JSON arguments, or the arguments
+  "An eval call's code, prose and namespace: the `code`, `prose` and `ns` of its JSON arguments, or the arguments
   as they came when they are not that JSON (a reply cut mid-call): the reader shows what they hold."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:prose {:optional true} :string]]]}
+  {:malli/schema [:=> [:cat [:maybe :string]] [:map [:code :string] [:prose {:optional true} :string] [:ns {:optional true} :string]]]}
   [arguments]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))]
     (if (and (map? j) (string? (get j "code")))
-      (cond-> {:code (get j "code")} (string? (get j "prose")) (assoc :prose (get j "prose")))
+      (cond-> {:code (get j "code")}
+        (string? (get j "prose")) (assoc :prose (get j "prose"))
+        (and (string? (get j "ns")) (not (str/blank? (get j "ns")))) (assoc :ns (get j "ns")))
       {:code a})))
 
 (defn reply-of

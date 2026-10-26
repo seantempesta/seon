@@ -69,7 +69,15 @@
       (is (= ["eval"] (mapv #(get-in % [:function :name]) (:tools b))))
       (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
              (:tool_calls (second (:messages b)))))
-      (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2)))))
+      (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2))))
+  (testing "a call's namespace (nREPL's eval :ns) is read from its arguments and sent back as it came"
+    (let [args "{\"prose\":\"p\",\"ns\":\"ns.x-test\",\"code\":\"(deftest t)\"}"
+          c (model/parse-reply (str "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":" (pr-str args) "}}]},\"finish_reason\":\"tool_calls\"}]}") 1.0 64)
+          call (first (:tool-calls c))
+          b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64}
+                                {:messages [{:role "assistant" :content "" :tool-calls [call]}] :task "t/x" :turn 1})]
+      (is (= "ns.x-test" (:ns call)) (pr-str c))
+      (is (= args (get-in (first (:tool_calls (first (:messages b)))) [:function :arguments])) "the same bytes"))))
   (testing "a streamed reply's call pieces join by index into each call's code, in order"
     (let [c (model/parse-reply
              (apply str (map chunk-line
@@ -158,7 +166,7 @@
                                           {:role "tool" :tool-call-id "c1" :content "{:handle result/e1, :value 1}"}]
                                :task "t/x" :turn 1})]
     (is (= "auto" (:tool_choice b)))
-    (is (= [:prose :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then code: the model states its intent before the code")
+    (is (= [:prose :ns :code] (keys (get-in b [:tools 0 :function :parameters :properties]))) "prose first, then its namespace, then code: the model states its intent before the code")
     (is (not (str/includes? (pr-str (:tools b)) ";;")) "no ;; in the tool")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
             :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
