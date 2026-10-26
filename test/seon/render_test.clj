@@ -1,11 +1,11 @@
 (ns seon.render-test
-  "Renders (session W2): selection (override key, schema-declared, printer), root's AI face,
+  "Renders (session W2): selection (override key, schema-declared, printer), root's context,
   and the render proc's step as a plain function: inputs before render, bytes before
   send, a new agent appended, a retired one removed, keyframes composed from what was
   retained. Run: bin/test seon.render-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
-            [seon.render :as r] [seon.render.ui :as ui] [seon.render.ai :as ai] [seon.render.proc :as p]
+            [seon.render :as r] [seon.render.ui :as ui] [seon.render.system :as system] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program] [seon.web] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
 
@@ -19,7 +19,7 @@
   (testing "the value's own override key wins: data as is"
     (is (= [:b "mine"] (r/html {:a 1 :seon.render/html [:b "mine"]} {:schema :seon.task/task}))))
   (testing "the schema's declared render, named by the producer"
-    (is (= 'seon.render.ui/task-box (r/declared :seon.task/task :html)))
+    (is (= 'seon.render.ui/task-box (r/declared :seon.task/task)))
     (is (str/includes? (h/html (r/html task {:schema :seon.task/task})) "task · calc/add")))
   (testing "a pulled entity's schema is the one its identity attribute names"
     (is (= :seon.run/run (r/schema-of {:seon.run/id "x#1"} nil)))
@@ -28,9 +28,14 @@
   (testing "no declaration: the one value printer's hiccup"
     (let [out (r/html {:k [1 2 3]} {})]
       (is (= "seon-data-panel" (get-in out [1 :class])))))
-  (testing "the AI face of an undeclared value is the printer's text"
-    (is (= "{:k 1}" (r/ai {:k 1} {})))
-    (is (vector? (r/html {:k 1} {})))))
+  (testing "one face: the page and the model read the same hiccup; no :ai face is left"
+    (is (vector? (r/html {:k 1} {})))
+    (is (nil? (resolve 'seon.render/ai)))
+    (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
+
+(defn- context-text
+  "Root's context as the render proc prints it: the system's value by the one printer at budget."
+  [s budget] (seon.print/print-value (system/system-data s) {:budget budget}))
 
 (def ^:private sys
   {:agents {:a1 {:status :idle :tests {:pass 1 :fail 1 :error 0 :reports [{:type :fail :var 'agent.a1/c}]}}
@@ -45,8 +50,8 @@
                         :red {:n 0 :rows []}}}})
 
 (deftest root-context
-  (let [data (ai/system-data sys)
-        text (r/ai sys {:schema :seon.render/system :budget 700})
+  (let [data (system/system-data sys)
+        text (:text (context-text sys 700))
         entries (for [[_ es] (:problems data) e es] e)]
     (testing "problems first: root's defect, then what main recorded (one producer); no proc is pinged"
       (is (= [:seon-root :problems] (take 2 (keys data))))
@@ -64,7 +69,7 @@
     (testing "the live view is not a second producer: an agent's own entry makes no problem entry"
       (is (not-any? #(= :a1 (:defect-in %)) entries)))
     (testing "over the budget: the printer's cut, which says what it left; nothing cut before it"
-      (let [small (ai/system sys {:budget 40})]
+      (let [small (context-text sys 40)]
         (is (:truncated? small))
         (is (<= (seon.print.select/estimate (:text small)) 40))))))
 
@@ -103,8 +108,8 @@
         s (assoc sys :tasks {"t/x0" {}} :runs runs :task-rows {}
                  :root-errors [{:pid :render :message (long-text 300)}] :root-errors-total 4
                  :events (vec (for [i (range 30)] {:type :ready :agent :a1 :at-ms i})))
-        data (ai/system-data s)
-        out (ai/system s {:budget 2000})]
+        data (system/system-data s)
+        out (context-text s 2000)]
     (testing "every ended run, its long reason whole, and the form that reads them all"
       (is (= 12 (count (get-in data [:work :ended]))))
       (is (= (long-text 200) (:reason (first (get-in data [:work :ended])))))
@@ -122,7 +127,7 @@
 (deftest root-context-groups-blocked-tasks-by-what-blocks-them
   (let [rows {"t/a" {:state :blocked :blocked-by #{"t/root"}} "t/b" {:state :blocked :blocked-by #{"t/root" "t/other"}}
               "t/c" {:state :blocked :blocked-by #{"t/root"}} "t/d" {:state :done :blocked-by #{}}}
-        data (ai/system-data (assoc sys :tasks {"t/a" {}} :task-rows rows))]
+        data (system/system-data (assoc sys :tasks {"t/a" {}} :task-rows rows))]
     (is (= [["t/root" 3] ["t/other" 1]] (mapv vec (get-in data [:work :waiting-on]))) "each blocker once, the one holding most first")
     (is (not (str/includes? (pr-str data) "t/a")) "not one entry per blocked task")))
 
@@ -132,7 +137,7 @@
   (is (nil? (resolve 'seon.render.ui/clip)))
   (is (nil? (resolve 'seon.render.ui/line)))
   (testing "root's context sizes tokens by the printer's own measure (seon.print.select/estimate), no alias of it"
-    (is (nil? (resolve 'seon.render.ai/tokens)))))
+    (is (nil? (resolve 'seon.render.system/tokens)))))
 
 ;; ---- no beat: health is what flows (owner, 2026-10-21) --------------------------------------
 
@@ -151,12 +156,11 @@
       (is (= 3 (count h))))))
 
 (deftest the-load-tiles-are-data-the-context-reads
-  (let [tiles (ui/load-tiles {:tx-count 4} {:status :down :pid 7} {:datoms 100})
-        text (r/ai sys {:schema :seon.render/system :budget 2000})]
+  (let [tiles (ui/load-tiles {:tx-count 4} {:status :down :pid 7} {:datoms 100})]
     (is (= ["t-writer" "t-fork-server" "t-main"] (mapv :id tiles)))
     (is (= "down" (second (:pill (second tiles)))))
     (testing "root's context holds them, one line each"
-      (let [tiles (get-in (ai/system-data sys) [:load :tiles])]
+      (let [tiles (get-in (system/system-data sys) [:load :tiles])]
         (is (some #(str/starts-with? % "writer 4 txs, batch") tiles))
         (is (some #(str/starts-with? % "fork server up – ms fork p50, forked –") tiles))))))
 
@@ -171,16 +175,12 @@
   (testing "an error map's schema is its variant: the base's render, whatever the variant"
     (is (= :seon.merge/behind (r/schema-of behind nil)))
     (is (= :seon.error/base (r/schema-of {:seon.error/type :no.such/variant :seon.error/operation 'a/b :seon.error/message "m"} nil))))
-  (let [text (r/ai behind {:handle 'result/h4})
-        data (ai/error-data behind)]
-    (testing "the message first, as a REPL answers; the fix; then its variant, where, and its own keys"
-      (is (= [:message :fix :type :operation :also] (keys data)))
-      (is (= {:tx 812 :behind 3} (:also data)))
+  (let [text (seon.print/text behind)]
+    (testing "as a REPL answers it, by the one printer: its message, fix, variant and its own keys"
       (is (str/includes? text "main changed 3 key(s)"))
       (is (str/includes? text "A merge task merges main into the branch (my.branch/merge-main!)"))
       (is (str/includes? text ":seon.merge/behind"))
-      (is (str/includes? text ":behind 3"))
-      (is (str/includes? text ":as-data (with-meta result/h4 nil)"))))
+      (is (str/includes? text ":behind 3"))))
   (testing "the page shows the same facts"
     (let [html (h/html (r/html behind {}))]
       (is (str/includes? html "main changed 3 key(s)"))
@@ -195,35 +195,22 @@
          :seon.task/evidence {:from "calc/add#2" :conflicts [] :unmerged [] :red ['app.proofs/add-0-test] :problem "red"}))
 
 (deftest a-task-reads-its-state-plan-proofs-and-failure
-  (testing "a key present in a map names no render at the REPL: it prints as the data it is"
-    (is (str/starts-with? (:text (r/printed failed-task 'result/h2)) "#:seon.task{")))
-  (testing "a task its producer names (seon.task/task's metadata) reads at the REPL by its declared render"
-    (let [text (:text (r/printed (with-meta failed-task {:seon.render/schema :seon.task/task}) 'result/h2))
-          data (ai/task-data failed-task)]
-      (is (= [:task :kind :execution :needs :branch :failure :plan :proofs :evidence] (take 9 (keys data))) "its id, state and needs, what is wrong, the plan, then the rest")
-      (is (= ["calc/sub"] (:needs data)))
-      (is (= "add cannot be total over longs" (get-in data [:failure :reason])))
-      (is (= 12 (count (:proofs data))) "every proof")
-      (is (str/includes? text "add cannot be total over longs"))
-      (is (str/includes? text ":from \"calc/add#2\""))
-      (testing "a long plan is the printer's cut, reading its rest through the form that makes the value again"
-        (let [cut (r/ai failed-task {:schema :seon.task/task :handle 'result/h2 :budget 300})]
-          (is (re-find #"\(seon.render.ai/task-data result/h2\)" cut) cut)))))
   (testing "the page's task box shows the failure too"
     (let [html (h/html (r/html failed-task {:schema :seon.task/task}))]
       (is (str/includes? html "failed in calc/add#2: add cannot be total over longs")))))
 
 (deftest a-run-reads-as-its-data
-  (is (= "{:run \"calc/add#1\", :status :running, :agent :a3, :turn 2, :tokens 1840}"
-         (r/ai {:seon.run/id "calc/add#1" :seon.run/status :running :seon.run/agent :a3 :seon.run/turns 2 :seon.run/tokens 1840} {})))
+  ;; root's context's work lists each run by run-data
+  (is (= {:run "calc/add#1" :status :running :agent :a3 :turn 2 :tokens 1840}
+         (system/run-data {:seon.run/id "calc/add#1" :seon.run/status :running :seon.run/agent :a3 :seon.run/turns 2 :seon.run/tokens 1840})))
   (let [a {:seon.run/id "calc/add#2" :seon.run/status :failed :seon.run/outcome :merge-failed
            :seon.run/reason (str "merge refused: " (:seon.error/message behind))
            :seon.run/conflicts [{:key "var app.calc/add" :kind :var :base "a" :ours "b" :theirs "c"}]
            :seon.run/unmerged ["var app.calc/add"]}
-        data (ai/run-data a)]
+        data (system/run-data a)]
     (is (= [:run :status :outcome :reason :conflicts :unmerged] (keys data)))
     (is (= ["var app.calc/add"] (:unmerged data)) "what its end carried, whole")
-    (is (str/includes? (r/ai a {:handle '(get atts "calc/add#2")}) "merge refused: main changed 3 key(s)"))))
+    (is (= "merge refused: main changed 3 key(s) since the branch's merge base: merge main into the branch first" (:reason data)))))
 
 (defn- row
   "A problem row as seon.problems/report makes it: every row's members, then its class's."
@@ -231,7 +218,7 @@
 
 (deftest every-problem-class-reads-what-it-is-about-and-why
   ;; rows as seon.problems/report makes them, one per class that had no line of its own
-  (let [data #(ai/problem-data (row (assoc %2 :class %1)))]
+  (let [data #(system/problem-data (row (assoc %2 :class %1)))]
     (is (= {:class :task-conflict :about ["calc/add" "calc/add#3" "plan"] :why {:base "Make add." :ours "Make add total." :theirs "Make add pass."}}
            (data :task-conflict {:task "calc/add" :run "calc/add#3" :attr :plan :open? true
                                  :evidence {:task "calc/add" :attr :plan :base "Make add." :ours "Make add total." :theirs "Make add pass." :from "calc/add#3"}})))
@@ -244,19 +231,14 @@
            (data :red {:task "calc/add" :run "calc/add#1" :test 'app.proofs/add-test :outcome :tests-red})))
     (is (= {:class :platform :count 4 :why "Datahike transact refused" :answered-by ["calc/fix-store"]}
            (data :platform {:signature "s" :message "Datahike transact refused" :count 4 :answered-by ["calc/fix-store"]}))))
-  (testing "the whole report at root's REPL: by class, each row by its render, closed rows marked"
+  (testing "the whole report on the page: by class, each row by its render"
     (let [rep (with-meta {:t 90 :classes {:failed {:n 1 :rows [(row {:task "calc/add" :reason "not total" :open? true})]}
                                           :merge {:n 1 :rows [(row {:task "calc/sub" :run "calc/sub#1" :error behind :open? false})]}
                                           :red {:n 0 :rows []}}}
                 {:seon.render/schema :seon.problems/report})
-          data (ai/report-data rep)
-          text (:text (r/printed rep 'result/h1))]
-      (is (= 90 (:problems-on-main-at-t data)))
-      (is (= [:failed :merge] (keys (:classes data))) "a class with rows; an empty one left out")
-      (is (= true (get-in data [:classes :merge :rows 0 :closed])))
-      (is (not (contains? (get-in data [:classes :merge :rows 0]) :class)) "a row under its class does not say it again")
-      (is (str/includes? text "not total"))
-      (is (str/includes? text ":as-data (with-meta result/h1 nil)")))))
+          html (h/html (r/html rep {}))]
+      (is (str/includes? html "not total"))
+      (is (str/includes? html "calc/sub#1")))))
 
 ;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
 
@@ -330,17 +312,15 @@
 
 (deftest the-printer-renders-each-nested-value-by-its-own-render
   ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
-  ;; schema declares a render shows as that render, one line, in its place: the run's :ai
-  ;; render in the text, a call of its :html render in the hiccup (expanded by the serializer);
-  ;; the printed value itself is the printer's, never its own render again
+  ;; schema declares a render shows as that render, one line, in its place: a call of its render
+  ;; in the hiccup (expanded by the serializer); the printed value itself is the printer's, never
+  ;; its own render again
   (let [a {:seon.run/id "calc/square#1" :seon.run/agent :a4 :seon.run/status :done :seon.run/outcome :green}
         v {:newest a :count 3}]
-    (is (re-find #":newest\s+\{:run \"calc/square#1\"" (r/ai v {})) (str "the text: the run's own render, in its place: " (r/ai v {})))
     (let [html (h/html (r/html v {}))]
       (is (str/includes? html "<tr class=\"at s-done o-green\">") "the hiccup: the run's own render")
       (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
-    (is (= "{:k [1 2 3]}" (r/ai {:k [1 2 3]} {})) "a value with no render of its own prints as data")
-    (is (str/includes? (r/ai a {}) "calc/square#1") "the value itself by its render, as before")))
+    (is (str/includes? (h/html (r/html a {})) "calc/square#1") "the value itself by its render, as before")))
 
 ;; ---- the walk (task seon.render/walk): an entity and the units its schema declares ----
 
@@ -429,15 +409,9 @@
         (is (= attrs (set (keys named))) "each is named by an entity schema")
         (is (every? #{1} (vals named)) (pr-str named))))))
 
-(defn boom
-  "An :ai render that throws: a page part that draws its :ai face fails on it."
-  [_ _] (throw (ex-info "a page part drew its :ai face" {})))
-
 (deftest a-page-part-renders-only-its-view
-  ;; a page part is drawn by its :html render alone: its :ai face is the model's, never made for
-  ;; the page (notes/audit-2026-10-24.md correction 1; seon.render/shown drew both every pass)
   (let [nd {:seon.render/kind :value :seon.render/eid 7 :seon.render/schema :seon.task/task
-            :seon.render/value (assoc task :seon.render/ai `boom)}
+            :seon.render/value task}
         db (walked-db)
         t (eid-of db [:seon.task/id "demo/f"])]
     (is (str/includes? (h/html (ui/tile nd {:unit "t-7"})) "task · calc/add") "a value's tile, by its view")
@@ -1049,7 +1023,9 @@
   (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
         html (h/html (r/html {:screen {:seon.render/html page} :n 1} {}))]
     (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
-    (is (str/includes? (r/ai {:screen {:seon.render/html page} :n 1} {}) "[:section [:h2 \"agents\"]") "the model reads it as the data it is")))
+    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render #'r/nested-html}))
+                       "[:section [:h2 \"agents\"]")
+        "a value's text names its hiccup as the data it is")))
 
 (deftest a-cut-opens-its-path-in-the-row
   ;; the value view's step 3: a cut on the page is a button naming the form that reads its rest; the
@@ -1143,17 +1119,16 @@
     (is (= parts (r/view c (seon.context/renders branch))) "pure: the same ctx, the same parts")))
 
 (deftest a-parts-faces-are-one-selection
-  ;; one selection of the one printer serves both faces, so the page and the model cut alike; a
-  ;; schema's declared face overrides that face alone
+  ;; a part is one hiccup, the page's and the model's: the printer's under its budget, cut where it
+  ;; says, else the render its schema declares
   (let [big {:plan (apply str (repeat 400 "a long plan sentence. ")) :n 1}
-        {:keys [html text]} (r/part-faces {:key [:task] :value big})
+        {:keys [html]} (r/part-faces {:key [:task] :value big})
         err (seon.contract/error :seon.render/not-callable `ui/root "boom" {:seon.render/fn 'x})
         fe (r/part-faces {:key [:eval "e9"] :value err})]
-    (is (str/includes? text "a long plan sentence.") text)
-    (is (re-find #"[0-9,]+ (chars|characters)|…" text) "the text face is cut, and says so")
-    (is (str/includes? (h/html html) "seon-print-elision") "the page's face is cut at the same place")
-    (is (= (r/ai err {}) (:text fe)) "a declared :ai render overrides the text face")
-    (is (= (h/html (r/html err {})) (h/html (:html fe))) "and its :html render the page's")))
+    (is (str/includes? (h/html html) "a long plan sentence."))
+    (is (str/includes? (h/html html) "seon-print-elision") "the printer's cut, which says so")
+    (is (= #{:html :inline} (set (keys fe))) "one face and its one line, no text face")
+    (is (= (h/html (r/html err {})) (h/html (:html fe))) "a declared render draws the part")))
 
 (deftest a-view-made-again-draws-from-the-memo
   ;; the review of slice 2: view makes new part values on every call, so the memo keys on the ctx
@@ -1174,7 +1149,7 @@
         [m1 out1] (r/drawn {} p)
         [m2 out2] (r/drawn m1 p)
         [_ out3] (r/drawn m1 (update p :value #(into {} %)))
-        [_ out4] (r/drawn (update-in m1 [[:run] 0] assoc 2 (fn [& _])) p)]
+        [_ out4] (r/drawn (update-in m1 [[:run] 0] assoc 1 (fn [& _])) p)]
     (is (identical? out1 out2) "the identical value: the held faces")
     (is (not (identical? out1 out3)) "an equal value that is a new object draws again")
     (is (= out1 out3))

@@ -418,7 +418,7 @@
   [r fold] (reduce (fn [r [k h]] (assoc r k (list k h))) r fold))
 
 (defn eval-messages
-  "An eval's part of the conversation (the :seon.render/ai render of :seon.db/eval-fact) as
+  "An eval's part of the conversation as
   provider-neutral messages: a model's eval (its record names the provider's call id) is its
   assistant message, the reply's prose and reasoning as returned with the eval call (:call, the
   call's place in its reply: the provider's format folds a reply's calls into one message),
@@ -451,19 +451,11 @@
       [{:role "user" :content (str "{:by " (pr-str by) " :code " (pr-str code) " :response " text "}")}])))
 
 (defn message-messages
-  "A message's part of the conversation (the :seon.render/ai render of :seon.message/fact): one
+  "A message's part of the conversation: one
   user message {:from :body}."
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
   [{:seon.message/keys [from body]} _]
   [{:role "user" :content (print/text {:from from :body body} (:context print/budgets))}])
-
-(defn- ai-messages
-  "Record v's part of the conversation: its schema k's declared :seon.render/ai render
-  (seon.render/render-of), with opts (an eval's: :seen)."
-  {:malli/schema [:function [:=> [:cat :map :qualified-keyword] [:vector :seon.model/message]]
-                  [:=> [:cat :map :qualified-keyword :map] [:vector :seon.model/message]]]}
-  ([v k] (ai-messages v k {}))
-  ([v k opts] ((render/render-of v :ai k) v opts)))
 
 (defn- ref-of
   "The ref a conversation's record is sent as (:seon.turn/sent): an eval's or a message's id."
@@ -525,28 +517,28 @@
                   c (cond-> (update c :ids conj id) tx (assoc :tx tx))]
               (cond
                 (get-in c [:parts id]) (update c :ids pop)
-                (= :message kind) (let [ms (ai-messages v k)] (assoc-in c [:parts id] (part [:message id] ms ms)))
+                (= :message kind) (let [ms (message-messages v {})] (assoc-in c [:parts id] (part [:message id] ms ms)))
                 :else
                 (let [rec (:seon.eval/record v) r (:response rec)
                       ;; a screen eval of the conversation (a record: it has a tx; an outside read's are not)
                       screen? (and tx (= "screen" (:seon.eval/by v)) (contains? r :value))
                       base (when screen? (get-in c [:screens (:code rec)]))
                       c (cond-> c screen? (assoc-in [:screens (:code rec)] {:handle (:handle r) :value (:value r)}))
-                      plain (when base (ai-messages v k))
+                      plain (when base (eval-messages v {}))
                       ;; the agent's eval of code an eval of the run ran before, answered the same: that one's handle
                       answer (hash (assoc (dissoc r :handle :ms :ticks :bytes) :printed (:printed rec)))
                       same (when-not (= "screen" (:seon.eval/by v))
                              (when-let [[h a] (get-in c [:codes (:code rec)])] (when (= a answer) h)))
                       c (cond-> c (not (or same (= "screen" (:seon.eval/by v)))) (assoc-in [:codes (:code rec)] [(:handle r) answer]))]
                   (if-let [d (when base
-                               (let [d (ai-messages (as-diff v base) k)]
+                               (let [d (eval-messages (as-diff v base) {})]
                                  ;; a diff longer than the value (a small one unchanged) is not sent
                                  (when (< (cost d) (cost plain)) d)))]
                     ;; a screen eval: its diff from the previous one of its form, whole while that one is not sent whole
-                    (assoc-in c [:parts id] (assoc (part [:eval id {:since (:handle base)}] d (ai-messages v k {:collapsed true}))
+                    (assoc-in c [:parts id] (assoc (part [:eval id {:since (:handle base)}] d (eval-messages v {:collapsed true}))
                                                    :fold {:since (:handle base)} :plain plain))
                   (if same
-                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (ai-messages v k {:same-as same}) (ai-messages v k {:collapsed true})))
+                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (eval-messages v {:same-as same}) (eval-messages v {:collapsed true})))
                 (let [has? (and (contains? r :value) (coll? (:value r)))
                       ;; an equal earlier value stands for this one (seen is by identity)
                       x (when has? (get canon [(type (:value r)) (:value r)] (:value r)))
@@ -554,9 +546,9 @@
                       fold (if (:printed rec) {} (fold-of r seen canon))]
                   (-> c
                       (assoc-in [:parts id] (cond-> (part (cond-> [:eval id] (seq fold) (conj fold))
-                                                          (ai-messages v k {:fold fold}) (ai-messages v k {:collapsed true}))
+                                                          (eval-messages v {:fold fold}) (eval-messages v {:collapsed true}))
                                               ;; and as it reads unfolded: sent so while what it folds to is not shown whole
-                                              (seq fold) (assoc :fold fold :plain (ai-messages v k))))
+                                              (seq fold) (assoc :fold fold :plain (eval-messages v {}))))
                       (assoc :seen (if (:printed rec) seen (print/seen seen r))
                              :canon (cond-> canon has? (assoc [(type x) x] x)))))))))))
           (or cache {:ids [] :parts {} :seen nil :canon {} :screens {} :codes {}}) items))
@@ -651,7 +643,7 @@
   basis b on db (opts :db :basis :block :help :run, and :help-ref :run-ref, the records those
   two texts render): the system prompt (system-text), the task story (opts :run, the run
   sections as its first turn was sent them, else block's), the conversation (each record of the
-  run, `records`, by its own :seon.render/ai render, in tx order, each printed once (printed-run,
+  run, `records`, by eval-messages or message-messages, in tx order, each printed once (printed-run,
   opts :printed the run's earlier requests' prints, answered again as :printed):
   the newest whole, older ones whole and then collapsed within the history budget, `kept`), then
   the screen: the screen evals b names, the newest records, each its diff from the previous one of
@@ -665,8 +657,7 @@
   the n records the budget left out.
   :sent is nil for a read with no screen evals (an outside agent's): its last message is the
   block's turn sections, no record; every model turn has screen evals.
-  Called by the turn, not declared as the agent fact's :seon.render/ai until the render cache
-  makes it once per change (design section 10, step 4)."
+  Called by the turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help run help-ref run-ref printed]}]
   (let [model? (and a (= :model (:origin basis)))
@@ -736,7 +727,7 @@
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), the task's run sections as of its t
-  (printed-story), an eval by its :seon.render/ai render with the fold its ref names (what it showed of an
+  (printed-story), an eval by eval-messages with the fold its ref names (what it showed of an
   earlier record, as the form that reads it there; a screen eval's {:since handle}, its diff from that
   one, `as-diff`) or collapsed ([:line id]), a message by its
   render, the history note by its count: what the request sent, the same bytes. No request is built again: the same records, rendered."
@@ -749,10 +740,10 @@
                    :task [{:role "user" :content (printed-story db x t)}]
                    ;; a screen eval sent as its diff names the one it was taken from (:since)
                    :eval (if-let [h (:since t)]
-                           (ai-messages (as-diff (ev x) {:handle h :value (get-in (ev (name h)) [:seon.eval/record :response :value])}) :seon.db/eval-fact)
-                           (ai-messages (ev x) :seon.db/eval-fact (cond (:same-as t) t (map? t) {:fold t} :else {})))
-                   :line (ai-messages (ev x) :seon.db/eval-fact {:collapsed true})
-                   :message (ai-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) :seon.message/fact)
+                           (eval-messages (as-diff (ev x) {:handle h :value (get-in (ev (name h)) [:seon.eval/record :response :value])}) {})
+                           (eval-messages (ev x) (cond (:same-as t) t (map? t) {:fold t} :else {})))
+                   :line (eval-messages (ev x) {:collapsed true})
+                   :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {})
                    :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
           refs)))
 
@@ -804,7 +795,7 @@
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
   the commit b names: the current-state block of its task with the observations b holds (with
   screen evals, the run's sections only: the turn's are theirs), and the messages, the agent's
-  request (`request`, its :seon.render/ai render; the run sections the first turn's, made again
+  request (`request`; the run sections the first turn's, made again
   from its own basis). The one maker of a context: the model's request is this, and so is
   every later reading of it. opts :printed, what the run's earlier requests printed (the cache
   `printed-run` answers, with the task story's text by its ref): only what is new is printed.

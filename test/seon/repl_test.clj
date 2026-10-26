@@ -371,10 +371,10 @@
   ;; when located cannot move a position into the form's terms (no :seon.error/at), the
   ;; request's own is printed rather than none; with :seon.error/at it is hidden
   (let [em (contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :jolt.error/line 4 :jolt.error/column 6})]
-    (is (str/includes? (render/ai em {}) ":jolt.error/line 4") (render/ai em {}))
-    (let [r (render/ai (assoc em :seon.error/at {:line 3 :column 6}) {})]
+    (is (str/includes? (h/html (render/html em {})) ":jolt.error/line 4") (h/html (render/html em {})))
+    (let [r (h/html (render/html (assoc em :seon.error/at {:line 3 :column 6}) {}))]
       (is (not (str/includes? r ":jolt.error/line")) r)
-      (is (str/includes? r ":at {:line 3, :column 6}") r))))
+      (is (str/includes? r "at line 3:6") r))))
 
 (def evals-run
   "How many times the ticks proof's form ran."

@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [seon.render :as render] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -225,12 +225,12 @@
                          (rpc-error id -32602 (str "no tool " n ": the tools are " (str/join ", " (map #(str "seon_" (name %)) (keys ops)))))
                          (let [a (answer sys (into {:op op} (for [[k v] (get params "arguments")] [(keyword k) v])))]
                            ;; what the model reads: the block itself, an eval's response as printed
-                           ;; under its handle, an error by its render, an op's answer that root's
+                           ;; under its handle, an error by the printer, an op's answer that root's
                            ;; REPL answers again (:again) under the reply budget with that form as its
                            ;; handle, anything else whole by the printer (nothing could re-ask it)
                            (result {"content" [{"type" "text" "text" (cond (and (= :context op) (:context a)) (:context a)
                                                                            (:response a) (:text (:response a))
-                                                                           (contract/error? a) (render/ai a {})
+                                                                           (contract/error? a) (print/text a)
                                                                            (:again (ops op)) (let [p (print/print-value a {:handle (:again (ops op))})] (or (:text p) (:seon.error/message p)))
                                                                            :else (print/text (vary-meta a assoc :seon.print/full true)))}]}))))
         (rpc-error id -32601 (str "no method " method ": this server answers initialize, ping, tools/list and tools/call"))))))
@@ -255,7 +255,7 @@
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
                                    (cond-> {:line line} (ex-data e) (assoc :data (sedn/encode (ex-data e)))))]
              (if mcp?
-               (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (render/ai d {})))
+               (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (print/text d)))
                (sedn/encode d)))))))
 
 (defn- serve-connection!

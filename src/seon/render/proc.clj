@@ -27,7 +27,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.system :as system] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
@@ -367,7 +367,7 @@
           (let [opts {:shown (get-in st [:shown view] (history-cap)) :view (ui/view-param view)
                       :agents (get-in st [:view :agents] {}) :recorded (:recorded st)}
                 {:seon.render/keys [value schema]} (:seon.render/root w)
-                own (when (render/declared schema :html)
+                own (when (render/declared schema)
                       (render/html value {:as :page :schema schema :page (assoc opts :walk w :dbs dbs :open (get-in st [:open view] #{}))}))]
             (if (and (map? own) (:seon.render/units own)) own (ui/page w opts))))))))
 
@@ -641,8 +641,9 @@
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
           sys (system-value st t0 now-ms)
-          ;; root's context: the system's AI face, also a unit of root's layout
-          ctx (render/ai sys {:schema :seon.render/system})
+          ;; root's context: the system as one value, printed once, also a unit of root's layout
+          ctx (let [r (print/print-value (system/system-data sys) {:budget (config/value :seon.config.render/root-context-budget)})]
+                (or (:text r) (:seon.error/message r)))
           sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)})
           st (assoc st :context (:context sys))
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
@@ -746,9 +747,9 @@
   {:malli/schema [:=> [:cat :map :seon.host/volatile [:vector :any] :any] :map]}
   [st o [_ v agent form] r]
   (let [err (:seon.error/message r)
-        ;; its text as the REPL answers it: the error's render, else the answer's (the
-        ;; stream's row cuts it to a cell, seon.render.ui/event-detail)
-        detail (if err (render/ai r {}) (:text (render/printed r nil)))]
+        ;; its text as the REPL answers it, by the one printer (the stream's row cuts it to a
+        ;; cell, seon.render.ui/event-detail)
+        detail (print/text r)]
     (when form
       (let [rec (repl/record-details (:main-db st) form (if err {:ex r} {:value r}) {} nil)]
         (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec nil)}}

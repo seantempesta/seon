@@ -265,7 +265,7 @@
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
-  ;; scrollback. Each eval renders its own part (its :seon.render/ai): the assistant message with
+  ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (notes/design-agent-view-2026-10-24.md §3, the request is a render)
   (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
@@ -448,7 +448,7 @@
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
-  ;; own :seon.render/ai (notes/design-agent-view-2026-10-24.md §3)
+  ;; own messages (seon.context/eval-messages; notes/design-agent-view-2026-10-24.md §3)
   (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))

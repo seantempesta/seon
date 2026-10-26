@@ -42,7 +42,7 @@
 
 (defn kname
   "A keyword's name with its namespace (:fx/model -> \"fx/model\"), \"–\" for nil, else as
-  a string: every render's word for an id, a status or a kind (render.ui and render.ai)."
+  a string: every render's word for an id, a status or a kind (render.ui and render.system)."
   {:malli/schema [:=> [:cat :any] :string]}
   [k] (cond (keyword? k) (subs (str k) 1) (nil? k) "–" :else (str k)))
 
@@ -147,7 +147,7 @@
 ;;; --- the load, as data -------------------------------------------------------------
 
 (defn load-tiles
-  "The writer, the fork server and main as data root's context prints, one line each (seon.render.ai),
+  "The writer, the fork server and main as data root's context prints, one line each (seon.render.system),
   every number from what its owner reports when it changes (the writer when it commits or flushes,
   the fork server when it forks, main when it commits)."
   {:malli/schema [:=> [:cat :map :map :map] [:vector :map]]}
@@ -234,15 +234,15 @@
     [:span (bytes-str b)]))
 
 (def error-shown
-  "The keys an error's renders show in their own lines (seon.render.ai/error, `error-box`);
-  every other key of the error map is printed after them, so both faces show the same facts.
+  "The keys an error's render shows in their own lines (`error-box`);
+  every other key of the error map is printed after them.
   :jolt.error/suggestions is the fix's own line (\"did you mean ...\"), and :seon.error/in and
   :seon.error/at the \"at line 3:6 of ns/f\" line, so none is printed twice."
   [:seon.error/type :seon.error/operation :seon.error/message :seon.error/fix :seon.error/problems :jolt.error/suggestions
    :seon.error/in :seon.error/at])
 
 (defn error-hidden
-  "The keys of error map e its renders do not print after the lines: `error-shown`, and the
+  "The keys of error map e its render does not print after the lines: `error-shown`, and the
   request-relative :jolt.error/ and :clojure.error/ line and column only when the form's own
   position (:seon.error/at) is stated, so a position is never dropped without its replacement."
   {:malli/schema [:=> [:cat :map] [:vector :keyword]]}
@@ -252,8 +252,9 @@
 
 (defn error-box
   "An error map (:seon.error/base, every variant): its message first, then its type and where
-  it was raised, the fix when it carries one, and every other key it carries by the printer
-  (`error-shown`: the AI face's lines and this one's are the same), its cut read through opts
+  it was raised, the form's own position (:seon.error/at, in :seon.error/in) when it has one, the
+  fix when it carries one, and every other key it carries by the printer
+  (`error-shown`), its cut read through opts
   :handle (a form that answers e) when it has one."
   {:malli/schema [:=> [:cat :seon.error/base :seon.render/opts] :any]}
   [e {:keys [handle]}]
@@ -262,6 +263,8 @@
          [:div {:class "err"}
       [:b (prose (:seon.error/message e) budget)]
       [:span {:class "muted"} (str " · " (kname (:seon.error/type e)) " in " (:seon.error/operation e))]
+      (when-let [{:keys [line column]} (:seon.error/at e)]
+        [:p {:class "muted"} (str "at line " line (when column (str ":" column)) (when-let [in (:seon.error/in e)] (str " of " in)))])
       (when (:seon.error/fix e) [:p {:class "fix"} "fix: " (prose (:seon.error/fix e) budget)])
       (for [{:keys [in expected value]} (:seon.error/problems e)]
         [:p {:class "muted"} "at " [:code (print/text in budget)] " expected " [:code (print/text expected budget)] ", got " [:code (:seon.print/code value)]])
@@ -589,7 +592,7 @@
 
 (defn problem-about
   "What problem row r is about, as words: its task, run, test and attribute, those it has (the
-  one wording seon.render.ai/problem-row and `problem-row` share)."
+  one wording seon.render.system/problem-data and `problem-row` share)."
   {:malli/schema [:=> [:cat :map] [:sequential :string]]}
   [r] (remove nil? [(:task r) (:run r) (some-> (:test r) str) (some-> (:attr r) kname)]))
 
@@ -679,7 +682,7 @@
 
 (defn- view
   "Node nd's value by its schema's :html render as as (seon.render/html: none declared, the one
-  printer): the one site a page part is drawn at. Its :ai face is the model's, never made here."
+  printer): the one site a page part is drawn at. The model reads the same hiccup."
   {:malli/schema [:=> [:cat :map :seon.render/as] :any]}
   [nd as] (render/html (:seon.render/value nd) {:as as :schema (:seon.render/schema nd)}))
 
