@@ -8,6 +8,12 @@ Agent view, for root. It applies the owner's two rulings of 2026-10-26 on top of
 1. **An eval's answer.** Any eval, `@ctx` included, is answered by the REPL with its value, printed by the one printer, as its tool message.
 2. **The UI as formal data, every turn.** The first turn of a session (or a resume) sends the page whole. Each later turn sends the page's diff (each part whose hiccup changed, by key) and ctx's diff (paths and values), split by §4's rule so each change is told once.
 
+**ctx's diff (root's ruling, 2026-10-26; ctx-atom builds it in seon.ctx):**
+- **A pure function, `(diff ctx0 ctx1)`.** ctx0 and ctx1 are the agent's record as of the turn's start t and its end t, each a build or patch of the db as of that t. Nothing accumulates in ctx.
+- **Where it compares.** The union of the `:changed` paths of the transactions in (t0, t1] bounds it. Those paths come from the db too: patch ctx0 by each of those transactions' datoms, from history, and union their `:changed`. So 4b's re-derivation of a recorded turn gets the same bytes. A path whose value is equal at both ends is dropped.
+- **Shape:** `{path [old new]}` in ctx's own shape. A member that went is `[old nil]`, and a new one is `[nil new]`.
+- **Cost proof:** calls linear in the changed paths, never in ctx.
+
 ## 2. The model's page: the same hiccup, drawn stateless and eager, meaning only
 The model reads the hiccup the user sees, drawn in a way that does not depend on any tab. The review found three ways today's renders would make it differ:
 - **Eager, not per-tab.** Today a fold's content is drawn only when a tab has opened it (render/ui.clj:785, 764, 622), and an eval's value is cut to the page's budget per tab (ui.clj:498-504). The model's draw opens every fold: one draw per part, with no tab state. The user's page folds that same hiccup with `<details>`, so what the page folds is in the data.
