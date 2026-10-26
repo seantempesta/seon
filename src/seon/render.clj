@@ -149,19 +149,16 @@
   [s m] (dissoc (if-let [ks (some-> s contract/properties :seon.render/keys)] (select-keys m ks) m) :db/id))
 
 (defn- own-attributes
-  "Entity node m without its joins' members (an entity, or a collection of them, under a join's
-  key): its own attributes, what a part drawn from m alone shows and is made from, so a member's
-  change leaves the part's memo as it was."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [m]
-  (let [entity? #(and (map? %) (contains? % :db/id))
-        join? #(or (entity? %) (and (map? %) (seq %) (every? entity? (vals %))))]
-    (into {} (remove (comp join? val)) m)))
+  "Entity node m without its joins' members (ks, the keys its pattern joins under: seon.ctx's
+  record names them, its :ix's :spec): its own attributes, what a part drawn from m alone shows
+  and is made from, so a member's change leaves the part's memo as it was."
+  {:malli/schema [:=> [:cat :map [:sequential :keyword]] :map]}
+  [m ks] (apply dissoc m ks))
 
 (defn- own-values
   "Entity node m's own attribute values (own-attributes), by key in order: a part's :from."
-  {:malli/schema [:=> [:cat :map] [:vector :any]]}
-  [m] (let [o (own-attributes m)] (mapv o (sort-by str (keys o)))))
+  {:malli/schema [:=> [:cat :map [:sequential :keyword]] [:vector :any]]}
+  [m ks] (let [o (own-attributes m ks)] (mapv o (sort-by str (keys o)))))
 
 (defn render-ctx
   "The agent page's layout (the declared html render of :seon.render/render-ctx, which an agent
@@ -189,11 +186,13 @@
   computed here: a part that reads the db carries its key (:read) and the db its render draws on,
   and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
   on (ids, the turns' bases but the newest's observation, the agent's own counters)."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
-  [{c :tree} fs]
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix {:optional true} :seon.ctx/ix]] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
+  [{c :tree ix :ix} fs]
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
+        ;; the keys the task's pattern joins under (its record's walk state names them)
+        tjoins (map :key (get-in ix [:spec (:db/id task) :joins]))
         ;; the newest turn of either origin (a model's, or an outside read's: each records what it
         ;; observed), in the order written, and the model turn before it (its last reply)
         ts (vec (sort-by t-of (vals (:turns run))))
@@ -206,7 +205,7 @@
         tk (when task ((:task-key fs) task))
         cks (when task (into (array-map) (for [v ((:cites fs) task)] [v ((:cited-key fs) v)])))]
     (-> []
-        (cond-> task (conj {:key [:task] :from (own-values task) :value (relevant-of :seon.task/task-fact (own-attributes task)) :region :task
+        (cond-> task (conj {:key [:task] :from (own-values task tjoins) :value (relevant-of :seon.task/task-fact (own-attributes task tjoins)) :region :task
                             :schema :seon.render/task-page :read tk :db (:db fs)})
                 task (into (for [[v ck] cks]
                              {:key [:task :cites v] :from [task] :value {:var v} :region :task :schema :seon.render/cited :read ck :db (:db fs)}))
@@ -286,17 +285,65 @@
   {:malli/schema [:=> [:cat :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
   [e via] (or (some identity-schemas (keys e)) (get entity-schemas via)))
 
-(defn units
-  "Entity schema s's joins as the attributes they read, in pull's syntax (a leading _ the reverse
-  ref): the joins of the pattern it declares (:seon.ctx/pattern, the one declaration of what its
-  entity's record holds)."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :keyword]]}
-  [s] (vec (for [c (some-> s contract/properties :seon.ctx/pattern) :when (map? c) [k _] c] (if (vector? k) (first k) k))))
-
-(defn- forward
+(defn forward
   "Attribute a read forward: a reverse ref (:ns/_name, pull's syntax) as its own attribute (:ns/name)."
   {:malli/schema [:=> [:cat :keyword] :keyword]}
   [a] (if (str/starts-with? (name a) "_") (keyword (namespace a) (str/replace-first (name a) "_" "")) a))
+
+(def ^:private join-options
+  "A join's options: Datahike's pull's (:as, :limit; :reverse, our fork's newest first) and ctx's one
+  beside them, :by, the identity attribute a symbol value names (forward: each value read as [by v];
+  reverse: the entities whose attribute holds this entity's by)."
+  #{:as :limit :reverse :by})
+
+(defn pattern
+  "Pull pattern p, what a record holds (docs/ctx.md#the-pattern: Datahike's syntax, '* the entity's
+  every attribute, else the attributes it names; {attr sub} a join, attr as [attr & options], sub
+  a pattern or an entity schema's name, its declared one), as the walk takes it: {:star? :attrs
+  :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
+  key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
+  reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no
+  vector, a clause that is no '*, attribute or join, a reverse attribute outside a join, an option
+  neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
+  pattern, an entity schema with none or whose pattern reaches itself."
+  {:malli/schema [:function [:=> [:cat :any] :seon.ctx/spec] [:=> [:cat :any [:set :qualified-keyword]] :seon.ctx/spec]]}
+  ([p] (pattern p #{}))
+  ([p seen]
+   (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'pattern why {:clause clause}))))
+         reverse? #(str/starts-with? (name %) "_")]
+     (when-not (vector? p) (bad "a pattern is a vector" p))
+     (doseq [x p] (cond (= '* x) nil
+                        (keyword? x) (when (reverse? x) (bad "a reverse attribute is read by a join: {:ns/_name pattern}" x))
+                        (map? x) nil
+                        :else (bad "a clause is '*, an attribute or a join" x)))
+     (let [joins (vec (for [clause p :when (map? clause) [k sub] clause]
+                        (let [[a & opts] (if (vector? k) k [k])
+                              o (if (even? (count opts)) (apply hash-map opts) (bad "a join's options are pairs" k))
+                              _ (when-let [x (first (remove join-options (keys o)))] (bad (str "no join option " x) k))
+                              _ (when-not (qualified-keyword? a) (bad "a join names an attribute" k))
+                              _ (when (and (:limit o) (not (:reverse o))) (bad "a window is newest first: :limit with :reverse true" k))
+                              lim (:limit o)]
+                          {:attr (forward a) :key (or (:as o) a) :rev? (reverse? a) :by (:by o) :reverse? (boolean (:reverse o))
+                           :limit (if (keyword? lim) (config/value lim) lim)
+                           :sub (cond (vector? sub) (pattern sub seen)
+                                      ;; an entity schema's name: the pattern it declares
+                                      (qualified-keyword? sub)
+                                      (cond (seen sub) (bad (str sub "'s pattern reaches itself") clause)
+                                            :else (pattern (or (some-> sub contract/properties :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
+                                                           (conj seen sub)))
+                                      :else (bad "a join's pattern is a vector, or an entity schema's name" clause))})))]
+       {:star? (boolean (some #{'*} p))
+        :attrs (into (into #{} (filter keyword?) p) (keep #(when (:rev? %) (:by %))) joins)
+        :joins joins}))))
+
+(defn units
+  "Entity schema s's joins as the attributes they read, in pull's syntax (a leading _ the reverse
+  ref): the joins of the pattern it declares (:seon.ctx/pattern, read by pattern)."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :keyword]]}
+  [s]
+  (if-let [p (some-> s contract/properties :seon.ctx/pattern)]
+    (mapv (fn [j] (if (:rev? j) (keyword (namespace (:attr j)) (str "_" (name (:attr j)))) (:attr j))) (:joins (pattern p #{s})))
+    []))
 
 (defn- relevant
   "Entity value m of schema, as a walk shows it: only the attributes its schema declares

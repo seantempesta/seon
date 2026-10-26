@@ -17,4 +17,15 @@
                                          [:held :map] [:swapped :map]]]
  ;; a pattern the walk cannot read (seon.ctx/spec): no vector, an option neither pull's nor :by, a
  ;; join naming no attribute or with no pattern; the clause it stopped at
- :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]}
+ :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]
+ ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, and its joins,
+ ;; each with its own pattern under :sub
+ :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]]
+                 [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
+                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:sub :map]]]]]
+ ;; the walk's state beside a record's map (seon.ctx/node): where each entity is held (its one path),
+ ;; every path it sits at ({:db/id e} at all but one), its pattern, what each join [e key] watches
+ ;; ([attribute value] keys, :watch) and its reverse (:watching); each a map checked shallowly: a contract
+ ;; checked on every call of the walk must not cost what the walk is proven not to (the record's size)
+ :seon.ctx/ix [:map [:held {:optional true} :map] [:at {:optional true} :map] [:spec {:optional true} :map]
+               [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]]}

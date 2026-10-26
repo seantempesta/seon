@@ -75,7 +75,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 19)
+    (case (.nextInt r 20)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -101,6 +101,11 @@
            [[:db/retractEntity [:var/name 'app.x/f1]]]
            [{:db/id "f" :form/id (str "app.x/f1-" i) :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
       18 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/references (symbol "app.x" (str "f" (.nextInt r 3)))]]
+      ;; the agent edits its pattern: a narrower window of its evals, or its schema's again
+      19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
+           (if (.nextBoolean r)
+             '[* {[:seon.eval/_agent :as :evals :limit 5 :reverse true] [*]} {[:seon.run/_agent :as :runs :limit 5 :reverse true] :seon.run/run-fact}]
+             (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact)))]]
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
@@ -203,6 +208,14 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db [:sequential :any] :keyword]]}
   [n] (patched-by n (fn [_] [{:form/id "app.x/c-2" :form/src "(defn c2 [] (f0 2))" :form/refs #{'app.x/f0}}])))
 
+(defn callers-of
+  "A new caller of a cited var already named by n forms, on a session of 10 evals."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db [:sequential :any] :keyword]]}
+  [n]
+  (let [db (:db-after (d/with (seeded 10) (vec (for [i (range n)] {:form/id (str "app.x/hot" i) :form/src (str "(defn hot" i " [] (f0 " i "))") :form/refs #{'app.x/f0}}))))
+        c (ctx/build db (aid db) :b) rep (d/with db [{:form/id "app.x/hot-new" :form/src "(defn hot-new [] (f0 0))" :form/refs #{'app.x/f0}}])]
+    [c (:db-after rep) (:tx-data rep) :b]))
+
 (defn plan-edited
   "The task's plan rewritten, on a session of n evals."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db [:sequential :any] :keyword]]}
@@ -211,7 +224,7 @@
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms and the window it
   ;; joins, whatever the session's size: a patch that walked the record, or a rebuild, grows with
-  ;; the session (measured: 24 calls, 815 KB, 200k ticks at 100 and at 1,000 evals; most of it the
+  ;; the session (measured: 25 calls, 815 KB, 200k ticks at 100 and at 1,000 evals; most of it the
   ;; window re-read and its map rebuilt in its order, newest first)
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-eval
@@ -220,9 +233,9 @@
                 "join's window re-read newest first (the window's members, by rseek, stopping at its limit), "
                 "the new member pulled whole and keyed by one seek, the oldest forgotten as it leaves, the "
                 "window's map built again in its order; every other member and join the same object; the "
-                "environment set. Twenty-four contracted calls, the window's datoms read once")
+                "environment set. Twenty-five contracted calls, the window's datoms read once")
      :growth :constant
-     :fixed {:calls 24 :bytes 850000}
+     :fixed {:calls 25 :bytes 850000}
      :sizes [100 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
@@ -311,8 +324,8 @@
 
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
-  ;; (measured at 100 and 1,000 evals: a redefinition 20 calls and 118 KB, a new caller 19 and
-  ;; 115 KB, a plan edit 8 and 99 KB), and each names the one path it changed
+  ;; (measured at 100 and 1,000 evals: a redefinition 21 calls and 118 KB, a new caller 20 and
+  ;; 127 KB, a plan edit 9 and 84 KB), and each names the one path it changed
   (let [changed (fn [[c db tx b]] (set (map second (ctx/changes c (ctx/patch c db tx b)))))]
     (is (= #{[:runs "lab/ctx#1" :task :cited 'app.x/f0 :form]} (changed (cited-redefined 10))) "a redefinition: the cited var's form")
     (is (= #{[:runs "lab/ctx#1" :task :cited 'app.x/f0 :callers "app.x/c-2"]} (changed (new-caller 10))) "a new caller: that caller")
@@ -321,17 +334,32 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
      :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task, run and agent nodes copied up the path"
-     :growth :constant :fixed {:calls 20 :bytes 125000} :sizes [100 1000 3000]})
+     :growth :constant :fixed {:calls 21 :bytes 125000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 19 :bytes 130000} :sizes [100 1000 3000]})
+     :growth :constant :fixed {:calls 20 :bytes 135000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
      :work "the task's own datom: its attributes pulled again, every join kept, the path copied up"
-     :growth :constant :fixed {:calls 8 :bytes 105000} :sizes [100 1000 3000]}))
+     :growth :constant :fixed {:calls 9 :bytes 90000} :sizes [100 1000 3000]}))
+
+(deftest a-callers-window-costs-its-forms
+  ;; a window of content-id members (a var's callers: a form's id is its content's, not in time
+  ;; order) is read whole and ordered by when each was written, so a new caller costs every form
+  ;; naming the var: linear in them, flat in calls (measured: 23 calls; 1.3 MB and 288k ticks at
+  ;; 100 forms, 9.1 MB and 2.4M ticks at 1,000). A var named by thousands (a hot core fn) costs that
+  ;; on each new caller while a task cites it
+  (cost/proof
+    {:of 'seon.ctx/patch :input 'seon.ctx-test/callers-of
+     :n "forms naming the cited var"
+     :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole, the path copied up"
+     :growth :linear
+     :per-n {:bytes 8800 :ticks 2600}
+     :fixed {:calls 23 :bytes 500000 :ticks 100000}
+     :sizes [100 1000 3000]}))
 
 (defn one-eval-diff
   "The input of size n: a session of n evals at a turn's start, and its record advanced by one eval:
@@ -452,8 +480,11 @@
       (is (= ["app.x/c8" "app.x/c7" "app.x/c6" "app.x/c5" "app.x/c4"]
              (keys (get-in (:tree (ctx/build db (aid db) :b)) [:runs "lab/ctx#1" :task :cited 'app.x/f0 :callers])))
           "its callers' window: the newest five, newest first, by when each was written (a form's id is its content's)"))
-    (is (= :seon.ctx/invalid-pattern (:seon.error/type (try (ctx/spec '[* {[:seon.task/references :via :var/name] [*]}]) (catch clojure.lang.ExceptionInfo e (ex-data e)))))
-        "an option neither pull nor :by: refused, naming it")))
+    (let [refused (fn [p] (:seon.error/type (try (render/pattern p) (catch clojure.lang.ExceptionInfo e (ex-data e)))))]
+      (is (= :seon.ctx/invalid-pattern (refused '[* {[:seon.task/references :via :var/name] [*]}])) "an option neither pull's nor :by: refused, naming it")
+      (is (= :seon.ctx/invalid-pattern (refused '[* (:seon.agent/key :limit 3)])) "a clause that is no '*, attribute or join")
+      (is (= :seon.ctx/invalid-pattern (refused '[:seon.eval/_agent])) "a reverse attribute outside a join")
+      (is (= :seon.ctx/invalid-pattern (refused '[{[:seon.eval/_agent :limit 3] [*]}])) "a window with no :reverse (the oldest n)"))))
 
 (deftest an-agent-edits-its-pattern
   ;; the owner, 2026-10-26: "the pull pattern ... stored in the context and the agent can update it":
