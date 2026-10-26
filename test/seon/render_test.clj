@@ -554,7 +554,8 @@
           "root's list: its own evaluations")
       (is (= "p-head" (:id (first (:seon.render/units root))) (:id (first (:seon.render/units agent))))))
     (testing "root's focus: its agents the sidebar, main's open problems and runs tiles by their own schemas, its input spawns"
-      (is (= [:seon.db/agent-fact] (for [u (:seon.render/units root) :when (= "#c-side" (:container u))] (schema-of main (second (:comp u))))))
+      (is (= [:seon.root/root-fact :seon.db/agent-fact] (for [u (:seon.render/units root) :when (= "#c-side" (:container u))] (schema-of main (second (:comp u)))))
+          "root first, then its agents: the same sidebar on every page")
       (is (= [:seon.render/problems :seon.render/runs] (tiles root)))
       (is (= :seon.render/root-input (:schema (first (filter #(= "p-input" (:id %)) (:seon.render/units root)))))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
@@ -737,13 +738,15 @@
         (is (str/includes? (p/page-html st2 :a3) "<pre class=\"seon-print-code\"><code class=\"language-clojure\">(f 2)") "its code, highlighted")))))
 
 (deftest the-sidebar-is-roots-agents
-  ;; the sidebar is the agent's ref to root, rendered: root's agents, each its own component,
-  ;; the same on every agent's page
+  ;; the sidebar is the agent's ref to root, rendered: root, then root's agents, each its own
+  ;; component, the same on every page
   (let [[main branch eid] (paged-dbs)
+        root (:db/id (d/entity main [:seon.root/id :root]))
         st (comp-state main branch eid)
         [st1 _] (#'p/pass-view st :a3)
         side (filter #(= "#c-side" (:container %)) (vals (get-in st1 [:views :a3 :units])))]
-    (is (= [[:main eid :side]] (map #(get-in % [:input :comp]) side)) "root's one agent, a3")
+    (is (= [[:main root :side] [:main eid :side]] (sort-by #(not= root (second %)) (map #(get-in % [:input :comp]) side))) "root, and its one agent, a3")
+    (is (str/includes? (p/page-html st1 :a3) "href=\"/\"") "root's line links to its page")
     (is (str/includes? (p/page-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [r (d/with main (seon.task/agent-tx "b1" :a4 {:status :busy}))
@@ -751,7 +754,7 @@
             st2 (-> (assoc st1 :main-db (:db-after r)) (update :dirty (fnil into #{}) (p/touched st1 ds)) (#'p/invalidate (p/comps-touched st1 :main ds)))
             [st3 patch] (#'p/pass-view st2 :a3)
             a4 (:db/id (d/entity (:db-after r) [:seon.agent/key "b1/a4"]))]
-        (is (= #{eid a4} (set (map #(second (get-in % [:input :comp])) (filter #(= "#c-side" (:container %)) (vals (get-in st3 [:views :a3 :units])))))))
+        (is (= #{root eid a4} (set (map #(second (get-in % [:input :comp])) (filter #(= "#c-side" (:container %)) (vals (get-in st3 [:views :a3 :units])))))))
         (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (concat (:appends patch) (:afters patch) (:prepends patch))) "its line is sent")
         (is (not-any? #(= (str "s-" eid) (first %)) (:frags patch)) "a3's line is not sent again")))))
 
@@ -1142,6 +1145,17 @@
       (is (str/includes? closed ">4<") "collapsed: its value in one line")
       (is (str/includes? closed "0.20 ms") closed)
       (is (not (str/includes? closed "ticks")) "and no response map or cost line twice"))))
+
+(deftest roots-context-is-its-debug-page
+  ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
+  ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
+  ;; :ai face), shown whole, never computed again for the page
+  (let [l (#'p/debug-value {:context {:text "{:seon-root \"the whole system\"}" :tokens 7}} [:debug :root])
+        u (some #(when (= "d-context" (:id %)) %) (:seon.render/units l))]
+    (is (= :seon.render/root-context (:schema u)))
+    (is (str/includes? (h/html (r/html (:input u) {:schema (:schema u) :unit "d-context"})) "the whole system"))
+    (is (str/includes? (h/html (:seon.render/html l)) "href=\"/\"") "the toggle back to its conversation")
+    (is (nil? (#'p/debug-value {} [:debug :root])) "nothing held yet: no page")))
 
 (deftest roots-page-reads-in-words
   ;; root, 2026-10-24: root is an agent; its head, problems and runs read as a person reads them,

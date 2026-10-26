@@ -22,6 +22,24 @@ The REPL speaks nREPL's message model: a handler with middleware composed over i
 
 Its tests run in a fork of itself (`seon.agent/run-tests-forked`), each test bounded by `:seon.config.agent/test-ticks` of work of its own (one bound in a turn, the judge and bin/test: `seon.proofs/run-tests!`), never time; when every selected test is green at its digest nothing is forked; a process test runs there only when its namespace is named or it is one of the proofs; a fork refused because a thread is active answers `:seon.test/fork-refused` ([turn](turn.md#who-runs-which-tests)).
 
+## A parked process
+
+An agent whose run ends waiting or out of turns keeps its process, parked, and the next message to its session wakes that same process for its next run: `seon.reconcile` (DECISIONS, Every agent parks).
+
+At the run's end (`seon.reconcile`'s `:diffed` step) a work task's run on a park outcome (`seon.reconcile/park-outcomes`: a reply with no eval, or its turn budget spent) keeps its process, and root's `:park` action writes the run `:parked`, once; any other end is judged as before, and an error holds the task with its cause. A turn that takes a message writes it on the branch; at the run's end the judge counts those (`seon.reconcile/taken-messages`, the run's `:seon.run/taken`), and root's index counts the messages main holds to the branch's runs (`seon.reconcile/branch-messages`). When main holds more than the parked run took, the task is ready, and its next run is a `:wake` on the parked process when that process is of this boot, else a `:spawn` that loads the session. Quiescence names a parked run that blocks released work as a root cause (`seon.reconcile/root-causes`: "parked: cap, waiting for a message"). A cancel, a hold or a new branch for the task stops the parked process; a merge task never parks.
+
+A parked process is one thread at 0% CPU, and root holds it as a fiber parked on the agent proc's in-port, so memory is what a parked agent costs. Measured once, with a scripted model, in the flow-lab of 2026-10-25 (its record: notes/archive/research-2026-10-25/flow-lab.md): a parked agent's footprint is 47-55 MB fresh, about 135 MB resumed and about 300 MB after real turns, and it does not shrink (Chez keeps its heap); a message wakes one in 7-35 ms, to its `work!` starting. So, by arithmetic, `:seon.config.machine/memory-mb` 4096 less root (1.1-1.9 GB measured) and the fork server (0.3 GB) leaves room for some 50 fresh parked agents, 18 resumed, or 8 that have worked.
+
+The flow-lab's wake hazards, each a proof:
+1. A stop the parked run left must not end the next at once with its message untaken: `begin!` starts each run's turn state anew (`seon.agent-test/a-waiting-run-parks-and-a-message-wakes-the-same-process`: the wake's run takes the message and runs turns of its own).
+2. A re-entered loop must not number its turns over the recorded ones: a turn's id is its run's id and its number, and each wake is a run of its own (the same test: each run's turns are numbered from its own 0).
+3. A message must wake a parked session whatever turn of the run before it came in: main counts every message to the branch's runs, so a run that parked having taken fewer is woken (`seon.reconcile-test/a-waiting-run-parks-and-a-message-wakes-it`).
+4. Two wakes must never run two `work!` forms in one process: a wake's run is running, so the session is not parked and more messages start nothing more (the same test).
+5. The judge must not end a parked session: a park outcome parks the run, never holds it (the same test).
+6. A wake whose parked process died before it reached it took nothing: the run is `:lost`, not a death, and the next run is a spawn (`seon.reconcile-test/a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn`).
+
+A replay that resumes a session must not trust a form whose effect is visible only through a helper, a form that reads a world that has moved on (the time, files, main), or a handle to a resource that died with the process.
+
 ## The socket and the agent proc
 
 Root and an agent speak length-prefixed frames over one Unix socket, read and written on the agent's side by its one thread with no pumps: `seon.sock`.

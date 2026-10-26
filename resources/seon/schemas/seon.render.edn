@@ -117,6 +117,8 @@
  :seon.render/page-more [:map {:seon.render/html seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]
  ;; the input at the top of root's page
  :seon.render/root-input [:map {:seon.render/html seon.render.ui/root-input}]
+ ;; what root reads (seon.render.proc/debug-value): the system's AI face as the render proc holds it
+ :seon.render/root-context [:map {:seon.render/html seon.render.ui/root-context} [:text :string] [:tokens nat-int?]]
  ;; the input at the top of an agent's page: its REPL, its messages, its held task's release
  :seon.render/agent-input [:map {:seon.render/html seon.render.ui/agent-input} [:id :keyword] [:live? :boolean]]
  ;; a cost proof's report as the agent's test run holds it: the estimate's function, the

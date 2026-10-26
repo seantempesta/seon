@@ -692,8 +692,11 @@
 (deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
   ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): a run that waits parks its
   ;; session, its process kept; the owner's message wakes it, and the next run is the same
-  ;; process (its pid), on the same agent (the parked run's own: the harness's agent is another)
-  (let [runs "[:find ?id ?st ?out ?ag :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/w\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]]"
+  ;; process (its pid), on the same agent (the parked run's own: the harness's agent is another).
+  ;; The wake's run starts clean in that process: it takes the message and runs turns of its own
+  ;; (flow-lab's hazards 1 and 2: a stop left by the parked run ended the next at once with the
+  ;; message untaken; turn numbers restarted over the recorded ones)
+  (let [runs "[:find ?id ?st ?out ?ag ?taken ?turns :where [?e :seon.run/task ?t] [?t :seon.task/id \"demo/w\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag] [?e :seon.run/taken ?taken] [?e :seon.run/turns ?turns]]"
         parked (fn [n] (str "(seon.root/await-db sys #(= " n " (count (filter (fn [[_ st]] (= :parked st)) (datahike.api/q '" runs " %)))))"))
         [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                          {:op :eval :agent "root"
@@ -701,12 +704,18 @@
                                      " (let [ag (some (fn [[id _ _ ag]] (when (= \"demo/w#1\" id) ag)) (datahike.api/q '" runs " @(:conn sys)))"
                                      " pid1 (get-in (c/state sys) [:agents ag :pid])]"
                                      " @(seon.root/message! sys ag \"carry on\") " (parked 2)
-                                     " {:runs (sort (datahike.api/q '" runs " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])}))")}]
+                                     " {:runs (sort (datahike.api/q '" runs " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])"
+                                     " :turns (sort (datahike.api/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/w\")}}))))}))")}]
                         {:sets [":seon.config.ai/script=seon.fixtures/wait-call"]
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
-        {:keys [runs pid1 pid2]} (:value r)]
+        {:keys [runs pid1 pid2 turns]} (:value r)
+        numbers (fn [run] (sort (keep #(when (str/starts-with? % (str run "/")) (parse-long (subs % (inc (count run))))) turns)))]
     (is (= [["demo/w#1" :parked :waiting] ["demo/w#2" :parked :waiting]] (mapv #(subvec % 0 3) runs)) (pr-str r))
-    (is (apply = (map peek runs)) "both runs on one agent")
+    (is (apply = (map #(nth % 3) runs)) "both runs on one agent")
+    (is (= [0 1] (mapv #(nth % 4) runs)) "the wake's run took the message the parked one had not")
+    (is (every? pos? (map #(nth % 5) runs)) "and ran turns of its own")
+    (is (= (range (nth (first runs) 5)) (numbers "demo/w#1")) "the parked run's turns, numbered from 0")
+    (is (= (range (nth (second runs) 5)) (numbers "demo/w#2")) "the wake's, numbered from its own 0, none over the parked run's")
     (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
 
 (deftest a-failed-call-keeps-what-it-sent
