@@ -717,7 +717,7 @@
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?u :seon.turn/sent ?s]] b run))))"
                   " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"demo/st-implement#1\"] [?m :seon.message/to ?r] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
                   " {:design (sent \"demo/st#1\") :implement (sent \"demo/st-implement#1\") :boundary boundary})")
-        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(require 'seon.fixtures) (load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
                         {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
         {:keys [design implement boundary]} (:value r)
         last-design (peek design) first-implement (first implement)]
