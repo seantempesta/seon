@@ -308,7 +308,11 @@
   source and the vars it names (:form/refs), and its namespace."
   [defs]
   (vec (mapcat (fn [[v src refs]]
-                 [{:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                 ;; its doc and contract, as the import records them from its source
+                 [(let [[_ _ & more] (read-string src) d (when (string? (first more)) (first more))
+                        c (some #(when (map? %) (:malli/schema %)) more)]
+                    (cond-> {:db/id (str v) :var/name v :var/ns (str "ns " (namespace v)) :var/form (str "form " v)}
+                      d (assoc :var/doc d) c (assoc :var/contract (pr-str c))))
                   (cond-> {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " (namespace v)) :form/order 0
                            :form/defines [(str v)]}
                     (seq refs) (assoc :form/refs (vec refs)))
@@ -341,7 +345,7 @@
             r0 (request 0)
             _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
             r1 (request 1)
-            ;; the plan rewritten mid-run (the story render follows it, seon.context/story): the
+            ;; the plan rewritten mid-run (the task's render follows it, seon.context/render-task): the
             ;; request's prefix is the story as of the session's first turn, so its bytes stay
             _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
             r2 (request 2)]
@@ -376,11 +380,8 @@
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
   ;; for a var as it does for a section (docs/references.md#the-delimiter-picks-the-depth)
-  (binding [*ns* *ns*]
-    (eval '(ns ctx-depth))
-    (eval '(defn sq "Squares x. Used by area." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)))
-    (eval '(defn cube "Cubes x." {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x)))
-    (eval '(defn tri "Triples x." {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))))
+  ;; the vars are the db's alone (no namespace of them in this process): what each shows is read
+  ;; from its facts (seon.docs/resolve-ref)
   (let [db (d/db-with (db-with-program)
                       (program-facts '[[ctx-depth/sq "(defn sq \"Squares x. Used by area.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" []]
                                        [ctx-depth/cube "(defn cube \"Cubes x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x x))" []]
@@ -408,7 +409,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "b" :seon.task/plan "Read ```ctx-big/big```."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
-        story (#'context/run-message (context/run-state db (task/task db "demo/b")))]
+        story (#'context/run-message (context/render-task db (task/task db "demo/b")))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (select/estimate story) (select/estimate src)) "the story is cut where it is printed")
@@ -817,11 +818,11 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "s"
                                                :seon.task/plan "Make `demo/f` triple. demo-test/h-test asserts (f 2) is 6."
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/h-test}}]))
-        story (context/run-state db (task/task db "demo/s"))]
+        story (context/render-task db (task/task db "demo/s"))]
     (is (= [:task :write-set :to-prove] (vec (keys story))) "plan, write set, proofs; nothing else uncited (what is near is off by default)")
     (let [db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "Make `demo/f` triple."
                                                  :seon.task/proofs #{'demo-test/f-test} :seon.task/config {:seon.config.render/similar 5}}]))]
-      (is (contains? (:similar (context/run-state db (task/task db "demo/n"))) :not-embedded)
+      (is (contains? (:similar (context/render-task db (task/task db "demo/n"))) :not-embedded)
           "a task that turns it on, its plan with no vector yet: says so"))
     (is (= [{:symbol 'demo/f :source (print/code "(defn f \"Doubles.\" [x] (* 2 x))") :callers '[demo/area demo/vol]}] (:write-set story))
         "each cited var with its source and its callers")
@@ -895,7 +896,7 @@
            (:nearest sim))
         "nearest first, the named one, the test and the test/ helper left out, the first five, each its name and first sentence")
     (is (string? (:more sim)) "and the form that searches further")
-    (is (= sim (:similar (context/run-state db (task/task db "demo/c")))) "in the story")
+    (is (= sim (:similar (context/render-task db (task/task db "demo/c")))) "in the story")
     (is (nil? (context/similar db nil #{})) "off by default (:seon.config.render/similar 0): nothing listed")))
 
 (deftest a-red-proofs-source-reads-as-its-file
@@ -988,7 +989,7 @@
           "a section embedded on the branch with the plan unchanged is in the next answer"))))
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
-  ;; the story is a render, never held: a var the plan cites redefined (the agent's defn, or main
+  ;; the task's render, never held: a var the plan cites redefined (the agent's defn, or main
   ;; caught up), the next view's task part shows its new source, through the parts' memo
   (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
         db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
@@ -998,7 +999,17 @@
         rep (d/with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
         [_ fs1] (draw m0 (ctx/patch c (:db-after rep) (:tx-data rep) :b) (:db-after rep))]
     (is (not (str/includes? (:text (first fs0)) ":redefined")))
-    (is (str/includes? (:text (first fs1)) "(defn g [] :redefined)") "the next view's story: the new source")))
+    (is (str/includes? (:text (first fs1)) "(defn g [] :redefined)") "the next view's task: the new source")))
+
+(deftest a-vars-arglists-are-its-recorded-sources
+  ;; what a var declares, read from its source as the db records it (seon.reader/arglists)
+  (is (= '([x]) (seon.reader/arglists "(defn sq \"Squares.\" {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))" 'demo)))
+  (is (= '([x] [x y]) (seon.reader/arglists "(defn f ([x] x) ([x y] (+ x y)))" 'demo)) "each arity's")
+  (is (= '([& body]) (seon.reader/arglists "(defmacro m [& body] `(do ~@body))" 'demo)) "a macro's")
+  (is (nil? (seon.reader/arglists "(def x 1)" 'demo)) "no arglists: no function")
+  (let [db (d/db-with (db-with-program) (program-facts '[[demo-only/h "(defn h \"Holds what the db says.\" [a b] a)" []]]))]
+    (is (= {:symbol 'demo-only/h :arglists '([a b]) :summary "Holds what the db says."} (docs/resolve-ref db 'demo-only/h :summary))
+        "a var only the db holds: its summary from its facts")))
 
 (deftest related-key-moves-with-a-vector-written
   ;; related is memoized by related-key: the same while nothing it reads is written, moved when a
@@ -1013,21 +1024,21 @@
     (is (not= k0 (context/related-key embedded te)) "a section embedded: a new key")
     (is (not= k0 (context/related-key (d/db-with db [[:db/add te :seon.task/plan "Say another thing."]]) te)) "the plan rewritten: a new key")))
 
-(deftest the-storys-key-moves-with-what-it-reads
-  ;; the story is a render (seon.context/story), memoized by what it read (story-key): the key is
+(deftest a-task-renders-key-moves-with-what-it-reads
+  ;; the task's render (seon.context/render-task) is memoized by what it read (render-task-key): the key is
   ;; the same while nothing it reads is written, and moves when the plan, or a var it cites, does
   (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
         m {:seon.task/id "demo/r" :db/id te}
-        k0 (context/story-key db m)
+        k0 (context/render-task-key db m)
         unrelated (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/agent [:seon.agent/key "demo/a1"]}])
         replan (d/db-with db [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]])
         redef (d/db-with db [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] 2)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
         caller (d/db-with db [{:db/id "c" :form/id "demo/k" :form/src "(defn k [] (g))" :form/refs #{'demo/g}}])]
-    (is (= k0 (context/story-key unrelated m)) "a run and an agent written: nothing the story reads, the same key")
-    (is (= (context/story db m) (context/story unrelated m)) "and the same story")
-    (is (not= k0 (context/story-key replan m)) "the plan rewritten: a new key")
-    (is (not= k0 (context/story-key redef m)) "a cited var redefined: a new key")
-    (is (not= k0 (context/story-key caller m)) "a new caller of a cited var: a new key")
+    (is (= k0 (context/render-task-key unrelated m)) "a run and an agent written: nothing the render reads, the same key")
+    (is (= (context/render-task db (task/task db "demo/r")) (context/render-task unrelated (task/task unrelated "demo/r"))) "and the same render")
+    (is (not= k0 (context/render-task-key replan m)) "the plan rewritten: a new key")
+    (is (not= k0 (context/render-task-key redef m)) "a cited var redefined: a new key")
+    (is (not= k0 (context/render-task-key caller m)) "a new caller of a cited var: a new key")
     (is (= (:tx (first (d/datoms db :eavt te :seon.task/id))) (context/first-t db te)) "an entity's first transaction, its identity's")))
 
 (deftest related-fuses-the-plans-references-with-meaning

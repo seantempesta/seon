@@ -11,11 +11,11 @@
   [] (some->> (turn/current-task) (task/task (agent/db))))
 
 (defn story
-  "This agent's task story as data (seon.context/run-state): its task and plan, its write set (each
+  "This agent's task rendered as data (seon.context/render-task): its task and plan, its write set (each
   var the plan cites, its source and callers), how to run each proof, the sections it cites; what
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (some->> (current) (context/run-state (agent/db))))
+  [] (some->> (current) (context/render-task (agent/db))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,
