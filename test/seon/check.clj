@@ -9,7 +9,7 @@
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
   reference (await-ref, seon.root/await-db), never a poll or a deadline."
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts]))
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.root :as c] [seon.lib :as lib] [datahike.api :as d] [seon.print :as print] [clojure.java.shell] [clojure.string] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.db] [seon.reconcile] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg] [seon.e2e] [seon.await] [seon.system] [seon.web] [seon.render.proc] [seon.fixtures] [my.root] [seon.task] [seon.config] [clojure.edn] [seon.server] [jolt.scheme] [clojure.core.async.flow.spi] [clojure.data.json] [seon.cost] [seon.problems] [seon.proofs] [seon.vector] [seon.main :refer [out! shown]] [seon.fx] [seon.source] [seon.docs] [seon.test-store :as ts] [seon.sock]))
 
 
 ;; ---- the harness: one frame, one verdict, one way to wait ------------------------------
@@ -853,65 +853,173 @@
 
 (defn- alive? [pid] (zero? (lib/c-kill pid 0)))
 
+(defn- cycle-row
+  "Cycle i, start! -> 3 agents evaluate -> stop!, in this process: root's threads against what
+  it declares (thread-diff, {} when exact) while running and after its stop!, the stop's answer
+  and any process it left."
+  [i]
+  (let [t0 (profile/now-ns)
+        sys (c/start! {:datoms 2000})
+        boot-ms (profile/ms-since t0)
+        ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
+        ok? (every? #(= "4" (printed (deref (c/submit! sys % "(+ 2 2)")))) ids)
+        health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
+        running (thread-diff (declared-threads sys) (threads))
+        pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
+        st (c/stop! sys)]
+    ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
+    ;; count is recorded, not compared: a thread Thread.join answered for is still in the
+    ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
+    ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md)
+    (let [stopped (thread-diff (declared-threads) (threads))]
+      {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
+       :health (set health)
+       :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))
+
+(defn lifecycle-cycle
+  "One cycle (cycle-row) in this process, its row the last line, as EDN."
+  [i]
+  (out! (sedn/encode (cycle-row i)))
+  (lib/c-exit 0))
+
 (defn- cycles
-  "n cycles of start! -> 3 agents evaluate -> stop! in this one process: per cycle, root's
-  threads against what it declares (thread-diff, {} when exact) while running and after its
-  stop!, the stop's answer and any process it left."
+  "n cycles, each in a process of its own (target/seon lifecycle-cycle i): a process boots root
+  once, on its main carrier, and forks its fork server from it while it is the one thread
+  (seon.root/boot!); a second boot in the process that ran the first is refused (boot-twice).
+  Each cycle's row (cycle-row), read from its last line."
   [n]
   (vec (for [i (range n)]
-         (let [t0 (profile/now-ns)
-               sys (c/start! {:datoms 2000})
-               boot-ms (profile/ms-since t0)
-               ids (apply spawn-ready! sys (map #(str "lc " %) (range 3)))
-               ok? (every? #(= "4" (printed (deref (c/submit! sys % "(+ 2 2)")))) ids)
-               health (mapv #(let [p (ping sys %)] (:status p p)) [:api :writer :fork-server :flusher :reconciler])
-               running (thread-diff (declared-threads sys) (threads))
-               pids (vec (cons (get-in (c/state sys) [:fork-server :pid]) (keep #(get-in (c/state sys) [:agents % :pid]) ids)))
-               st (c/stop! sys)]
-           ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
-           ;; count is recorded, not compared: a thread Thread.join answered for is still in the
-           ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
-           ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md). A
-           ;; thread that does not end shows in the next cycle's :running, which keeps :os
-           (let [stopped (thread-diff (declared-threads) (threads))]
-             {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
-              :health (set health)
-              :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))))
+         (let [{:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-cycle" (str i))]
+           (if (zero? exit)
+             (sedn/decode (last (clojure.string/split-lines out)))
+             {:cycle i :ok false :exit exit :err err :health #{}})))))
+
+(defn- in-child
+  "f's answer in a child lib/fork! makes, as its exit status: 0 when (f) answers true, 1 when
+  it answers anything else; on a future with a 5 s deadline when deadline? (2: no answer, so a
+  child whose runtime is broken ends instead of hanging), else on the child's own fiber."
+  [deadline? f]
+  (lib/fork! {:child #(lib/c-exit (if deadline?
+                                    (let [r (deref (future (f)) 5000 ::hung)] (cond (= ::hung r) 2 (true? r) 0 :else 1))
+                                    (if (true? (f)) 0 1)))
+              :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+
+(def ^:private fork-cases
+  "The forking cases seon.lib-test runs, each in a fresh process (target/seon forks CASE) whose
+  main carrier makes the fork, as every process that forks does (seon.root/boot!, the fork
+  server, an agent): a fork beside live runtime threads is refused whenever one is active at
+  that instant. Each answers the data its test asserts."
+  {"line-parks"
+   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's
+   #(in-child false
+      (fn []
+        (let [[r w] (seon.sock/socketpair)
+              ticks (volatile! 0) stop (volatile! false)
+              _ (a/go-loop [] (when-not @stop (a/<! (a/timeout 5)) (vswap! ticks inc) (recur)))
+              _ (future (Thread/sleep 200) (seon.sock/write-line! w "done"))
+              rd (seon.sock/line-reader r)
+              before @ticks
+              lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))
+              during (- @ticks before)]
+          (vreset! stop true)
+          (and (= ["done"] lines) (pos? during)))))
+   "memory-gauge"
+   ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
+   ;; bytevector this large in place (a large object is never copied by a collection)
+   #(let [before (lib/real-mb)
+          block (byte-array (* 300 1024 1024))]
+      (java.util.Arrays/fill block (byte 7))
+      (let [held (lib/real-mb)
+            child (in-child true (fn [] (let [b0 (lib/real-mb)]
+                                          ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
+                                          (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
+                                          (< 28 (- (lib/real-mb) b0) 60))))]
+        {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
+   "go-blocks"
+   #(let [c (a/chan) r (a/go (a/<! c))]
+      (a/>!! c 41)
+      {:parent (a/<!! r)
+       :go (in-child true (fn [] (let [c (a/chan) r (a/go (a/<! c))] (a/>!! c 41) (= 41 (a/<!! r)))))
+       :timeout (in-child true (fn [] (= :t (a/alt!! (a/timeout 10) :t))))
+       :store (in-child true (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
+                                      (d/create-database cfg)
+                                      (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})})
+
+(defn forks
+  "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."
+  [k]
+  (out! (sedn/encode (jolt.host/main-carrier-run! (get fork-cases k))))
+  (lib/c-exit 0))
+
+(defn boot-twice
+  "start! -> stop! -> start! in this one process: the second boot's answer, the last line as EDN,
+  {:second message}. A process boots root once (seon.root/boot!: on the main carrier, before any
+  thread), and its threads outlive stop!, so the second start! is refused by Jolt by name
+  (main-carrier-run!: fibers already run on carrier threads) and forks nothing beside them."
+  []
+  (c/stop! (c/start! {:datoms 2000}))
+  (out! (sedn/encode {:second (try (c/stop! (c/start! {:datoms 2000})) :booted
+                                   (catch Throwable e (ex-message e)))}))
+  (lib/c-exit 0))
 
 (defn- exact? [row] (and (empty? (:running row)) (empty? (:stopped row))))
+
+(defn- pause-row
+  "Pause/resume in this process, which boots root once: a paused agent's two requests, held
+  while it is paused and answered after resume; with the threads root declares and the GC's."
+  []
+  (let [sys (c/start! {:datoms 2000})
+        [a] (spawn-ready! sys "paused")
+        _ (flow/pause-proc (:graph sys) a)
+        ;; the proc's control channel is FIFO: this ping is taken after the pause
+        paused-health (ping sys a)
+        p1 (c/submit! sys a "(def x 1) x")
+        p2 (c/submit! sys a "(inc x)")
+        ;; the measurement: no answer within the window while paused
+        held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
+        held-state (= :paused (:status (ping sys a)))
+        _ (flow/resume-proc (:graph sys) a)
+        r1 @p1 r2 @p2
+        declared {:declared-running (declared-threads sys)}]
+    (c/stop! sys)
+    {:threads (assoc declared :declared-stopped (declared-threads))
+     :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
+     ;; what the two held requests answered once resumed, printed, and as they came
+     :resumed {:printed [(printed r1) (printed r2)] :responses [r1 r2]}
+     :pause-holds (and (= :held held) held-state (= :paused (:status paused-health)))}))
+
+(defn lifecycle-pause
+  "pause-row in this process, the last line as EDN."
+  []
+  (out! (sedn/encode (pause-row)))
+  (lib/c-exit 0))
 
 (defn lifecycle
   "n cycles (cycles): each stop! must answer with every proc exited (:graph true) and no
   agent or fork-server process left, and root's threads must be exactly what it declares
   (declared-threads): while running by name and by the OS's count, after every
-  stop! by name (the OS's count after a stop recorded: cycles). Then pause/resume: a paused agent's request is held (no answer), and answered after
-  resume, in order."
+  stop! by name (the OS's count after a stop recorded: cycles). Then pause/resume (pause-row):
+  a paused agent's request is held (no answer), and answered after resume, in order. Each in a
+  process of its own (target/seon lifecycle-cycle i, lifecycle-pause): a process boots root
+  once, and this one boots none."
   [n]
-  (let [rows (cycles n)]
-    (run-check "LIFECYCLE" {:datoms 2000}
-     (fn [sys]
-      (let [[a] (spawn-ready! sys "paused")
-            _ (flow/pause-proc (:graph sys) a)
-            ;; the proc's control channel is FIFO: this ping is taken after the pause
-            paused-health (ping sys a)
-            p1 (c/submit! sys a "(def x 1) x")
-            p2 (c/submit! sys a "(inc x)")
-            ;; the measurement: no answer within the window while paused
-            held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
-            held-state (= :paused (:status (ping sys a)))
-            _ (flow/resume-proc (:graph sys) a)
-            r1 @p1 r2 @p2]
-        {:report {:threads {:declared-running (declared-threads sys) :declared-stopped (declared-threads)}
-                  :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :stopped-os :left :health]) rows)
-                  :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
-                  :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
-                  ;; what the two held requests answered once resumed, printed, and as they came
-                  :resumed {:printed [(printed r1) (printed r2)] :responses [r1 r2]}}
-         :checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
-                  :every-cycle-worked (every? #(and (:ok %) (= #{:running} (:health %))) rows)
-                  :threads-declared (every? exact? rows)
-                  :pause-holds (and (= :held held) held-state (= :paused (:status paused-health)))
-                  :resume-releases-in-order (and (= "1" (printed r1)) (= "2" (printed r2)))}})))))
+  (let [rows (cycles n)
+        {:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-pause")
+        pr (if (zero? exit) (sedn/decode (last (clojure.string/split-lines out))) {:exit exit :err err})
+        [r1 r2] (get-in pr [:resumed :printed])]
+    (run-check "LIFECYCLE" nil
+     (fn [_]
+       {:report {:threads (:threads pr)
+                 :cycles (mapv #(select-keys % [:cycle :boot-ms :running :stopped :stopped-os :left :health :exit :err]) rows)
+                 :stop-ms (lib/summ (map #(get-in % [:stop :ms]) rows))
+                 :gc (:gc pr) :gc-sweepers (:gc-sweepers pr)
+                 :resumed (:resumed pr)
+                 :pause (select-keys pr [:exit :err])}
+        :checks {:every-stop-exited (every? #(and (true? (get-in % [:stop :graph])) (zero? (get-in % [:stop :agents-left])) (empty? (:left %))) rows)
+                 :every-cycle-worked (every? #(and (:ok %) (= #{:running} (:health %))) rows)
+                 :threads-declared (every? exact? rows)
+                 :pause-holds (true? (:pause-holds pr))
+                 :resume-releases-in-order (and (= "1" r1) (= "2" r2))}}))))
 
 (defn threads-declared
   "lifecycle's cycles alone; the last line is the EDN {:running [diff ..] :stopped [diff ..]}
@@ -1566,6 +1674,10 @@
      "robust" (fn [n more] (robust))
      "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
      "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
+     "lifecycle-cycle" (fn [n more] (lifecycle-cycle (n-or n "0")))
+     "lifecycle-pause" (fn [n more] (lifecycle-pause))
+     "boot-twice" (fn [n more] (boot-twice))
+     "forks" (fn [n more] (forks n))
      "sweepers-held" (fn [n more] (sweepers-held))
      "drain" (fn [n more] (drain (n-or n "8")))
      "backpressure" (fn [n more] (backpressure (n-or n "8")))
