@@ -188,7 +188,8 @@
   "What the work on task entity te's plan is likely to need beyond what the plan cites: the
   :seon.config.render/related wiki sections, program functions and schema keys nearest it, each
   kind ranked by the plan's references and by meaning fused by reciprocal rank (seon.vector/rrf):
-  the graph from its citations (the cited vars' callers and callees, the sections naming a cited
+  the graph from its citations (the cited vars' callers and callees, or, when it cites no defined
+  var, those of the functions nearest it by meaning; the sections naming a cited
   var, the sections a cited section references or is referenced by, the schema keys the plan
   names and the cited vars' forms name, :form/keywords) and seon.vector/near on the plan's vector. Fused, they found more of
   what 31 merged tasks changed than either alone (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: functions
@@ -221,8 +222,21 @@
             cap (cfg/value :seon.config.render/related-rarity)
             by-rarity (fn [xs] (mapv peek (sort (for [[x n] (frequencies xs)]
                                                   [(- (/ n (inc (bounded-count cap (d/datoms db :avet :form/refs x))))) (str x) x]))))
-            near (fn [of f] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te (* 4 k) {:of of})))
-            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) fns) (mapcat #(map :var (callees db %)) fns)
+            named (fn [f hits] (into [] (comp (keep (comp f first)) (distinct)) hits))
+            n (* k (cfg/value :seon.config.render/related-near))
+            var-of #(some-> (d/entity db %) :var/_form first :var/name)
+            ;; a plan citing no defined var (a user's request in prose; a section or a name of no var
+            ;; alike) seeds the graph with the program functions nearest it by meaning, read past the
+            ;; tests that are nearer still (:seon.config.render/related-seeds-near; task
+            ;; seon.context/a-prose-request-finds-its-functions): one search of the forms serves both,
+            ;; meaning's candidates its first n
+            defined (filterv #(d/entity db [:var/name %]) fns)
+            forms (vector/near db te (if (seq defined) n (max n (cfg/value :seon.config.render/related-seeds-near))) {:of :form/id})
+            meaning {:functions (named var-of (take n forms))
+                     :sections (named #(:seon.section/address (d/entity db %)) (vector/near db te n {:of :seon.section/address}))
+                     :schemas (named #(:schema/key (d/entity db %)) (vector/near db te n {:of :schema/key}))}
+            seeds (if (seq defined) defined (into [] (comp (filter function?) (take k)) (named var-of forms)))
+            graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) seeds) (mapcat #(map :var (callees db %)) seeds)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
                                                      (:seon.section/address (d/entity db e)))
@@ -230,9 +244,6 @@
                                                    (for [a secs r (:seon.section/_references (d/entity db [:seon.section/address a]))] (:seon.section/address r))))
                    :schemas (by-frequency (filter schema? (concat (filter keyword? (keep :seon.ref/name cites))
                                                                      (mapcat #(:form/keywords (:var/form (d/entity db [:var/name %]))) fns))))}
-            meaning {:functions (near :form/id #(some-> (d/entity db %) :var/_form first :var/name))
-                     :sections (near :seon.section/address #(:seon.section/address (d/entity db %)))
-                     :schemas (near :schema/key #(:schema/key (d/entity db %)))}
             cited {:functions fns :sections secs :schemas #{}}]
         (into {} (for [kind [:sections :functions :schemas]]
                    [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
