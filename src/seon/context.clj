@@ -666,14 +666,14 @@
                (and (qualified-keyword? k) (not= :evals k)))))
 
 (defn world
-  "What changed for agent entity a between two transactions of its branch on db (a turn's record's
-  and the one before it's), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
+  "What changed for agent entity a between two commits of its branch on db (the ones a turn's
+  request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
   that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them at the paths
   nothing else tells (`told?`)}, the empty ones left out; with no c0, the page whole, {:page page}.
   Printed whole as one user message: the page and each change told once."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :int] :int] [:vector :seon.model/message]]}
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
-  (let [at #(d/as-of db %)
+  (let [at #(d/commit-as-db db %)
         [r1 p1] (page (at c1) a)
         v (if (nil? c0)
             {:page p1}
@@ -684,12 +684,20 @@
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 
-(defn- turn-txs
-  "The transactions that recorded the model turns of agent entity a's session on db, oldest first:
-  each turn's page is drawn as of its own (its record, what it observed, in the db it reads)."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:vector :int]]}
+(defn- turn-pages
+  "The model turns of agent entity a's session on db, oldest first, each [tx commit]: the
+  transaction that recorded it, and the commit its request was made on, after its record (so its
+  page holds what it observed), as the page ref it sent names; the newest, recorded and not sent yet,
+  the request now being made on db. A turn that sent nothing was never asked."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:vector [:tuple :int :any]]]}
   [db a]
-  (vec (sort (d/q '[:find [?tx ...] :in $ ?a :where [?r :seon.run/agent ?a] [?t :seon.turn/run ?r] [?t :seon.turn/origin :model ?tx]] db a))))
+  (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a :where [?r :seon.run/agent ?a] [?t :seon.turn/run ?r] [?t :seon.turn/origin :model ?tx]] db a))
+        newest (second (last ts))]
+    (vec (keep (fn [[tx t]]
+                 (if-let [c (some (fn [ref] (when (= :page (first ref)) (nth ref 3))) (rseq (vec (:seon.turn/sent (d/pull db [:seon.turn/sent] t)))))]
+                   [tx c]
+                   (when (= t newest) [tx (d/commit-id db)])))
+               ts))))
 
 (defn request
   "The agent's request, a render of its record: agent a (its entity map, :db/id) for the turn
@@ -699,7 +707,7 @@
   :printed; within the history budget, `kept`): each eval (eval-messages) and message
   (message-messages), and at each model turn of the session, the page: the first turn's whole,
   each later one's what changed since the turn before (`world`: the page's parts by key and ctx's
-  diff), each as of the transaction that recorded its turn. So the session's first request reads the page
+  diff), each at the commit its turn's request was made on, after the turn's record. So the session's first request reads the page
   whole and each later one what changed, each change told once, and every request is the one
   before and what was added. How many earlier parts the budget left out goes just after the
   system prompt. An outside agent's read (origin :outside): the system prompt and the page whole.
@@ -707,7 +715,7 @@
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
   records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
   as of t; [:eval id] (with its fold); [:line id], an eval sent collapsed; [:message id]; [:page a
-  t0 t1], the page as of turn record t1 (t0 nil) or what changed since t0; [:history n], the n parts the
+  c0 c1], the page at commit c1 (c0 nil) or what changed since c0; [:history n], the n parts the
   budget left out. :sent is nil with no agent. Called by the turn."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:map [:messages [:vector :seon.model/message]] [:sent [:maybe [:vector :any]]] [:printed :map]]]}
   [a {:keys [db basis block help help-ref printed]}]
@@ -717,13 +725,13 @@
     (let [e (:db/id a)
           model? (= :model (:origin basis))
           since (:tx printed)
-          ;; each model turn's page as of its record's transaction (a turn records itself before its
-          ;; request; a read with none recorded, as of db), drawn only when printed-run has not
+          ;; each model turn's page at the commit its request was made on (a turn records itself
+          ;; before its request; a read with none recorded, db's), drawn only when printed-run has not
           ;; printed it (a delay)
-          ts (or (not-empty (if model? (turn-txs db e) [])) [(:max-tx db)])
-          pages (for [[t prev] (map vector ts (cons nil ts))
-                      :when (or (nil? since) (>= t since))]
-                  [[:page [e prev t]] (delay (world db e prev t)) nil t])
+          ts (or (not-empty (if model? (turn-pages db e) [])) [[(:max-tx db) (d/commit-id db)]])
+          pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
+                      :when (or (nil? since) (>= tx since))]
+                  [[:page [e prev c]] (delay (world db e prev c)) nil tx])
           rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
           items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
           cache (printed-run items (when model? printed))
@@ -774,7 +782,7 @@
   render: the system prompt's section as of its t (system-text), an eval by eval-messages with the
   fold its ref names (what it showed of an earlier record, as the form that reads it there) or
   collapsed ([:line id]), a message by its render, the page at a turn or what changed since the
-  turn before ([:page a t0 t1], `world`, re-derived from the branch as of those transactions),
+  turn before ([:page a c0 c1], `world`, re-derived from the branch at those commits),
   the history note by its count: what the request sent, the same bytes. No request is built
   again: the same records, rendered."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
