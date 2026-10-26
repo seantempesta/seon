@@ -6,11 +6,9 @@ All work is task entities on main, linked by `:needs`; a template turns what som
 
 A request becomes its whole linked task set in one transaction on main, released, and the reconciler forks the set's first agent only from a main that holds all of it, so every agent of it reads the same data from its first form.
 
-```seon.template/request``` makes the default, two tasks ([decisions](decisions.md#a-request-is-design-build-then-merge)):
-- the request itself as its **design-build** task (kind `:work`, its plan the request's words, the `:work` instructions): one agent writes the red proof and makes it green on its own branch, and does not merge;
-- `<name>-merge` (kind `:merge`), needing it, on its branch (`seon.template/with-merge`): it merges main into the branch, keeps the proofs green and merges the branch into main.
-
-The work task and its merge are one session on their branch (```seon.task/session-key```). For an experiment, `my.root/request!` takes another template in place of `request`: ```seon.template/whole``` makes the request one task of kind `:whole` that one agent works through and merges itself (```seon.task/merges?```), its runs starting as work does, not one at a time as merges do; and ```seon.template/stages``` makes the staged set from the same declaration:
+By default (`my.root/request!`), ```seon.template/request``` makes the request one task of kind `:whole` on its own branch, which one agent works through in one session: it reproduces what the plan says is wrong, writes the red proof, makes it green, merges main at each green and keeps it green, and its green branch merges into main as a merge task's does (```seon.task/merges?```); its runs start as work does, not one at a time as merges do ([decisions](decisions.md#a-request-is-one-whole-task-for-now)). For an experiment, `my.root/request!` takes another template in its place:
+- ```seon.template/design-build``` makes the request its **design-build** task (kind `:work`, the `:work` instructions: the red proof, then green on its branch, no merge of its own) followed by `<name>-merge` (kind `:merge`, `seon.template/with-merge`), needing it on its branch; the two are one session there (```seon.task/session-key```);
+- ```seon.template/stages``` makes the staged set from the same declaration:
 - the request itself as the **design** step (kind `:design`, its plan the request's words);
 - `<name>-implement` (kind `:implement`), needing design;
 - `<name>-merge` (kind `:merge`), needing implement: the template adds it, explicit in the graph from the start.

@@ -819,6 +819,40 @@
     (when boot
       (if (= boot (:boot stopped)) stopped {:boot boot :cause :unclean :at-ms (System/currentTimeMillis)}))))
 
+(defn- boot!
+  "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
+  thread drives every fiber, so a go block or future a library starts is a fiber and nothing
+  else runs): main opened on the store at path, its indexes preloaded, its program loaded and
+  instrumented, the warm paths run and the heap made static, then the fork server forked from
+  it, sharing all of that copy-on-write while this is the one thread there is
+  (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers,
+  timer and poller; main-carrier-run! returns into an ordinary process), and root's follow.
+  open!'s answer with main's :db as forked, the fork server's :pid and :fd and each phase's ms."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch :int] :map]}
+  [backend path datoms main t0]
+  (jolt.host/main-carrier-run!
+    (fn []
+      (let [{store-cfg :cfg conn :conn :as opened} (pdb/open! backend path datoms main)
+            ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
+            agents-dir (pdb/agents-dir store-cfg)
+            _ (.mkdirs (java.io.File. agents-dir))
+            open-ms (profile/ms-since t0)
+            t-pre (profile/now-ns)
+            _ (pdb/preload! @conn)
+            preload-ms (profile/ms-since t-pre)
+            load-ms (profile/ms-since t0)
+            t1 (profile/now-ns)
+            program (program/load-all! @conn)
+            program-ms (profile/ms-since t1)
+            contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])]
+        (warm! conn)
+        (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
+        (lib/static!)
+        (let [db @conn]
+          (merge opened (fs/fork-server db store-cfg)
+                 {:db db :agents-dir agents-dir :open-ms open-ms :preload-ms preload-ms :load-ms load-ms
+                  :program program :program-ms program-ms :contracts contracts}))))))
+
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (DECISIONS, Branches as in production). opts:
@@ -848,17 +882,9 @@
         main (or main (keyword (cfg/value :seon.config.root/main)))
         backend (or backend (cfg/value :seon.config.store/backend))
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
-        {store-cfg :cfg conn :conn recovered? :recovered?} (pdb/open! backend path datoms main)
-        ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
-        agents-dir (pdb/agents-dir store-cfg)
-        _ (.mkdirs (java.io.File. agents-dir))
-        open-ms (profile/ms-since t0)
-        t-pre (profile/now-ns)
-        _ (pdb/preload! @conn)
-        preload-ms (profile/ms-since t-pre)
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms preload-ms load-ms program program-ms contracts pid fd]}
+        (boot! backend path datoms main t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
-        load-ms (profile/ms-since t0)
-        t1 (profile/now-ns)
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
         ;; through the writer once the graph runs, and that commit is the reconciler's first pass
         boot (str (random-uuid))
@@ -867,16 +893,6 @@
         provider (or provider (cfg/provider cfg/config))
         ;; the config in force, written on main's root entity with the boot fact
         config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
-        program (program/load-all! @conn)
-        program-ms (profile/ms-since t1)
-        contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
-        _ (warm! conn)
-        _ (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
-        _ (lib/static!)
-        db @conn
-        ;; physics: the fork server is forked while this is the one active thread (Jolt's carriers,
-        ;; timer and watcher parked: the child resets them, seon.lib/fork!; docs/failure-points.md, Physics)
-        {:keys [pid fd]} (fs/fork-server db store-cfg)
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))

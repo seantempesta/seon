@@ -623,6 +623,20 @@
  ;; and 256 alike (R@5 0.343 -> 0.346; seon.context/related-weighs-a-neighbour-by-its-rarity). At
  ;; the bound: at most this many :form/refs datoms read a neighbour.
  :seon.config.render/related-rarity 16
+ ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
+ ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
+ ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the
+ ;; fused related was measured with (b9920ecf5b, notes/related-search-2026-10-25.md); no other value
+ ;; was measured. At the bound: a candidate past it is never ranked by meaning.
+ :seon.config.render/related-near 4
+ ;; Unit: forms. When the plan cites no defined var (a user's request in prose), the call graph's half
+ ;; of related starts from the first :seon.config.render/related program functions among this many
+ ;; forms nearest the plan (near a prose request most are tests). Provenance: the 8 requests of the
+ ;; design-build run db1, each true site in the page's functions (cited, or related's five): none
+ ;; 4 of 8, seeds among the 20 candidates 5, among the 50 nearest forms 6, among 200 6 (task
+ ;; seon.context/a-prose-request-finds-its-functions): 50 is the smallest measured that found as
+ ;; many; 8 requests do not tell 50 from 200. At the bound: a function past it never seeds.
+ :seon.config.render/related-seeds-near 50
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

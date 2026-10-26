@@ -53,13 +53,24 @@
                 ;; the agent's :ready event, tapped before the attach that spawns it and awaited
                 ;; after: its hello (a ping of :agents until idle was a poll)
                 (eval-root "(def ready-ev (c/events sys))")
-                (ask {:op :attach :task "demo/t"})
-                (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
-                (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms))
+                ;; an attach answers its agent ({:agent :task :run}); one that made none (refused:
+                ;; its fork server lost) ends the test with that answer once the root is stopped,
+                ;; never a wait for a hello that cannot come, nor an answer a caller could read as
+                ;; an agent's
+                (let [attach (ask {:op :attach :task "demo/t"})]
+                  (if-not (:agent attach)
+                    {::attach-made-no-agent attach}
+                    (do (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
+                        (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms)))))
               [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
-    (ts/stop-root! root)
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
+    (let [stopped (ts/stop-root! root)]
+      (ts/drop-main! store main)
+      (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
+      ;; root's log (its fork server's stderr says why it died) is read at its stop, before the
+      ;; runs directory goes
+      (when-let [a (and (map? out) (::attach-made-no-agent out))]
+        (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) "\nroot's log:\n" (:log stopped))
+                        {:attach a :log (:log stopped)}))))
     (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
 
 (defn- root-ended
@@ -88,9 +99,9 @@
                           "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a2 (:agent e))) :began (recur)))))"))
         agents (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
         pids (set (vals agents))
-        [_ r] (str/split (str/trim (slurp (str runs "/root.pids"))) #" ")
         children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        fs (first (children r))]
+        ;; the fork server root names, never the first child pgrep lists (pid order wraps)
+        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")]
     (when fork-server-first?
       (doseq [k (children fs) :when (not (pids k))] (sh/sh "kill" "-9" (str k)))
       (sh/sh "kill" "-9" (str fs)))
@@ -119,9 +130,12 @@
         eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
                                (if (:error r) r (value-of (:response r)))))
         _ (eval-root "(def lost-ev (c/events sys))")
-        [_ r] (str/split (str/trim (slurp (str runs "/root.pids"))) #" ")
         children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        fs (first (children r))
+        ;; the fork server is the one root names: root has other children (its file watcher), and
+        ;; pgrep's order is pid order, which wraps (the first child pgrep listed was the watcher,
+        ;; killed in its place, and the test waited for a loss that never came)
+        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
+        ;; its standby is its child
         _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
         _ (sh/sh "kill" "-9" (str fs))
         lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (if (= :fork-server-lost (:type e)) :lost (recur))))")
@@ -493,6 +507,30 @@
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
     (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
 
+(deftest a-branch-that-deletes-mains-test-it-breaks-is-not-merged
+  ;; owner, 2026-10-26: "auto merge (the goal) means the old tests need to pass too. So deleting
+  ;; the old test doesn't stop the old test from running": a branch breaks what one of main's
+  ;; tests checks and deletes that test (unmapped, staged as its removal); the test still judges,
+  ;; from main's definition, so the run is red, not merged, and its end names main's test
+  (let [main-test 'seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+        [_ _ _ _ _ _ done seen]
+        (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                   "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
+                   "(deftest t (is (= 2 (inc 1))))"
+                   "(in-ns 'seon.ref) (defn- first-sentence \"Every sentence of flat prose.\" {:malli/schema [:=> [:cat :string] :string]} [flat] flat)"
+                   (str "(ns-unmap 'seon.ref-test '" (name main-test) ") (seon.stage/stage!) (in-ns 'agent.a1)")
+                   before-done {:op :done :agent "a1"}
+                   {:op :eval :agent "root"
+                    :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
+                               " [(select-keys (first (vals (seon.task/runs @(:conn sys)))) [:seon.run/outcome :seon.run/reason])"
+                               "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) \"demo/t\")])")}]
+                  {:dirs ["src" "test"]})
+        [run state] (:value seen)]
+    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
+    (is (= :red (:seon.run/outcome run)) (pr-str run))
+    (is (not (#{:done :merged} state)) (str "not merged: " state))
+    (is (str/includes? (str (:seon.run/reason run)) (str main-test)) "its end names main's failing test")))
+
 (deftest an-outside-run-with-a-green-proof-finishes
   ;; root (2026-10-23): an outside agent that writes its proof green and hands the run back is
   ;; judged by the end it wrote, and its task finishes, not held
@@ -839,6 +877,39 @@
                       {:sets [":seon.config.ai/provider=:none"]
                        :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
+
+(deftest a-green-whole-task-merges-itself-with-no-act-beyond-done
+  ;; owner, 2026-10-26: "we have the agents have live feedback so we can know if we can auto merge
+  ;; so test for it": through my.root/request! (the default, one whole task) and the reconciler, a
+  ;; run whose proof passes on its branch ends green, and root merges its branch into main: the
+  ;; agent does nothing beyond its work
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wg\" :seon.task/plan \"Make wg.\"})"
+                  " _ (seon.root/await-db sys \"the whole task merged\" #(= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"demo/wg\")))"
+                  " db @(:conn sys) r (seon.task/run db \"demo/wg#1\")]"
+                  " [(:seon.task/kind (seon.task/task db \"demo/wg\")) (:seon.run/outcome r) (:seon.run/status r) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/whole-green"]})]
+    (is (= [:whole :green :merged true] (:value r)) (pr-str r))))
+
+(deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
+  ;; the other way: a whole run whose proof is red is not merged. Its run does not end red: it
+  ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
+  ;; rule's reasons as data in what it observed (a run root refuses at its end gets root's verdict
+  ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
+  ;; ends on the run's own end, which always comes
+  (let [code (str "(let [_ (my.root/request! sys {:seon.task/ns 'demo :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
+                  " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"demo/wr#1\"]))))"
+                  " db @(:conn sys) r (seon.task/run db \"demo/wr#1\")"
+                  " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"demo/wr\")}}))"
+                  " obs (datahike.api/q '[:find ?b . :where [?r :seon.run/id \"demo/wr#1\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 1] [?u :seon.turn/origin :model] [?u :seon.turn/basis ?b]] b)]"
+                  " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"demo/wr\") (mapv :reason (get-in obs [:observed :reasons])) (get-in obs [:observed :merge])])")
+        [_ r] (in-agent [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code code}]
+                        {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
+        [status state reasons merge] (:value r)]
+    (is (= :parked status) (pr-str r))
+    (is (not= :merged state) "not merged")
+    (is (= [:proof-red] reasons) "its next turn carries why, as data: the proof is red")
+    (is (= [] (:conflicts merge)) "its merge readiness was measured that turn: nothing would conflict, the red proof alone keeps it from merging")))
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own

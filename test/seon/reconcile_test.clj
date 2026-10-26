@@ -465,18 +465,26 @@
   )
 
 (deftest a-whole-task-works-in-parallel-and-its-green-merges
-  ;; owner, 2026-10-26 (seon.template/whole): a whole task's runs start as work does, not one at a
+  ;; owner, 2026-10-26 (seon.template/request): a whole task's runs start as work does, not one at a
   ;; time as merges do; its green run merges into main as a merge run's does; out of turns, it parks
   (let [whole (fn [nm] (assoc (decl nm) :seon.task/kind :whole))]
     (is (= [(spawn "a" 1) (spawn "b" 1)] (actions-for (db-of [(whole "a") (whole "b")]))) "two at once")
     (is (= [{:op :octopus-merge :run "demo/a#1" :members [{:run "demo/a#1" :task "demo/a"}]}]
            (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass})))))
-    (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))))
+    (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))
+    ;; owner, 2026-10-26 ("test for it"): a whole run that ended red, or green with main's merge
+    ;; unresolved on its branch, is not merged: its verdict goes back to its own session, the
+    ;; done rule's reasons as data (a merge task's holds for root)
+    (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :proof-red :symbol (t "a")}]}]
+           (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :red :results {(t "a") :fail})))))
+    (is (= [[:verdict [:unmerged]]]
+           (map (juxt :op #(mapv :reason (:reasons %)))
+                (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :green :results {(t "a") :pass} :unmerged ["[:var app/f]"]))))))))
 
 (deftest a-requests-green-work-is-merged-by-its-merge-task
-  ;; owner, 2026-10-26: "design-build and merge": the green design-build task is done, not merged
+  ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged
   ;; by itself; its merge task then runs on the branch, and its green run is the octopus merge
-  (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/request (decl "a"))]
+  (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/design-build (decl "a"))]
                              (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))]
     (is (= [(spawn "a" 1)] (actions-for (db-req []))) "the work task forks first, alone")
     (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
