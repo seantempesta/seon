@@ -106,7 +106,8 @@
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
   ;; step (or test) whose function reaches a process var (a fork, an agent, a root booted for it:
   ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
-  ;; nothing; it runs when named. A shell call is no process (audit 2026-10-26, item 7): it runs
+  ;; nothing; it runs when named. A shell call is no process (audit 2026-10-26, item 7): a test
+  ;; that only shells runs in a plan that names nothing
   (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
                    'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
                    'app.pv-boot "(defn calc [] (c/add 1 2))")
