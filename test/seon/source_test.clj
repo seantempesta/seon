@@ -270,7 +270,7 @@
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
-        (is (= 2 (count (:commits t2))) "two merges committed")
+        (is (= 2 (count (:commits t2))) (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
