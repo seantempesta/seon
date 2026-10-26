@@ -229,12 +229,13 @@ Pinned in `deps.edn` (not a submodule).
 
 ## lmdb
 
-`reference-code/lmdb` pinned at `42c0514`, the tip of ``jolt/sysv-sem-identity``, built from source by `bin/build lmdb` with `MDB_USE_ROBUST` ([failure points](failure-points.md#lmdb-robust-locks)).
+`reference-code/lmdb` pinned at `15420ce`, the tip of ``jolt/sysv-sem-identity``, built from source by `bin/build lmdb` with `MDB_USE_ROBUST` ([failure points](failure-points.md#lmdb-robust-locks)).
 
 - Fork repo: ``https://github.com/seantempesta/lmdb``. Upstream: ``LMDB/lmdb``, branch `mdb.master3`.
 - Base: `253ba52`, upstream `mdb.master3`. There is no ``jolt/main`` yet: the pin sits on its one topic branch.
-- Ours, on ``jolt/sysv-sem-identity`` `42c0514`:
-  - `42c0514` with SysV semaphores (`MDB_USE_ROBUST` on macOS) an env takes a semaphore set nobody uses, never one it shares. `ftok` keeps 16 bits of the lock file's inode, so two envs could share one set: the first open of one reset the other's locks, and the last close of one removed the set the other used (its next open: EINVAL). The last close also raced a process waiting for the lock file (EINVAL as well). A set now counts its processes (SEM_UNDO) and names its lock file; the lock format's type goes 8 → 9. EINVAL from a lock on a live set is the process's undo limit, `MDB_SEM_UNDO_FULL`. Proof: `target/lmdb-sem` (`native/lmdb_sem.c`), a `bin/check` step: three of its four cases red on `253ba52`, all green here. Generic (an upstream candidate).
+- Ours, on ``jolt/sysv-sem-identity`` `15420ce`:
+  - `42c0514` with SysV semaphores (`MDB_USE_ROBUST` on macOS) an env takes a semaphore set nobody uses, never one it shares. `ftok` keeps 16 bits of the lock file's inode, so two envs could share one set: the first open of one reset the other's locks, and the last close of one removed the set the other used (its next open: EINVAL). The last close also raced a process waiting for the lock file (EINVAL as well). A set now counts its processes (SEM_UNDO) and names its lock file; the lock format's type goes 8 → 9. EINVAL from a lock on a live set is the process's undo limit, `MDB_SEM_UNDO_FULL`. Generic (an upstream candidate).
+  - `15420ce` a joiner never joins a set being taken (a sixth semaphore held from the claim until the set names its lock file), a take accepts only a set of six, and a failed open stops counting itself (from the branch's review). Proof of both: `target/lmdb-sem` (`native/lmdb_sem.c`), a `bin/check` step: every case red on `253ba52` (the third by a count), all green here. Generic.
 
 ## Unmodified submodules
 

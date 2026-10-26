@@ -1,12 +1,14 @@
 /* lmdb-sem DIR: the proof that each env has a SysV semaphore set of its own
  * (docs/failure-points.md#lmdb-robust-locks). The robust build locks with a set found by
  * ftok(lock.mdb), which keeps 16 bits of the inode, and the last close of an env removes its set.
- * 1. two envs whose lock files share a key: one is held open, the other opened and closed, and
- *    the held one opens again and writes (the old build answered EINVAL: the close removed the
- *    shared set);
+ * 1. two envs whose lock files share a key: one holds its writer lock while the other is opened,
+ *    written and closed; the holder's set is still there and its lock still held (upstream's
+ *    build reset it, then removed it), and a new process opens the held env and writes;
  * 2. an env whose recorded set is gone while a process holds it (what a process that waited on
  *    the lock file while the last user closed finds): a new process opens it and writes;
- * 3. N processes open and close one env at once, LOOPS times each: no open fails;
+ * 3. 16 processes open one env at once 200 times each, adding one to a count under the writer
+ *    lock: no open fails and no addition is lost (upstream's build: a few opens of 3,200 fail
+ *    with EINVAL, the last close's race; a count, not every run);
  * 4. one process opens envs until one fails: the failure is MDB_SEM_UNDO_FULL, never EINVAL.
  * Prints LMDB-SEM OK and exits 0 only when every case holds. Case 1 makes about 65,536 files to
  * find a key (the inode counter's low 16 bits come round), each removed at once. */
@@ -24,8 +26,20 @@
 static int open_env(const char *dir, MDB_env **e) {
   int r = mdb_env_create(e);
   if (!r) r = mdb_env_set_mapsize(*e, 1 << 26);
-  if (!r) r = mdb_env_open(*e, dir, MDB_NOTLS, 0664);
+  if (!r) r = mdb_env_open(*e, dir, MDB_NOTLS | MDB_NOSYNC, 0664);
   return r;
+}
+
+/* The set this process last operated SEMNUM of, for lock file L: the first, from L's ftok key
+ * on (the fork's sets move to a later key on a collision; 64 keys is far past any here), whose
+ * SEMNUM this pid last changed; else the set at the key itself (upstream's one set). */
+static int find_set(const char *l, int semnum) {
+  key_t k = ftok(l, 'M'); int i;
+  for (i = 0; i < 64; i++, k = (k & ~0xffff) | ((k + 1) & 0xffff)) {
+    int s = semget(k, 0, 0);
+    if (s >= 0 && semctl(s, semnum, GETPID) == getpid()) return s;
+  }
+  return semget(ftok(l, 'M'), 0, 0);
 }
 
 static int put(MDB_env *e, const char *k) {
@@ -68,11 +82,17 @@ static int collision(const char *base) {
   }
   printf("1. two lock files with ftok key %#x (after %d files)\n", k, n);
   if (ftok(lb, 'M') != k) { printf("  no file found with the key\n"); return 0; }
-  MDB_env *held; int r = open_env(b, &held);
-  if (!r) r = put(held, "held");
-  printf("  holder of b: %s\n", r ? mdb_strerror(r) : "opened and committed");
-  int ok = !r && child_open_put(a, "a", "another process opens a, writes and closes")
-              && child_open_put(b, "b", "a new process opens b and writes");
+  MDB_env *held; MDB_txn *t; int r = open_env(b, &held);
+  if (!r) r = mdb_txn_begin(held, NULL, 0, &t);
+  printf("  holder of b, inside a write txn: %s\n", r ? mdb_strerror(r) : "yes");
+  if (r) return 0;
+  int s = find_set(lb, 1), ok = child_open_put(a, "a", "another process opens a, writes and closes");
+  struct semid_ds buf; union semun { int val; struct semid_ds *buf; unsigned short *array; } u = {.buf = &buf};
+  int there = s >= 0 && !semctl(s, 0, IPC_STAT, u), held_lock = there && semctl(s, 1, GETVAL) == 0;
+  printf("  the holder's set %d: %s, its writer lock %s\n", s, there ? "there" : "gone", held_lock ? "still held" : "free");
+  r = mdb_txn_commit(t);
+  printf("  holder commits: %s\n", r ? mdb_strerror(r) : "committed");
+  ok = ok && there && held_lock && !r && child_open_put(b, "b", "a new process opens b and writes");
   r = put(held, "held-after");
   printf("  holder of b writes again: %s\n", r ? mdb_strerror(r) : "committed");
   mdb_env_close(held);
@@ -86,11 +106,32 @@ static int removed(const char *base) {
   printf("2. an env whose recorded set is gone while a process holds it\n");
   MDB_env *held; int r = open_env(d, &held);
   if (r) { printf("  holder: %s\n", mdb_strerror(r)); return 0; }
-  int s = semget(ftok(l, 'M'), 0, 0);
+  int s = find_set(l, 2);	/* the fork counts the holder on semaphore 2 */
   printf("  holder's set %d removed: %s\n", s, s >= 0 && !semctl(s, 0, IPC_RMID) ? "yes" : "no");
   int ok = s >= 0 && child_open_put(d, "joined", "a new process opens it and writes");
   mdb_env_close(held);
   return ok;
+}
+
+/* add one to the count under key "n", in a write txn (under the writer lock) */
+static int add(MDB_env *e) {
+  MDB_txn *t; MDB_dbi d; MDB_val K = {1, "n"}, V; unsigned n = 0;
+  int r = mdb_txn_begin(e, NULL, 0, &t);
+  if (r) return r;
+  r = mdb_dbi_open(t, NULL, 0, &d);
+  if (!r && !mdb_get(t, d, &K, &V)) memcpy(&n, V.mv_data, sizeof n);
+  n++; V.mv_size = sizeof n; V.mv_data = &n;
+  if (!r) r = mdb_put(t, d, &K, &V, 0);
+  if (!r) r = mdb_txn_commit(t); else mdb_txn_abort(t);
+  return r;
+}
+
+static unsigned count(MDB_env *e) {
+  MDB_txn *t; MDB_dbi d; MDB_val K = {1, "n"}, V; unsigned n = 0;
+  if (mdb_txn_begin(e, NULL, MDB_RDONLY, &t)) return 0;
+  if (!mdb_dbi_open(t, NULL, 0, &d) && !mdb_get(t, d, &K, &V)) memcpy(&n, V.mv_data, sizeof n);
+  mdb_txn_abort(t);
+  return n;
 }
 
 static int race(const char *base, int n, int loops) {
@@ -101,7 +142,7 @@ static int race(const char *base, int n, int loops) {
     pipe(fds[i]);
     if (!fork()) {
       char c; int f = 0, j; close(bar[1]); read(bar[0], &c, 1);
-      for (j = 0; j < loops; j++) { MDB_env *e; if (open_env(d, &e)) f++; mdb_env_close(e); }
+      for (j = 0; j < loops; j++) { MDB_env *e; if (open_env(d, &e) || add(e)) f++; mdb_env_close(e); }
       write(fds[i][1], &f, sizeof f); _exit(0);
     }
     close(fds[i][1]);
@@ -109,8 +150,10 @@ static int race(const char *base, int n, int loops) {
   close(bar[0]); close(bar[1]);
   for (i = 0; i < n; i++) { int f = 0; read(fds[i][0], &f, sizeof f); bad += f; close(fds[i][0]); }
   while (wait(NULL) > 0) ;
-  printf("3. %d processes open and close one env %d times each: %d of %d opens failed\n", n, loops, bad, n * loops);
-  return bad == 0;
+  MDB_env *e; unsigned got = 0;
+  if (!open_env(d, &e)) { got = count(e); mdb_env_close(e); }
+  printf("3. %d processes open one env %d times each and add one: %d of %d failed, the count %u\n", n, loops, bad, n * loops, got);
+  return bad == 0 && got == (unsigned)(n * loops);
 }
 
 static int limit(const char *base) {
@@ -121,9 +164,9 @@ static int limit(const char *base) {
     r = open_env(d, &e[i]);
     if (!r) r = put(e[i], "k");
   }
-  printf("4. one process opens envs: %d open, then %s\n", r ? i - 1 : i, r ? mdb_strerror(r) : "no limit reached");
+  printf("4. one process opens and writes envs: %d, then %s\n", r ? i - 1 : i, r ? mdb_strerror(r) : "no limit reached (the undo limit should stop it)");
   int n = i; while (n--) mdb_env_close(e[n]);
-  return !r || r == MDB_SEM_UNDO_FULL;
+  return r == MDB_SEM_UNDO_FULL;
 }
 
 int main(int argc, char **argv) {
