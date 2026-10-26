@@ -112,15 +112,33 @@
        (merge (zipmap (keys read) (repeat []))
               (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
+(defn tasks-read-tx
+  "The write of a good read of n task files on main db: root's :seon.root/tasks, its reads
+  counted, so each good read is a new fact whether or not it changed a declaration. A refused
+  read's error names it as its subject (load-answer), so this write closes it."
+  {:malli/schema [:=> [:cat :seon.host/db nat-int?] [:vector :map]]}
+  [db n]
+  (let [held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+    [{:seon.root/id :root :seon.root/tasks {:reads (inc (:reads held 0)) :files n}}]))
+
+(defn load-answer
+  "Answer r of a read of the task files, as load-tasks! answers it: a refusal (a file's or the
+  reconcile's) names :seon.root/tasks as its subject, the fact only a good read writes."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
+
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
-  ones updated, removed ones cancelled; unchanged ones write nothing. Answers the writer's
-  answer with the counts, or the error. Releasing stays run!'s."
+  ones updated, removed ones cancelled; unchanged ones write no declaration. A good read writes
+  root's :seon.root/tasks (tasks-read-tx). Answers the writer's answer with the counts, or the
+  error (load-answer). Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [files (if dir (task-files dir) (task-files))]
-     (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))))
+   (let [files (if dir (task-files dir) (task-files))
+         r (load-answer (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))]
+     (when-not (contract/error? r) @(root/transact-main! sys (tasks-read-tx @(:conn sys) (count files))))
+     r)))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
