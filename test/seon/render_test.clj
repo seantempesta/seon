@@ -1265,3 +1265,52 @@
         (#'p/pass (assoc st' :waiting {3 debug} :recorded (seon.problems/health db)) o2)
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
+
+(deftest a-view-is-its-ctxs-parts
+  ;; task seon.render/a-ctx-is-shown-as-its-parts (slice 2a of the one derivation): an agent's ctx as
+  ;; ordered keyed parts, pure in the ctx, with nothing in them that changes without meaning
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        branch (d/db-with branch [{:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
+                                   :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
+                                                     :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
+                                                                :reasons ["demo/f-test is red"]}}}])
+        c (:tree (seon.ctx/build branch k :task-demo-f))
+        parts (r/view c)
+        ks (mapv :key parts)]
+    (is (= [[:task] [:proofs] [:verdict] [:run]] (subvec ks 0 4)) "the task, its proofs, the verdict, the run, first")
+    (is (= {'demo/f-test {:status :fail :failure {:expected '(= 4 (f 2)) :actual 5}}} (:value (second parts)))
+        "each proof's status as the newest turn observed it, with its first failure")
+    (is (= ["demo/f-test is red"] (:value (nth parts 2))))
+    (is (= 2 (:turns-taken (:value (nth parts 3)))))
+    (is (= [[:eval "e1"] [:eval "e2"] [:eval "e3"]] (filterv #(= :eval (first %)) ks)) "the evals in the order they were written")
+    (is (some #(= [:message "m-1"] %) ks) "the message to the run, in the conversation")
+    (is (not-any? #(and (map? %) (or (contains? % :db/id) (contains? % :seon.agent/answered-t))) (tree-seq coll? seq parts))
+        "no entity ids, no counters")
+    (is (not-any? #(#{:t :commit :branch} (first %)) ks) "no environment")
+    (is (= parts (r/view c)) "pure: the same ctx, the same parts")))
+
+(deftest a-parts-faces-are-one-selection
+  ;; one selection of the one printer serves both faces, so the page and the model cut alike; a
+  ;; schema's declared face overrides that face alone
+  (let [big {:plan (apply str (repeat 400 "a long plan sentence. ")) :n 1}
+        {:keys [html text]} (r/part-faces {:key [:task] :value big})
+        err (seon.contract/error :seon.render/not-callable `ui/root "boom" {:seon.render/fn 'x})
+        fe (r/part-faces {:key [:eval "e9"] :value err})]
+    (is (str/includes? text "a long plan sentence.") text)
+    (is (re-find #"[0-9,]+ (chars|characters)|…" text) "the text face is cut, and says so")
+    (is (str/includes? (h/html html) "seon-print-elision") "the page's face is cut at the same place")
+    (is (= (r/ai err {}) (:text fe)) "a declared :ai render overrides the text face")
+    (is (= (h/html (r/html err {})) (h/html (:html fe))) "and its :html render the page's")))
+
+(deftest a-part-draws-once-per-value
+  ;; the memo: a part draws again only when its value or a function that draws it is a new object
+  (let [p {:key [:run] :value {:seon.run/id "demo/f#1" :seon.run/status :running}}
+        [m1 out1] (r/drawn {} p)
+        [m2 out2] (r/drawn m1 p)
+        [_ out3] (r/drawn m1 (update p :value #(into {} %)))
+        [_ out4] (r/drawn (update-in m1 [[:run] 0] assoc 2 (fn [& _])) p)]
+    (is (identical? out1 out2) "the identical value: the held faces")
+    (is (not (identical? out1 out3)) "an equal value that is a new object draws again")
+    (is (= out1 out3))
+    (is (not (identical? out1 out4)) "a function that draws it redefined: drawn again")))
