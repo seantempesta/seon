@@ -107,8 +107,10 @@
 (deftest a-spawn-after-the-fork-server-is-lost-answers
   ;; task seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
   ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;
-  ;; a spawn asked then answers with the error naming it, and root stops. Unfixed, the fork was
-  ;; neither sent nor answered and the spawn (an attach's) waited for good
+  ;; a spawn asked then is refused with the error naming it (seon.fork-server/lost), before any
+  ;; agent is made, and root stops. Unfixed, the fork was neither sent nor answered and the spawn
+  ;; (an attach's) waited for good; then a spawn made an agent whose socket the lost server closed,
+  ;; so it answered :seon.agent/died or :seon.agent/failed, whichever end reached root first
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         main (str "fork-server-lost-" (random-uuid))
         store (ts/process-store checkout)
@@ -125,13 +127,15 @@
         lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (if (= :fork-server-lost (:type e)) :lost (recur))))")
         spawned (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
         status (eval-root "(get-in (c/state sys) [:fork-server :status])")
+        agents (eval-root "(count (:agents (c/state sys)))")
         stopped (ts/stop-root! root)]
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs)
     (is (= :lost lost) "root heard the server is lost")
-    (is (= :seon.agent/failed (first spawned)) (pr-str spawned))
+    (is (= :seon.root/refused (first spawned)) (pr-str spawned))
     (is (re-find #"fork server is lost" (str (second spawned))) (pr-str spawned))
     (is (= :lost status))
+    (is (= 0 agents) "no agent was made for the refused spawn")
     (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
 
 (deftest an-agent-ends-when-its-root-is-gone

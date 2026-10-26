@@ -246,9 +246,10 @@
   (some-> ^Thread reader (.join 5000))
   nil)
 
-(defn- lost
+(defn lost
   "The answer to every request a lost fork server is asked (one that died with no standby
-  to take its place): the request refused, naming why."
+  to take its place): the request refused, naming why. Root's api refuses a spawn with it
+  once it has heard of the loss, before any agent is made."
   {:malli/schema [:=> [:cat] :seon.root/refused]}
   [] (seon.contract/error :seon.root/refused #'seon.fork-server/lost
                           "the fork server is lost: it died with no standby to take its place, so root forks no agent and answers no fork server request"))

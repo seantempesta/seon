@@ -677,7 +677,7 @@
   [seed n] (apply str (map #(char (+ 97 (mod (+ seed (* 7 %)) 26))) (range n))))
 
 (defn- members "Entities es as a collection: ctx's newest-first map by eid." {:malli/schema [:=> [:cat [:sequential :map]] :map]}
-  [es] (into (sorted-map-by @#'seon.ctx/newest-first) (map (juxt :db/id identity)) es))
+  [es] (#'seon.ctx/members-map (mapv (juxt :db/id identity) es)))
 
 (defn- an-eval {:malli/schema [:=> [:cat nat-int? pos-int?] :map]} [i len]
   {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by "a1"

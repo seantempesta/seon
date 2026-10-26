@@ -333,6 +333,9 @@
                (cond
                  holder (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder)
                                               {:branch (:branch opts) :agent holder}))
+                 ;; no server to fork it: refused before an agent proc and its socket are made (a
+                 ;; socket the lost server closes would end that agent first, as a death)
+                 (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
