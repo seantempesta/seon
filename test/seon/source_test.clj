@@ -257,6 +257,7 @@
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")}
+        red (volatile! false)
         cloned (sh/sh "git" "clone" "-q" "--local" here tree)
         root (atom (ts/start-root! (assoc root0 :args ["--set" (str ":seon.config.source/root=" (pr-str tree))
                                                        "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"])))
@@ -270,7 +271,10 @@
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
-        (is (= 2 (count (:commits t2))) (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))))
+        (when-not (= 2 (count (:commits t2))) (vreset! red true))
+        (is (= 2 (count (:commits t2)))
+            (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
+                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out]]) @(:conn sys))))"))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
         ;; the tree changes a test namespace's ns form while root is down (as a merge to test/
@@ -294,6 +298,12 @@
               "the new generation runs both, resumed on main holding its generation")))
       (finally
         (ts/stop-root! @root)
+        ;; a red keeps its root's log (target/restart-test-<n>.log, named in the failure), the evidence a
+        ;; deleted scratch dir took with it
+        (when @red
+          (let [kept (str here "/target/restart-test-" (random-uuid) ".log")]
+            (sh/sh "cp" (str dir "/runs/root.log") kept)
+            (println "the restart test's root.log kept at" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
         (sh/sh "rm" "-rf" dir)))))
