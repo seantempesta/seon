@@ -1046,7 +1046,7 @@
 (defn- take-answer
   "[st requests] with answer m taken by the flight step that asked it (advance), and the next
   pass when that ended its flight."
-  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state [:map [:tag :int] [:r :any]]] [:tuple :seon.reconcile/state [:vector :map]]]}
   [st m]
   (let [st (cond-> st (= (:tag m) (:report st)) (dissoc :report))
         [st [aid step]] (step/answered st (:tag m))
