@@ -42,6 +42,19 @@
     (is (= :refused (first r)) (str "answered " r))
     (is (<= 2 (second r)) (str "active threads " (second r)))))
 
+(deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent
+  ;; the child holds a copy of every frame its parent forked from: a throw out of (child) that
+  ;; unwound out of lib/fork! ran the parent's code in the child (here the catch below, exit 7;
+  ;; in an agent's test child, the agent's own serve! loop, which died as the agent, exit 70, or
+  ;; went on reading root's socket as a second agent). The child ends at fork!, exit 1, saying
+  ;; what threw
+  (let [r (try (lib/fork! {:child #(throw (ex-info "out of the child" {}))
+                           :refused (fn [n] {:refused n}) :parent lib/wait-status})
+               (catch clojure.lang.ExceptionInfo _ (lib/c-exit 7)))]
+    (is (= {:exit 1} r)))
+  (is (= {:exit 0} (lib/fork! {:child (fn [] :returned) :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+      "a child whose code returns exits 0"))
+
 (defn- in-child
   "f's answer in a child lib/fork! makes, as its exit status: 0 when (f) answers true
   within 5 s, 1 when it answers anything else, 2 when it has not answered (a future
