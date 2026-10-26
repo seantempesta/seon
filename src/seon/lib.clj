@@ -61,6 +61,8 @@
 (defc kq-watch "e13_kq_watch" [:int :int] :long)
 (defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
 
+(defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
+
 (defn wait-fd-or-exit
   "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
   watching both (EVFILT_READ, and NOTE_EXIT, the fact the fork server reaps by), parked on as a
@@ -86,7 +88,6 @@
                           ;; kq is readable, so e13_wait answers at once: 0 for fd's input, the pid at its exit
                           (if (pos? (kq-wait kq fd)) (do (vreset! exited true) :exited) :input))))
        :close (fn [] (poller/forget! kq) (c-close kq))})))
-(defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
 (defc mp-probe* "mp_probe" [:pointer :long] :long)
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
