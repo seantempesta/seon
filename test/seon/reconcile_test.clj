@@ -435,14 +435,16 @@
                           "the index again, as seon.turn/observe did every turn, settles all n tasks: n^1.75, 258M "
                           "ticks and 922 MB at 1,000 (92.0M ticks, 384 MB on that root's main)")
                :growth :linear
-               ;; measured 2026-10-24: 8.51M ticks / 67.7 MB at 10, 8.23M / 61.1 MB at 100, 11.3M / 68.7 MB at 1,000
-               :fixed {:ticks 8500000.0 :bytes 65000000.0}
-               :per-n {:ticks 3000.0 :bytes 8000.0}
-               ;; below 1,000 the growth is smaller than the fixed part's layout variance between builds,
-               ;; measured (8.18M ticks at 10 on main's tree, 8.33M with one more schema attribute; n=500 costs
-               ;; less than n=10 on both, 7.9M ticks and 52 MB): no size but 1,000 sees the work, so 100 is left
-               ;; out until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
-               :sizes [10 500 1000]}))
+               ;; measured with an attribute compared with no try (Datahike cc614f4e: a slice comparison
+               ;; 417 -> 1 B): 4.71M ticks / 17.9 MB at 10, 5.36M / 18.3 MB at 500, 7.74M / 23.8 MB at 1,000;
+               ;; before it, 8.34M / 65.6 MB at 10 and 10.9M / 65.0 MB at 1,000 (most of the fixed part was
+               ;; each comparison's try/catch)
+               :fixed {:ticks 4700000.0 :bytes 18000000.0}
+               :per-n {:ticks 3100.0 :bytes 6000.0}
+               ;; below 1,000 the growth is smaller than the layout variance between builds (n=500 measured
+               ;; cheaper than linear, 5.36M ticks), so the slope is read between sizes the work outweighs it:
+               ;; 10, 1,000 and 2,000, until task seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed is fixed
+               :sizes [10 1000 2000]}))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
