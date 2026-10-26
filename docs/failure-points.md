@@ -125,7 +125,10 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   1-2 runs in 10 faulted). Its rules:
   - a blocking foreign call stops every fiber of the process until it returns: a `waitpid` for
     a test child, and `seon.sock/send!` to root while the socket's buffer is full (it does not
-    park, as `recv!` does);
+    park, as `recv!` does). A wait on another process parks through the I/O poller instead:
+    the agent's wait for its test child's lines, the whole test run, is
+    ```seon.sock/line-reader```'s `jolt.io-poller/wait-ready`
+    (```seon.lib-test/a-wait-for-a-line-parks-the-fiber```; a `poll(2)` held every fiber);
   - the loop wakes on root's signals (SIGUSR1, SIGIO) through kqueue
     (`jolt.io-poller/wake-on-signals!`), so an agent's wait is never "stuck": with nothing
     queued and nothing awaited it waits for root;
