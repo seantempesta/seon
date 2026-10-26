@@ -1164,8 +1164,10 @@
         [_ fs2] (draw m1)
         c2 (assoc-in c [:tree :evals "e1" :seon.eval/record :response :value] 5)
         [_ fs3] (reduce (fn [[m acc] p] (let [[m f] (r/drawn m p)] [m (conj acc f)])) [m1 []] (r/view c2 (seon.context/renders branch)))]
-    (is (every? true? (map identical? fs1 fs2)) "the same ctx: every part from the memo")
-    (is (= 1 (count (remove true? (map identical? fs1 fs3)))) "one member changed: that part alone drawn again")))
+    ;; the task's part is made from its story, rendered on each view (seon.context/story): drawn again
+    (is (every? true? (map identical? (rest fs1) (rest fs2))) "the same ctx: every part but the task's from the memo")
+    (is (not (identical? (first fs1) (first fs2))) "the task's, from its story rendered now, drawn again")
+    (is (= 1 (count (remove true? (map identical? (rest fs1) (rest fs3))))) "one member changed: that part alone drawn again")))
 
 (deftest a-part-draws-once-per-value
   ;; the memo: a part draws again only when its value or a function that draws it is a new object

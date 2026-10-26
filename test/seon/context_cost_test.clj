@@ -157,3 +157,13 @@
                :growth :constant
                :fixed {:calls 16}
                :sizes [10 100 1000]}))
+
+(deftest a-story-costs-what-the-plan-names
+  ;; the story rendered (run-state over the task as of t), as a view draws it each time until its
+  ;; memo by story-key lands: what the plan cites read and resolved, flat in the wiki's size
+  (cost/proof {:of 'seon.context/story :input 'seon.context-cost-test/story-key-of
+               :n "wiki sections with vectors"
+               :work "the task read with its accumulated plan, its references parsed and each resolved, its proofs' forms, the cited sections viewed, similar off: eighteen contracted calls, flat in the wiki"
+               :growth :constant
+               :fixed {:calls 18}
+               :sizes [10 100 1000]}))
