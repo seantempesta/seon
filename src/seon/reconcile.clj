@@ -526,10 +526,10 @@
 (defn- unfiled-error
   "The commit-error of a merged member r (seon.writer/octopus-merge's result) whose changed forms
   name no source file: each namespace and the definitions it changed."
-  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of :symbol [:vector :any]]]]] :string]}
+  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of :symbol [:vector :seon.merge/def-key]]]]] :string]}
   [r]
   (str "merged at t " (:tx r) " but its changed forms name no source file to write back: "
-       (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (pr-str ds))))))
+       (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
 
 (defn- cas-tx
   "Move run aid's status from -> to (Datahike's compare-and-swap, by lookup ref: a racing

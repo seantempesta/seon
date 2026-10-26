@@ -271,7 +271,9 @@
         ;; stored there closed its task with no turn and merged nothing
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
                :env {"SEON_TEST_RESULTS" (str dir "/test-results")}}
+        ;; any failure or error in this test keeps its boot logs: each report passes through
         red (volatile! false)
+        report clojure.test/report
         ;; bin/root start truncates runs/root.log: each boot's log is copied to its own file
         ;; (runs/boot-N.log) before the next boot, so a red keeps every boot's
         boots (volatile! 0)
@@ -282,6 +284,7 @@
         ;; the printed value of a root eval; a reply that is an error stays the error value
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))]
+    (binding [clojure.test/report (fn [m] (when (#{:fail :error} (:type m)) (vreset! red true)) (report m))]
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
@@ -289,10 +292,10 @@
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
-        (when-not (= 2 (count (:commits t2))) (vreset! red true))
         (is (= 2 (count (:commits t2)))
-            (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
-                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out ?turns :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out] [(get-else $ ?r :seon.run/turns :none) ?turns]]) @(:conn sys))))"))))
+            (when-not (= 2 (count (:commits t2)))
+              (str "two merges committed: " (pr-str (select-keys t1 [:commits :commit-errors])) " then " (pr-str (select-keys t2 [:commits :commit-errors]))
+                 "; the runs: " (pr-str (ask "(vec (sort (datahike.api/q (quote [:find ?id ?st ?out ?turns :where [?r :seon.run/id ?id] [?r :seon.run/status ?st] [(get-else $ ?r :seon.run/outcome :none) ?out] [(get-else $ ?r :seon.run/turns :none) ?turns]]) @(:conn sys))))")))))
         ;; a crash: answered at the root's death, as its holder reaped it
         (ts/kill-root! @root)
         (keep-boot!)
@@ -328,7 +331,7 @@
             (println "the restart test's boot logs kept in" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))
-        (sh/sh "rm" "-rf" dir)))))
+        (sh/sh "rm" "-rf" dir))))))
 
 (deftest a-schema-file-round-trips-through-the-program
   ;; task seon.source/schemas-are-part-of-the-program: a schema resource is program data
