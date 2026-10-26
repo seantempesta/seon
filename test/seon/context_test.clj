@@ -1064,6 +1064,26 @@
                               {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
         (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
 
+(deftest a-prose-requests-functions-come-from-its-nearest-and-their-neighbours
+  ;; task seon.context/a-prose-request-finds-its-functions: a plan citing no defined var (a user's
+  ;; request in prose; `demo/nope` names none) seeds related's call graph with the program functions
+  ;; nearest it by meaning, read past the tests nearer still (:seon.config.render/related-seeds-near):
+  ;; twenty-five tests sit nearer the plan than demo/g, so meaning's candidates (related-near per
+  ;; line) hold no program function, and demo/h (no vector) is found only as g's callee
+  (doseq [plan ["Make the page say one thing." "Make the page say one thing, as `demo/nope` does."]]
+    (let [[db te dir] (sections-near plan)
+          db (d/db-with db [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])" :form/defines #{"hv"}} {:db/id "hv" :var/name 'demo/h :var/form "h" :var/kind :fn}
+                            {:form/id "demo/g" :form/refs #{'demo/h} :form/defines #{[:var/name 'demo/g]}}])
+          db (d/db-with db (vec (for [i (range 25)] (let [f (str "t" i)]
+                                                      {:db/id f :form/id (str "demo-test/t" i) :form/src "(deftest t (g))" :form/refs #{'demo/g}
+                                                       :form/defines #{(str f "v")}}))))
+          db (d/db-with db (vec (for [i (range 25)] {:db/id (str "t" i "v") :var/name (symbol "demo-test" (str "t" i)) :var/form [:form/id (str "demo-test/t" i)] :var/kind :test})))
+          ts (for [i (range 25)] (pdb/eid db :form/id (str "demo-test/t" i)))
+          db (d/db-with db (vector/tx-data (vec ts) (repeat 25 1) (for [i (range 25)] (dir 1.0 (* 0.001 (inc i)))) (repeat 25 10) "m"))
+          rel (context/related db te)]
+      (is (some #{'demo/h} (:functions rel)) (str "the nearest function's callee, for: " plan " " (pr-str (:functions rel))))
+      (is (not-any? #(= "demo-test" (namespace %)) (:functions rel)) "the tests that seeded nothing are not shown"))))
+
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
   ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"
