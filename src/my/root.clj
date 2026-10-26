@@ -23,14 +23,14 @@
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
 
 (defn request!
-  "Work request decl as the tasks template makes of it (seon.template/request, the default: its
-  design-build task and its merge; seon.template/whole or seon.template/stages for an
-  experiment), written released in one transaction on main (seon.template/request-tx), so no
+  "Work request decl as the tasks template makes of it (seon.template/whole, the default: one
+  task that designs, builds and merges itself; seon.template/design-build or
+  seon.template/stages for an experiment), written released in one transaction on main (seon.template/request-tx), so no
   agent forks before every task of it is set. Answers the writer's answer with the tasks'
   ids, or the error."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/declaration] :map]
                   [:=> [:cat :seon.root/sys :seon.task/declaration ifn?] :map]]}
-  ([sys decl] (request! sys decl tpl/request))
+  ([sys decl] (request! sys decl tpl/whole))
   ([sys decl template]
    (let [ds (template decl)
          tx (tpl/request-tx @(:conn sys) ds)]

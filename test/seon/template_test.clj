@@ -52,16 +52,16 @@
   (is (apply distinct? (map :seon.task/name fx/requests)) "ten different requests")
   (doseq [d fx/requests]
     (is (not (contains? d :seon.task/proofs)) "no proof given: the agent writes its own")
-    (is (re-find #"Reproduce: \(.*\) answers .*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
+    (is (re-find #"Reproduce: [\(\[].*[\)\]] answers [\[\"0-9a-z].*; it should" (:seon.task/plan d)) (str "a reproduction, what it answers and what it should: " (:seon.task/name d)))
     (is (< (count (:seon.task/plan d)) 1000) (str "short: " (:seon.task/name d)))
-    (is (seq (task/create-tx (ts/test-db) (tpl/request d))) "each a valid task set")))
+    (is (seq (task/create-tx (ts/test-db) (tpl/whole d))) "each a valid task set")))
 
-(deftest a-request-is-its-design-build-task-and-its-merge
-  ;; owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge": the
-  ;; design-build task (kind :work, the :work instructions: red proof, then green, no merge of
-  ;; its own) and its merge task, needing it, on its branch; whole and stages stay choices
+(deftest a-design-build-request-is-its-design-build-task-and-its-merge
+  ;; owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge", then the
+  ;; one task again as the default: an experiment's choice, the design-build task (kind :work, the
+  ;; :work instructions: red proof, then green, no merge of its own) and its merge task, needing it
   (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
-        [w m :as ds] (tpl/request d)]
+        [w m :as ds] (tpl/design-build d)]
     (is (= [["w" :work] ["w-merge" :merge]] (mapv (juxt :seon.task/name :seon.task/kind) ds)) "exactly two tasks")
     (is (= #{"demo/w"} (:seon.task/needs m)) "the merge needs the work")
     (is (= [:task-demo-w :task-demo-w] (mapv :seon.task/branch ds)) "on one branch")
@@ -72,12 +72,13 @@
     ;; already fixed, five had what they needed by turns 1-18 and read on, and proofs were built on the
     ;; live db and on zipmap's order: reproduce first and fail! if it is right, stop reading once it is
     ;; wrong and write the deftest red, and build its input as the existing tests build theirs
-    (let [w (:work tpl/instructions)
-          steps ["reproduce what the plan says is wrong in one eval" "if the output is already right" "(my.task/fail! "
-                 "Once the output is wrong, stop reading" "as a deftest" "existing tests build theirs" "never the live db"
-                 "register it" "run it red" "make it pass"]]
-      (is (every? #(str/includes? w %) steps) "each step is in the design-build instructions")
-      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) "in that order: reproduce, fail! or stop reading, the deftest, red, green"))
+    (doseq [k [:whole :work]
+            :let [w (k tpl/instructions)
+                  steps ["reproduce what the plan says is wrong in one eval" "if the output is already right" "(my.task/fail! "
+                         "Once the output is wrong, stop reading" "as a deftest" "existing tests build theirs" "never the live db"
+                         "register it" "run it red" "make it pass"]]]
+      (is (every? #(str/includes? w %) steps) (str k ": each step is in the instructions"))
+      (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) (str k ": in that order: reproduce, fail! or stop reading, the deftest, red, green")))
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 

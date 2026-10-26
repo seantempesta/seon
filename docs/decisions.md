@@ -108,8 +108,8 @@ Owner, 2026-10-25: chose "Diffs between turns". `(seon.screen/show {:since t})` 
 ### Merge the agent-view branch to main once its review is done
 Owner, 2026-10-25: "873 lines isn't that much if you think it's good lets merge to main. ... I want to see the web work too so if merging to main makes that easier lets do it". Stated in: this entry.
 
-### A request is design-build, then merge
-Owner, 2026-10-26: "make the default tests into two tasks -- design-build and merge" and "don't get rid of the other tasks. I still want to experiment later on". A request's default is its design-build task (one agent: the red proof, then green on its branch) followed by its merge task; the one-go task and the design → implement → merge stages stay, chosen for an experiment. The one-go task replaced the stages first ("switch to one-go for all tests until we figure out a better solution"), measured on the same ten requests, thinking off: 2/10 merged at $0.073 and 92.4% cached, against the stages' 2/10 at $0.145 and 86.3% (jolt/one-go's commits). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
+### A request is one whole task, for now
+Owner, 2026-10-26: "until we solve this we should keep experimenting with having the agent do everything in one task until we get this idea fully baked". A request's default is one task that designs, builds and merges (`seon.template/whole`); design-build then merge ("make the default tests into two tasks -- design-build and merge", the default for one run) and the design → implement → merge stages stay, chosen for an experiment ("don't get rid of the other tasks"). Measured on the same ten requests, thinking off: one task 2/10 merged at $0.073 and 92.4% cached; the stages 2/10 at $0.145 and 86.3%; design-build then merge 1/10 at $0.068 and 93.2%, four of the ten requests already done on main (notes: context-for-20-turns). Stated in: [tasks](tasks.md#a-request-is-one-transaction).
 
 ## 2026-10-24 rulings
 

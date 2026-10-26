@@ -469,9 +469,9 @@
     (is (= [:park] (map :op (actions-for (db-of [(whole "a")] :extra (run "a" 1 :ended :outcome :cap :results {(t "a") :fail}))))))))
 
 (deftest a-requests-green-work-is-merged-by-its-merge-task
-  ;; owner, 2026-10-26: "design-build and merge": the green design-build task is done, not merged
+  ;; owner, 2026-10-26: "design-build and merge" (seon.template/design-build, an experiment's choice): the green design-build task is done, not merged
   ;; by itself; its merge task then runs on the branch, and its green run is the octopus merge
-  (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/request (decl "a"))]
+  (let [db-req (fn [extra] (let [db (empty-db) ds (tpl/design-build (decl "a"))]
                              (-> db (d/db-with (tpl/request-tx db ds)) (d/db-with (task/boot-tx "boot-1" 4)) (d/db-with extra))))]
     (is (= [(spawn "a" 1)] (actions-for (db-req []))) "the work task forks first, alone")
     (is (= [{:op :accept :run "demo/a#1" :task "demo/a"}]
