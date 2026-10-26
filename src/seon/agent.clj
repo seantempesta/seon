@@ -390,6 +390,18 @@
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 
+(defn merge-readiness
+  "Whether this branch can merge into main now, as merge-main! would find it, read only: what
+  main changed since the merge base (:main-moved, its program keys) and which of those this
+  branch changed too (:conflicts, the keys a merge of main would leave unmerged). The same
+  three-way merge-main! runs (seon.merge/delta-three-way), so it costs what changed on each
+  side since the base, not the program."
+  {:malli/schema [:=> [:cat] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]}
+  []
+  (let [conn (:store-conn @state)
+        r (pm/delta-three-way (:base @state) (db) (pdb/head conn (pdb/main-branch (:cfg @state))) #{})]
+    {:main-moved (vec (sort-by pr-str (keys (:theirs r)))) :conflicts (vec (sort-by pr-str (map :key (:conflicts r))))}))
+
 ;; ---- evaluation -----------------------------------------------------------------
 
 
@@ -531,10 +543,14 @@
   :digests {test digest}, :dir (the results directory when shared), :graph (the reach graph it
   walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
-  are not automatic)."
+  are not automatic). The tests base holds that the branch removed (seon.program/divergence's
+  :removed, each a test var on base) are selected too, with their source as base holds it
+  (:removed {test src}): main's tests judge a branch whether or not it still holds them (owner:
+  \"deleting the old test doesn't stop the old test from running\")."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
-                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]]]}
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]
+                   [:removed [:map-of :qualified-symbol :string]]]]}
   [db base proofs]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
@@ -547,12 +563,25 @@
         g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
-        unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))]
+        unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
+        ;; main's tests the branch removed: each judges from base's definition, loaded in the test
+        ;; child, its namespace's ns form first when the branch removed the namespace too; one
+        ;; that reaches a process of its own (base's index says) stays a process test
+        removed (into (sorted-map-by #(compare (str %1) (str %2)))
+                      (when base
+                        (for [v (:removed (program/divergence base db))
+                              :let [e (some->> (pdb/eid base :var/name v) (d/entity base))
+                                    nsym (symbol (namespace v))
+                                    head (when-not (find-ns nsym)
+                                           (some->> (pdb/eid base :ns/name nsym) (d/entity base) :ns/form :form/src))]
+                              :when (= :test (:var/kind e))]
+                          [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
+        removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
-        (update :selected into unrecorded)
-        (update :run into unrecorded)
-        (assoc :digests cd :dir dir :graph g
-               :process (program/process-tests idx)))))
+        (update :selected into (concat unrecorded (keys removed)))
+        (update :run into (concat unrecorded (keys removed)))
+        (assoc :digests cd :dir dir :graph g :removed removed
+               :process (into (program/process-tests idx) removed-process)))))
 
 (declare handle!)
 
@@ -601,6 +630,16 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
     (await-reply! k))))
+
+(defn- load-removed!
+  "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
+  src}) from base's source, in its own namespace (its ns form first when the branch removed
+  that too), so it runs as main holds it. nil."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string]] :nil]}
+  [removed]
+  (doseq [[t src] removed]
+    (binding [*ns* (create-ns (symbol (namespace t)))] (load-string src)))
+  nil)
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
@@ -731,8 +770,9 @@
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has
                    ;; no digest and is selected all the same), and the tests the branch changed
-                   (vec (sort-by str (filter (set judge) (into (set (filter proofs (:selected plan)))
-                                                               (filter (:digests plan) (program/changed-vars (:base @state) (db)))))))
+                   (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
+                                                             (into (filter (:digests plan) (program/changed-vars (:base @state) (db))))
+                                                             (into (keys (:removed plan)))))))
                    judge)
         {:keys [reused digests dir]} plan
         run (filterv #(not (reused %)) selected)
@@ -767,7 +807,7 @@
                           (intr/exit-at-eof! #(sock/peer-gone? w))
                           (lib/set-trip! (* 16 1048576))
                           (swap! state assoc :mode :test :evaluating false)
-                          (let [res (try (run-tests-here w ticks run)
+                          (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks run)
                                          (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
                             (sock/write-line! w (sedn/encode res))))
                  :parent (fn [pid]

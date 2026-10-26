@@ -9,11 +9,11 @@
     from the merge template (kind :merge, on the work task's branch, needing it, its plan
     and proofs inherited). A task that needs another's work needs its merge, so it starts
     from a main that holds that work.
-  - `request`: a request (one declaration: what the user asked) becomes its design-build task
-    (kind :work: the red proof, then green on its branch) followed by its merge task
-    (`with-merge`). For experiments, `whole` makes it one :whole task that merges itself, and
-    `stages` design -> implement -> merge on design's branch. `request-tx` writes any of these
-    released in one transaction (DECISIONS, A
+  - a request (one declaration: what the user asked) becomes, by default (`my.root/request!`),
+    one :whole task that designs, builds and merges itself (`request`); for experiments,
+    `design-build` makes its design-build task (kind :work: the red proof, then green on its
+    branch) followed by its merge task (`with-merge`), and `stages` design -> implement -> merge
+    on design's branch. `request-tx` writes any of these released in one transaction (DECISIONS, A
     request's whole linked task set is one transaction on main, before any agent forks): the
     reconciler forks only from a committed main, so every agent of the
     set starts from the same graph.
@@ -59,24 +59,26 @@
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. You do it at the REPL, proof first: reproduce what the plan says is wrong as a deftest, evaluated in its "
-              "test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your branch's program, so you write "
-              "no file), register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then make "
-              "it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
-              "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. If the "
-              "plan's premise is false (what it says is wrong is not), fail the task with the evidence "
-              "(``(my.task/fail! \"why\" evidence)``) rather than saying so in prose. Its merge task brings main's work in "
-              "after you.")
+              "branch. First reproduce what the plan says is wrong in one eval and read its output: if the output is already "
+              "right, the premise is false, so fail the task with that output at once (``(my.task/fail! \"why\" evidence)``). "
+              "Once the output is wrong, stop reading: write it as a deftest in its test namespace (``(in-ns 'ns.x-test)``, then "
+              "the deftest: what you evaluate is your branch's program, so you write no file), its input built as the function's "
+              "existing tests build theirs (their helpers and fixtures, never the live db, vector literals where order matters), "
+              "register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then make it pass "
+              "by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
+              "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. Its "
+              "merge task brings main's work in after you.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
-               "work merged in. You do it at the REPL, proof first: reproduce what the plan says is wrong as a deftest, evaluated "
-               "in its test namespace (``(in-ns 'ns.x-test)``, then the deftest: what you evaluate is your branch's program, so you "
-               "write no file), register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then "
-               "make it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost "
-               "proof (``seon.cost/proof``) for a function whose input grows. Main is merged in at each green "
-               "(`my.branch/merge-main!`); `(my.branch/unmerged)` lists what both sides changed: redefine each with what both "
-               "need, and keep the proofs green. Never loosen a contract or a proof to make it pass. If the plan's premise is "
-               "false (what it says is wrong is not), fail the task with the evidence (``(my.task/fail! \"why\" evidence)``) "
-               "rather than saying so in prose.")
+               "work merged in. First reproduce what the plan says is wrong in one eval and read its output: if the output is "
+               "already right, the premise is false, so fail the task with that output at once "
+               "(``(my.task/fail! \"why\" evidence)``). Once the output is wrong, stop reading: write it as a deftest in its test "
+               "namespace (``(in-ns 'ns.x-test)``, then the deftest: you write no file), its input built as the function's existing "
+               "tests build theirs (their helpers and fixtures, never the live db, vector literals where order matters), register "
+               "it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red. Then make it pass by "
+               "redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof "
+               "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. Your "
+               "status's :merge says what main changed under you and what merging it would conflict on: redefine each such "
+               "var with what both sides need. Once :merge says :ready, your run ends and root merges your branch.")
    :test (str "Your task: test what the plan changed. You are done when the proofs and the tests of what changed pass, and "
               "each behaviour that broke has a deftest of its own. You do it by running them (`(my.agent/prove)`), writing a "
               "deftest in the proofs' namespace for each break, and fixing the code until all pass. Then end your turn with prose.")})
@@ -111,21 +113,23 @@
                      [d (merge-decl d wid (merge-name (:seon.task/name d)))]))
                  decls))))
 
-(defn request
-  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the tasks
-  that work it, the default: its design-build task (decl, kind :work, the :work instructions:
-  one agent writes the red proof and makes it green on its branch, and does not merge),
-  followed by its merge task (with-merge), which merges main into the branch, keeps the proofs
-  green and merges the branch into main (owner: \"make the default tests into two tasks --
-  design-build and merge\"). `whole` and `stages` are the experiments' choices."
+(defn design-build
+  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as its
+  design-build task (decl, kind :work, the :work instructions: one agent writes the red proof
+  and makes it green on its branch, and does not merge), followed by its merge task
+  (with-merge), which merges main into the branch, keeps the proofs green and merges the branch
+  into main. An experiment's choice; `request` is the default (my.root/request!)."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   (with-merge [(assoc decl :seon.task/kind :work :seon.task/instructions (instructions :work))]))
 
-(defn whole
-  "Request decl as one task of kind :whole on its own branch, for experiments: one agent writes
-  the red proof, makes it green, merges main and keeps it green, and its green branch merges
-  into main itself (seon.task/merges?)."
+(defn request
+  "Request decl (what the user asked: its plan, perhaps one line, and any proofs) as the task
+  that works it, the default (my.root/request!; owner: \"keep experimenting with having the agent
+  do everything in one task\"): one task of kind :whole on its own branch, which one agent works
+  through: it writes the red proof, makes it green, merges main and keeps it green, and its green
+  branch merges into main itself (seon.task/merges?). `design-build` and `stages` are the
+  experiments' choices."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl]
   [(-> decl (assoc :seon.task/kind :whole :seon.task/instructions (instructions :whole))
@@ -150,7 +154,7 @@
     [design implement (merge-decl implement (task/task-id tns (:seon.task/name implement)) (merge-name (:seon.task/name decl)))]))
 
 (defn request-tx
-  "The one transaction that writes a request's tasks ds (request's, whole's or stages') on main,
+  "The one transaction that writes a request's tasks ds (request's, design-build's or stages') on main,
   released: the reconciler sees the whole set at once and forks its first agent only once it
   is committed. An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]

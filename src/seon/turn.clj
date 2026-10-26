@@ -94,8 +94,12 @@
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
-        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)]
-    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task (task/task db id)
+        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)
+        t (task/task db id)]
+    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task t
+     ;; a task that merges itself sees, every turn, whether main moved under it and whether
+     ;; merging main would conflict (seon.agent/merge-readiness), so it ends when it can merge
+     :merge (when (task/merges? (:seon.task/kind t)) (agent/merge-readiness))
      :will-merge (program/divergence (:base @agent/state) db)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? test-run)
@@ -138,15 +142,16 @@
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every reason of the
   done rule, the failing assertions of each test it names, the test run's own errors, and what the
-  branch's merge will carry to main."
+  branch's merge will carry to main, and, for a task that merges itself, its merge readiness."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [test-run reasons task results will-merge tests attention]}]
+  [{:keys [test-run reasons task results will-merge tests attention merge]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
-    {:results results :reasons reasons
-     :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
-     :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
-     :will-merge will-merge :tests tests :attention attention}))
+    (cond-> {:results results :reasons reasons
+             :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
+             :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
+             :will-merge will-merge :tests tests :attention attention}
+      merge (assoc :merge merge))))
 
 (defn- take!
   "The entries since the last turn (a person's message, root's at a stage boundary, a refused
