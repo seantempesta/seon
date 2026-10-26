@@ -1,81 +1,70 @@
 # One derivation, revision 4.2: two outputs, and the model reads the page
 
-Agent view, for an independent review and then root (AGENTS §2). It applies the owner's two rulings of 2026-10-26 on top of revision 4.1 (`notes/one-derivation-design-rev4.md`), and it replaces 4.1 where they disagree:
+Agent view, for root. It applies the owner's two rulings of 2026-10-26 on top of revision 4.1 (`notes/one-derivation-design-rev4.md`), replacing it where they disagree, with the independent review folded in (`notes/one-derivation-design-rev42-review.md`: approve with changes; its five changes applied below). The rulings:
 - "no we don't store derived data in the db or the ctx atom";
 - "there are only two outputs too: @ctx returns data just like any repl eval and then we need to show the UI and the diffs to the ctx and the html at every turn as formal data".
 
 ## 1. Two outputs
-1. **An eval's answer.** Any eval, `@ctx` included, is answered by the REPL with its value, printed by the one printer, as a tool message. There is no other face of a value.
-2. **The UI as formal data, every turn.**
-   - The first turn of a session (or a resume) sends the whole page as hiccup.
-   - Each later turn sends two diffs:
-     - **ctx's diff:** `seon.ctx/patch`'s `:changed` paths and their values since the agent's last turn;
-     - **the page's diff:** each part whose hiccup changed, by part key, with its new hiccup; parts added and removed by key.
-   - Both are data, printed by the one printer.
+1. **An eval's answer.** Any eval, `@ctx` included, is answered by the REPL with its value, printed by the one printer, as its tool message.
+2. **The UI as formal data, every turn.** The first turn of a session (or a resume) sends the page whole. Each later turn sends the page's diff (each part whose hiccup changed, by key) and ctx's diff (paths and values), split by §4's rule so each change is told once.
 
-**The model reads the same hiccup the user sees.** The page and the model are no longer two faces of a part: the part's hiccup is drawn as HTML for the user and printed as data for the model. A detail the page folds (an eval's whole response under its one line) is still present in the hiccup data, inside its `<details>`, so the model has it.
+## 2. The model's page: the same hiccup, drawn stateless and eager, meaning only
+The model reads the hiccup the user sees, drawn in a way that does not depend on any tab. The review found three ways today's renders would make it differ:
+- **Eager, not per-tab.** Today a fold's content is drawn only when a tab has opened it (render/ui.clj:785, 764, 622), and an eval's value is cut to the page's budget per tab (ui.clj:498-504). The model's draw opens every fold: one draw per part, with no tab state. The user's page folds that same hiccup with `<details>`, so what the page folds is in the data.
+- **Meaning only, by one projection at print time.** Renders carry 182 utility class strings and Datastar attributes (ui.clj:502, 588). Rewriting every render is the alternative, and it is ruled out. Instead, one step projects a part's hiccup for the model: it keeps the tag, its semantic class (`.part`, `.badge`, `.ref`: input.css `@layer components`) and its text and values, and leaves out utility classes, `data-*` and `on*` attributes, and layout-only wrappers. It is one function, beside the printer.
+- **Values stay data.** A value inside a part is kept as the value, not as `print-html`'s span tree (render.clj:115-123), so the printer prints it as its structure, at a fraction of the tokens.
 
-## 2. What this deletes
-| deleted | where | why |
-|---|---|---|
-| `:seon.render/ai` on every schema, and `seon.render/ai`, `print-ai` | schemas (9 keys: render, error, facts, problems, task), render.clj | the model reads hiccup; a value's text is the printer's |
-| `seon.render.ai` (the hand-written `:ai` faces: system, problems, task, run, error, sections) | render/ai.clj, 222 lines | root's context becomes root's page as hiccup |
-| `part-faces`' text face and the `:page`/`:value` split | render.clj | one face, the hiccup |
-| ctx's derived members, `:born`, `order` | seon.ctx (ctx-atom, done on jolt/ctx-atom) | no derived data in ctx |
-| the screen (already gone), "Since your last turn" (4.1 §5) | context.clj | the two diffs above are the world message |
+## 3. Renders memoised by value; order computed in view
+- **`(view c db)`:** the record and the agent's branch db as of its t. The conversation's order is each member's first transaction, `seon.context/first-t` (jolt/ctx-atom), one seek per member. It is not memoised: the review cut the cache as more mechanism than the lookup it saves.
+- **The task part's render, `seon.render.ui/task-page`.** It is run-state (context.clj:280) over the task and the db as of t, drawn as hiccup with what the task cites, what to prove and its write set. It lives in seon.render.ui, which already requires seon.context (ui.clj:19). Declared on `:seon.task/task`, it replaces `task-box` (ui.clj:357) wherever a task is drawn.
+- **The related part's render, `seon.render.ui/related`:** over the plan's vectors.
+- **One memo, by value:** `{part-key [fns value read-t hiccup]}`, a hit when the fns and the value are identical and `read-t` is the same.
+  - `read-t` is the t of the newest transaction for which `seon.context/story-reads?` is true, for the task and related parts. It is nil for the others.
+  - Not tracked (ctx-atom's docstring): files on disk, namespace metadata, config. A change to one of them shows as drift by digest (4.1 §1), never as a stale byte inside a session.
 
-What stays as functions, not faces:
-- `seon.context/eval-messages` (context.clj:361) and `message-messages` (394): what the tool message and a person's message are. They are the request's producers, no longer declared as `:seon.render/ai`.
-- The MCP server's error text (server.clj): it prints errors with the printer.
-
-## 3. Renders, memoised by value; order computed in view
-- **`(view c db)`: the record and the agent's branch db as of its t.** The conversation is ordered by each member's first transaction, `(seon.context/first-t db e)` (ctx-atom's, one seek, never changes). view memoises it by entity id in the memo below.
-- **The task part.** Its value is the task. Its schema's declared render is `seon.context/task-page`: run-state (context.clj:280) over the task and the db as of t, drawn as hiccup with what it cites, what to prove and its write set.
-  - The render is in seon.context. render.clj resolves a declared render by symbol at draw time (render.clj:150), so `seon.render` → `seon.context` is no require cycle.
-  - The parts the page folds (a cited var's source, a long plan) are inside `<details>`, present in the data.
-- **The related part.** Its render is `seon.context/related` over the plan's vectors, drawn as hiccup.
-- **One memo, by value.** `{part-key [fns value db-key hiccup]}`, a hit when the fns and value are identical and the db key is equal.
-  - The db key is ctx-atom's tracking: a story or related part keeps its hiccup while every transaction since it was drawn answers `(seon.context/story-reads? datoms)` false.
-  - Any other part's db key is nil: its render reads only its value.
-
-## 4. The wire, revised
+## 4. The wire: each change told once
 | role | carries |
 |---|---|
 | system | the rules, pinned per session |
-| user, first | the whole page as hiccup data, plus the theme map once (§5) |
+| user, first | the model's page, whole: its parts' projected hiccup in view order |
 | assistant | the agent's prose and eval calls |
-| tool | the eval's answer: value, out, err, error and cost, the REPL's, printed |
-| user, each later turn | `[from <sender>]` each message taken (a person, root's stage, a red verdict; 4.1 §5 entries); `[ctx]` ctx's diff, paths and values; `[page]` the parts whose hiccup changed, by key, with their new hiccup |
+| tool | the eval's answer: value, out, err, error and cost |
+| user, each later turn | `[from <sender>]` each message taken (4.1 §5's entries); `[page]` each non-conversation part whose hiccup changed, by key; `[ctx]` each changed ctx path no part on the page draws |
 
-- **Who caused a change decides where it is told, once.** The agent's own eval's value is in its tool answer. The page diff carries the parts it changed, but for the agent's own eval's conversation part it sends the key and the handle its tool answer gave, `[:eval "e14"] result/e14`.
-  - That is a reference to text the model read in this same request, so it is still readable (rule 7), never a dangling fold.
-  - Without it, every eval's whole response would be sent twice, once as its answer and once inside its part's `<details>`. **This is the one point to measure (§6) and for the owner to rule on.**
+**The rule, so a change is told once:**
+- **The model's page leaves out the conversation parts:** the agent's evals, its turns and its messages. Its own transcript already carries them, as assistant calls, tool answers and `[from]` entries. That removes the review's triple telling of an eval and needs no reference.
+- **What the agent's own eval caused** is in its tool answer, and is not told again in `[page]` or `[ctx]`. 4.1's "less what its own evals caused", by the transaction's `:seon.tx/eval`, is kept.
+- **Anything else** is in `[page]` when a part draws it, and in `[ctx]` only when no part draws that path.
 
-## 5. Hiccup tokens: a compact vocabulary
-The model now reads hiccup, so its size is the cost to watch.
-- **Semantic classes in hiccup shorthand**, `[:section.part …]`, `[:span.badge.fail …]`. There are no utility classes in a render.
-- **The theme map** (class → Tailwind utilities, `resources/public/css/input.css` `@layer components`) is sent once with the first page, so an agent that edits a render knows what each class draws. It is sent again only when it changes.
-- **The vocabulary of revision 4.1 §4**: part, reference, references, badge, code, prose, change, ripple. A render returns those elements and values. The printer prints the hiccup compactly (one line per short element, values by their own structure under the part's budget).
-- **No layout-only wrappers in a render.** The page's grid is the layout's, which is chrome, and the model gets the parts' hiccup in view order, not the layout's.
+## 5. What this deletes, and what replaces it
+| deleted | callers today | replaced by |
+|---|---|---|
+| `:seon.render/ai` on 8 schema keys (render, error, facts, problems, task) | the request's conversation picks its render through it (context.clj:401-407) | the request's producers, called directly: `eval-messages` (context.clj:361), `message-messages` (394) |
+| `seon.render/ai`, `print-ai`, `rendered?`, `printed` | root's context (render/proc.clj:642, feeding `/context.txt`, root's debug tile and two docs pages); the stream's web-call line (proc.clj:748); MCP error text (server.clj:233, 258) | root's context: root's page, its parts' projected hiccup, with the `-data` functions (`system-data` and its kin) kept as part values. The stream line and MCP errors: the printer, with errors message-first at their producer (`seon.contract/error`) |
+| `seon.render.ai`'s hand-written faces (render/ai.clj, 222 lines), less the `-data` functions | the above | the `-data` functions as part values |
+| `:seon.render.config/root-context-budget` | root's context | the part's budget |
+| `part-faces`' text face and the `:page`/`:value` split | view, repl/parts, proc | one face, hiccup; the model's projection (§2) |
+| ctx's derived members, `:born`, `order` | (done on jolt/ctx-atom) | `first-t`, renders over the db |
+| 14 test references to `:ai` faces | tests | rewritten with their slices |
 
-## 6. Measurements (slice by slice, live-agents before and after)
-- **The first page's hiccup, printed, against today's starting page** (system + story + screen). Revision 1 measured a1's page at about 5.2k tokens without @ctx. That was a Python estimate, withdrawn; the slice measures it with the real printer.
-- **A turn's world message** (ctx diff + page diff) against today's, on the recorded a-map run's 29 turns.
-- **With and without §4's reference** for the agent's own eval parts: the duplicate's cost.
-- **Turns to green and cache share** on a live run, by live-agents, before merge.
+## 6. Measure first (the review's order; live-agents before and after)
+1. **a1's parts printed as projected hiccup by the real printer**, against today's starting request (system + story + screen: 6,043 tokens past the system prompt).
+2. **One recorded a-map turn's world message** (`[page]` + `[ctx]`), with and without the agent's own parts, against today's 25,979 tokens a turn.
+3. **How often `story-reads?` fires on the agent's own `defn`s** (each fire redraws the task part).
 
 ## 7. The prefix proof
-`seon.context-test/the-prefix-stays-byte-identical-across-turns` holds. The request is system, the page as hiccup at t0, then for each turn the assistant's calls, their tool answers, and the world message of its diffs. Each term is read as of its t, so within a session each request is a byte prefix of the next, except at the history cut's jumps (4.1 §1). Drift across a process is detected by each term's digest and its input digests (4.1).
+`seon.context-test/the-prefix-stays-byte-identical-across-turns` holds: system, the page at t0, then per turn the calls, their answers and the world message. Within a session each request is a byte prefix of the next, except at the history cut's jumps; across a process, drift is detected by digest (4.1 §1).
 
 ## 8. Split with ctx-atom
-- **ctx-atom (done, on jolt/ctx-atom, 2 commits past main):** the derived members, `:born` and `order` deleted; `first-t` and `story-reads?` added.
+- **ctx-atom (done on jolt/ctx-atom):** derived members, `:born` and `order` deleted; `first-t` and `story-reads?` added.
 - **Agent view, on a branch built on jolt/ctx-atom, merged with it:**
   - `(view c db)`;
-  - the task and related parts as declared renders in seon.context;
-  - the one memo;
-  - `my.task/related` and the tests ctx-atom's branch left red;
-  - then the deletions of §2 and the two-diff world message, with related-sections for the request's assembly (4b).
+  - `task-page` and `related` in seon.render.ui;
+  - the memo with `read-t`;
+  - the model's projection (§2);
+  - `my.task/related` and the tests ctx-atom left red;
+  - then §5's deletions and the world message (§4), with related-sections for the request's assembly (4b).
 
 ## 9. Open, for root and the owner
-- **(a)** §4's reference for the agent's own eval parts. Without it the page diff resends each eval's whole response. Recommendation: keep the reference, and measure both.
-- **(b)** The theme map is sent once per session. This brings back revision 1's theme map, which revision 2 dropped on root's ruling (styling as the stylesheet's classes). Now that the model reads hiccup, the map is what explains the classes. Root rules.
+- **(a) The theme map.** The review would cut it, since it is CSS and the rulings ask for meaning only. The owner earlier asked to compress, not remove: "if we remove the styling and don't show the removal how do agents easily update it". With the projection keeping semantic classes, an agent that edits a render sees which class a part uses, and the stylesheet's `@layer components` is one form away. My recommendation: no theme map in the request; the stylesheet is cited by its section. The owner rules.
+- **(b)** Root's context becomes root's page as projected hiccup. `/context.txt` and root's debug tile then show that.
