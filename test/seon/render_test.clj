@@ -1146,53 +1146,6 @@
       (is (str/includes? closed "0.20 ms") closed)
       (is (not (str/includes? closed "ticks")) "and no response map or cost line twice"))))
 
-(deftest a-record-an-eval-names-is-live
-  ;; root, 2026-10-26 (the owner: evals with a render show as live tiles): the newest eval whose value
-  ;; names a record (an entity by its identity, @ctx by its basis) shows that record as its branch
-  ;; holds it now, under the eval's line, re-rendered when it changes; an older one, and a computed
-  ;; value, stay as recorded
-  (let [[main branch eid] (paged-dbs)
-        k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
-        branch (d/db-with branch (seon.task/create-tx branch [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g fast." :seon.task/kind :work}]))
-        rec (fn [id v] (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} id "a3"
-                                            {:code "(my.task/current)" :line "g" :response {:handle (symbol "result" id) :value v}} nil))
-        task {:seon.task/id "demo/g" :seon.task/plan "Make g fast."}
-        branch (reduce d/db-with branch [(rec "e5" task) (rec "e6" task) (rec "e7" {:turn "1 of 8"})])
-        e-of #(:db/id (d/entity branch [:seon.eval/id %]))
-        l (#'p/page-value (proc-state main branch) :a3)
-        as-of (into {} (for [u (:seon.render/units l) :when (= "#c-rows" (:container u)) :let [[_ e as] (:comp u)]] [e as]))
-        html-of (fn [db e] (h/html (ui/component db e (as-of e))))]
-    (is (= [:seon.task/id "demo/g"] (ui/live-key {:response {:value task}})) "an entity, by its identity")
-    (is (= [:ctx] (ui/live-key {:basis {:t 1 :branch :b} :response {}})) "@ctx, by its basis")
-    (is (nil? (ui/live-key {:response {:value {:turn "1 of 8"}}})) "a computed value names no record")
-    (is (= [true false false] (map #(last (as-of (e-of %))) ["e6" "e5" "e7"])) "the newest naming the task, alone")
-    (is (str/includes? (html-of branch (e-of "e6")) "seon-live") "its live tile")
-    (is (not (str/includes? (html-of branch (e-of "e5")) "seon-live")) "the older as recorded")
-    (is (not (str/includes? (html-of branch (e-of "e7")) "seon-live")) "a computed value as recorded")
-    (is (nil? (ui/live-key {:response {:value (assoc task :n 2)}})) "a map that adds a key of its own was computed")
-    (is (nil? (ui/live-key {:response {:value {:seon.agent/id :a3 :seon.run/turns 5}}})) "and one that joins another record's")
-    (is (= [:seon.task/id "demo/g"] (ui/live-key {:response {:value (assoc task :seon.task/accumulated "Make g fast.")}}))
-        "what its producer derives of it, in its namespace (seon.task/task)")
-    (let [branch' (d/db-with branch [{:seon.task/id "demo/g" :seon.task/plan "Make g faster still."}])]
-      (is (str/includes? (html-of branch' (e-of "e6")) "Make g faster still.") "the record as it is now")
-      (is (not (str/includes? (html-of branch' (e-of "e5")) "faster still")) "the older eval keeps what it answered"))
-    (testing "the render proc draws it again because the transaction touched what it read, and nothing older"
-      (let [[st1 _] (#'p/pass-view (comp-state main branch eid) :a3)
-            r (d/with branch [{:seon.task/id "demo/g" :seon.task/plan "Make g faster still."}])
-            touched (p/comps-touched st1 :task-demo-f (map (fn [d] {:e (:e d) :a (:a d) :v (:v d)}) (:tx-data r)))]
-        (is (some #(= (e-of "e6") (second %)) touched) (pr-str touched))
-        (is (not-any? #(#{(e-of "e5") (e-of "e7")} (second %)) touched) "the evals kept as recorded read nothing it wrote")))
-    (testing "@ctx: the newest is its agent's record on its branch now"
-      (let [b (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e8" "a3"
-                                                     {:code "@ctx" :line "ctx" :printed "ctx" :type "seon.ctx.Ctx" :schema :seon.ctx/ctx
-                                                      :basis {:t (:max-tx branch) :branch :task-demo-f} :response {:handle 'result/e8}} nil))
-            l (#'p/page-value (proc-state main b) :a3)
-            as (some (fn [u] (let [[_ e as] (:comp u)] (when (= e (:db/id (d/entity b [:seon.eval/id "e8"]))) as))) (:seon.render/units l))
-            html (h/html (ui/component b (:db/id (d/entity b [:seon.eval/id "e8"])) as))]
-        (is (true? (last as)))
-        (is (str/includes? html "@ctx as its branch holds it now") html)
-        (is (re-find #"ctx · \S*task-demo-f" html) "its block, built from the branch")))))
-
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
   ;; model turn, so its debug page is the context the render proc holds (its :context, the system's

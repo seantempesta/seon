@@ -478,21 +478,15 @@
   nil)
 
 (defn- based-value
-  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db,
-  seon.ctx/build): as of its t, or, live?, as db holds it now; nil: no basis, or no db to read it
-  on."
-  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db] :boolean] [:maybe :map]]}
-  [rec e db live?]
+  "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db as of
+  t, seon.ctx/build), or nil: no basis, or no db to read it on."
+  {:malli/schema [:=> [:cat :map :map [:maybe :seon.host/db]] [:maybe :map]]}
+  [rec e db]
   (when-let [{:keys [t branch]} (when db (:basis rec))]
     (let [k (:seon.agent/key (d/entity db (:db/id (:seon.eval/agent e))))]
-      (with-meta (if live?
-                   ;; now: its reads are the component's, so the render proc builds it again when
-                   ;; a transaction on its branch touches them
-                   (:tree (seon.ctx/build db k branch))
-                   ;; a value as of t never changes: its reads are not the component's (no later
-                   ;; transaction touches them), so it is built when the component renders and
-                   ;; never because the branch moved
-                   (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t))
+      ;; a value as of t never changes: its reads are not the component's (no later transaction
+      ;; touches them), so it is built when the component renders and never because the branch moved
+      (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (seon.ctx/build (d/as-of db t) k branch))) :t t)
         {:seon.render/schema (:schema rec)}))))
 
 (defn- branch-render
@@ -512,37 +506,6 @@
   {:malli/schema [:=> [:cat :map :any [:maybe :seon.host/db]] [:maybe :map]]}
   [e handle db]
   (when-let [id (when db (:seon.agent/id (d/entity db (:db/id (:seon.eval/agent e)))))] {:agent id :handle handle}))
-
-(declare view entity-node)
-
-(defn live-key
-  "The record of the store eval record rec's value names, or nil (a value computed, kept as
-  recorded): [:ctx] for @ctx (recorded as its basis, seon.repl/record-details); [a v] for an
-  entity's data, a map holding its identity attribute a whose every key is in a's namespace: its
-  attributes, and what its producer derives of it (seon.task/task's :seon.task/accumulated); a map
-  with any other key was computed. Map lookups only."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe [:vector :any]]]}
-  [rec]
-  (let [v (get-in rec [:response :value])]
-    (if (:basis rec)
-      [:ctx]
-      (when (and (map? v) (not (contains? (:response rec) :values)))
-        (when-let [a (some #(when (contains? render/identity-schemas %) %) (keys v))]
-          (when (and (some? (get v a)) (every? #(and (keyword? %) (= (namespace a) (namespace %))) (keys v)))
-            [a (get v a)]))))))
-
-(defn- live-now
-  "The record eval e names (live-key k) as db holds it now, by its render: @ctx built from its
-  branch (based-value), an entity as a tile shows it (entity-node); nil when db holds none. Its
-  reads are the component's, so the render proc draws it again when a transaction touches them."
-  {:malli/schema [:=> [:cat :map :map [:vector :any] :seon.host/db] :any]}
-  [rec e k db]
-  (if (= [:ctx] k)
-    (when-let [v (based-value rec e db true)]
-      (let [h (get-in rec [:response :handle])]
-        (render/html v {:as :block :schema (:schema rec) :handle h :db db :drawer (drawer e h db)})))
-    (when-let [eid (:db/id (d/entity db k))]
-      (view (entity-node db eid) :tile))))
 
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its record, and of a response), as
@@ -583,7 +546,7 @@
                            (keyword "data-on:click") (str "@post('/open?view=' + el.closest('[data-view]').dataset.view + '&unit=' + "
                                                           "encodeURIComponent(el.closest('li[id]').id + '/' + el.dataset.seonForm) + '&open=false')")} f]
                  (render/html (print/read-rest form (:handle r) v) {:handle form})])])
-           (if-let [v (based-value rec e (:db opts) false)]
+           (if-let [v (based-value rec e (:db opts))]
              ;; a value recorded as its basis (@ctx): rendered from what the branch holds at it
              [:div {:class "flex gap-2 text-text-200"} [:span {:class "text-text-500"} "⇒"]
               (render/html v {:as :block :schema (:schema rec) :handle (:handle r) :db (:db opts) :drawer (drawer e (:handle r) (:db opts))})]
@@ -890,10 +853,9 @@
   line, its code's first line, its cost and its response's first line, that opens (opts [open?]:
   posting /open with the view its list names in data-view, so the whole of it is rendered only
   while open, and its html is the same on every page) to its form and response;
-  a message, who sent it and its body. live?, the newest eval of its conversation naming a record
-  (live-key): under its line, that record as db holds it now (`live-now`)."
+  a message, who sent it and its body."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe [:sequential :any]] :string] :any]}
-  [db eid [open? opened live?] id]
+  [db eid [open? opened] id]
   (let [own (d/pull db '[*] eid)
         schema (render/entity-schema own :seon.eval/agent)]
     (case schema
@@ -928,28 +890,8 @@
            [:span {:class (if (:ex r) "text-error" "text-text-500")} (if (:ex r) "✕" "⇒")]
            [:code {:class "min-w-0 flex-1 truncate text-text-400"} (:line rec)]
            (when (:ms r) [:span {:class "shrink-0 tabular-nums text-2xs text-text-500"} (ms-str (:ms r))])]
-          (when open? (evaluation own {:opened opened :db db}))]
-         ;; the newest eval naming a record (live?, chat): that record as it is now, re-rendered as
-         ;; it changes; what the eval answered stays in its block above
-         (when-let [k (when live? (live-key rec))]
-           (when-let [now (live-now rec own k db)]
-             [:div {:class "seon-live"}
-              [:div {:class "seon-live-head"} [:span {:class "seon-live-dot"}] "live"
-               [:span {:class "text-text-500"} (if (= [:ctx] k) "@ctx as its branch holds it now" (list (str (first k) " ") (prose (second k) (cell) {:one-line? true}) " now"))]]
-              now]))])
+          (when open? (evaluation own {:opened opened :db db}))]])
       [:li {:id id :class "py-1"} (render/html (dissoc own :db/id) {:schema schema})])))
-
-(defn- entity-node
-  "Entity eid on db as a page part draws it: its schema and its relevant attributes, less its units
-  (shown as their own parts), the pulled entity as its metadata's :own."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] :map]}
-  [db eid]
-  (let [own (d/pull db '[*] eid)
-        schema (render/entity-schema own nil)
-        units (:seon.render/units (contract/properties schema))]
-    (with-meta {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
-                :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}
-      {:own own})))
 
 (defn component
   "Entity eid on db as a page part shows it, as as (:row, :tile, :block; [:debug open? view], a
@@ -974,8 +916,11 @@
        [:a {:href (if root "/" (str "/agent/" (kname id))) :class "font-semibold text-text-100"} (if root "root" (kname id))]
        [:span {:class "text-2xs text-text-500"} (if root "main" (some-> status name))]])
     :else
-  (let [nd (entity-node db eid)
-        own (:own (meta nd))]
+  (let [own (d/pull db '[*] eid)
+        schema (render/entity-schema own nil)
+        units (:seon.render/units (contract/properties schema))
+        nd {:seon.render/kind :entity :seon.render/eid eid :seon.render/schema schema
+            :seon.render/value (let [m (apply dissoc own :db/id units)] (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))}]
     (case as
       :row (let [evals (for [c (:seon.turn/calls own) :when (:eval c) :let [e (d/pull db '[*] [:seon.eval/id (:eval c)])] :when e]
                          {:seon.render/kind :entity :seon.render/eid (:db/id e) :seon.render/schema (render/entity-schema e :seon.eval/agent)
@@ -1034,16 +979,10 @@
         on (vec (reverse (take shown listed)))
         older (- (count listed) (count on))
         ;; an eval's row: open or not, and the forms of its cuts opened on the page ("id/form", /open)
-        ;; the newest eval naming each record (listed is newest first): drawn live, the older as recorded
-        lives (into #{} (vals (reduce (fn [m nd] (if-let [k (and (= :seon.db/eval-fact (:seon.render/schema nd))
-                                                                     (live-key (get-in nd [:seon.render/value :seon.eval/record])))]
-                                                       (if (contains? m k) m (assoc m k (:seon.render/eid nd))) m))
-                                      {} (take shown listed))))
         as (fn [nd] (if (#{:seon.db/eval-fact :seon.turn/turn-fact} (:seon.render/schema nd))
                       (let [id (comp-id (:seon.render/eid nd) :chat)]
                         [:chat (contains? (or open #{}) id)
-                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)
-                         (contains? lives (:seon.render/eid nd))])
+                         (into (sorted-set) (keep #(let [[u p] (str/split % #"/" 2)] (when (and p (= u id)) p))) open)])
                       :chat))
 ]
     {:seon.render/html

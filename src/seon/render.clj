@@ -202,7 +202,7 @@
   by one entity schema (seon.render-test/a-walk-is-its-entity-and-its-units)."
   (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (map-keys form)] [a k])))
 
-(def identity-schemas
+(def ^:private identity-schemas
   "{identity-attribute schema}: the entity schemas by the upsert keys they name."
   (into {} (filter (comp identity-attr? key)) entity-schemas))
 
