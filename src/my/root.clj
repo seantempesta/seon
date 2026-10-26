@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -113,8 +113,8 @@
               (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
 
 (defn tasks-read-tx
-  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files :digest} or
-  {:error}), on root. A refusal's error names it as its subject and is written with it, in one
+  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
+  on root. A refusal's error names it as its subject and is written with it, in one
   transaction; the first read whose outcome differs closes it, and the same outcome again
   writes no datom."
   {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
@@ -136,18 +136,22 @@
 
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
-  ones updated, removed ones cancelled; unchanged ones write no declaration. A good read writes
-  its outcome, root's :seon.root/tasks (tasks-read-tx); a refused one answers its error
-  (load-answer), whose recorder writes both (refusal-tx). Answers the writer's answer with the
-  counts, or the error. Releasing stays run!'s."
+  ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
+  outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
+  one held; a refused one answers its error (load-answer), whose recorder writes both
+  (refusal-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [files (if dir (task-files dir) (task-files))
-         r (load-answer (write-declared! sys (task/load-tx @(:conn sys) files) {:files (count files)} (mapcat identity (vals files))))]
-     (when-not (contract/error? r)
-       @(root/transact-main! sys (tasks-read-tx {:files (count files) :digest (seon.error/digest (sedn/encode files))})))
-     r)))
+   (let [db @(:conn sys)
+         files (if dir (task-files dir) (task-files))
+         tx (task/load-tx db files)
+         outcome {:files (count files)}
+         held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+     ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
+     ;; good read still writes nothing
+     (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
+                                   {:files (count files)} (mapcat identity (vals files)))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section

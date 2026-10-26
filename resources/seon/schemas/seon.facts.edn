@@ -350,11 +350,11 @@
                    ;; the last batch that loaded: each kind with the first record that made it
                    [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
- ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files and the
- ;; digest of what they declared, or the refusal's message. A refusal's error names it as its subject
+ ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
+ ;; the refusal's message. A refusal's error names it as its subject
  ;; and is written in the same transaction, so it stays open until a good read writes another value
  ;; (seon.problems/closed?); the same outcome again writes no datom
- :seon.root/tasks [:or [:map [:files nat-int?] [:digest :string]] [:map [:error :string]]]
+ :seon.root/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end

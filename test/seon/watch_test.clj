@@ -135,7 +135,7 @@
   ;; hours after the file read again. Put back as it was, the good read changed no declaration, so
   ;; load-tasks! wrote nothing, and the refusal named no subject that anything could write
   (let [bad (mr/load-answer (seon.task/file-declarations 'my.task "[{:seon.task/name \"a\" :seon.task/plan}]"))
-        good {:files 1 :digest "d1"}
+        good {:files 1}
         read #(d/db-with % (mr/tasks-read-tx good))
         refused #(d/db-with % (mr/refusal-tx % bad 1000))
         open? #(not (false? (:open? (first (get-in (problems/report %) [:classes :platform :rows])))))
