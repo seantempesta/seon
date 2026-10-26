@@ -42,7 +42,7 @@ A replay that resumes a session must not trust a form whose effect is visible on
 
 ## A stalled agent
 
-An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `seon.agent-proc/stall-ms`, a clock named in [clocks](clocks.md)).
+An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `:seon.config.agent/stall-ms`, a clock named in [clocks](clocks.md)).
 
 Root writes it as the agent's `:seon.agent/stalled`, with what it waits on: the request root last sent it, its kind and form, and for a test run the test that started last (each test's start reaches root as a `:testing` frame from `seon.agent/run-tests-forked`). While the fact holds it is an open `:stalled` problem naming the agent and what it waits on (`seon.problems/stalled-agents`, under the agents area of root's page and `my.root/problems`), and it is in every ctx that holds the agent. The agent's next frame retracts it (`:spoke`), and so does its end.
 

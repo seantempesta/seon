@@ -269,3 +269,22 @@
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
   (let [dir (System/getProperty "user.dir")]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
+
+(deftest a-stalled-test-is-named-and-the-run-goes-on
+  ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice"): a test
+  ;; quiet past the stall bound is named, never ended (bin/stalls, which bin/test runs beside its
+  ;; shards). Here a shard's log says a test started, and the shard waits on a FIFO the test
+  ;; releases only once STALLED is printed: it is printed and recorded once, and when the shard
+  ;; goes on and ends, the watcher ends with it (exit 0). A 200 ms bound, no fixed wait
+  (let [root (System/getProperty "user.dir")
+        d (str root "/target/stalls-test-" (random-uuid))
+        _ (.mkdirs (java.io.File. d))
+        script (str "cd " d "; printf 'started seon.x-test/waits\\n' > shard.log; mkfifo release out\n"
+                    "(read x < release) & p=$!\n"
+                    root "/bin/stalls 200 shard.log:$p > out & s=$!\n"
+                    "line=$(head -1 out)\n"
+                    "echo go > release; wait $s; echo \"exit $?\"; echo \"$line\"; grep -c STALLED shard.log\n")
+        [ex line n] (str/split-lines (:out (clojure.java.shell/sh "zsh" "-c" script)))]
+    (is (= "exit 0" ex) "the watcher ends when the shard does: the run goes on")
+    (is (re-find #"^STALLED seon.x-test/waits \d+ ms" (str line)) "the quiet test is named, with its quiet ms")
+    (is (= "1" n) "recorded in the shard's log, once")))

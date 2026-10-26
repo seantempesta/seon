@@ -765,7 +765,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :stall-ms (the stall bound, seon.agent-proc/stall-ms, for the checks that
+   runs' model) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -842,7 +842,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
-                         :stall-ms (or stall-ms ap/stall-ms) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
+                         :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)

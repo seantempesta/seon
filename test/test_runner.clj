@@ -271,7 +271,7 @@
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
-  them (both empty: nothing to build, nothing to seed). Answers the exit
+  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound bin/test reads. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
@@ -294,6 +294,8 @@
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
+        _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
         _ (when (seq (filter binary run-tests)) (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))))
