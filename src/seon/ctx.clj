@@ -257,6 +257,13 @@
 ;; on it, so each patch follows the one before
 (defonce ^:private held (volatile! nil))
 
+(defn record
+  "This agent's held record, {:tree :ix :born :changed}: @ctx (its :tree) with each member's first
+  transaction (:born), what the page's parts are ordered by (seon.render/view); nil before it is
+  built."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  [] @held)
+
 ;; ---- map -> db: a swap!'s change as one transaction -------------------------------------
 
 (defn follow

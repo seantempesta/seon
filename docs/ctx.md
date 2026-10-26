@@ -60,7 +60,7 @@ Refused, nothing written, with the error that says why (`seon.ctx-test/a-swap-wr
 
 The record's environment is read-only; everything else is writable, and history keeps what a write retracts.
 
-**The screen is the agent's to change.** `(swap! ctx assoc :seon.agent/screen ["(seon.screen/show)" "(:lab.ctx/steps @ctx)"])` sets the forms its next screen evaluates (``seon.turn``'s screen reads the record; absent, ``seon.screen/forms``).
+**The screen is the agent's to change.** `(swap! ctx assoc :seon.agent/screen ["(my.task/status)" "(:lab.ctx/steps @ctx)"])` sets the forms its next screen evaluates (``seon.turn``'s screen reads the record; absent, ``seon.screen/forms``).
 
 ## Provenance: who made each fact
 
