@@ -581,7 +581,6 @@
       [:section {:class "flex flex-col gap-1 text-xs"}
        [:h2 {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
        [:p {:class "text-text-100"} line]
-       ;; the model reads the plan in its task story: not on its screen too
        (when-not (str/blank? plan) [:p {:class "whitespace-pre-wrap text-text-300"} (prose plan (part))])])))
 
 (defn- toggle
@@ -908,7 +907,7 @@
   "The task as its agent works it (the declared html render of :seon.render/task-page): its id,
   kind and execution, then the stage's story (seon.context/story over opts :db, the branch as of
   the record's t): its plan as prose, then what to prove, the sections and the similar, drawn by
-  the one printer as the data it is. Each var the plan cites is a part of its own (`cited`).
+  the one printer as the data it is. Each var the plan cites is a part of its own (`cited`)."
   {:malli/schema [:=> [:cat :map :seon.render/opts] :any]}
   [{:seon.task/keys [id kind execution] :as task} opts]
   [:section {:class "tile"}
@@ -917,7 +916,7 @@
    (when-let [story (some-> (:db opts) (context/story task))]
      ;; the story's task is this one: its plan as prose here, the rest of the story by the printer
      (list (when-let [plan (get-in story [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part))])
-           (render/html (dissoc story :task :write-set) {:budget (config/value :seon.config.render/value-budget)})))])
+           (render/html (dissoc story :task) {:budget (config/value :seon.config.render/value-budget)})))])
 
 (defn cited
   "A var the task's plan cites (the declared html render of :seon.render/cited): its source and
@@ -963,9 +962,7 @@
     [:section {:id (:unit opts) :class "rounded-md bg-base-900 p-2 min-w-0 overflow-x-auto"}
      ;; a key the agent added, or the verdict, is named; the task's, the proofs' and the run's renders name themselves
      (when (or (qualified-keyword? (first key)) (= [:verdict] key)) [:h2 {:class "kicker"} (str/join " " (map kname key))])
-     ;; the page draws the task; what the model reads of it is the stage's story (seon.render/view)
-     (when (= [:task] key) [:p {:class "text-2xs text-text-500"} "the model reads its story: what it cites and what to prove"])
-     (h/raw html)]))
+          (h/raw html)]))
 
 (defn parts-page
   "Agent id's page laid out from its parts as its agent drew them (seon.repl/parts; for an agent
@@ -1122,7 +1119,7 @@
       [:header {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model was sent"))]
        [:p {:class "text-text-400"} (if context
-                                      "Its context as the render proc holds it now: the system's AI face, the text /context.txt serves, rendered again when the system changes."
+                                      "Its context as the render proc holds it now: the system's value printed, the text /context.txt serves, rendered again when the system changes."
                                       "Newest first: each turn, what it added to the request; its whole request opens on demand.")]]
       (when context (slot (:id context)))
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]

@@ -274,6 +274,8 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
   [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce min)))
 
+(declare cited)
+
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
@@ -281,9 +283,11 @@
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   screen's: it changes each turn); the wiki sections it cites; the functions nearest its plan
-  by meaning that it does not name (`similar`)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] :map]}
-  [db t]
+  by meaning that it does not name (`similar`). With write-set? false (the page's task part, whose
+  cited vars are parts of their own, `cited`), no write set is made."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task] :map] [:=> [:cat :seon.host/db :seon.task/task :boolean] :map]]}
+  ([db t] (run-state db t true))
+  ([db t write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
         refs (filterv #(= :var (docs/citation-kind db %)) cites)
@@ -294,13 +298,11 @@
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
              ;; resolve to nothing are one entry, their problem said once
-             :write-set (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name))
-                                                (map #(let [v (docs/resolve-ref db (:seon.ref/name %) :code)]
-                                                        (cond-> v (not (:unresolved v)) (assoc :callers (docs/callers db (:seon.ref/name %)))))))
-                                       refs)
+             :write-set (when write-set?
+                          (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name)) (map #(cited db (:seon.ref/name %)))) refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)
-                            gone (conj {:unresolved (mapv :symbol gone) :problem (:unresolved ref/problem-messages)})))
+                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)}))))
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
@@ -308,7 +310,8 @@
                                     (list 'my.agent/prove #{p})
                                     (str "not written yet; it should assert what the plan says: " (not-written p plan)))]))}
       (seq sections) (assoc :sections sections)
-      near (assoc :similar near))))
+      near (assoc :similar near)
+      (not write-set?) (dissoc :write-set)))))
 
 (defn- latest-t
   "The newest transaction of entity e's datoms on db, or nil when it has none: what moves when
@@ -317,16 +320,17 @@
   [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce max)))
 
 (defn story
-  "Task m's story on db (m as ctx holds a task: its :seon.task/id), the task's :ai face as of the
-  db's t: its run sections (run-state), its plan as it accumulated along :needs. A render, never
-  held: a view memoizes it by story-key."
+  "Task m's story on db (m as ctx holds a task: its :seon.task/id), what the page's task part draws
+  as of the db's t: its run sections (run-state) less the write set (each cited var is a part of
+  its own, `cited`), its plan as it accumulated along :needs. A render, never held: a view
+  memoizes it by story-key."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db m] (run-state db (task/task db (:seon.task/id m))))
+  [db m] (run-state db (task/task db (:seon.task/id m)) false))
 
 (defn- var-entities
   "The entities var v's page reads on db: its var, its form and the forms that name it (its
   callers), or none when v resolves to nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:sequential pos-int?]]}
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:sequential pos-int?]]}
   [db v]
   (when-let [e (pdb/eid db :var/name v)]
     (cons e (concat (some-> (d/entity db e) :var/form :db/id vector)
@@ -336,7 +340,7 @@
   "The vars task m's plan cites beside its proofs, in the plan's order, each once: each is its own
   part of the task's page ([:task :cites sym], seon.render/view, drawn by `cited`), so a cited
   var's edit changes that part alone."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :symbol]]}
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :qualified-symbol]]}
   [db m]
   (let [t (task/task db (:seon.task/id m))
         {:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -346,7 +350,7 @@
 (defn cited
   "Var v as the task's page shows it: its source and its callers (docs/callers), or that it
   resolves to nothing."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] :map]}
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :map]}
   [db v]
   (let [r (docs/resolve-ref db v :code)]
     (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (assoc r :callers (docs/callers db v)))))
@@ -354,7 +358,7 @@
 (defn cited-key
   "What `cited` reads for var v on db, as a value: v and the newest transaction of each entity it
   reads (var-entities), so its part draws again only when one of them is written."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] :any]}
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :any]}
   [db v] [v (into (sorted-map) (for [e (var-entities db v)] [e (latest-t db e)]))])
 
 (defn story-key

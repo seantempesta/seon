@@ -967,7 +967,7 @@
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
   ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
-  ;; :ai face), shown whole, never computed again for the page
+  ;; value printed), shown whole, never computed again for the page
   (let [l (#'p/debug-value {:context {:text "{:seon-root \"the whole system\"}" :tokens 7}} [:debug :root])
         u (some #(when (= "d-context" (:id %)) %) (:seon.render/units l))]
     (is (= :seon.render/root-context (:schema u)))

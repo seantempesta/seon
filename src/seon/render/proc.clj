@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health, main's tasks and
-  runs and the events into the system value (:seon.render/system), whose :ai face is
+  runs and the events into the system value (:seon.render/system), whose printed value (seon.render.system/system-data) is
   root's context. Each page a tab watches is an entity's (seon.render/walk: / root's, /agent/{id}
   an agent's in root's boot, /walk/{eid} any entity's), walked on main and, for an agent, on its
   branch as last read, and laid out by seon.render.ui/page into units. Then, per unit: inputs
@@ -234,7 +234,7 @@
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
   (if (= :root (second view))
-    ;; root has no model turn: what it reads is the system's AI face, held each pass (:context)
+    ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
     (when-let [ctx (:context st)]
       (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
   (when-let [bdb (get-in st [:branches view :db])]
