@@ -71,7 +71,12 @@
     ;; an answer to this agent's ask on the api's reply route (the test service's, seon.prove; its
     ;; the render proc's)
     nil [(to-proc! st {:op :reply :k (:tag m) :result (:r m)}) nil]
-    :req (let [{:keys [rid msg kind]} m]
+    ;; a request its proc takes after the process ended (the api sent it before it heard): answered
+    ;; at once, as root answers one to an agent that ended, and no live status reported
+    :req (if (:dead? st)
+           [st {:to-api [{:dest {:rid (:rid m)}
+                          :r (contract/error :seon.root/ended #'seon.agent-proc/agent-in (str "agent " (name (:id st)) " ended") {:agent (:id st)})}]}]
+         (let [{:keys [rid msg kind]} m]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
@@ -83,7 +88,7 @@
                                              (string? (:forms msg)) (assoc :form (:forms msg)))))]
              [st {:to-api [(status st (cond-> {:status :busy}
                                         (= kind :eval) (assoc :running {:form (:forms msg)
-                                                                        :since-ms (System/currentTimeMillis)})))]}]))
+                                                                        :since-ms (System/currentTimeMillis)})))]}])))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
     ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
