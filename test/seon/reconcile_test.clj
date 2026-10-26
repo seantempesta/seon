@@ -242,6 +242,24 @@
     (is (= died (get-in st' [:flights "demo/a#1" :died])) "the death is the flight's cause")
     (is (= [{:op :write :req {:op :branch-db :branch :demo/a}}] (mapv :req outs)) "its end is read from the branch next")))
 
+(deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn
+  ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
+  ;; work! reached it, so root answers that agent ended; the run took nothing, so it is :lost, not
+  ;; a death, and the session's next run is a spawn, a load of the session, never a wake of a
+  ;; process that is gone
+  (let [ended (contract/error :seon.root/ended 'seon.root/api-proc "agent a-a1 ended" {:agent :a-a1})
+        flight {:act {:op :wake :run "demo/a#2" :task "demo/a" :env {:branch :demo/a}} :agent :a-a1 :step :worked}
+        st {:db (db-of [(decl "a")]) :boot "boot-1" :rid 0 :pending {} :flights {"demo/a#2" flight}}
+        [_ outs] (#'r/advance st "demo/a#2" :worked ended)
+        tx (get-in (first outs) [:req :req :tx-data])]
+    (is (some #(= [:db/cas [:seon.run/id "demo/a#2"] :seon.run/status :running :lost] %) tx) "the wake's run is lost")
+    (is (some #(some-> (:seon.run/reason %) (str/includes? "agent a-a1 ended")) tx) "with why")
+    (is (= [(spawn "a" 3)]
+           (actions-for (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :waiting) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]
+                                                           (run "a" 2 :lost)
+                                                           (task/message-tx "m1" "user" "demo/a#1" "carry on")))))
+        "the next run is a spawn")))
+
 (deftest the-judge-reads-its-branch-in-one-request
   ;; task seon.reconcile/the-judge-reads-its-branch-in-one-request: once the tests answer, the flight
   ;; asks the writer once (:branch-diff, whose answer holds the head, its merge base and what it
@@ -796,7 +814,9 @@
       (is (= [{:task "demo/a" :cause "parked: cap, waiting for a message" :run "demo/a#1" :blocks ["demo/b"]}]
              (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :cap 0)))))
           "quiet names it, with what it blocks"))
-    (testing "a message it has not taken: a wake on its process"
+    (testing "a wake in flight: more messages start nothing more, since one process runs one work! (flow-lab's hazard 4); its run takes them, or parks short of them and wakes again"
+      (is (= [] (actions-for (db-of [(decl "a")] :extra (concat (parked :waiting 0) (run "a" 2 :running) (msg "m1") (msg "m2")))))))
+    (testing "a message it has not taken: a wake on its process (one that came while its run ran is counted too: flow-lab's lost wake, hazard 3)"
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :waiting 0) (msg "m1"))))))
       (is (= [wake] (actions-for (db-of [(decl "a")] :extra (into (parked :cap 1) (concat (msg "m1") (msg "m2"))))))))
     (testing "parked, its task cancelled or held: its process is stopped (a kill of the parked run), nothing starts"

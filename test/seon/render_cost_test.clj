@@ -301,8 +301,10 @@
      ;; the read of the added parts alone (2026-10-25); 458 with the page's shared bar and header
      ;; (seon.render.ui/top-bar: their elements and attributes, serialized once a pass, 2026-10-25);
      ;; 459 since sent-split sizes the parts together (seon.context/messages-tokens, one call a pass:
-     ;; the sizer is not additive across pieces; measured per function, 2026-10-25)
-     :fixed {:calls 459 :bytes 1210000}
+     ;; the sizer is not additive across pieces; measured per function, 2026-10-25); 500 with the bar's
+     ;; toggle between a page and what its model reads (its tabs' elements and attributes serialized,
+     ;; seon.web.html: 41 calls, measured per function against main, 2026-10-26)
+     :fixed {:calls 500 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 1000 4000]}))
 
