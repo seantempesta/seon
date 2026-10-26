@@ -188,8 +188,8 @@ Owner, 2026-10-23: quote not recorded; relayed by root. A test that launches a b
 Owner, 2026-10-23: quote not recorded; relayed by root ("content-derived ids; global addressing"). Stated in: not yet (owed docs/storage.md, with the ``jolt/global-ids`` branch).
 ### Tests run on change, through Seon
 Owner, 2026-10-23: "I want the testing to happen on demand. When a change happens. When data flows through the system." Root's file watcher sees a change and runs the tests the change reaches at the new digest, reusing greens and recording results as facts (``jolt/health``). Until it lands, `bin/prove` once per finished step, never after each edit, no full runs without root's go ("I want less useless runs. Agents are slowing everything down doing full checks after every little change."). Stated in: AGENTS §3 (Testing); docs/merging.md#a-merge-runs-what-the-change-reaches.
-### Renders are `(value opts)` functions with auto-render
-Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: not yet (owed docs/render.md, with the ``jolt/printer-eval`` and renders branches).
+### Renders are `(opts & children)` functions, Reagent's form, with auto-render
+Owner, 2026-10-23 (value first, relayed by root), restated 2026-10-26: "I was thinking react so symbol opts children would be my guess?". Every render call is `[f opts & children]`; a value in the tree with no explicit render is drawn by its schema's render, else the printer. Stated in: docs/render.md (with jolt/render-call-shape).
 ### Thinking is off by default
 Owner, 2026-10-21, restated 2026-10-23: "if we can't have intuitive function calling based on the context our context is bad and instructions need help". Stated in: docs/model.md#thinking-is-off-by-default; `:seon.config.ai/thinking` in `resources/seon/config/default.edn`.
 ### No automatic retries: a refused or failed run is held for root
