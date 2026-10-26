@@ -284,7 +284,7 @@
         thrown (try (runner/plan-of d "tests" false nil store) nil (catch Throwable t t))]
    (try
     (is (some? thrown) "a file that does not read: the plan throws")
-    ;; the full run of 2026-10-26 passed the store's own refusal (MDB_SEM_UNDO_FULL, scratch stores
+    ;; the full run of 2026-10-26 passed the store's own error (MDB_SEM_UNDO_FULL, scratch stores
     ;; left open) as this throw, and then read a store it had half made
     (is (not (#{:lmdb-error :db-does-not-exist} (:type (ex-data thrown)))) "the file's, not the store's")
     (is (= #{:db} (branches)) "and leaves no branch named for its tree")
