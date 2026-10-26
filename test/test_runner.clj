@@ -217,7 +217,7 @@
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
   red one printed (RED); then
-  its greens stored at their digests (seon.proofs/store-greens!), unless the tree is not the
+  its results, greens and reds, stored at their digests (seon.proofs/store-verdicts!), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
   Then SHARD n green m red. Answers the exit status."
@@ -239,7 +239,7 @@
           ;; the tree the tests read is the plan's from before the run to after it: an edit
           ;; during the run (a test reading files reads it) is not what the digests name
           same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
-          unstored (when same? (proofs/store-greens! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
+          unstored (when same? (proofs/store-verdicts! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
           _ (.mkdirs (io/file ms-dir))
           _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
           red (count (remove proofs/green? (vals ran)))]
@@ -272,7 +272,7 @@
         merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
         cand (if (or named? merge?) all-cand (automatic all-cand process))
-        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} (proofs/greens dir (vec (vals cand)))) #{})
+        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} (proofs/verdicts dir (vec (vals cand)))) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
      :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
@@ -318,8 +318,14 @@
     (when (= :merge all?)
       (println (str "prove: a merge's verification: " (count (filter (set process) (concat run-tests run-steps)))
                     " keys that reach a process run (no green at their digest), 0 left out")))
+    ;; a key green and red at one digest: red, never run again until a change moves its digest;
+    ;; out/flaky names each, and bin/test ends red on it after its shards ran
+    (let [flaky (for [[k r] (sort-by (comp str key) reused) :when (:flaky r)]
+                  (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
+      (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))
+      (run! println flaky))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
-                  (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
+                  (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count (filter (comp :flaky val) reused)) " flaky, " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
@@ -335,7 +341,7 @@
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
-  (check-<step>, space separated) stored green at its digest (seon.proofs/store-greens!),
+  (check-<step>, space separated) stored green at its digest (seon.proofs/store-verdicts!),
   unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
   than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
   stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
@@ -351,7 +357,7 @@
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
-                     (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}]))))]
+                     (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}]))))]
     (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))

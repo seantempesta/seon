@@ -577,7 +577,7 @@
                               :when (= :test (:var/kind e))]
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
-    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (merge (if dir (proofs/greens dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
+    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (proofs/found (if dir (proofs/verdicts dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
         (update :selected into (concat unrecorded (keys removed)))
         (update :run into (concat unrecorded (keys removed)))
         (assoc :digests cd :dir dir :graph g :removed removed
@@ -747,7 +747,7 @@
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
   Each test that ran green is stored at its digest in test-plan's :dir through root's :file
-  owner (seon.proofs/store-greens!); a write refused is named under :unstored, and that test
+  owner (seon.proofs/store-verdicts!, greens and reds); a write refused is named under :unstored, and that test
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
@@ -821,9 +821,14 @@
                                read
                                (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))})))
         unstored (when (and dir (not (contract/error? res)))
-                   (proofs/store-greens! #(fx! :file % {}) dir
-                                         (into {} (for [[t status] (proofs/results res) :when (and (= :pass status) (digests t))]
-                                                    [t {:test t :digest (digests t) :pass 1 :fail 0 :error 0}]))))]
+                   ;; greens and reds; a test whose child died while it ran has no verdict
+                   (let [fails (proofs/failures res)
+                         died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports res)))]
+                     (proofs/store-verdicts! #(fx! :file % {}) dir
+                                             (into {} (for [[t status] (proofs/results res) :when (and (digests t) (not (died t)))]
+                                                        [t (cond-> {:test t :digest (digests t) :pass (if (= :pass status) 1 0)
+                                                                    :fail (if (= :fail status) 1 0) :error (if (= :error status) 1 0)}
+                                                             (fails t) (assoc :failures (fails t)))])))))]
     (if (contract/error? res)
       res
       (-> res
