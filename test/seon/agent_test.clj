@@ -729,14 +729,13 @@
   (let [[end turn] (in-agent ["(seon.turn/work! {:task \"demo/t\" :run \"demo/t#fail\" :max-turns 1})"
                               (str "(let [db (seon.agent/db) t (datahike.api/pull db '[:db/id :seon.turn/sent :seon.turn/error] [:seon.turn/id \"demo/t#fail/0\"])]"
                                    "  {:sent (mapv first (:seon.turn/sent t)) :error (:seon.error/type (:seon.turn/error t))"
-                                   "   :read (count (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))"
-                                   "   :screen (seon.print/record-text (:seon.eval/record (datahike.api/pull db '[:seon.eval/record] [:seon.eval/id (second (nth (:seon.turn/sent t) 2))])))})")]
+                                   "   :read (mapv :content (mapcat second (seon.context/parts-of db (:seon.turn/sent t))))})")]
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :task :eval :eval :eval] (:sent (:value turn))) "the help page, the task's data, the screen's three evals (status, changes, related)")
-    (is (str/includes? (str (:screen (:value turn))) ":turn \"1 of 1\"") (str "the screen's first eval, the task's status: " (:screen (:value turn))))
-    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")
-    (is (= 5 (:read (:value turn))) "read back from its records")))
+    (is (= [:section :page] (:sent (:value turn))) "the help page, then the page whole")
+    (is (= 2 (count (:read (:value turn)))) "read back from its records")
+    (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
+    (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
 (deftest code-sent-again-is-told-on-its-answer
   ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
