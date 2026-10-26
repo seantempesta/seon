@@ -54,6 +54,9 @@ main_first() {
   mkdir -p "$(dirname "$MAIN_LOCK")"
   perl -MFcntl=:flock -e "$MAIN_LOCK_PL" "$MAIN_LOCK" ""
 }
+# is_main_tree: this checkout (ROOT) is the main tree. Only main's merge verification goes first:
+# bin/prove --merge holds the lock there, and a worktree's --merge holds nothing, waiting like any run
+is_main_tree() { [ "$(cd "$ROOT" && pwd -P)" = "$(cd "$MAIN_TREE" && pwd -P)" ]; }
 # main_hold NAME CMD ARGS: CMD run under the lock (waiting for another holder first), NAME in the lock file
 main_hold() {
   mkdir -p "$(dirname "$MAIN_LOCK")"
