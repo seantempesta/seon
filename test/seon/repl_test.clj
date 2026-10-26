@@ -407,3 +407,23 @@
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
     (is (not (contains? r :value)) "an exception is the response: no value")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
+
+(deftest an-uncontracted-definition-is-told-on-its-answer
+  ;; the one derivation's review (2026-10-26): instrument computed the uncontracted-definition
+  ;; warning per form and seon.repl/response dropped it, so the agent never read it. The answer
+  ;; carries it, naming every uncontracted definition so far and how to fix it; a contracted one is
+  ;; armed and warns nothing
+  (let [old @agent/state
+        ev (fn [st code] (try (reset! agent/state st) [(repl/eval-string code {}) @agent/state] (finally (reset! agent/state old))))
+        st0 {:n 0 :ns (create-ns 'seon.repl-test.warned)}
+        [r st1] (ev st0 "(defn warned-f [x] x)")
+        [r2 _] (ev st1 "(defn warned-g [x] x) (defn armed-h {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+        [r3 _] (ev st0 "(defn armed-k {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+        w (first (:warnings r))]
+    (is (= :uncontracted-definition (:seon.repl/finding w)) (pr-str r))
+    (is (= ['seon.repl-test.warned/warned-f] (:uncontracted w)))
+    (is (str/includes? (:seon.repl/fix w) ":malli/schema") "and how to fix it")
+    (is (str/includes? (:text r) ":uncontracted-definition") "printed in the text the agent reads")
+    (is (= ['seon.repl-test.warned/warned-f 'seon.repl-test.warned/warned-g] (:uncontracted (first (:warnings r2))))
+        "the next names every uncontracted definition so far, once")
+    (is (not (contains? r3 :warnings)) "a contracted definition warns nothing")))

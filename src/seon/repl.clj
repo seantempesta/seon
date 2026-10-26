@@ -334,7 +334,9 @@
   answered: the values before an error stay), the last form's value (:value, as *1 holds it),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
-  seon.program/meaning-changes), and its cost summed over its forms (ms, ticks, bytes allocated);
+  seon.program/meaning-changes), what its definitions warn (:warnings, instrument's: the newest
+  form's uncontracted-definition warning, which names every one so far, and each contract that
+  could not be armed), and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
   {:malli/schema [:=> [:cat [:sequential :seon.wire/msg] :qualified-symbol] :seon.eval/response]}
@@ -343,11 +345,14 @@
         lst (peek fs)
         vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
-        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))]
+        sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
+        warnings (into (vec (last (keep :warnings fs)))
+                       (for [f fs :when (= :invalid (:contract f))] {:seon.repl/finding :invalid-contract :error (:contract-error f)}))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
       (and (> (count fs) 1) (seq vs)) (assoc :values vs)
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
+      (seq warnings) (assoc :warnings warnings)
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
