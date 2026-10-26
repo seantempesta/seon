@@ -103,9 +103,12 @@
   ;; target/watch said ready once FSEventStreamStart returned, but fseventsd delivers to a stream
   ;; only once it is registered, later: a change made just after ready was lost (1 in 600 under
   ;; load, measured on the binary alone), and a-change-arrives-and-a-dead-watcher-is-a-platform-
-  ;; error waited on it forever at 0% CPU. Ready is now the stream's synchronization cookie come
-  ;; back (native/watch.c), so a change made the moment start! answers arrives, every time. 50
-  ;; watchers in turn; there is no clock to end a wait, so the old watcher's red is a hang here
+  ;; error waited on it forever at 0% CPU. Ready is now fseventsd's HistoryDone sentinel, sent
+  ;; once the stream is registered (native/watch.c), so a change made the moment start! answers
+  ;; arrives, every time. 50
+  ;; watchers in turn; there is no clock to end a wait, so the old watcher's red is a hang here,
+  ;; and a rare one: at 1 in 600, 50 writes catch the old watcher about 8% of the time (the
+  ;; before and after on the binary alone are in the change's commit)
   (let [base (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid))) (.mkdirs)))
         arrived (vec (for [i (range 50)]
                   (let [dir (.getCanonicalPath (doto (io/file (str base "/" i)) (.mkdirs)))
@@ -114,6 +117,7 @@
                         w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got true))) (fn [_]))]
                     (spit f "# X\n")
                     (let [r @got] (watch/stop! w) r))))]
+    (clojure.java.shell/sh "rm" "-rf" base)
     (is (= 50 (count (filter true? arrived))))))
 
 (deftest a-throw-in-the-batch-handler-is-a-recorded-death
