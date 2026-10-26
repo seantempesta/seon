@@ -726,3 +726,29 @@
      :per-n {:ticks 11000 :bytes 16000}
      :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
      :sizes [10 100 1000]}))
+
+(defn newest-evals
+  "d/pull's arguments for the newest five of n: an agent and n evals referring to it (each a
+  :seon.eval/agent ref), on the test store's seed, and the pattern that reads its newest five,
+  [:seon.eval/_agent :limit 5 :reverse true]."
+  [n]
+  (let [r (d/with (ts/test-db) (into [{:db/id "a" :seon.agent/key "newest"}]
+                                     (for [i (range n)] {:seon.eval/id (str "newest-" i) :seon.eval/agent "a"})))]
+    [(:db-after r) '[{[:seon.eval/_agent :limit 5 :reverse true] [:seon.eval/id]}] (get (:tempids r) "a")]))
+
+(deftest the-newest-n-cost-what-they-hold
+  ;; Datahike 872bfa03: :reverse reads the reverse ref's :avet datoms by rseek-datoms from the
+  ;; agent's end and stops after five, so the pull costs its five members and the index's depth,
+  ;; whatever the collection holds. Without it a newest-n read realizes every member (the window
+  ;; ctx's pattern holds, docs/ctx.md)
+  (is (= ["newest-9" "newest-8" "newest-7" "newest-6" "newest-5"]
+         (let [[db p e] (newest-evals 10)] (mapv :seon.eval/id (:seon.eval/_agent (d/pull db p e)))))
+      "the newest five, newest first")
+  (cost/proof
+    {:of 'datahike.api/pull :input 'seon.db-test/newest-evals
+     :n "evals referring to the agent"
+     :work "the pattern compiled; one :avet descent to the agent's last referrer, five datoms read back, five members pulled"
+     :growth :constant
+     ;; measured: 112, 114 and 122 KB, 23k, 23k and 26k ticks at 10, 1,000 and 100,000 (one more index level)
+     :fixed {:ticks 26000 :bytes 122000}
+     :sizes [10 1000 100000]}))
