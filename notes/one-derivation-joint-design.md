@@ -2,9 +2,33 @@
 
 Agent view (render, layout, the printer and request side) with ctx-atom (the ctx side, `ctx-side-of-webui-design-2026-10-26.md`, folded in below). It answers root's reference (`one-derivation-2026-10-26.md`), its eight points and its deletion list, under the owner's rulings of 2026-10-26. Status: for root's check and an independent review before anything is built.
 
-## The split in two lines (the owner's ruling on faces)
-- **The one printer is the default face of every value, both ways from one pass:** `print/text` for the model and `emit/ops-hiccup` for the page, with the same selection and the same cuts. `:seon.render/ai` remains only as that printer's text face, never as a hand-written second view.
-- **Everything else is the page itself:** the layout and the custom renders are hiccup made compact enough that the model is shown it as rendered (through the printer), so the agent and the user see the same thing.
+## The core: the page is html(ctx); the model's context is print(html(ctx))
+The owner, 2026-10-26: "I feel like we are close to one simple design without all the manual scaffolding and rules we are setting up for the webui and the context generation."
+
+```
+@ctx  --:seon.render/html-->  hiccup  ---> HTML (the theme expanded)            = the page the user sees
+                                      `--> the one printer (budget, cuts, folds) = the model's context
+```
+- **One generation.** `@ctx` is rendered once, by its schema's `:seon.render/html` (the layout), into one hiccup tree. That tree is the page. The model's context is the one printer applied to the same tree: whole once, then diffs by component key, with the printer's budget, cuts, folds and the history cut acting on that one tree. Model and user read the same thing.
+- **The printer's rules are the only context rules,** and they apply to any tree:
+  - what a cut leaves and the form that reads it;
+  - folds (an earlier part as its line);
+  - `:same-as` and seen-value references, only to what is still readable above;
+  - the history cut, which jumps once and holds;
+  - diffs by component key, never "unchanged" for what was cut.
+  There is no rule specific to the request, the screen or the story.
+- **`:seon.render/ai` is a rare escape hatch,** for a value whose model view should differ from its page (a vector as its length and first rows, a blob as a one-line summary). It is not a second generation: the printer meets it as a node in the tree and prints its text there.
+- **What that deletes, measured by the size of each function that goes** (the section "What it deletes" below has the list):
+  - the story block: the task is a tile;
+  - the screen's own producer: the screen is the tile side;
+  - the records read for the conversation: the chat side;
+  - the separate debug page: what was sent is the printed page, recorded per turn;
+  - the hand-written `:ai` renders (`seon.render.ai`, root's system face included: root's context is print(html(root's ctx)));
+  - the parts of `seon.context` that assemble the request;
+  - the page walk and its read-set index.
+  - Total: **≈1,414 src lines go, ≈450 come, net ≈ −960.**
+- **What remains of the context machinery** is `seon.context/kept` (the history cut), the system prompt (help), the data producers that agents and tiles call (`refused`, `near`, `related`, `similar`), and `printed-run`'s rules, moved into the printer as its rules over a conversation's nodes.
+- **The prefix:** the first print of the page (the task tile at its top) takes the story's place as the stable prefix. A stage boundary (a new task) is a diff of the task tile plus root's message as a chat entry, so the earlier stage's request remains a byte-exact prefix (the agent loop's invariant 2).
 
 ## The shape (root's eight points, each with how)
 
@@ -95,29 +119,31 @@ Agent view (render, layout, the printer and request side) with ctx-atom (the ctx
 The toggle is "conversation | context" on every page. The context view is the request as recorded: each turn's sent parts, for a model agent; for root, which has no model turn, the context the render proc already holds. Both are built on webui-root-chat, and it stays as the view of the model's face.
 
 ## What it deletes, and the src estimate
-| deleted | where | lines |
+Sizes are each function's line count on main today (`notes/measure/defsizes.py`). What goes is my reading of the design, for review.
+
+| deleted | functions (lines) | lines |
 |---|---|---|
-| the page walk (`walk`, `one`, `relevant` and its helpers) | `seon.render` 216–311 | −95 |
-| the read-set index for pages (`with-reads` capture, `comps-touched`, `:comp-index`, `location` and `page-value`'s walk path, branch reads per view) | `seon.render.proc` | −160 |
-| the walk-driven layouts (`page`, `rows`, the agent page's tile gathering, `component`'s size cases), replaced by `:seon.ctx/ctx`'s layout render | `seon.render.ui` | −300 |
-| `:seon.render/ai` hand-written faces where the hiccup serves | `seon.render.ai`, schemas | −120 |
-| the screen's own producer (`seon.screen/show`); its diff becomes the printer's component diff | `seon.screen` | −40 |
-| the request's own read of the records (`seon.context/records`), replaced by ctx's ordered conversation | `seon.context` | −50 |
-| `live-key` (never merged) | webui-root-chat | (0 on main) |
-| **deleted** | | **≈ −765** |
+| `seon.context`, the request's assembly | `run-state` 36, `turn-state` 43, `current-state` 7, `story` 10, `eval-messages` 33, `message-messages` 7, `ai-messages` 8, `ref-of` 5, `fold-of` 16, `folded` 6, `as-diff` 8, `as-sent` 9, `records` 21, `run-keys` 5, `run-message` 8, `screen-message` 10, `request` 51, `messages` 6, `turn-input` 12, `render` 33 | −334 |
+| `seon.context`, the debug page's read-back | `parts-of` 23, `sent-split` 14, `messages-tokens` 8 | −45 |
+| `seon.screen`, the screen's producer and its own diff | `show` 12, `last-screen` 10, `input` 7, `diff` 23 | −52 |
+| `seon.render`, the walk and the `:ai` face | `walk` 41, `one` 42, `relevant` 9, `forward` 5, `entity-schemas` 6, `identity-schemas` 4, `print-ai` 11, `ai` 5, `rendered?` 7 | −130 |
+| `seon.render.ai`, the hand-written `:ai` renders (system, problems, task, run, error) | the whole namespace but one escape-hatch example | −200 |
+| `seon.render.proc`, walk pages, the read-set index, the screen's own render, root's system value | `page-value` 40, `debug-value` 25, `ready?` 13, `walk?` 8, `ask-branches` 25, the index (`index`, `unindex`, `index-each`, `reindex`, `touched`, `db-key`, `comps-touched`, `comps-of`, `drop-comps`, `invalidate`) 73, the screen (`screen-hiccup`, `screen-of`, `screen-due?`, `screen-view?`, `index-of`) 52, root's system value (`system-value`, `main-info`, `task-rows`, `proc-health-of`, most of) 60 | −296 |
+| `seon.render.ui`, walk-driven layouts and the debug page | `page` 37, `rows` 11, `tile-id` 9, `tile` 10, `shown-as` 5, `view` 6, `component` 39, `agent` 70, `root` 27, `runs-of` 10, `debug` 25, `debug-input` 24, `source` 14, `sent-parts-html` 25, `sent-request` 35, `root-context` 10 | −357 |
+| **deleted** | | **≈ −1,414** |
 
 | added | where | lines |
 |---|---|---|
 | `patch` answers `:changed` and each member's t | `seon.ctx` | +30 |
-| root's ctx per viewed page, built and patched from the writer's reports | `seon.render.proc` | +50 |
-| the ctx-path render cache | `seon.render.proc` | +40 |
-| `:seon.ctx/ctx`'s layout render: the screen side, the chat side, the sidebar | `seon.render.ui` | +150 |
-| hiccup as a printer value kind: theme map once, render markers, wrapper elision, the component diff | `seon.print`, `emit` | +110 |
+| root's ctx per viewed page, from the writer's reports; the path cache | `seon.render.proc` | +90 |
+| `:seon.ctx/ctx`'s layout render (screen side, chat side, sidebar), the chat part read from a ctx entry | `seon.render.ui` | +150 |
+| hiccup as a printer value kind: theme map once, render markers, wrapper elision, the component diff, `printed-run`'s rules as the printer's | `seon.print`, `emit` | +110 |
+| the request: the system prompt, then print(html(ctx)) whole or as its diff, recorded per turn (what the debug toggle shows) | `seon.context` | +40 |
 | `:seon.eval/replay?` on screen forms | `seon.screen`, schema | +15 |
 | `take!` writes the message; `:from` as a ref | `seon.turn`, schema | +15 |
-| **added** | | **≈ +410** |
+| **added** | | **≈ +450** |
 
-**Net ≈ −350 src lines.** Estimated from the current files' sizes, not measured; each slice reports its measured delta.
+**Net ≈ −960 src lines.** The deletions are measured function sizes; the additions are estimates. Each slice reports its measured delta. On main this also removes the toggle's separate debug page, which the webui-root-chat merge adds: the toggle stays and shows the printed page.
 
 ## Cost per transaction, against today
 - **Today:**
