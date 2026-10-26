@@ -114,21 +114,21 @@
 
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
-  on root. A refusal's error names it as its subject and is written with it, in one
+  on root. A refused read's error names it as its subject and is written with it, in one
   transaction; the first read whose outcome differs closes it, and the same outcome again
   writes no datom."
   {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
   [outcome] [{:seon.root/id :root :seon.root/tasks outcome}])
 
 (defn load-answer
-  "Answer r of a read of the task files, as load-tasks! answers it: a refusal (a file's or the
+  "Answer r of a read of the task files, as load-tasks! answers it: a refused one (a file's or the
   reconcile's) names :seon.root/tasks as its subject, the read's outcome."
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
 
-(defn refusal-tx
+(defn load-error-tx
   "The write of load error e at ms on main db: a :platform error (seon.root/platform-tx) and, in
-  the same transaction, the outcome its subject holds (a task-file refusal's, tasks-read-tx)."
+  the same transaction, the outcome its subject holds (a refused task-file read's, tasks-read-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
   [db e ms]
   (cond-> (root/platform-tx db e ms)
@@ -139,7 +139,7 @@
   ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
   outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
   one held; a refused one answers its error (load-answer), whose recorder writes both
-  (refusal-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
+  (load-error-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
@@ -280,7 +280,7 @@
                                 ;; a loader's typed error (a refused task file) is a recorded :platform error; the
                                 ;; problems the load made true are shown by health, and the last are kept in the fact
                                 (doseq [e (load-errors loaded)]
-                                  @(root/transact-main! sys (refusal-tx @(:conn sys) e (System/currentTimeMillis))))
+                                  @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]

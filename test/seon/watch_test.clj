@@ -133,23 +133,23 @@
 (deftest a-refused-task-files-error-closes-at-the-next-good-read
   ;; found on the standing root 2026-10-26: "task file my.task.edn: not readable EDN" stayed open ~21
   ;; hours after the file read again. Put back as it was, the good read changed no declaration, so
-  ;; load-tasks! wrote nothing, and the refusal named no subject that anything could write
+  ;; load-tasks! wrote nothing, and the refused read named no subject that anything could write
   (let [bad (mr/load-answer (seon.task/file-declarations 'my.task "[{:seon.task/name \"a\" :seon.task/plan}]"))
         good {:files 1}
         read #(d/db-with % (mr/tasks-read-tx good))
-        refused #(d/db-with % (mr/refusal-tx % bad 1000))
+        refused #(d/db-with % (mr/load-error-tx % bad 1000))
         open? #(not (false? (:open? (first (get-in (problems/report %) [:classes :platform :rows])))))
         before (read (ts/test-db))
         db (refused before)]
-    (is (= :seon.root/tasks (:seon.error/subject bad)) "the refusal names the read's outcome")
+    (is (= :seon.root/tasks (:seon.error/subject bad)) "the refused read names the read's outcome")
     (is (= [:seon.task/refused] (mapv :type (get-in (problems/report db) [:classes :platform :rows]))))
     (is (open? db) "refused, its outcome written with it: open")
     (is (open? (d/db-with db [{:seon.root/id :root :seon.root/boot "b2"}])) "a write of root's other facts says nothing of the task files")
     (let [again (refused db)]
-      (is (open? again) "the same refusal again: open")
+      (is (open? again) "the same refused read again: open")
       (is (= (count (d/datoms db :aevt :seon.root/tasks)) (count (d/datoms again :aevt :seon.root/tasks))) "and its outcome, the same value, wrote no datom"))
     (let [fixed (read db)]
-      (is (not (open? fixed)) "a good read of the same bytes as before the refusal: closed, nothing written to close it")
+      (is (not (open? fixed)) "a good read of the same bytes as before the refused one: closed, nothing written to close it")
       (is (not (open? (read fixed))) "a good read again writes nothing and it stays closed")
       (is (open? (refused fixed)) "refused again: open again"))))
 

@@ -351,7 +351,7 @@
                    [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
                    [:error {:optional true} :string]]
  ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
- ;; the refusal's message. A refusal's error names it as its subject
+ ;; the refused read's message. A refused read's error names it as its subject
  ;; and is written in the same transaction, so it stays open until a good read writes another value
  ;; (seon.problems/closed?); the same outcome again writes no datom
  :seon.root/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
