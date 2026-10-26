@@ -721,20 +721,18 @@
   "What each wiki section lacking a :seon.section/read was last written against, from git (the
   :history effect, seon.fx/wiki-history), as the loader takes it: {address {:read :unread}} (seon.docs/baseline-reads).
   {} when every section has one. The history asked, the effect owner does the git; when it cannot be
-  asked every section is read as of today and says why. Answers [baseline tx]: tx, for the load's
-  own transaction, is the failed history's :effect row, naming :seon.section/read, which the load
-  writes (seon.error/asked-tx); [] when the history answered or was not asked."
-  {:malli/schema [:=> [:cat :seon.root/sys :string :string] [:tuple :map [:vector :any]]]}
+  asked every section is read as of today and says why: its record is each section's
+  :seon.section/baseline-unread, which health shows as a :stale-section row."
+  {:malli/schema [:=> [:cat :seon.root/sys :string :string] :map]}
   [sys checkout dir]
   (let [db @(:conn sys)
         plan (docs/baseline-plan db (docs/pages checkout dir))]
     (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
-      [{} []]
+      {}
       (let [r @(call! sys {:op :fx :kind :history :req {:root checkout :sections plan}})]
-        [(if (contract/error? r)
-           (docs/baseline-failed db plan (:seon.error/message r))
-           (docs/baseline-reads db plan (:value r)))
-         (err/asked-tx db r :seon.section/read [])]))))
+        (if (contract/error? r)
+          (docs/baseline-failed db plan (:seon.error/message r))
+          (docs/baseline-reads db plan (:value r)))))))
 
 (defn wiki-tx
   "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
@@ -873,7 +871,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
-                                                                                  (into (let [[baseline tx] (wiki-baseline sys (cfg/checkout) "docs")] (into (wiki-tx db (cfg/checkout) baseline) tx))))
+                                                                                  (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
