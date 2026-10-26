@@ -3,12 +3,12 @@
   seon.task/a-task-cites-what-it-needs): references from the plan, never authored, and a
   citation that resolves to nothing answered beside the write."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.repl :as repl]
-            [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template]))
+            [seon.db :as pdb] [seon.task :as task] [seon.ref :as ref] [seon.template :as template] [clojure.string :as str]))
 
 (defn- db-with-program []
   ;; one recorded definition, its form (seon.program's facts), written as data
   (d/db-with (ts/test-db)
-             [{:db/id "ns" :ns/name 'demo}
+             [{:db/id "ns" :ns/name 'demo :ns/file "src/demo.clj"}
               {:db/id "v" :var/name 'demo/f :var/ns "ns" :var/form "form"}
               {:db/id "form" :form/id "demo/f" :form/src "(defn f [x] x)" :form/ns "ns" :form/order 0 :form/defines ["v"]}]))
 
@@ -30,12 +30,31 @@
     (is (not (contains? (first (task/create-tx (db-with-program) [(decl "Make `demo/f` pass.")])) :seon.task/sections))
         "no section, no key")))
 
+(deftest the-writer-cites-the-programs-names-not-the-reproductions
+  ;; audit item 2a: a reproduction's test helper (seon.test-store/test-db), library call
+  ;; (datahike.api/db-with) and handle (result/e1) are its entry and data, not its subject: the
+  ;; task cites only the program's names, a name of a program namespace not yet defined among them
+  (let [db (d/db-with (db-with-program) [{:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
+        plan (str "Make demo/f exact and add demo/g. Reproduce: (let [db (demo-test/fixture) db (datahike.api/db-with db [])] "
+                  "(demo/f db)) answers result/e1, as (clojure.string/split-lines s) shows.")
+        [written] (task/create-tx db [(decl plan)])]
+    (is (= #{'demo/f 'demo/g} (:seon.task/references written)) "the program's names: one defined, one to make")
+    (is (= #{'demo/f 'demo/g 'demo-test/fixture 'datahike.api/db-with 'result/e1 'clojure.string/split-lines} (set (ref/names plan)))
+        "while the text names them all")
+    (testing "a test the plan names on purpose reaches the page as its proof, not as a cited var"
+      (let [[written] (task/create-tx db [(assoc (decl "Make `demo-test/f-test` pass.") :seon.task/proofs #{'demo-test/f-test})])]
+        (is (not (contains? (:seon.task/references written) 'demo-test/f-test)))
+        (is (= #{'demo-test/f-test} (:seon.task/proofs written)))))))
+
 (deftest a-templates-instructions-are-cited-as-a-plan-is
   ;; owner, 2026-10-22: instructions are cited text; a var a kind's instructions cite reaches
   ;; the task's references, and so its context, exactly as a plan's does (the navigation functions
   ;; every kind shares are the help page's, docs/agent.md)
   (doseq [kind [:design :implement :test :merge]
-          :let [[written] (task/create-tx (db-with-program) [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
+          :let [names (ref/names (template/instructions kind))
+                ;; the program's namespaces they name, as the store records them (seon.program/program-name?)
+                db (d/db-with (db-with-program) (vec (for [n (distinct (map namespace names))] {:ns/name (symbol n) :ns/file (str "src/" (str/replace n "." "/") ".clj")})))
+                [written] (task/create-tx db [(assoc (decl "") :seon.task/instructions (template/instructions kind))])]]
     (is (= (set (ref/names (template/instructions kind))) (set (:seon.task/references written))) (str kind ": every name, derived"))))
 
 (deftest unresolved-citations-are-answered-not-refused
