@@ -22,7 +22,7 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+  (:require [datahike.db.utils :as dbu] [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
             [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
 
 (defn parents
@@ -376,8 +376,7 @@
   (when-let [own (d/pull db '[*] eid)]
     (let [schema (entity-schema own nil)
           units (units schema)
-          types (d/schema db)
-          ref? (fn [a] (or (not= a (forward a)) (= :db.type/ref (get-in types [a :db/valueType]))))
+          ref? (fn [a] (or (not= a (forward a)) (dbu/ref? db a)))
           ;; each ref unit's linking datoms, with the transaction that wrote each, newest first: a
           ;; reverse ref's from its index (one read for every row: a ref is in :avet)
           linked (fn [a] (let [f (forward a)]
