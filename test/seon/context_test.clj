@@ -1082,7 +1082,13 @@
           db (d/db-with db (vector/tx-data (vec ts) (repeat 25 1) (for [i (range 25)] (dir 1.0 (* 0.001 (inc i)))) (repeat 25 10) "m"))
           rel (context/related db te)]
       (is (some #{'demo/h} (:functions rel)) (str "the nearest function's callee, for: " plan " " (pr-str (:functions rel))))
-      (is (not-any? #(= "demo-test" (namespace %)) (:functions rel)) "the tests that seeded nothing are not shown"))))
+      ;; a plan citing a defined var keeps its own graph: g's callee is not reached from meaning
+      (let [db (d/db-with db [{:db/id "q" :form/id "demo/q" :form/src "(defn q [])" :form/defines #{"qv"}} {:db/id "qv" :var/name 'demo/q :var/form "q" :var/kind :fn}
+                              {:db/id "c" :form/id "demo/c" :form/src "(defn c [] (q))" :form/refs #{'demo/q} :form/defines #{"cv"}} {:db/id "cv" :var/name 'demo/c :var/form "c" :var/kind :fn}
+                              {:seon.task/id "demo/r" :seon.task/plan (str plan " Change `demo/q`.")}])
+            fs (:functions (context/related db te))]
+        (is (some #{'demo/c} fs) (str "a cited var's graph: its caller " (pr-str fs)))
+        (is (not-any? #{'demo/h} fs) "and not meaning's seed")))))
 
 (deftest a-proof-with-no-result-reads-unknown
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never

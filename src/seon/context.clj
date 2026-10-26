@@ -222,19 +222,20 @@
             cap (cfg/value :seon.config.render/related-rarity)
             by-rarity (fn [xs] (mapv peek (sort (for [[x n] (frequencies xs)]
                                                   [(- (/ n (inc (bounded-count cap (d/datoms db :avet :form/refs x))))) (str x) x]))))
-            near (fn [of f n] (into [] (comp (keep (comp f first)) (distinct)) (vector/near db te n {:of of})))
+            named (fn [f hits] (into [] (comp (keep (comp f first)) (distinct)) hits))
             n (* k (cfg/value :seon.config.render/related-near))
             var-of #(some-> (d/entity db %) :var/_form first :var/name)
-            meaning {:functions (near :form/id var-of n)
-                     :sections (near :seon.section/address #(:seon.section/address (d/entity db %)) n)
-                     :schemas (near :schema/key #(:schema/key (d/entity db %)) n)}
-            ;; a plan citing no defined var (a user's request in prose) seeds the graph with the program
-            ;; functions nearest it by meaning, read past the tests that are nearer still
-            ;; (:seon.config.render/related-seeds-near; task seon.context/a-prose-request-finds-its-functions)
-            seeds (let [defined (filter #(d/entity db [:var/name %]) fns)]
-                    (if (seq defined)
-                      defined
-                      (into [] (comp (filter function?) (take k)) (near :form/id var-of (cfg/value :seon.config.render/related-seeds-near)))))
+            ;; a plan citing no defined var (a user's request in prose; a section or a name of no var
+            ;; alike) seeds the graph with the program functions nearest it by meaning, read past the
+            ;; tests that are nearer still (:seon.config.render/related-seeds-near; task
+            ;; seon.context/a-prose-request-finds-its-functions): one search of the forms serves both,
+            ;; meaning's candidates its first n
+            defined (filterv #(d/entity db [:var/name %]) fns)
+            forms (vector/near db te (if (seq defined) n (max n (cfg/value :seon.config.render/related-seeds-near))) {:of :form/id})
+            meaning {:functions (named var-of (take n forms))
+                     :sections (named #(:seon.section/address (d/entity db %)) (vector/near db te n {:of :seon.section/address}))
+                     :schemas (named #(:schema/key (d/entity db %)) (vector/near db te n {:of :schema/key}))}
+            seeds (if (seq defined) defined (into [] (comp (filter function?) (take k)) (named var-of forms)))
             graph {:functions (by-rarity (concat (mapcat #(docs/callers db %) seeds) (mapcat #(map :var (callees db %)) seeds)
                                                     (for [a secs n (:seon.section/names (d/entity db [:seon.section/address a]))] n)))
                    :sections (by-frequency (concat (for [n fns e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db n)]
