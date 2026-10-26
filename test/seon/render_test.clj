@@ -1208,3 +1208,14 @@
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
         (is (str/includes? (p/page-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
+
+(deftest an-agents-run-tile-is-mains
+  ;; root, 2026-10-26: an agent's run is root's chrome, read on main as the sidebar is. Main writes
+  ;; a run's status and end after the agent's branch forked, so the branch's copy never has them; a
+  ;; fresh agent's run tile read "#1––––––"
+  (let [[main branch _] (paged-dbs)
+        main (d/db-with main [{:seon.run/id "demo/f#1" :seon.run/status :closed :seon.run/outcome :done}])
+        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
+        tile (get-in st [:views :a3 :units "q-run" :html])]
+    (is (str/includes? (str tile) "closed") (str "the status main holds: " tile))
+    (is (str/includes? (str tile) "done") "and how it ended")))
