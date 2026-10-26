@@ -236,6 +236,12 @@
  ;; needed more); each result records its :ticks. At the bound that test is an :error of
  ;; :seon.test/ticks-spent naming it, and the run goes on. 0: none.
  :seon.config.agent/test-ticks 200000000000
+ ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
+ ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
+ ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
+ ;; guessed tolerance the agent proc held as a var (30 s; a model call answers or streams within
+ ;; it). Past it nothing is ended. 0: no check.
+ :seon.config.agent/stall-ms 30000
 
  ;; ==== merges =================================================================================
 
@@ -354,6 +360,12 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
+ ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
+ ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
+ ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
+ ;; leaves a slow test. Past it the test is named, never ended.
+ :seon.config.proofs/stall-factor 3
  ;; Unit: assertions. The failing assertions a red test keeps in its run's facts, the first ones;
  ;; the rest are counted in the report, not kept. Provenance: the value seon.proofs held as a
  ;; literal (shrink: a bound is a config key). At the bound: later failures of that test go unkept.

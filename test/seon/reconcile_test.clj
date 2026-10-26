@@ -292,6 +292,7 @@
         tx (get-in (first outs) [:req :req :tx-data])]
     (is (some #(= [:db/cas [:seon.run/id "demo/a#2"] :seon.run/status :running :lost] %) tx) "the wake's run is lost")
     (is (some #(some-> (:seon.run/reason %) (str/includes? "agent a-a1 ended")) tx) "with why")
+    (is (some #(= :lost (:seon.run/outcome %)) tx) "and its outcome, so it reads as ended")
     (is (= [(spawn "a" 3)]
            (actions-for (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :waiting) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]
                                                            (run "a" 2 :lost)
@@ -324,7 +325,7 @@
         [st' outs] (#'r/advance st "demo/a#1" :diffed no)]
     (is (= {:op :kill :id :a1 :ended true} (:req (first outs))))
     (is (= [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended]
-            {:seon.run/id "demo/a#1" :seon.run/reason "no branch :demo/a" :seon.run/error no}]
+            {:seon.run/id "demo/a#1" :seon.run/outcome :error :seon.run/reason "no branch :demo/a" :seon.run/error no}]
            (update (get-in (second outs) [:req :req :tx-data]) 1 dissoc :seon.run/end-ms)))
     (is (= :done (get-in st' [:pending (:tag (second outs)) 1])) "its flight ends with the write")))
 
@@ -777,6 +778,32 @@
           (is (not (:quiet st4)))
           (is (nil? (report-in outs4))))))))
 
+(deftest every-way-a-run-leaves-running-writes-its-outcome
+  ;; root, 2026-10-26: a run with no outcome is a running run (an agent's ctx and its page's run
+  ;; tile read it so: outcome and reason are what the agent's take copies), so every way root
+  ;; moves a run off :running writes one with its reason: a reap (root restarted), a kill of a
+  ;; live run, a death, the writer refusing to read its branch; a refused spawn and a lost wake
+  ;; (their own tests), and the judge's end (the agent's, or :no-end)
+  (let [db (db-of [(decl "a")] :extra (run "a" 1 :running))
+        st {:db db :boot "boot-1" :rid 0 :pending {} :flights {}}
+        flight {:act {:op :spawn :run "demo/a#1" :task "demo/a" :env {:branch :task-demo-a}} :agent :a-a1}
+        outcome (fn [[_ outs]] (some :seon.run/outcome (mapcat #(get-in % [:req :req :tx-data]) outs)))
+        died (contract/error :seon.agent/died 'seon.root/end-agent "agent a-a1 died" {:agent :a-a1})]
+    (is (= :lost (outcome (#'r/start st {:op :reap :run "demo/a#1"}))) "a reap: lost")
+    (is (= :killed (outcome (#'r/start st {:op :kill :run "demo/a#1" :reason :cancelled}))) "a kill of a live run: killed")
+    (is (= :dead (outcome (#'r/advance (assoc-in st [:flights "demo/a#1"] (assoc flight :died died)) "demo/a#1" :dead-read {:db nil})))
+        "a death: dead")
+    (is (= :error (outcome (#'r/advance (assoc-in st [:flights "demo/a#1"] flight) "demo/a#1" :diffed
+                                        (contract/error :seon.writer/refused 'seon.writer/refused "no branch :task-demo-a" {}))))
+        "the writer refused its branch: error")))
+
+(deftest a-stall-task-starts-no-agent
+  ;; owner, 2026-10-26: "Hold off launching paid agents for now": root's stall task is created and
+  ;; shown, and worked by a Claude session through seon_attach; the reconciler forks nothing for it
+  (let [db (db-of [(tpl/stall :a1 "demo/t#1" {:quiet-ms 4000 :pid 77})] :released [])]
+    (is (some? (task/task db "root/stall-a1-demo-t-1")) "the task is on main")
+    (is (not-any? #(#{:spawn :wake} (:op %)) (actions-for db)) "and no agent is started for it")))
+
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 (deftest a-refused-spawn-writes-a-refused-run
@@ -792,6 +819,7 @@
     (is (some? asked) "the first pass asks for the spawn")
     (is (= :refused (:seon.run/status run)) "the refused answer is written as the run")
     (is (= held-why (:seon.run/reason run)) "with root's reason")
+    (is (= :refused (:seon.run/outcome run)) "and its outcome, so it reads as ended")
     (is (= [(spawn "a" 2)] (actions-for (d/db-with db written))) "the next pass starts the task again")))
 
 (deftest a-refused-task-asks-again-when-main-moves

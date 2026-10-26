@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.cost :as cost] [seon.docs]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.docs]))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -223,7 +223,65 @@
     (testing "an effect outstanding is waiting on its owner, not stalled"
       (let [[st _] (#'ap/agent-proc st :from {:op :fx :k 1 :kind :model})
             st (assoc st :last-frame-ms 1000)]
-        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))))
+        (is (empty? (:to-api (second (#'ap/agent-proc st :in {:op :stall? :now-ms 9000 :stall-ms 2000})))))))
+    (testing "a test of its run that started is what a stall names; its first frame after the stall ends it"
+      (let [[st _] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/hangs"})
+            st (assoc st :last-frame-ms 1000)
+            [st outs] (#'ap/agent-proc st :in {:op :stall? :now-ms 5000 :stall-ms 2000})
+            [_ outs2] (#'ap/agent-proc st :from {:op :testing :test "#'app.t/next"})]
+        (is (= {:kind :tests :form "#'app.t/hangs"} (get-in (first (:to-api outs)) [:error :last-op])) "the stall names the test")
+        (is (some #(= {:op :spoke :agent :a1} %) (:to-api outs2)) "its next frame: it spoke")))))
+
+(deftest a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
+  ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice an agent
+  ;; has been stuck"): a stall root observes is a fact on the agent, with what it waits on, so
+  ;; my.root/problems, root's page and every ctx holding the agent show it, until the agent's next
+  ;; frame or its end retracts it
+  (let [view {:agents {:a1 {:status :busy :pid 77 :task "t/x"}}}
+        waits {:kind :tests :form "#'app.t/hangs"}
+        stalled {:op :stalled :agent :a1
+                 :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
+                                        {:agent :a1 :quiet-ms 4000 :last-op waits})}
+        facts (fn [o] (into [] cat (writes o)))
+        retracts? (fn [o] (some #(and (vector? %) (= :seon.agent/stall (last %))) (facts o)))
+        [st o1] (step (api view) :back stalled)]
+    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.agent/stall %)) (facts o1)) "recorded on the agent, with what it waits on")
+    (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
+    (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
+
+(deftest a-stall-in-a-live-run-makes-one-task-for-root
+  ;; owner, 2026-10-26: no push; a stall "becomes a task for root to deal with, from a template":
+  ;; the first write of a stall in a live run writes one task (seon.template/stall), its cause
+  ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same run
+  ;; writes none (one per agent and run), and an agent working no run gets none
+  (let [db (ts/test-db)
+        view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"} :a2 {:status :busy :pid 78}}}
+        stalled (fn [ag] {:op :stalled :agent ag
+                          :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in (str "agent " (name ag) " sent nothing for 4000 ms with a request in flight")
+                                                 {:agent ag :quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}})})
+        tasks (fn [o] (filter :seon.task/id (into [] cat (writes o))))
+        [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
+        [t] (tasks o1)]
+    (is (= ["root/stall-a1-demo-t-1"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its run")
+    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (get-in t [:seon.task/cause :stall]))
+        "its cause pre-filled with the stall")
+    (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
+        "held, for an outside worker, its proofs the boundary conditions")
+    (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
+        "a later stall of the same run writes none")
+    (is (empty? (tasks (second (step (assoc (api view) :conn (atom db)) :back (stalled :a2))))) "an agent working no run: none")))
+
+(deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
+                                     :seon.agent/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
+                                    {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
+        rows (get-in (problems/health db) [:classes :stalled :rows])]
+    (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
+    (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
+    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stall]])) [:classes :stalled :rows]))
+        "closed once the fact is retracted")
+    (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
+        "and by a new boot: an earlier boot's stall ended with its process")))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
@@ -907,7 +965,8 @@
                :work "one lookup per class with an open row, found at the first row"
                :growth :constant
                :per-n {:ns 0 :bytes 0 :calls 0}
-               :fixed {:ns 3000000 :bytes 4000000 :calls 45}
+               ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up
+               :fixed {:ns 3000000 :bytes 4000000 :calls 47}
                :sizes [10 100 1000]}))
 
 (deftest attention-survives-a-store-write

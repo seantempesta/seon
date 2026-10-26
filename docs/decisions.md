@@ -379,7 +379,7 @@ The questions waiting on the owner's ruling, the plan's blockers among them.
 - Changed-since: a Datahike tree diff by node address (port v1 fork `771a0c4b`, prototype first) or a `:seon.tx/changed` stamp against the "no stamps" ruling.
 - Proofs along `:needs`: keep `seon.task/accumulate` (2026-10-20 ruling) or never carry proofs, since an accumulated designed-red check blocks implement (DESIGN-tasks §3.4, §11 #14); possibly moot once templates become held task data.
 - No progress: is a byte-identical repeated reply a recorded fact only, or does it end the run.
-- What is a stall once an eval is bounded by its work: three tasks (`seon.root/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `seon.agent-proc/stall-ms` (30000) remains.
+- What is a stall once an eval is bounded by its work: three tasks (`seon.root/a-stall-is-past-the-requests-own-bound`, `seon.root/one-clock`, `seon.turn/a-form-has-a-time-bound`) still plan a clock; `:seon.config.agent/stall-ms` (30000, a config key now) remains.
 - The per-run turn cap: lower `:seon.config.agent/max-turns` (40) to about 2x the measured p90 turns-to-green once 20 real tasks give one.
 - A dropped model connection (`:seon.model/transport`): retry once after a wait, or end as now.
 - File and shell roots: a config key with a permissive default, or none; and whether `:git` `:build` `:deps` `:source` effects are root-only.

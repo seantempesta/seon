@@ -133,10 +133,12 @@
 (defn earlier-agents-tx
   "A new boot's root is no longer the root of the agents an earlier boot started: their link to
   root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root)."
+  root's agents are this boot's (root's walk, :seon.agent/_root); and a stall one showed is over,
+  its :seon.agent/stall retracted with its process (an open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
-              [:db/retract a :seon.agent/root r])))
+  [db] (into (vec (for [[a r] (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
+                    [:db/retract a :seon.agent/root r]))
+             (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))
 
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
@@ -170,7 +172,8 @@
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it (agent-tx)."
   {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
-   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms})
+   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms
+   :stalled :seon.agent/stall})
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
@@ -200,7 +203,7 @@
 (defn agent-tx
   "What root observes of agent id in its boot, as facts on the agent's entity: the root that
   started it, and each member m holds of root's view (status, pid, memory, the form running,
-  its task's id or description, branch, when it forked and ended); a member m holds as nil is
+  its task's id or description, branch, when it forked and ended, a stall it shows); a member m holds as nil is
   no longer true, and retracted (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
@@ -321,7 +324,7 @@
   my.task/update! writes them: a set member (:seon.task/proofs) its values added and retracted, a
   single member its new value. A value its member's schema does not admit (proofs that are no
   set of qualified symbols, a plan that is no string) is the update's contract error, writing nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs] :seon.host/fn [:sequential :any]]
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:enum :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause] :seon.host/fn [:sequential :any]]
                   [:or [:vector :any] :seon.task/invalid-member]]}
   [t member f args]
   (let [id [:seon.task/id (:seon.task/id t)]

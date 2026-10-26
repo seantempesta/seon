@@ -53,6 +53,7 @@
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
+  [:seon.config.agent/stall-ms :seon.config.agent/stall-ms]
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]
@@ -72,6 +73,7 @@
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.source/test-results-dir :seon.config.source/test-results-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]
   [:seon.config.proofs/max-assertions :seon.config.proofs/max-assertions]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]

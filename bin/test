@@ -47,6 +47,13 @@ st=0 P=()
 # each shard's wall and CPU seconds kept beside its log (shard-<i>.time); its tests' own in their results (:ms)
 TIMEFMT='real %E user %U sys %S'
 for f in $F; do { time (runner --shard "$f" > "${f%.edn}.log" 2>&1) } 2> "${f%.edn}.time" & P+=($!); done
+# a stalled test is named, never ended: a running shard quiet since its last "started" line past
+# that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test
+# with no record: :seon.config.agent/stall-ms, out/stall-ms, 0: none) is printed and recorded as
+# STALLED (bin/stalls; an observation: docs/clocks.md)
+STALL_MS=$(<$OUT/stall-ms) W=
+S=(); for (( i = 1; i <= ${#F}; i++ )); do S+=("${F[$i]%.edn}.log:$P[$i]"); done
+(( STALL_MS > 0 )) && { "$ROOT/bin/stalls" $STALL_MS "$OUT/stall-bounds" $S & W=$! }
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?
@@ -56,5 +63,6 @@ for (( i = 1; i <= ${#F}; i++ )); do
     grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
   fi
 done
+[[ -n $W ]] && kill $W 2>/dev/null
 if (( st == 0 )); then echo "TEST OK"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st
