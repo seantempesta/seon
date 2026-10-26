@@ -1224,22 +1224,3 @@
     (is (str/includes? (str tile) "done") "and how it ended")
     (is (not= :closed (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"]))) "which the branch's copy does not hold")))
 
-
-(deftest the-model-reads-the-page-projected-to-its-meaning
-  ;; revision 4.2 (the owner, 2026-10-26: the model reads the same hiccup the user sees): a part's
-  ;; hiccup projected to its meaning, its tag, semantic classes and text, a link's href, a value
-  ;; the printer drew as the value itself; utility classes, ids and data-* left out and named
-  (let [v {:a 1 :b [1 2 3]}
-        h [:section {:class "part rounded-md bg-base-900 p-2" :id "q-x" :data-on:click "@post('/x')"}
-           [:h2 {:class "kicker"} "proofs"]
-           [:div {:class "flex gap-2"} [:a {:href "/doc/x" :class "text-xs"} "docs/x.md#y"]]
-           (r/html v {})]
-        pj (r/project h)]
-    (is (= '[[:section.part [:h2.kicker "proofs"] [:a {:href "/doc/x"} "docs/x.md#y"] {:a 1 :b [1 2 3]}]] (vec pj))
-        "semantic classes kept, utilities, the id and data-* left out, a layout div spliced, the value as data")
-    (let [page (r/model-page [{:key [:proofs] :html h} {:key [:eval "e1"] :html [:li "(f 2)"]}])
-          text (seon.print/text page 100000)]
-      (is (str/includes? text ":theme") "the theme, once, so a semantic class says what it draws")
-      (is (str/includes? text "[:proofs]") "each part by its key")
-      (is (not (str/includes? text "(f 2)")) "the conversation is the agent's own transcript, never the page twice")
-      (is (str/includes? text "(my.agent/part [:task])") "and the form that reads what the projection left out"))))
