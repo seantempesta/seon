@@ -894,7 +894,7 @@
                 [st'' _] (#'p/pass-view (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) [:debug :a1])
                 html (p/page-html st'' [:debug :a1])]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "eval e1") "beside what it sent")))))))
+            (is (str/includes? html "the page whole") "beside what it sent")))))))
 
 (deftest a-new-turn-is-one-new-row
   ;; a turn is written once: a pass after a new turn renders only its row
@@ -905,9 +905,10 @@
             db (get-in st1 [:branches [:debug :a1] :db])
             b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
                :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"}
-            db' (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 2 :seon.turn/origin :model
-                                :seon.turn/basis b :seon.turn/sent (:sent (seon.context/render db b))
-                                :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
+            ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
+            db1 (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 2 :seon.turn/origin :model
+                                :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
+            db' (d/db-with db1 [{:seon.turn/id "demo/f#1/2" :seon.turn/sent (:sent (seon.context/render db1 b))}])
             [st2 patch] (#'p/pass-view (assoc-in st1 [:branches [:debug :a1] :db] db') [:debug :a1])]
         (is (= 3 (get-in st1 [:counts :rendered])) "the first pass renders both turns and the list's end")
         (is (= 5 (get-in st2 [:counts :rendered])) "the next renders the new turn alone, and the list's end it moved")

@@ -1145,7 +1145,7 @@
   [[kind x t c]]
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
-    :page (if t (str "what changed of the page from commit " t " to " c) (str "the page whole at commit " c))
+    :page (if t (str "what changed of the page from t " t " to " c) (str "the page whole at t " c))
     :eval (str "eval " x)
     :line (str "eval " x ", sent as its one line")
     :message (str "message " x)
