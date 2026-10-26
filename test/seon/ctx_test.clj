@@ -248,8 +248,8 @@
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
-  ;; size: a patch that walked the record, or a rebuild, grows with the session (measured: 23 calls,
-  ;; 155 KB, 28k ticks at 100 and at 1,000 evals; 815 KB and 200k ticks while the window was read
+  ;; size: a patch that walked the record, or a rebuild, grows with the session (measured: 25 calls,
+  ;; 159 KB, 28k ticks at 100 and at 1,000 evals; 815 KB and 200k ticks while the window was read
   ;; again and its map rebuilt)
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-eval
@@ -258,13 +258,30 @@
                 "(window-moves): the new member pulled whole and assoc'd under its id, the oldest dissoc'd "
                 "and forgotten; every other member and join the same object; the environment set")
      :growth :constant
-     :fixed {:calls 23 :bytes 165000}
+     :fixed {:calls 25 :bytes 165000}
      :sizes [100 1000 3000]}))
+
+(deftest a-fresh-build-shares-what-it-did-not-change
+  ;; task seon.ctx/share-assocs-what-it-shares: a fresh build (a relocation's) is handed back the
+  ;; record's own objects wherever it holds the same values, by assoc into its collections (sorted
+  ;; maps by id), which replace a value with an identical one (Jolt f561902a: before it, an assoc of
+  ;; a value = to the one held kept the held one, and share built each map anew)
+  (let [db (seeded 30) a (:tree (ctx/build db (aid db) :b)) b (:tree (ctx/build db (aid db) :b))
+        share #'ctx/share]
+    (is (not (identical? (:evals a) (:evals b))) "two builds: equal values, new objects")
+    (is (identical? (:evals a) (share (:evals a) (:evals b))) "an equal collection: the record's own")
+    (let [e7 (id db [:seon.eval/id "e7"])
+          b' (assoc-in (:evals b) [e7 :seon.eval/by] "someone")
+          s (share (:evals a) b')]
+      (is (= "someone" (get-in s [e7 :seon.eval/by])) "the changed member: the new value")
+      (is (every? (fn [[k v]] (or (= k e7) (identical? v (get (:evals a) k)))) s) "every other member: the record's own object")
+      (is (identical? (get-in s [e7 :seon.eval/record]) (get-in (:evals a) [e7 :seon.eval/record])) "and, in the changed one, what did not change")
+      (is (= (keys b') (keys s)) "in the collection's order"))))
 
 (deftest a-window-moves-by-its-change
   ;; root's ruling, 2026-10-26: a window is a map by id, so a new member is an assoc and the oldest
   ;; a dissoc, never the window read again or its map rebuilt: flat in the window's size (measured:
-  ;; 23 calls, 151 KB at a window of 100, 155 KB at 1,000), and the record a fresh build's
+  ;; 25 calls, 155 KB at a window of 100, 159 KB at 1,000), and the record a fresh build's
   (let [[c db tx b] (eval-in-window 30) c' (ctx/patch c db tx b)]
     (is (= c' (ctx/build db (aid db) b)) "as a build holds it")
     (is (= 30 (count (:evals (:tree c')))) "the window's size, the oldest gone")
@@ -274,7 +291,7 @@
      :n "members of the window (the agent's pattern's :limit)"
      :work "the new member assoc'd, the oldest dissoc'd: two map operations on a sorted map by id, one pull, one forget"
      :growth :constant
-     :fixed {:calls 23 :bytes 165000}
+     :fixed {:calls 25 :bytes 165000}
      :sizes [100 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
@@ -365,8 +382,8 @@
 
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
-  ;; (measured at 100 and 1,000 evals: a redefinition 21 calls and 118 KB, a new caller 20 and
-  ;; 127 KB, a plan edit 9 and 84 KB), and each names the one path it changed
+  ;; (measured at 100 and 1,000 evals: a redefinition 23 calls and 118 KB, a new caller 22 and
+  ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
         task #(vector :runs (id % [:seon.run/id "lab/ctx#1"]) :task)
         f0 #(into (task %) [:cited (id % [:var/name 'app.x/f0])])]
@@ -377,22 +394,22 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
      :n "evals in the session's record"
      :work "the var's datoms touch its :form join: the new form pulled whole, the old forgotten; the var, task, run and agent nodes copied up the path"
-     :growth :constant :fixed {:calls 21 :bytes 125000} :sizes [100 1000 3000]})
+     :growth :constant :fixed {:calls 23 :bytes 125000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 20 :bytes 135000} :sizes [100 1000 3000]})
+     :growth :constant :fixed {:calls 22 :bytes 135000} :sizes [100 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
      :work "the task's own datom: its attributes pulled again, every join kept, the path copied up"
-     :growth :constant :fixed {:calls 9 :bytes 90000} :sizes [100 1000 3000]}))
+     :growth :constant :fixed {:calls 10 :bytes 90000} :sizes [100 1000 3000]}))
 
 (deftest a-callers-window-costs-its-forms
   ;; a window of content-id members (a var's callers: a form's id is its content's, not in time
   ;; order) is read whole and ordered by when each was written, so a new caller costs every form
-  ;; naming the var: linear in them, flat in calls (measured: 23 calls; 1.3 MB and 288k ticks at
+  ;; naming the var: linear in them, flat in calls (measured: 25 calls; 0.9 MB and 288k ticks at
   ;; 100 forms, 9.1 MB and 2.4M ticks at 1,000). A var named by thousands (a hot core fn) costs that
   ;; on each new caller while a task cites it
   (cost/proof
@@ -401,7 +418,7 @@
      :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole, the path copied up"
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
-     :fixed {:calls 23 :bytes 500000 :ticks 100000}
+     :fixed {:calls 25 :bytes 500000 :ticks 100000}
      :sizes [100 1000 3000]}))
 
 (defn one-eval-diff
