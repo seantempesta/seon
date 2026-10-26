@@ -41,7 +41,7 @@
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches its checkout
+  what an outside agent's MCP relay (bin/mcp) talks to. It watches what its loaders read
   (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
@@ -71,7 +71,7 @@
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
         ;; the watcher ends with this process (target/watch exits on its parent's exit)
         (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (seon.contract/error? w) (str "nothing: " (:seon.error/message w)) "the checkout and its refs")))
+          (out! "ROOT WATCHING " (if (seon.contract/error? w) (str "nothing: " (:seon.error/message w)) "what its loaders read and its refs")))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))

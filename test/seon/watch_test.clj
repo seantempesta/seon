@@ -120,6 +120,24 @@
     (clojure.java.shell/sh "rm" "-rf" base)
     (is (= 50 (count (filter true? arrived))))))
 
+(deftest a-root-made-after-the-watch-starts-is-watched
+  ;; root watches its loaders' dirs (my.root/watch!), one of which may not exist yet (a test root's
+  ;; task dir, a checkout's test/): FSEvents reports the dir's creation (:root) and what is written
+  ;; in it after. A watch whose every root is missing says no ready (native/watch.c), which a root
+  ;; never asks: its docs/ and src/ are there
+  (let [base (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid))) (.mkdirs)))
+        here (.getCanonicalPath (doto (io/file (str base "/here")) (.mkdirs)))
+        later (str base "/later/tasks")
+        f (str later "/t.edn")
+        got (promise)
+        w (watch/start! [here later] (fn [b] (when (some #(= [:path f] %) b) (deliver got b))) (fn [_]))]
+    (is (not (contract/error? w)) (pr-str w))
+    (.mkdirs (io/file later))
+    (spit f "[]")
+    (is (some #(= [:path f] %) @got) "a file in the root made after the start arrives")
+    (watch/stop! w)
+    (clojure.java.shell/sh "rm" "-rf" base)))
+
 (deftest a-throw-in-the-batch-handler-is-a-recorded-death
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
         dead (promise)
@@ -143,7 +161,7 @@
   ;; found on the standing root 2026-10-25: a past boot's :seon.watch/died stayed open while this
   ;; boot's watcher ran (task seon.problems/a-platform-error-closes-when-its-cause-is-gone)
   (let [db0 (ts/test-db)
-        e (contract/error :seon.watch/died 'seon.watch/start! "its batch handler threw: docs/references.md (No such file or directory): root no longer watches the checkout"
+        e (contract/error :seon.watch/died 'seon.watch/start! "its batch handler threw: docs/references.md (No such file or directory): root no longer watches what its loaders read"
                           {:bin "/c/target/watch" :roots ["/c"] :exit 143 :stderr ""})
         fresh {:roots ["/c"] :boot "b2" :batches 0 :paths 0 :rescans 0}
         died #(d/db-with % (mr/watch-died-tx % (assoc fresh :boot "b1") e 1000))
