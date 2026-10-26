@@ -241,6 +241,15 @@
         (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)) "advanced, the record is the end t's")
         (is (= (env (:tree c1)) (env (replay (:tree c0) d))) "the start's record with the diff applied is the end's")
         (is (every? (fn [[_ [o n]]] (not= o n)) d) "no path whose value is equal at both ends")))
+    (testing "a member retracted and made again under its key within the turn: the end's"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "(again)" :response {:value 1}}}]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)))
+        (is (= "(again)" (get-in (:tree c1) [:evals "e7" :seon.eval/record :code])))
+        (is (contains? (ctx/diff c0 c1) [:evals "e7"]))))
     (testing "a change undone within the turn is no change"
       (let [db0 (seeded 30)
             db1 (-> db0 (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :done]]) :db-after
