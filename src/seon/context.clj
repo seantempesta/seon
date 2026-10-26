@@ -266,6 +266,27 @@
     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
                 :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it"))))
 
+(defn first-t
+  "Entity e's first transaction on db: the least tx of its datoms (an identity's, which an upsert
+  never writes again, among them), the order an entry was written in. A fact of history, read when
+  a render needs it (a view orders its conversation by it), never held: memoize it by e, since it
+  never changes."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:maybe :int]]}
+  [db e] (some->> (seq (d/datoms db :eavt e)) (map :tx) (reduce min)))
+
+(def ^:private story-nss
+  "The attribute namespaces run-state and related read: a task (its plan, proofs, :needs,
+  config), the program's forms, vars and namespaces, a wiki section, a schema, a vector."
+  #{"seon.task" "seon.config.render" "var" "form" "ns" "seon.section" "schema" "seon.vector"})
+
+(defn story-reads?
+  "Can a transaction of datoms change what the story (run-state) or related read: does one name a
+  task, the program, the wiki, a schema, a vector, or a run's task? A memo of either keeps its
+  value while every transaction since answers false. Not tracked: what run-state reads beside the
+  db (a cited file's text on disk, a namespace's meta in the process)."
+  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  [datoms] (boolean (some (fn [{:keys [a]}] (or (= a :seon.run/task) (contains? story-nss (namespace a)))) datoms)))
+
 (defn run-state
   "The task story: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
