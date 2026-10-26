@@ -2,7 +2,7 @@
   "Render selection and the one render call (W1's proto.render and proto.render.schema,
   ported onto next's registry: notes/archive/option3-W1-render.md §1).
 
-  A render is a plain function (value opts) -> its result, like a React component: opts are
+  A render is a plain function (opts & children) -> its result, Reagent's form: opts are
   its props, all optional (:as, the room it is shown in, :inline, :block or :tile; :budget,
   its tokens; :handle, the form its cuts read the rest through), and a function that does not
   care about one ignores it (owner: \"It's all just functions and results\"). A render answers
@@ -20,7 +20,7 @@
        and a pulled entity's is the schema with a declared render holding its identity
        attribute;
     3. the one value printer (seon.print/print-value), the default render.
-  A nested value renders by a call ([render v opts] in hiccup, or render's result)."
+  A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
             [clojure.string :as str] [datahike.api :as d] [seon.web.html :as h]))
@@ -86,7 +86,7 @@
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
   (when-let [h (render-of v nil)]
-    {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h v {:as :inline}]}))
+    {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline} v]}))
 
 (defn- nested-html
   "The HTML printer's :render: nested's, and a value whose own :seon.render/html key holds hiccup
@@ -108,8 +108,8 @@
 (defn print-html
   "The one value printer as the default :html render: v's structural hiccup under opts' budget,
   or one line (seon.print/line) when shown :inline."
-  {:malli/schema [:=> [:cat :any :seon.render/opts] :any]}
-  [v opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
+  [opts v]
   (if (= :inline (:as opts))
     [:code {:class "seon-inline"} (print/line v (or (:budget opts) (config/value :seon.config.render/line-budget)) (:handle opts))]
     (let [r (print/print-value v (assoc (printer-opts opts) :outputs #{:hiccup} :render nested-html))]
@@ -131,14 +131,14 @@
       @(requiring-resolve sym))))
 
 (defn html
-  "v rendered: (render-fn v opts), the function its override or schema names, else the printer's
+  "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-html); a value's own key holding hiccup answers that hiccup."
-  {:malli/schema [:=> [:cat :any :seon.render/opts] :any]}
-  [v opts]
+  {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
+  [opts v]
   (let [own (own-key v :seon.render/html)]
     (if (and (some? own) (not (symbol? own)))
       own
-      ((or (render-of v (:schema opts)) print-html) v opts))))
+      ((or (render-of v (:schema opts)) print-html) opts v))))
 
 ;;; --- parts: a ctx as the page and the model are drawn from it --------------------------------
 
@@ -186,8 +186,8 @@
   computed here: a part that reads the db carries its key (:read) and the db its render draws on,
   and draws only when the memo misses (drawn). What a part leaves out is not data the agent acts
   on (ids, the turns' bases but the newest's observation, the agent's own counters)."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix {:optional true} :seon.ctx/ix]] [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
-  [{c :tree ix :ix} fs]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:db :seon.host/db] [:cites :seon.host/fn] [:task-key :seon.host/fn] [:cited-key :seon.host/fn] [:related-key :seon.host/fn] [:first-t :seon.host/fn]]] [:map [:tree :map] [:ix {:optional true} :seon.ctx/ix]]] [:vector :seon.render/part]]}
+  [fs {c :tree ix :ix}]
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
         task (:task run)
@@ -237,9 +237,9 @@
   {:malli/schema [:=> [:cat :seon.render/part] :seon.render/faces]}
   [{:keys [value schema] :as p}]
   (if (= :eval (first (:key p)))
-    (cond-> {:inline (html value {:as :inline :chat true :schema schema})}
-      (:opened p) (assoc :html (html value {:schema schema})))
-    {:html (html value (cond-> {:schema schema} (:db p) (assoc :db (:db p))))}))
+    (cond-> {:inline (html {:as :inline :chat true :schema schema} value)}
+      (:opened p) (assoc :html (html {:schema schema} value)))
+    {:html (html (cond-> {:schema schema} (:db p) (assoc :db (:db p))) value)}))
 
 (defn part-html
   "Part p as a page shows it, from its faces f: {:key :html :inline}, its html and its one line

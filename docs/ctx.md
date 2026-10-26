@@ -52,7 +52,7 @@ An agent adds to its record, and to what it sees of it, with four evals (`seon.c
 
 ```clojure
 (my.schema/register! :lab.ctx/steps '[:vector {:seon.render/html lab.ui/steps} :string])
-(ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat [:vector :string] :map] :any]} [v _] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
+(ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
 (my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
 @ctx
 ```
