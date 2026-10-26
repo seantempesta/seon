@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.context :as context] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema]))
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -41,7 +41,8 @@
   [n]
   (let [db (:db-after (d/with (ts/test-db) (into [{:seon.agent/key k :seon.agent/id :a1}
                                                    {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                                    :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}}]
+                                                    :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
+                                                    :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                                   (run-tx "lab/ctx#1" 0))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
@@ -62,7 +63,7 @@
         evals (vec (sort (d/q '[:find [?id ...] :where [_ :seon.eval/id ?id]] db)))
         run (nth runs (.nextInt r (count runs)))
         turns (vec (sort (d/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] db)))]
-    (case (.nextInt r 13)
+    (case (.nextInt r 15)
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
@@ -75,8 +76,11 @@
       9 (if (seq turns) [[:db/add [:seon.turn/id (nth turns (.nextInt r (count turns)))] :seon.turn/run [:seon.run/id run]]] (eval-tx (+ 30000 i)))
       10 (if (< 1 (count runs)) [[:db/retractEntity [:seon.run/id run]]] (eval-tx (+ 40000 i)))
       12 [{:seon.task/id (str "lab/other" i) :seon.task/ns 'app.y :seon.task/name (str "other" i) :seon.task/plan "Another."
-           :seon.task/kind :work}
+           :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
           [:db/add [:seon.run/id run] :seon.run/task [:seon.task/id (str "lab/other" i)]]]
+      ;; what a run's derived members read: the plan's vector written, a program form written
+      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] [10] "m")
+      14 [{:db/id "f" :form/id (str "app.x/g" i) :form/src (str "(defn g" i " [])")} {:var/name (symbol "app.x" (str "g" i)) :var/form "f"}]
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
@@ -173,11 +177,11 @@
      :work (str "one eval's three datoms (its id, its agent, its record): the id's entity is new, so its "
                 "ref to the agent, a known entity, joins it, read whole (one pull) and keyed by its id (one "
                 "datom seek); its first transaction (one more seek of the same datom); the environment's t, "
-                "branch and commit set. Nothing per eval already held. Eight contracted calls: patch, join, "
-                "node, own (the pull), key-of (the seek), held-in and born (the joined entity's first t), "
-                "environment")
+                "branch and commit set; whether a datom names what a derived member reads (none here). Nothing "
+                "per eval already held. Nine contracted calls: patch, join, node, own (the pull), key-of (the "
+                "seek), held-in and born (the joined entity's first t), rederive, environment")
      :growth :constant
-     :fixed {:calls 8}
+     :fixed {:calls 9}
      :sizes [100 1000 3000]}))
 
 (deftest a-key-renders-by-its-own-schema
@@ -216,6 +220,44 @@
       (is (= {":seon.agent/screen" "e5" ":seon.agent/id" "from :main" ":seon.agent/answered-t" "merged from :main"}
              (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
           "the page names who made each key"))))
+
+(declare as-agent!)
+
+(deftest a-runs-story-and-related-are-derived-as-of-t
+  ;; one derivation, revision 4.1: the stage's story (run-state) and related are members of ctx
+  ;; derived from the db by build and patch, never stored; kept as the same object while what
+  ;; they read is unchanged, so a part's memo of them stays a pointer test
+  (let [db (seeded 10) c (ctx/build db (aid db) :b) story (get-in (:tree c) [:runs "lab/ctx#1" :story])
+        patched (fn [tx] (let [rep (d/with db tx)] (ctx/patch c (:db-after rep) (:tx-data rep) :b)))]
+    (is (= (context/run-state db (task/task db "lab/ctx")) story) "the run's story, as run-state answers it")
+    (is (not (contains? (get-in (:tree c) [:runs "lab/ctx#1"]) :related)) "related answers none (no vectors): no key")
+    (let [c' (patched (eval-tx 11))]
+      (is (identical? story (get-in (:tree c') [:runs "lab/ctx#1" :story])) "an eval reads nothing the story reads: the same object")
+      (is (not-any? #(= :story (peek %)) (:changed c'))))
+    (let [c' (patched [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan "Make app.x/f1 pass instead."]])]
+      (is (= "Make app.x/f1 pass instead." (get-in (:tree c') [:runs "lab/ctx#1" :story :task :seon.task/plan])) "a plan changed: derived again")
+      (is (contains? (:changed c') [:runs "lab/ctx#1" :story]) "and told as changed"))
+    (let [[[r] _] (as-agent! db #(try (swap! ctx/ctx assoc-in [:runs "lab/ctx#1" :story] {:task {}}) (catch clojure.lang.ExceptionInfo e [(ex-data e)])))]
+      (is (= [[:runs "lab/ctx#1" :story]] (mapv :path (:invalid r))) "a swap! of a derived member is refused"))))
+
+(defn plan-change
+  "The input of size n: a session of n evals, its record, and a transaction changing its task's
+  plan: [c db-after tx-data branch], patch's."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db [:sequential :any] :keyword]]}
+  [n]
+  (let [db (seeded n) c (ctx/build db (aid db) :b) rep (d/with db [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "Plan " n ".")]])]
+    [c (:db-after rep) (:tx-data rep) :b]))
+
+(deftest a-derived-member-costs-what-it-reads-not-the-session
+  ;; a plan changed derives the run's story again: the work of run-state over the task, whatever
+  ;; the session's size
+  (cost/proof
+    {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-change
+     :n "evals in the session's record"
+     :work "the plan's datoms set on the task (two datoms, one held entity); the session's newest run found (its runs ordered by first transaction, before and after); the story and related derived again for that one run (run-state over the task: its plan's references, its proofs; related answers none without vectors); nothing per eval"
+     :growth :constant
+     :fixed {:calls 44}
+     :sizes [100 1000 3000]}))
 
 (declare steps)
 
