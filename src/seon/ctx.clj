@@ -154,9 +154,10 @@
   {:malli/schema [:=> [:cat :map [:vector :any]] :map]}
   [{:keys [tree] :as c} p]
   (let [unit (pop p) t (without tree unit (peek p))
-        ;; a unit emptied is no key, as a build holds it
-        t (if (and (seq unit) (empty? (get-in t unit))) (without t (pop unit) (peek unit)) t)]
-    (-> (forget c (get-in tree p) p) (assoc :tree t :changed (conj (:changed c) p)))))
+        ;; a unit emptied is no key, as a build holds it: the unit's path changed too
+        emptied? (and (seq unit) (empty? (get-in t unit)))
+        t (if emptied? (without t (pop unit) (peek unit)) t)]
+    (-> (forget c (get-in tree p) p) (assoc :tree t :changed (cond-> (conj (:changed c) p) emptied? (conj unit))))))
 
 (defn- join
   "c with entity e of schema s added at path p, whole as db holds it."
@@ -205,29 +206,35 @@
   :commit) is the root map's, new each transaction, and no path of :changed."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
   [c db datoms branch]
-  (-> (reduce
-       (fn [c [e ds]]
-         (let [own (fn [at] (fn [c dt] (reduce (fn [c [p s]] (if (contains? (get (:ix c) e) [p s]) (step c db p s dt) c)) c at)))
-               ;; a datom whose ref names a held entity by one of its reverse units' attribute links e
-               ;; into that unit (added) or out of it (retracted), at each path the held one sits at
-               link (fn [c {:keys [a v added]}]
-                      (let [at (get (:ix c) v)]
-                        (if-let [{:keys [key schema id]} (when (seq at) (some #(when (and (:rev? %) (= a (:attr %))) %) (get units (second (first at)))))]
-                          (let [k (key-of db e id)]
-                            (reduce (fn [c [pp _]] (let [q (conj pp key k)]
-                                                     (cond (and added (not (contains? (get (:ix c) e) [q schema]))) (join c db e schema q)
-                                                           (and (not added) (contains? (get (:ix c) e) [q schema])) (leave c q)
-                                                           :else c)))
-                                    c at))
-                          c)))
-               gone (remove :added ds) put (filter :added ds)]
-           ;; retractions first (a change is a retraction and an assertion); where e joins it is read
-           ;; whole from db, so its assertions set it only at the paths it held before
-           (let [c (reduce link (reduce (own (get (:ix c) e)) c gone) gone)
-                 held (get (:ix c) e)]
-             (reduce (own held) (reduce link c put) put))))
-       (assoc c :changed #{}) (group-by :e datoms))
-      (update :tree #(merge (apply dissoc % environment-keys) (environment db branch)))))
+  (let [by (group-by :e datoms)
+        ;; one pass over every entity's datoms of one kind: retractions first across all of them
+        ;; (a change is a retraction and an assertion, and a member retracted and made again under
+        ;; its key, a new entity, must leave before it joins), then assertions
+        pass (fn [c added?]
+          (reduce
+               (fn [c [e ds]]
+                 (let [own (fn [at] (fn [c dt] (reduce (fn [c [p s]] (if (contains? (get (:ix c) e) [p s]) (step c db p s dt) c)) c at)))
+                       ;; a datom whose ref names a held entity by one of its reverse units' attribute links e
+                       ;; into that unit (added) or out of it (retracted), at each path the held one sits at
+                       link (fn [c {:keys [a v added]}]
+                              (let [at (get (:ix c) v)]
+                                (if-let [{:keys [key schema id]} (when (seq at) (some #(when (and (:rev? %) (= a (:attr %))) %) (get units (second (first at)))))]
+                                  (let [k (key-of db e id)]
+                                    (reduce (fn [c [pp _]] (let [q (conj pp key k)]
+                                                             (cond (and added (not (contains? (get (:ix c) e) [q schema]))) (join c db e schema q)
+                                                                   (and (not added) (contains? (get (:ix c) e) [q schema])) (leave c q)
+                                                                   :else c)))
+                                            c at))
+                                  c)))
+                       gone (remove :added ds) put (filter :added ds)]
+                   ;; where e joins it is read whole from db, so its assertions set it only at the paths it
+                   ;; held before
+                   (if added?
+                     (let [held (get (:ix c) e)] (reduce (own held) (reduce link c put) put))
+                     (reduce link (reduce (own (get (:ix c) e)) c gone) gone))))
+               c by))]
+    (-> (assoc c :changed #{}) (pass false) (pass true)
+        (update :tree #(merge (apply dissoc % environment-keys) (environment db branch))))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
@@ -388,6 +395,31 @@
     (:tx-data tx)
     (let [[gone added] (d/datoms-diff a b :eavt [])]
       (concat (map #(assoc % :added false) gone) added))))
+
+(defn advance
+  "c0, the record as of db0, as of db1 (the same branch, later): patched by the datoms the two
+  values differ by, the net change of every transaction in between (a turn's, from its start t to
+  its end t), so its :changed holds every path one of them changed and nothing else. Read from the
+  db alone, so a turn recorded is advanced again to the same record. Work: the patch's, of the net
+  datoms."
+  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :map]] :seon.host/db :seon.host/db :any] [:map [:tree :map] [:ix :map] [:changed [:set [:vector :any]]]]]}
+  [c0 db0 db1 branch] (patch c0 db1 (moved db0 db1 nil) branch))
+
+(defn diff
+  "What changed of the record from c0 to c1 (c1 advanced from c0, its :changed bounding where they
+  are compared), as data in the record's own shape: {path [old new]} for each changed path whose
+  value differs at the two ends, old nil for a member that joined, new nil for one that went; a
+  path that changed and came back is equal, and dropped, and so is one under another the diff holds
+  (a member that joined holds its attributes; a unit's last member that left is the unit gone,
+  its first that joined the member alone). c1's :changed must be one advance's from c0 (patch
+  sets it anew each call). A build's #{[]} compares the record whole. Pure in the two values.
+  Work: two reads and a compare per changed path, and a look at its prefixes, never the record
+  (advance's own is the patch of the net datoms)."
+  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:tree :map] [:changed [:set [:vector :any]]]]] [:map-of [:vector :any] [:tuple :any :any]]]}
+  [c0 c1]
+  (let [d (into {} (for [p (:changed c1) :let [o (get-in (:tree c0) p) n (get-in (:tree c1) p)] :when (not= o n)] [p [o n]]))]
+    ;; a path under another the diff holds is in that one's values: left out, so each change is said once
+    (into {} (remove (fn [[p _]] (some #(contains? d (subvec p 0 %)) (range (count p))))) d)))
 
 (defn- agent-record
   "The record of the agent state st names (its key's entity on db, its branch), built."

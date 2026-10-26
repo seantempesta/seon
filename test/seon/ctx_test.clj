@@ -215,6 +215,83 @@
              (select-keys rows [":seon.agent/screen" ":seon.agent/id" ":seon.agent/answered-t"]))
           "the page names who made each key"))))
 
+(defn- replay
+  "Tree t with diff d applied: each path's new value set, a gone one taken out (shorter paths first,
+  as a member joins before its attributes)."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [t d]
+  (reduce (fn [t [p [_ n]]] (cond (empty? p) n
+                                  (nil? n) (update-in t (pop p) dissoc (peek p))
+                                  :else (assoc-in t p n)))
+          t (sort-by (comp count key) d)))
+
+(deftest a-turns-diff-is-what-changed-between-its-ts
+  ;; one derivation, revision 4.2: what changed of the record over a turn is a pure function of the
+  ;; record at its start and end t (seon.ctx/diff), bounded by the paths its transactions changed,
+  ;; read from the db as their net change (seon.ctx/advance); equal paths dropped
+  (let [r (java.util.Random. 42)
+        env #(apply dissoc % [:t :branch :commit])]
+    (dotimes [turn 12]
+      (let [db0 (seeded 30)
+            ;; a turn: a few transactions of a session's kinds
+            db1 (reduce (fn [db i] (:db-after (d/with db (change db i r)))) db0 (range (inc (.nextInt r 5))))
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)
+            d (ctx/diff c0 c1)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)) "advanced, the record is the end t's")
+        (is (= (env (:tree c1)) (env (replay (:tree c0) d))) "the start's record with the diff applied is the end's")
+        (is (every? (fn [[_ [o n]]] (not= o n)) d) "no path whose value is equal at both ends")))
+    (testing "a member retracted and made again under its key within the turn: the end's"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/record {:code "(again)" :response {:value 1}}}]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)
+            c1 (ctx/advance c0 db0 db1 :b)]
+        (is (= (dissoc c1 :changed) (dissoc (ctx/build db1 (aid db1) :b) :changed)))
+        (is (= "(again)" (get-in (:tree c1) [:evals "e7" :seon.eval/record :code])))
+        (is (contains? (ctx/diff c0 c1) [:evals "e7"]))))
+    (testing "a change undone within the turn is no change"
+      (let [db0 (seeded 30)
+            db1 (-> db0 (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :done]]) :db-after
+                    (d/with [[:db/add [:seon.run/id "lab/ctx#1"] :seon.run/status :running]]) :db-after)
+            c0 (ctx/build db0 (aid db0) :b)]
+        (is (= {} (ctx/diff c0 (ctx/advance c0 db0 db1 :b))))))
+    (testing "an eval added: its member, old nil"
+      (let [db0 (seeded 30) db1 (:db-after (d/with db0 (eval-tx 31))) c0 (ctx/build db0 (aid db0) :b)
+            d (ctx/diff c0 (ctx/advance c0 db0 db1 :b))]
+        (is (= [[:evals "e31"]] (keys d)))
+        (is (nil? (first (val (first d)))))))))
+
+(defn one-eval-diff
+  "The input of size n: a session of n evals at a turn's start, and its record advanced by one eval:
+  [c0 c1], diff's."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [db0 (seeded n) db1 (:db-after (d/with db0 (eval-tx (inc n)))) c0 (ctx/build db0 (aid db0) :b)]
+    [c0 (ctx/advance c0 db0 db1 :b)]))
+
+(deftest a-turns-diff-costs-its-changed-paths-not-the-record
+  (cost/proof
+    {:of 'seon.ctx/diff :input 'seon.ctx-test/one-eval-diff
+     :n "evals in the session's record"
+     :work "one changed path (the eval's member): its value read at each end and compared; nothing of the evals already held"
+     :growth :constant
+     :fixed {:calls 1}
+     :sizes [100 1000 3000]}))
+
+(deftest a-redefined-vars-record-holds-its-new-form
+  ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
+  ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
+        e (:db/id (d/entity db [:var/name 'demo/f]))
+        c (ctx/build db e :b)
+        rep (d/with db [{:db/id "g" :form/id "demo/f-2" :form/src "(defn f [] 2)"} [:db/add e :var/form "g"]])
+        c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
+    (is (= "(defn f [] 1)" (get-in (:tree c) [:form :form/src])) "built: the var with its form")
+    (is (= "(defn f [] 2)" (get-in (:tree c') [:form :form/src])) "patched: the new form, whole")
+    (is (contains? (:changed c') [:form]))
+    (is (= (dissoc c' :changed) (dissoc (ctx/build (:db-after rep) e :b) :changed)) "as a build holds it")))
+
 (declare steps)
 
 (deftest an-agent-adds-a-datum-and-its-render

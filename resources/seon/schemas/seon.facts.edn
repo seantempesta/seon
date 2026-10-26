@@ -90,7 +90,7 @@
                       [:form/timeouts {:optional true} :form/timeouts] [:form/catches {:optional true} :form/catches]]
  :seon.db/ns-fact [:map {:seon.db/attributes true} [:ns/name :ns/name] [:ns/doc {:optional true} :ns/doc]
                     [:ns/form {:optional true} :ns/form] [:ns/file {:optional true} :ns/file] [:ns/tail {:optional true} :ns/tail]]
- :seon.db/var-fact [:map {:seon.db/attributes true}
+ :seon.db/var-fact [:map {:seon.db/attributes true :seon.render/units [:var/form]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
                      [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]

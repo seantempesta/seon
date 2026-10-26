@@ -186,9 +186,9 @@
 
 (defn view
   "An agent's held record ({:tree c}, seon.ctx/build's: c is @ctx, the db's data only) as its
-  parts, in order, with the renders fs that read the db beside it ({:story :related :first-t},
-  each over the branch's db as of the record's t: seon.context/story, related and first-t):
-  [:task], the stage's story ((:story fs) of the task: the task, what it cites, what to prove),
+  parts, in order, with the renders fs that read the db beside it ({:task :related :first-t},
+  each over the branch's db as of the record's t: seon.context/renders):
+  [:task], the task rendered ((:task fs) of it: the task, what it cites, what to prove),
   the page drawing the task's relevant keys; [:related], the sections, functions and schema keys
   nearest its plan ((:related fs) of the task entity) when there are any; [:proofs], each
   proof's status as the newest turn observed it, with its first failure; [:verdict], the done
@@ -201,7 +201,7 @@
   db only through fs, and no config. What a
   part leaves out is not data the agent acts on (ids, the turns' bases but the newest's
   observation, the agent's own counters): a change without meaning is a data defect, fixed here."
-  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:story :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
+  {:malli/schema [:=> [:cat [:map [:tree :map]] [:map [:task :seon.host/fn] [:related :seon.host/fn] [:first-t :seon.host/fn]]] [:vector :seon.render/part]]}
   [{c :tree} fs]
   (let [t-of #((:first-t fs) (:db/id %))
         run (last (sort-by t-of (vals (:runs c))))
@@ -212,11 +212,11 @@
         entry (fn [k e] {:key [k (or (:seon.eval/id e) (:seon.message/id e) (:seon.turn/id e))] :from [e]
                          :value (if (= :turn k) (-> (relevant-of :seon.turn/turn-fact e) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])) (dissoc e :db/id :seon.eval/agent :seon.message/to))})]
     (-> []
-        (cond-> task (conj (let [story ((:story fs) task)]
-                             ;; the model reads the stage's story; the page draws the task, by its own render.
-                             ;; Made from the story rendered now, a new value each view: drawn again every
-                             ;; time, so never stale (memoizing it by story-key is an optimization to come)
-                             {:key [:task] :from [story task] :value story :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
+        (cond-> task (conj (let [rendered ((:task fs) task)]
+                             ;; the model reads the task rendered; the page draws the task, by its own render.
+                             ;; Made from the render of now, a new value each view: drawn again every time,
+                             ;; so never stale (memoizing it by its key is an optimization to come)
+                             {:key [:task] :from [rendered task] :value rendered :page (relevant-of :seon.task/task-fact (dissoc task :turns :runs))})))
         (as-> ps (if-let [rel (and task ((:related fs) (:db/id task)))] (conj ps {:key [:related] :from [rel] :value rel}) ps))
         (cond-> (seq (:seon.task/proofs task))
                 (conj {:key [:proofs] :from [task turn] :value (with-meta (into (sorted-map-by #(compare (str %1) (str %2)))
