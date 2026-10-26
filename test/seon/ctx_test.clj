@@ -507,9 +507,19 @@
                                           {:var/name (symbol "app.y" (str "c" i)) :var/kind :fn :var/form (str "c" i)}])
                                  (range 60)))])
         c (ctx/build db (aid db) :b)
-        tests (:tests (seon.render.ui/cited-of db (:tree c) 'app.x/f0))]
-    (is (< (seon.config/value :seon.config.ctx/callers) 61) "more newer callers than the window holds")
-    (is (every? #(contains? tests %) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) (str "every test, past the window: " (pr-str tests)))))
+        n (seon.config/value :seon.config.ctx/callers)
+        drawn (seon.render.ui/cited-of db (:tree c) 'app.x/f0)
+        tests (:tests drawn)]
+    (is (< n 61) "more newer callers than the window holds")
+    (is (every? #(contains? tests %) '[app.x-test/w0 app.x-test/w1 app.x-test/w2]) (str "every test, past the window: " (pr-str tests)))
+    (is (= n (count (:callers drawn))) "the other callers: ctx's window, the newest it holds")
+    (testing "more tests than the window: the newest, the rest left to (my.agent/callers)"
+      (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "u" i) :form/id (str "app.x-test/u" i "-1") :form/src (str "(deftest u" i " (is (f0 1)))") :form/refs #{'app.x/f0}}
+                                                    {:var/name (symbol "app.x-test" (str "u" i)) :var/kind :test :var/form (str "u" i)}])
+                                          (range n))))
+            tests (:tests (seon.render.ui/cited-of db (:tree (ctx/build db (aid db) :b)) 'app.x/f0))]
+        (is (= n (count tests)))
+        (is (not-any? '#{app.x-test/w0 app.x-test/w1 app.x-test/w2} (keys tests)) "the older three past the window")))))
 
 (deftest an-agent-adds-a-datum-and-its-render
   ;; what an agent evaluates to add to its record and draw it (the owner, 2026-10-25: "they can

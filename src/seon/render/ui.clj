@@ -955,8 +955,9 @@
           others (remove #(= :test (:var/kind %)) vars)
           ;; its tests by one query, the join reaching them through :var/kind (176k ticks at 60 newer
           ;; callers, 330k at 600; ctx's window filtered by kind read 3.8M at 600), newest first
-          tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n]] db v)
-                     (sort-by second >) (take (config/value :seon.config.ctx/callers)) (map first))
+          ;; (forms written in one transaction tie on it: their names break the tie, so the cut is fixed)
+          tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
+                     (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
           status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
       (cond-> {:source (print/code (str (get-in cv [:form :form/src])))}
         (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
