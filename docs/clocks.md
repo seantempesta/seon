@@ -35,7 +35,7 @@ The sites where time decides because the owner allowed it, the provider's delaye
 
 Tests whose subject is itself a timeout or a measurement window, so the clock read there is what they test.
 
-- `seon.lib-test/in-child`: what it tests is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends).
+- `seon.check/fork-cases`, `seon.lib-test/fork-case`: what they test is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends), run in a fresh process (`target/seon forks CASE`) and asserted by the test.
 - `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
 
 ## Time decides, owed its owner's fix
@@ -75,7 +75,7 @@ Clock reads whose value is recorded or shown and never compared to decide anythi
 - `seon.profile/measure!`: the one measurement of a call ([cost](cost.md)): its wall ns are what the REPL records as a form's ms, its CPU ns what a cost proof times; shown, never compared.
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.
-- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.server/root-eval`: a duration recorded on the work's own fact or reply (`seon.fork-server/server-step`'s on its `:applied`, `:fork` and `:static` events, with a commit's lag from the writer's stamp).
+- `seon.turn/act!`, `seon.turn/work!`, `seon.turn/observe`, `seon.turn/context-block`, `seon.model/openai-compat`, `seon.model/scripted`, `seon.fx/build`, `seon.fx/run-tests`, `seon.fx/worker-proc`, `seon.contract/instrument!`, `seon.agent/clone!`, `seon.agent/run-tests-forked`, `seon.proofs/run-tests!`, `seon.db/collect!`, `seon.fork-server/server-step`, `seon.root/import-source!`, `seon.root/boot!` (the boot's open, preload, load and program ms), `seon.server/root-eval`: a duration recorded on the work's own fact or reply (`seon.fork-server/server-step`'s on its `:applied`, `:fork` and `:static` events, with a commit's lag from the writer's stamp).
 - `my.root/watch!`: the time a file watcher's death was seen, stamped on its `:platform` error ([health](health.md#every-writer-root-loads-what-changed)).
 - `seon.root/state`: the writer's transactions per second over the last second, shown.
 - `seon.render.proc/pass`: a render pass's duration and the events' age, shown on the dashboard.
