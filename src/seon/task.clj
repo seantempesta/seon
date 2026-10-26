@@ -52,11 +52,13 @@
   [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
 
 (defn- references-of
-  "The :seon.task/references a declaration states: the names its text cites (seon.ref/names),
-  derived and never authored; absent when it cites none."
+  "The :seon.task/references and :seon.task/sections a declaration states: the names and the wiki
+  sections its text cites (seon.ref/names, seon.ref/addresses), derived and never authored; each
+  absent when it cites none."
   {:malli/schema [:=> [:cat :seon.task/declaration] :map]}
   [decl]
-  (let [ns (set (ref/names (cited-text decl)))] (if (seq ns) {:seon.task/references ns} {})))
+  (let [text (cited-text decl) ns (set (ref/names text)) as (set (ref/addresses text))]
+    (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
@@ -376,7 +378,8 @@
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
-    (:seon.task/references t) (update :seon.task/references set)))
+    (:seon.task/references t) (update :seon.task/references set)
+    (:seon.task/sections t) (update :seon.task/sections set)))
 
 (def placeholder-assertion
   "The assertion seon.context writes into a proof's test that does not exist yet (its :proof-unknown
@@ -527,7 +530,7 @@
 (def ^:private stated-attributes
   "The task attributes a declaration states (its members, config flattened), as stored."
   [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/references
+   :seon.task/kind :seon.task/evidence :seon.task/references :seon.task/sections
    :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused

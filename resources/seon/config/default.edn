@@ -573,10 +573,17 @@
  ;; (render-workload-a1: 63 evals over 4 runs), so a working session's conversation fits whole.
  ;; Older members stay on the branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
  :seon.config.ctx/window 100
- ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds. 5: what a
- ;; cited var's part shows of its callers; a hot var (clojure.core/let) is named by 1,600 forms, which
- ;; are read and ordered by when each was written (a form's id is its content's, not in time order).
- :seon.config.ctx/callers 5
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds; those
+ ;; that are tests (a caller whose var is :var/kind :test) are the var's existing tests, for a render
+ ;; to join to their last result by name. At the bound the older callers are left out, and
+ ;; (my.agent/callers 'x) reads them all. 50: the six capped design-build runs of
+ ;; 2026-10-26 lacked the cited vars' existing tests (short-history spent 25 turns before finding
+ ;; kept's tests, mixed 9 guessing inputs that problem-rows in print_test builds); a cited var is
+ ;; named by few forms (a task's own functions), and a hot one (clojure.core/let, 1,600 forms) is cut
+ ;; here, its forms read and ordered by when each was written. Measured over this checkout's 830
+ ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
+ ;; the most), 801 past 5.
+ :seon.config.ctx/callers 50
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
