@@ -22,6 +22,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
+- `seon.cost/bound`, `seon.cost/cases`: a generated estimate names its function (whose contract carries its bound) and its generator as symbols in data.
 - `seon.agent/test-plan`, `seon.proofs/run-tests!`: a task's proofs and the tests a plan selects are symbols in data (reach digests' keys), resolved to their Vars to run.
 - `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
 - `seon.model/scripted`: the scripted provider's `:seon.config.ai/script` names its reply function as data (a test fixture in `test/`, loaded by name; one not found is `:seon.model/no-script`).

@@ -281,22 +281,17 @@
                       (contract/error :seon.cost/no-bound #'bound (str sym " carries no :seon.cost/bound beside its :malli/schema")
                                       {:seon.error/fix (str "Add :seon.cost/bound (fn [& args] {:ticks :bytes :out}) to " sym "'s attribute map.") :var sym})))))
 
-(def case-sizes
-  "The sizes generated cases are drawn at, case i at (mod i case-sizes): test.check's own range,
-  0 to 100, so a run of 100 cases or more reaches every size once."
-  101)
-
 (defn cases
   "The argument vectors a generated estimate measures its function on: :cases of them from :gen
   (the var of a test.check generator of argument vectors), else from the function's contract
-  (malli's generator of its input), at sizes spread over case-sizes and the running test's seed
+  (malli's generator of its input), at sizes cycling through :seon.config.proofs/case-sizes and the running test's seed
   (seon.proofs/test-seed, a function of its reach digest: the same code draws the same cases;
   outside a test, the seed of no test, still the same each call)."
   {:malli/schema [:=> [:cat :seon.cost/generated] [:vector [:vector :any]]]}
   [{:keys [of cases] g :gen}]
   (let [g (if g @(requiring-resolve g) (mg/generator (first (m/children (contract/schema (:malli/schema (meta (requiring-resolve of))))))))
         seed (proofs/test-seed)]
-    (mapv #(vec (gen/generate g (mod % case-sizes) (+ seed %))) (range cases))))
+    (mapv #(vec (gen/generate g (mod % (config/value :seon.config.proofs/case-sizes)) (+ seed %))) (range cases))))
 
 (defn run
   "Estimate e measured: its function on its input at each size (sizes, under
