@@ -243,8 +243,10 @@
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   tests of names (or all) and the bin/check steps with no green at their digest
-  (seon.proofs/plan; all? every one), less, when nothing is named, the ones that reach a
-  process (automatic), its program read from the kept store at store (program-db). Answers
+  (seon.proofs/plan; all? true every one), less, when nothing is named, the ones that reach a
+  process (automatic). all? :merge is a merge's verification (bin/prove --merge): every key with
+  no green at its digest, the ones that reach a process too, so nothing is left out and none is
+  named by hand. Its program read from the kept store at store (program-db). Answers
   {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
   :missing :inputs}."
   [root what all? names store]
@@ -257,13 +259,14 @@
         base (some->> (fx/base-commit root) (fx/tree-of root))
         {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
-        named? (or all? (seq names))
+        named? (or (true? all?) (seq names))
+        merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
-        cand (if named? all-cand (automatic all-cand process))
-        {:keys [run reused]} (proofs/plan nil cand (if all? {} (proofs/greens dir (vec (vals cand)))) #{})
+        cand (if (or named? merge?) all-cand (automatic all-cand process))
+        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} (proofs/greens dir (vec (vals cand)))) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
-     :left (when-not named? (vec (sort-by str (filter all-cand process))))
+     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
      :digests digests :steps steps :missing missing :inputs inputs}))
 
 (defn- prove!
@@ -279,7 +282,7 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
@@ -301,6 +304,9 @@
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
                     " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))
+    (when (= :merge all?)
+      (println (str "prove: a merge's verification: " (count (filter (set process) (concat run-tests run-steps)))
+                    " keys that reach a process run (no green at their digest), 0 left out")))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
                   (count reused) " green at their digest (reused), " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
                   " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
@@ -345,7 +351,7 @@
     (System/exit
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
-        "--plan" (let [[what out & names] more all? (= "--all" (first names))]
+        "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))))))

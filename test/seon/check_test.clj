@@ -269,3 +269,56 @@
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
   (let [dir (System/getProperty "user.dir")]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
+
+(deftest a-heavy-run-waits-while-mains-verification-runs
+  ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
+  ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
+  ;; when the holder lets go. Ordered by the processes' own lines, no clock: the holder says it
+  ;; holds the lock, the waiter says it waits while it is still alive, the holder is released,
+  ;; and the waiter returns
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/main-first-" (random-uuid))
+        _ (.mkdirs (java.io.File. dir))
+        lock (str dir "/main-verify.lock") go (str dir "/go")
+        _ (clojure.java.shell/sh "mkfifo" go)
+        holder (.start (ProcessBuilder. ^java.util.List ["perl" "-MFcntl=:flock" "-e"
+                                                          "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush; $| = 1; print \"held\\n\"; open(my $g, '<', $ARGV[1]); <$g>;"
+                                                          lock go]))
+        held (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream holder))))
+        waiter (.start (ProcessBuilder. ^java.util.List ["zsh" "-c" (str ". bin/env; MAIN_LOCK=" lock "; main_first; echo returned")]))
+        said (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getErrorStream waiter))))]
+    (try
+      (is (= "held" held))
+      (is (= "waiting for main's merge verification (a test holder)" said) "it says whom it waits for")
+      (is (.isAlive waiter) "and waits: the holder still holds the lock")
+      (spit go "go\n")
+      (is (= "returned" (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream waiter))))) "it goes on once the holder lets go")
+      (is (zero? (.waitFor waiter)))
+      (finally (.destroy holder) (.destroy waiter) (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
+  ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,
+  ;; names each red from their logs, and appends its line to the merge log itself (so a line
+  ;; cannot say green over a red exit); bin/prove --merge-verdict runs that part alone
+  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
+        log (str dir "/merge-log.md")
+        run (fn [st cst sst] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) (str cst) (str sst) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
+    (.mkdirs (java.io.File. dir))
+    (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"
+                                      "RED seon.x-test/a-red {:pass 1, :fail 1, :error 0}\nPROVE FAILED\n"))
+    (spit (str dir "/contracts.log") "CONTRACTS OK\n")
+    (spit (str dir "/smoke.log") "SMOKE OK\n")
+    (spit log "x one earlier line, 195 process keys left out\n")
+    (try
+      (let [r (run 1 0 0) line (last (str/split-lines (slurp log)))]
+        (is (= 1 (:exit r)) (:out r))
+        (is (str/ends-with? (str/trim (:out r)) "MERGE FAILED"))
+        (is (str/includes? line "MERGE FAILED; prove FAILED (exit 1)") line)
+        (is (str/includes? line "reds: RED seon.x-test/a-red") line)
+        (is (str/includes? line "main's last line: 195") line))
+      (let [r (run 0 0 2) line (last (str/split-lines (slurp log)))]
+        (is (= 1 (:exit r)) "a red smoke is a failed merge though prove is green")
+        (is (str/includes? line "smoke FAILED (exit 2)") line))
+      (let [r (run 0 0 0) line (last (str/split-lines (slurp log)))]
+        (is (zero? (:exit r)))
+        (is (str/includes? line "MERGE OK") line))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))

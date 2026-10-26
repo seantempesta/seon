@@ -11,14 +11,68 @@
 # named (bin/test NS, bin/check MODE) or in the full run (docs/merging.md).
 # Ends on PROVE OK / PROVE FAILED and its exit status. The full runs are explicit:
 # bin/test --all, bin/check 100.
+#
+# bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
+# it holds the main checkout's lock for its whole run, so every other heavy run waits for it
+# (bin/env's main_first); runs every test and step with no green at its digest, the ones that
+# reach a process too (nothing left out, none named by hand), then bin/check contracts and
+# bin/check smoke; ends on MERGE OK / MERGE FAILED from those exit statuses alone, naming each
+# red and anything that did not run; and appends its line to notes/merge-log.md: the sha, the
+# plan's counts, the verdicts, the reds, the src delta of HEAD against its first parent and the
+# keys left out against main's last merge line.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# merge_verdict OUT ST CST SST: the merge's one verdict from prove's, contracts' and smoke's exit
+# statuses alone, with the reds named from their logs in OUT; its line appended to MERGE_LOG
+# (notes/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST CST SST runs it alone.)
+merge_verdict() {
+  local out=$1 st=$2 cst=$3 sst=$4 log=${MERGE_LOG:-$ROOT/notes/merge-log.md}
+  v() { (( $1 == 0 )) && echo OK || echo "FAILED (exit $1)"; }
+  local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" "$out/contracts.log" "$out/smoke.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
+  local counts=$(grep -E "^prove: [0-9]+ keys" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: //; s/; selected in.*//')
+  local merged=$(grep -E "^prove: a merge's verification" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: a merge.s verification: //')
+  local srcd=$(git -C "$ROOT" diff --shortstat HEAD^1 HEAD -- src 2>/dev/null | sed -E 's/^ *//')
+  local main_left=$(grep -oE "[0-9]+ process keys left out|left out [0-9]+" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+  local verdict="MERGE FAILED"
+  (( st == 0 && cst == 0 && sst == 0 )) && verdict="MERGE OK"
+  local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); contracts $(v $cst); smoke $(v $sst); reds: ${reds:-none}; src ${srcd:-unchanged}; left out 0 (main's last line: ${main_left:-none recorded})"
+  echo "$line" >> "$log"
+  echo "$line"
+  echo "$verdict"
+  [[ $verdict == "MERGE OK" ]]
+}
+[[ ${1:-} == --merge-verdict ]] && { merge_verdict "$2" "$3" "$4" "$5"; exit $? }
+MERGE=0
+[[ ${1:-} == --merge ]] && { MERGE=1; shift }
+if (( MERGE )) && [[ -z ${SEON_MAIN_FIRST_HELD:-} ]]; then
+  # take the main checkout's lock (waiting for another merge's verification, saying so), name
+  # the holder in it, and run this verification under it: its steps are the holder's
+  MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+  mkdir -p "$MAIN_TREE/target"
+  exec perl -MFcntl=:flock -e '
+    my ($lock, $who, @cmd) = @ARGV;
+    open(my $f, ">>", $lock) or die "bin/prove --merge: $lock: $!\n";
+    unless (flock($f, LOCK_EX | LOCK_NB)) {
+      open(my $r, "<", $lock); my $w = <$r> // ""; chomp $w;
+      print STDERR "waiting for main\x27s merge verification ($w)\n";
+      flock($f, LOCK_EX) or die "bin/prove --merge: flock: $!\n";
+    }
+    truncate($f, 0); print $f "$who\n"; $f->flush;
+    $ENV{SEON_MAIN_FIRST_HELD} = $$;
+    my $st = system(@cmd);
+    exit($st == -1 ? 127 : ($st & 127) ? 128 + ($st & 127) : $st >> 8);' \
+    "$MAIN_TREE/target/main-verify.lock" "pid $$, $(git -C "$ROOT" rev-parse --short HEAD) in $ROOT, since $(date '+%H:%M:%S')" \
+    "$0" --merge "$@"
+fi
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
 OUT=$ROOT/target/prove
 mkdir -p "$OUT"
 rm -f "$OUT/steps" "$OUT/steps.edn" "$OUT/green"
 st=0
-nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" "$@" || st=1
+PLAN=(); (( MERGE )) && PLAN=(--merge)
+# a subshell: the pipeline's first part, its status the run's (tee keeps the log the merge reads)
+(
+nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" $PLAN "$@" || st=1
 if [[ $WHAT != tests && -s $OUT/steps ]]; then
   # bin/test built target/seon from this tree: a step's result is keyed by the source it reaches
   "$ROOT/bin/check" --steps "$OUT" || st=1
@@ -26,3 +80,10 @@ if [[ $WHAT != tests && -s $OUT/steps ]]; then
 fi
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
 exit $st
+) 2>&1 | tee "$OUT/prove.log"
+st=${pipestatus[1]}
+(( MERGE )) || exit $st
+# the merge's other two verdicts, each run whatever the one before answered
+"$ROOT/bin/check" contracts > "$OUT/contracts.log" 2>&1; cst=$?
+"$ROOT/bin/check" smoke > "$OUT/smoke.log" 2>&1; sst=$?
+merge_verdict "$OUT" $st $cst $sst
