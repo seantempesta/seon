@@ -944,6 +944,17 @@
   (when (or (not= commit (d/commit-id branch)) (not= t (:max-tx image)))
     {:commit commit :t t :branch-commit (d/commit-id branch) :image-t (:max-tx image)}))
 
+(defn begin-run!
+  "Run run of task recorded as this process's session's on its branch, as root records it on main:
+  the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
+  the run with its task. Written as the process starts with its run (init!: an outside agent's
+  branch is cut before its run is written on main), or by the turn that begins a later run of the
+  session; once, nothing written when the branch holds it."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
+  [task run]
+  (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
+    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state)}}])))
+
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
@@ -1011,4 +1022,6 @@
      ;; its task from main, with the failure and evidence the last run left there; an
      ;; agent with no task (a fresh one on a kept branch) takes none
      (when-let [tx (when (and resumed task) (not-empty (task/onto-tx db0 @store-conn task)))]
-       (transact! tx))))))
+       (transact! tx))
+     ;; forked for a run: it is this session's on the branch from the start
+     (when (and task run) (begin-run! task run))))))
