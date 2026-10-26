@@ -314,7 +314,7 @@
   (if (and (not (:cases e)) (< (count ns) min-points))
     (contract/error :seon.cost/too-few-sizes #'seon.cost/run
                     (str (:of e) "'s proof measures " (count ns) " sizes under :seon.config.proofs/cost-max-n " cap
-                         " (" (pr-str (vec (sort (:sizes e)))) "), fewer than " min-points ": give it sizes under the cap where its work dominates")
+                         " (" (print/text (vec (sort (:sizes e))) (:part print/budgets)) "), fewer than " min-points ": give it sizes under the cap where its work dominates")
                     {:of (:of e) :sizes (vec (sort (:sizes e))) :cap cap})
   (let [f @(requiring-resolve (:of e))
         ;; each point measured: a size and its input built outside the measure, or a generated
