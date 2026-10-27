@@ -235,6 +235,7 @@ Owner, 2026-10-23: quote not recorded; relayed by root. The root is a fresh clon
 Owner, 2026-10-23: quote not recorded; relayed by root. Stated in: docs/cost.md (ticks, bytes and calls are exact; wall time is not a measure).
 ### Process tests are not automatic: the reach walk classifies them
 Owner, 2026-10-23: quote not recorded; relayed by root. A test that launches a binary is deferred by what the reach walk finds, not run on every change. Stated in: docs/turn.md#who-runs-which-tests; docs/merging.md#a-merge-runs-what-the-change-reaches.
+Superseded (2026-10-27): by the day's ruling "a merge runs the process tests its change reaches, automatically" (see the 2026-10-27 day rulings above); the gate now defaults to the root's source root.
 ### Ids are derived from content; addressing is global
 Owner, 2026-10-23: quote not recorded; relayed by root ("content-derived ids; global addressing"). Stated in: not yet (owed docs/storage.md, with the ``jolt/global-ids`` branch).
 ### Tests run on change, through Seon

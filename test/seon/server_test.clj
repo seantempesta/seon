@@ -148,7 +148,8 @@
   ;; an outside agent's own context reads are each whole)
   (let [plan "Work: f0 returns its input."
         [first-turn _ swapped page elsewhere on-branch told]
-        (at/in-agent [{:op :context :agent "a1"}
+        (at/in-agent (fn [{:keys [agent task]}]
+                      [{:op :context :agent agent}
                       "(def c0 (datahike.api/commit-id (seon.agent/db)))"
                       (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
                            " (get-in @ctx [:runs rid :task :seon.task/plan]))")
@@ -157,11 +158,11 @@
                       ;; would show as an earlier eval's handle is compared here instead)
                       (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan]))")
                       {:op :eval :agent "root"
-                       :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\")))"
-                                  " [:seon.task/id \"demo/t\"]))")}
-                      (str "(let [c1 (datahike.api/commit-id (seon.agent/db)) t (:content (first (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) agent.a1/c0 c1)))]"
+                       :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
+                                  " [:seon.task/id " (pr-str task) "]))")}
+                      (str "(let [c1 (datahike.api/commit-id (seon.agent/db)) t (:content (first (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) agent." agent "/c0 c1)))]"
                            " [(clojure.string/includes? t \":seon.task/plan]\") (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
-                           " (clojure.string/includes? t " (pr-str (pr-str plan)) ")])")])]
+                           " (clojure.string/includes? t " (pr-str (pr-str plan)) ")])")]))]
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")

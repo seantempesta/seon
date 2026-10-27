@@ -1149,11 +1149,15 @@
   ([sys pred] (await-db sys nil pred))
   ([sys what pred]
   (let [stopped (gone nil "root stopped")
-        db0 @(:conn sys)
-        p (if what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx db0)} {:stopped true}) (promise))
         k (keyword "seon.root" (str "await-" (random-uuid)))
-        a (:wrapped-atom (:conn sys))]
-    (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
+        a (:wrapped-atom (:conn sys))
+        p (promise)
+        ;; the watch first, then the value: a commit between reading main and adding the watch
+        ;; was seen by neither, and the wait went on until a later commit that never came (a
+        ;; 48-minute hang of seon.e2e-test/await-quiet-ends-on-a-recorded-defect under load)
+        _ (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
+        db0 @(:conn sys)
+        _ (when what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx db0)} {:stopped true} p))]
     ;; the watch goes whatever ends the wait (an interrupt of a caller whose client left, a pred
     ;; that threw on the current value)
     (try (when (pred db0) (deliver p db0))
