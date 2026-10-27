@@ -40,13 +40,28 @@
                   (seq runs) (assoc :runs runs)
                   (:seon.task/failure t) (assoc :failure (:reason (:seon.task/failure t))))]))))
 
+(defn live-tasks
+  "What is live on main db, as an outside agent reads it: :tasks, each task running or with runs
+  (task-summaries), newest run first; :others, every other task counted by its execution; :all,
+  the form that lists them all at root's REPL. Main holds hundreds of held tasks with no run
+  (580 on the standing root, 2026-10-27), which listed whole hid what runs."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]}
+  [db]
+  (let [idx (r/index db)
+        started (fn [id] (reduce max 0 (keep #(:seon.run/start-ms ((:runs idx) %)) (get-in idx [:by-task id]))))
+        all (task-summaries db)
+        live? (fn [[_ s]] (or (= :running (:execution s)) (seq (:runs s))))]
+    {:tasks (apply array-map (mapcat identity (sort-by (comp - started key) (filter live? all))))
+     :others (frequencies (map (comp :execution val) (remove live? all)))
+     :all '(seon.server/task-summaries @(:conn sys))}))
+
 (defn agents-answer
-  "Live agents (id, branch, status, task) and every task (task-summaries)."
+  "Live agents (id, branch, status, task) and what is live on main (live-tasks)."
   {:malli/schema [:=> [:cat :seon.root/sys] :map]}
   [sys]
-  {:agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (c/gone-statuses (:status a)))]
-                                [id (select-keys a [:branch :status :task])]))
-   :tasks (task-summaries @(:conn sys))})
+  (assoc (live-tasks @(:conn sys))
+         :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (c/gone-statuses (:status a)))]
+                                      [id (select-keys a [:branch :status :task])]))))
 
 (def ^:dynamic *sys*
   "This root while its REPL evaluates a form: the `sys` each form reads (root-eval)."
@@ -118,7 +133,7 @@
   answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or
   nil) and the request. MCP lists each as the tool seon_<op> (mcp-reply)."
   (array-map
-   :agents {:doc "Live agents (id, branch, status, task) and every task (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem)."
+   :agents {:doc "Live agents (id, branch, status, task); the tasks running or with runs, newest first (execution, done, blocked-by, its runs as [id status outcome turns tokens], problem); every other task counted by execution, and the form that lists them all."
             :args {} :answer (fn [sys _ _] (agents-answer sys))
             ;; the form that answers it again at root's REPL (seon_eval root): its reply's cuts read through it
             :again '(seon.server/agents-answer sys)}

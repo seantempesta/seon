@@ -1,7 +1,28 @@
 (ns seon.server-test
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]))
+  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
+
+(deftest seon-agents-answers-what-is-live
+  ;; task seon.server/seon-agents-answers-what-is-live: seon_agents answered every task on main
+  ;; (580 on the standing root, 2026-10-27, most of them :held or :cancelled with no run), so an
+  ;; outside agent never saw what runs. It answers the tasks running or with runs, newest run
+  ;; first, and counts the others by execution, with the form that lists them all
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
+           _ (d/transact conn (task/create-tx @conn (vec decls)))
+           env {:branch :demo :model nil :max-turns 4}
+           _ (d/transact conn (concat (task/execution-tx ["demo/b" "demo/d"] :running) (task/execution-tx ["demo/e"] :cancelled)
+                                      (task/run-start-tx "demo/b#1" "demo/b" "boot-1" :a1 env 1000 "Work.")
+                                      (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a2 env 2000 "Work.")))
+           {:keys [tasks others all]} (seon.server/live-tasks @conn)]
+       (is (= ["demo/d" "demo/b"] (filterv #(= "demo" (namespace (symbol %))) (keys tasks))) "the running tasks, newest run first, and no held one")
+       (is (= [["demo/d#1" :running nil nil nil]] (get-in tasks ["demo/d" :runs])) "each with its runs")
+       (is (<= 2 (:held others)) "the held ones counted")
+       (is (<= 1 (:cancelled others)) "and the cancelled")
+       (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")))))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
