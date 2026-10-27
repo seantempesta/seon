@@ -155,14 +155,14 @@
   ;; seon.turn/observe calls) while a session asks for the same branch's head (seon.root/prove!,
   ;; the server's :prove op / seon_prove): the service runs it once, for both, and a session asking
   ;; again after the eval that asked recorded itself (the tx moved, nothing the run reads did) gets that run.
-  (let [code (str "(let [ap (c/submit! sys :a1 \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
-                  "      sp (c/prove! sys :a1)"
-                  "      s (select-keys @sp [:key :pass :fail :error])"
-                  "      a @ap"
-                  "      again (select-keys @(c/prove! sys :a1) [:key])"
+  (let [code #(str "(let [ap (c/submit! sys :" % " \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
+                   "      sp (c/prove! sys :" % ")"
+                   "      s (select-keys @sp [:key :pass :fail :error])"
+                   "      a @ap"
+                   "      again (select-keys @(c/prove! sys :" % ") [:key])"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))]"
                   "  (pr-str {:session s :agent (:text a) :again again :runs (vec runs)}))")
-        [r] (at/in-agent [{:op :eval :agent "root" :code code}])
+        [r] (at/in-agent #(vector {:op :eval :agent "root" :code (code (:agent %))}))
         v (clojure.edn/read-string (:value r))]
     (is (map? v) (pr-str r))
     (is (re-find #"@[0-9a-f]+!turn$" (:key (:session v))) "the key is the agent's branch at the digest of its program")
