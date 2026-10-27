@@ -308,8 +308,9 @@
 (deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
   ;; the full run of 2026-10-26: this namespace's scratch stores stayed open (program-db keeps its
   ;; branch's connection), nine of them by its end, and the shard's next opens failed with
-  ;; MDB_SEM_UNDO_FULL (each open env takes one of kern.sysv.semume's 10). A test's own store ends
-  ;; with the test, so a process plans on any number in turn
+  ;; MDB_SEM_UNDO_FULL (the LMDB fork then held one of kern.sysv.semume's 10 for each open env's
+  ;; life; it holds none since lmdb 7b7de38f). A test's own store ends with the test, so a process
+  ;; plans on any number in turn
   (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
                       "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
         planned (vec (for [_ (range 12)
