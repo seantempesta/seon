@@ -299,7 +299,7 @@
   ;; first, :seon.config.ctx/errors) and not the store's history of them: its bytes and datoms read
   ;; stay flat as the store holds 10, 100, 1,000 recorded errors of the task (measured: 541k, 543k
   ;; and 548k ticks, 2.39 MB and 292 calls at each, against 408k ticks, 1.89 MB and 263 calls before
-  ;; the join). The members are the task's own and the newest, never another task's
+  ;; the join; 298 calls with the content-id windows' one more check per reverse join read). The members are the task's own and the newest, never another task's
   (let [[db a b] (errored 20) c (ctx/build db a b)
         errs (:errors (:task (val (first (:runs (:tree c))))))]
     (is (= #{"boom 18" "boom 16" "boom 14" "boom 12" "boom 10"} (set (map :seon.error/message (vals errs)))) "the newest errors raised in the task: five of its ten")
@@ -309,7 +309,7 @@
      :n "recorded errors in the store, half of them last raised in the agent's task"
      :work "the agent's pull as ever, and the task's errors join: an index seek of the task's id on :seon.error/last-task, the newest :seon.config.ctx/errors members pulled, whatever the history holds"
      :growth :constant
-     :fixed {:calls 292 :bytes 2400000}
+     :fixed {:calls 298 :bytes 2550000}
      :sizes [10 100 1000]}))
 
 (deftest the-patch-costs-the-change-not-the-session
@@ -459,6 +459,29 @@
             d (ctx/diff c0 (ctx/advance c0 db0 db1 :b))]
         (is (= [[:evals (id db1 [:seon.eval/id "e31"])]] (keys d)))
         (is (nil? (first (val (first d)))))))))
+
+(deftest a-window-of-content-ids-is-newest-first
+  ;; a run's, turn's and message's entity id is derived from its content, so the id's order is not the
+  ;; order they were written in: the window kept the members in the order members answers them (newest
+  ;; first) and then sorted them again by id, so (first (:runs @ctx)) was the lost run after a restart
+  ;; (found live by the context session). The window holds them newest first, and a patch that adds
+  ;; one keeps it so
+  (let [db0 (seeded 3)
+        run (fn [db r] (:db-after (d/with db [{:seon.run/id r :seon.run/task [:seon.task/id "lab/ctx"] :seon.run/status :running :seon.run/agent [:seon.agent/key k]}])))
+        ;; a pair of names whose later run has the smaller id
+        [db older newer] (first (for [i (range 400)
+                                      :let [a (str "w" i "#1") b (str "w" i "#2") db (run (run db0 a) b)
+                                            ea (id db [:seon.run/id a]) eb (id db [:seon.run/id b])]
+                                      :when (< eb ea)]
+                                  [db ea eb]))]
+    (is (some? db) "a later run with a smaller id exists among the names tried")
+    (let [c (ctx/build db (aid db) :b)]
+      (is (= newer (first (keys (:runs (:tree c))))) "the newer run first, whatever its id")
+      (is (= [older] (rest (filter #{older newer} (keys (:runs (:tree c)))))) "and the older after it")
+      (testing "a run added by a patch is first, and the diff names only it"
+        (let [db2 (run db "w-third#1") c2 (ctx/advance c db db2 :b) third (id db2 [:seon.run/id "w-third#1"])]
+          (is (= third (first (keys (:runs (:tree c2))))) "the newest first after the patch")
+          (is (contains? (ctx/diff c c2) [:runs third]) "and the diff names it as the member that joined (the task, held once under the newest run, moves to its path)"))))))
 
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
