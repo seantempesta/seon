@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [hasch.core :as hasch]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -145,12 +145,6 @@
                            (for [[k v] env] (str k "=" v))
                            ["bin/root" command] args)))
 
-(defn- bound-port "The port the root in runs bound (bin/root wrote it from ROOT LISTENING), or nil."
-  {:malli/schema [:=> [:cat :string] [:maybe :int]]}
-  [runs]
-  (let [f (java.io.File. (str runs "/root.port"))]
-    (when (.exists f) (parse-long (clojure.string/trim (slurp f))))))
-
 (defn drop-main!
   "Delete main and every branch under it from the store at store (seon.check/drop-mains, through
   the binary), once the root that made them has stopped: what a test's root made leaves the one
@@ -190,7 +184,7 @@
                             (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
                                     ["--started-by" (str (ns-name ns) "/" name)]))
                             (into args)))
-  (let [port (bound-port runs) log (java.io.File. (str runs "/root.log"))]
+  (let [port (fx/bound-port runs) log (java.io.File. (str runs "/root.log"))]
     (cond-> (assoc root :port port)
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
       (nil? port) (assoc :log (if (.exists log) (slurp log) "")))))
@@ -201,7 +195,7 @@
   {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
   [root]
   (root-sh root "next" [])
-  (assoc root :port (bound-port (:runs root))))
+  (assoc root :port (fx/bound-port (:runs root))))
 
 (defn kill-root!
   "SIGKILL the root (bin/root kill), answered once the root and every process it started are

@@ -602,6 +602,15 @@
   (or (git-try repo ["rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
       (git-try repo ["rev-parse" "--verify" "--quiet" "HEAD^{commit}"])))
 
+(defn bound-port
+  "The port the root whose runs directory is runs bound, as bin/root recorded it from its ROOT
+  LISTENING line (runs/root.port), or nil when no root there has listened: a root on a port the
+  kernel assigns (:seon.config.root/server-port -1) has it nowhere else. See docs/server.md."
+  {:malli/schema [:=> [:cat :string] [:maybe :int]]}
+  [runs]
+  (let [f (java.io.File. (str runs "/root.port"))]
+    (when (.isFile f) (parse-long (str/trim (slurp f))))))
+
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
@@ -624,18 +633,20 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        ;; the results root, or this root itself when none is named (a test's root): where the run's
-        ;; shards record and where its results are read back
-        results (let [p (cfg/value :seon.config.proofs/results-port)] (if (pos? p) p (cfg/value :seon.config.root/server-port)))
+        ;; the results root, or this root itself when none is named (a test's root), at the port it
+        ;; bound: where the run's shards record and where its results are read back
+        results (let [p (cfg/value :seon.config.proofs/results-port) s (cfg/value :seon.config.root/server-port)]
+                  (cond (pos? p) p (pos? s) s :else (bound-port (cfg/value :seon.config.root/runs-dir))))
         ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
         ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
         ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
         ;; a test of the root's working tree that main does not hold, and its shard died at once)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
                "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
-        at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
+        at (when (and results (not (contract/error? sha))) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
+      (nil? results) (error #'seon.fx/run-tests :seon.fx/io-error (str "no results root: :seon.config.proofs/results-port names none, and this root's bound port is not in " (cfg/value :seon.config.root/runs-dir) "/root.port") {:path dir})
       (not (zero? (:exit at))) (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
