@@ -1,0 +1,2163 @@
+[ {
+  "task" : "seon.proofs/one-prove-path",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 34,
+    "label" : "useful",
+    "why" : "the merge/prove selection the judge shares"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#the-test-service",
+    "pct" : 25,
+    "label" : "useful",
+    "why" : "the one prove service turn and judge share"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 22,
+    "label" : "useful",
+    "why" : "digests include tick bound input"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#open-owner-questions-pending-rulings-the-plans-blockers-are-also-in-planmd",
+    "pct" : 21,
+    "label" : "noise",
+    "why" : "open questions list"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : "in changed, entrant boundary defect"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "judge's test selection, forks nothing if all green"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/report",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "clojure.test report plumbing"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/*digests*",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "digest binding for seeds"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/on?",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "contract toggle"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-report",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, carries ticks-spent errors"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 50,
+    "label" : "useful",
+    "why" : "the one per-test key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.test/ticks-spent",
+    "pct" : 35,
+    "label" : "useful",
+    "why" : "error variant for test past bound"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/jobs",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "jobs count unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/test-results-dir",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "results dir not changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "task state generic"
+  } ],
+  "missing" : [ "seon.root/run-tests!", "docs/turn.md#who-runs-which-tests", "docs/turn.md#observe", "docs/processes.md#the-agent-process", "docs/failure-points.md#edges-that-catch-each-names-its-one-variant" ]
+}, {
+  "task" : "seon.turn/context-render-observes-what-changed",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/turn.md#observe",
+    "pct" : 67,
+    "label" : "useful",
+    "why" : "the section describing observe and index"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-we-measure",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : "generic measuring guidance"
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "different incremental mechanism"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#the-test-service",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "test service not index"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "test reach not reconcile"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/empty-index",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "the empty index observe starts from"
+  }, {
+    "kind" : "function",
+    "name" : "seon.fork-server/index-at-fork",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "forks hand observed index, same mechanism"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/watched-ns",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "watched attributes of observe"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/reconciler-proc",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "proc not index"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/init!",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "agent init unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/done-input",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "the done-input the index feeds"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "test ticks unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/task-fact",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "task fact generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.store/node-cache-bytes",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "node cache unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/tick-quantum",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "tick quantum unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "datahike.query/a-predicate-that-throws-is-an-error",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 68,
+    "label" : "useful",
+    "why" : "the datahike fork section, in changed"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "jolt fork not datahike"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "catching edges, different layer"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "merge reach unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "uncaught edges unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.server/ops",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "server ops unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "test plan unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/refused",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "done-rule reasons unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/catches",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "try catch facts, not datahike"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/checked",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "contract wrapper unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/no-source-root",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/not-held",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.error/class",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.agent/eval-error",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/quiet-before-true",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "jolt.backend/image-registration-is-opt-in",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#shared-build-caches",
+    "pct" : 60,
+    "label" : "useful",
+    "why" : "in changed, bin/env compile options"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 60,
+    "label" : "useful",
+    "why" : "in changed, jolt fork pin"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "test reach not compile cache"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "datahike fork unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/errors.md#an-eval-errors-diagnostics",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "eval errors unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/env-readers",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "file-read vars, not compile options"
+  }, {
+    "kind" : "function",
+    "name" : "seon.repl/wrap-record",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "records program facts, not registration"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/checked",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "contract wrapper unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/test-vars",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "test budget unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/held?",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "held check unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.build/jolt-compiler-options",
+    "pct" : 37,
+    "label" : "useful",
+    "why" : "the config key changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/root",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "source root unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config/config",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "config map generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/form-ticks",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "form ticks unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":form/source",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "form source attr unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.cost/ticks-are-exact",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 79,
+    "label" : "useful",
+    "why" : "in changed, what a measure takes"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-growth-is-judged",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "tick chunk allowance judged"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-we-measure",
+    "pct" : 20,
+    "label" : "useful",
+    "why" : "explains measuring from estimates"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#a-bound-in-the-contract",
+    "pct" : 19,
+    "label" : "noise",
+    "why" : "contract bound unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#where-it-is-used",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "uses of proofs, not measurement"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/tick-allowance",
+    "pct" : 18,
+    "label" : "useful",
+    "why" : "ticks allowance during measure"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/exact",
+    "pct" : 8,
+    "label" : "useful",
+    "why" : "counted dimensions measure decides"
+  }, {
+    "kind" : "function",
+    "name" : "seon.profile/measure!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "the measured call, ticks source"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/units",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "unit table not measure"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/baseline",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "baseline measure subtracts"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 37,
+    "label" : "useful",
+    "why" : "sample cap of measure"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/dims",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "dims measured"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-settled",
+    "pct" : 30,
+    "label" : "useful",
+    "why" : "settled-sample key of measure"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/tick-quantum",
+    "pct" : 19,
+    "label" : "useful",
+    "why" : "chunk allowance key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/unsettled",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : "unsettled error of measure"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.root/the-api-uses-flows-own-channels",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/flow.md#idioms-for-seon",
+    "pct" : 57,
+    "label" : "useful",
+    "why" : "in changed, channel idioms"
+  }, {
+    "kind" : "section",
+    "name" : "docs/flow.md#the-proc-contract-reference-codejoltstdlibclojurecoreasyncflowclj-process-reference-codejoltstdlibclojurecoreasyncflowimplclj-proc",
+    "pct" : 17,
+    "label" : "useful",
+    "why" : "step-fn contract and outputs"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : "uncaught edges, other topic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/clocks.md#time-decides-owed-its-owners-fix",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "clock owed list"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "jolt fork pin"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/ext-op",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "in changed, root ext-op answers"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/end-agent",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "in changed, agent death handling"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/answer-taken",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "answers defects, uses out!"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent-proc/agent-frame",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "agent frames, not root api"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.proc/render-proc",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "render proc unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/stopped",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "stop state not changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "task state generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/proc-defect",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : "defect shape from error channel"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.agent/died",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "agent died unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.check/ping-ms",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "ping config unrelated"
+  } ],
+  "missing" : [ "seon.root/api-one", "seon.root/api-proc", "docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map" ]
+}, {
+  "task" : "seon.test-store/a-kept-store-is-keyed-by-its-schema",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 66,
+    "label" : "useful",
+    "why" : "in changed, store/plan reuse"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "test reach unrelated to store"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "catch edges unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/checks.md#modes",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "check modes unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/storage.md#plain-values",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "plain values type unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.db/install-missing!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "installs attrs, types-differ path"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "test plan unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.db/open!",
+    "pct" : 2,
+    "label" : "useful",
+    "why" : "opens store that refused differing types"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "import unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.db/make!",
+    "pct" : 2,
+    "label" : "useful",
+    "why" : "builds the kept store"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/types-differ",
+    "pct" : 27,
+    "label" : "useful",
+    "why" : "error the kept store hit"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/gate-checkout",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "gate checkout unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/program-store-max-bytes",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "program store size bound"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/program-store",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "program store config"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "task state generic"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.step/an-errors-message-is-read-one-way",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/errors.md#an-eval-errors-diagnostics",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "error-map and ex-message handling"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "catch variants, other topic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#one-printer",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "printer unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/resolution.md#sanctioned",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "resolution unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "entrant boundaries, not message reading"
+  }, {
+    "kind" : "function",
+    "name" : "seon.judge/form-facts",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "form facts unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/baseline-reads",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, one site to fix"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/error-map",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, builds error map"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.proc/view-pass",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "render error unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.fx/read-source",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, one site to fix"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/no-source-root",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/no-source-text",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.server/defect",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.error/base",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "error base only loosely"
+  } ],
+  "missing" : [ "seon.fx/git-commit", "seon.fx/resolve-deps", "seon.fx/wiki-history", "seon.server/respond", "seon.model/http-post" ]
+}, {
+  "task" : "seon.step/an-edge-asks-one-way",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/flow.md#idioms-for-seon",
+    "pct" : 71,
+    "label" : "useful",
+    "why" : "in changed, idioms for edge asks"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 18,
+    "label" : "noise",
+    "why" : "uncaught edges unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "catch edges unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/config.md#constants",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "constants unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/flow.md#the-proc-contract-reference-codejoltstdlibclojurecoreasyncflowclj-process-reference-codejoltstdlibclojurecoreasyncflowimplclj-proc",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "proc contract, not asker side"
+  }, {
+    "kind" : "function",
+    "name" : "seon.web/ask!",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "in changed, one of the three askers"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/call!",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, one of the three askers"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/await-db",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "await-db unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/stop!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, its shutdown ask"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/api-proc",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "api proc not changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/quiet-before-true",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ai/judge-pass-usd",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/stopped",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "the closed value answered root stopped"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/action",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.config/a-bound-is-a-config-key",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#cost-proofs",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "cost doctrine unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/clocks.md#clocks",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "clocks unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "test reach unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/config.md#config",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "config key law and resolver"
+  }, {
+    "kind" : "section",
+    "name" : "docs/resolution.md#resolution",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "resolution unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent-proc/stop-bound-ms",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "other bound, not listed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/tick-allowance",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "cost tolerance, own task"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/growth-share",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "cost tolerance, own task"
+  }, {
+    "kind" : "function",
+    "name" : "seon.lib/PAGE",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "no description, unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/back-op",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, uses view-window"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/death-stderr-bytes",
+    "pct" : 39,
+    "label" : "useful",
+    "why" : "new key in changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/view-window",
+    "pct" : 22,
+    "label" : "useful",
+    "why" : "new key in changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/max-assertions",
+    "pct" : 18,
+    "label" : "useful",
+    "why" : "new key in changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config/config",
+    "pct" : 8,
+    "label" : "useful",
+    "why" : "config schema namespace"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/big-alloc",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "other render key"
+  } ],
+  "missing" : [ "seon.root/stderr-tail", "seon.proofs/failures", "seon.render.ai/problem-lines", "seon.print.emit/structural-kinds", "seon.root/set-agent" ]
+}, {
+  "task" : "seon.lib/real-mb-reads-what-macos-charges",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-we-measure",
+    "pct" : 77,
+    "label" : "useful",
+    "why" : "in changed, measurement estimates"
+  }, {
+    "kind" : "section",
+    "name" : "docs/machine.md#the-target-a-16-gb-macbook-m1",
+    "pct" : 57,
+    "label" : "useful",
+    "why" : "in changed, memory target"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#the-model",
+    "pct" : 50,
+    "label" : "noise",
+    "why" : "model not gauge"
+  }, {
+    "kind" : "section",
+    "name" : "docs/storage.md#the-map-is-address-space",
+    "pct" : 16,
+    "label" : "noise",
+    "why" : "address space, not footprint gauge"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#physics-who-may-run-threads",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : "thread physics unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.lib/mp-probe",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, the macOS ledger probe"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/mem-mb",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, reads real-mb"
+  }, {
+    "kind" : "function",
+    "name" : "seon.fork-server/server-step",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "fork server step unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/init!",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "agent init unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "import unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.check/pages-ms",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "pages check unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ai/judge-pass-usd",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "judge budget unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.lib/probe",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, probe result"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "task state generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.fork-server/forked",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "forked msg unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.render/page",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#tailwind",
+    "pct" : 61,
+    "label" : "useful",
+    "why" : "in changed, page styling"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#the-page",
+    "pct" : 23,
+    "label" : "useful",
+    "why" : "in changed, page is a walk"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct" : 18,
+    "label" : "noise",
+    "why" : "model context prefix, other view"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "catch edges unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "datahike fork unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.proc/agent-view",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : "hand-assembled agent window to replace"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/observed-keys",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "view entry keys, minor"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/act!",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "model turn unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.server/ops",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "server ops table unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/eval-item",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "eval component the walk must render"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/root-fact",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "in changed, root entity fact"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.run/run-fact",
+    "pct" : 26,
+    "label" : "useful",
+    "why" : "run view being folded in"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/line-budget",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : "in changed, render budget"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render.list/history",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, history key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config/config",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "config generic"
+  } ],
+  "missing" : [ "docs/render.md#the-walk", "docs/render.md#the-page-is-units", "docs/dashboard.md#the-render-proc", "seon.render.proc/page-value", "seon.render.proc/location" ]
+}, {
+  "task" : "seon.context/similar-finds-helpers-by-embedding",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/vector.md#the-pyramid",
+    "pct" : 78,
+    "label" : "useful",
+    "why" : "two-level search design"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#the-model",
+    "pct" : 67,
+    "label" : "useful",
+    "why" : "model in process"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#what-is-embedded",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : "what gets embedded"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#fused-with-the-call-graph",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : "in changed, fused with graph"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct" : 55,
+    "label" : "useful",
+    "why" : "related part uses similar"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/similar",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : "in changed, nearest by plan"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/related",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : "related by meaning, uses vectors"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/embed-written!",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "embeds written texts"
+  }, {
+    "kind" : "function",
+    "name" : "seon.vector/round",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "embeds due texts round"
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/related",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "agent's related search"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.vector/lib",
+    "pct" : 8,
+    "label" : "useful",
+    "why" : "vector config key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.vector/model",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "vector config key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.vector/coarse-dims",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "vector config key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.vector/texts",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "vector config key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.vector/shortlist",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : "vector config key"
+  } ],
+  "missing" : [ "docs/vector.md#vectors", "seon.context/rrf", "seon.context/current-state", "seon.vector/stored", "seon.vector/embed-texts" ]
+}, {
+  "task" : "seon.profile/a-call-is-measured-one-way",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#where-it-is-used",
+    "pct" : 73,
+    "label" : "useful",
+    "why" : "in changed, proof measurement use"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 66,
+    "label" : "useful",
+    "why" : "how a proof measures"
+  }, {
+    "kind" : "section",
+    "name" : "docs/machine.md#the-clock",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "clock, not tick count"
+  }, {
+    "kind" : "section",
+    "name" : "docs/clocks.md#time-measured-recorded-never-compared-to-decide",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : "in changed, recorded clock reads"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#cost-proofs",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "cost doctrine unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.profile/measure!",
+    "pct" : 37,
+    "label" : "useful",
+    "why" : "the one measure being unified"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/tick-allowance",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "allowance, not touched"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/measure",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "proof side calling once"
+  }, {
+    "kind" : "function",
+    "name" : "seon.repl/middleware",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "middleware list, not wrap-cost"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/baseline",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "baseline unchanged"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/form-top-fns",
+    "pct" : 42,
+    "label" : "useful",
+    "why" : "wrap-cost top functions"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/dims",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "measured dims"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : "cost sampling unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/tick-quantum",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "allowance unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-settled",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "settling unrelated"
+  } ],
+  "missing" : [ "seon.fx/base-commit" ]
+}, {
+  "task" : "seon.contract/an-armed-call-costs-its-checks",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/forks.md#malli",
+    "pct" : 100,
+    "label" : "useful",
+    "why" : "in changed, malli fork"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "jolt fork, not malli"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#where-it-is-used",
+    "pct" : 13,
+    "label" : "noise",
+    "why" : "cost uses, unit table only"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : "what is measured generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "test reach unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/wrap",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "wraps with contract checks"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/run",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "cost run unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/test-vars",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "test budget unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.profile/measure!",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "measure unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/exact",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "exact dims unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "sampling unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "test ticks unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.test/ticks-spent",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "ticks-spent unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.instrument/contract-error",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : "contract error reported by checks"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.profile/fn-cost",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "profile fn cost minor"
+  } ],
+  "missing" : [ "seon.contract/options" ]
+}, {
+  "task" : "seon.cost/a-speedup-never-reads-as-steeper",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#cost-proofs",
+    "pct" : 33,
+    "label" : "noise",
+    "why" : "cost doctrine generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-we-measure",
+    "pct" : 21,
+    "label" : "useful",
+    "why" : "read across sizes"
+  }, {
+    "kind" : "section",
+    "name" : "docs/agent.md#done",
+    "pct" : 21,
+    "label" : "noise",
+    "why" : "agent done rule unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#a-bound-in-the-contract",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "contract bound unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/config.md#constants",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "constants unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/growth",
+    "pct" : 25,
+    "label" : "useful",
+    "why" : "in changed, fits growth"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/growth-share",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : "growth fit share"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/steeper-by",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : "steeper tolerance judged"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/exact",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "exact dims, not growth"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/ratchet",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "ratchet, not changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/tick-quantum",
+    "pct" : 17,
+    "label" : "useful",
+    "why" : "quantum judge subtracts"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/sized",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : "sizes of rows"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/row",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : "rows judged"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/case-sizes",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "case sizes unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-settled",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "settle unrelated"
+  } ],
+  "missing" : [ "docs/cost.md#how-growth-is-judged" ]
+}, {
+  "task" : "seon.main/docstrings-carry-no-dates-and-no-old-words",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/health.md#a-stale-section",
+    "pct" : 45,
+    "label" : "useful",
+    "why" : "stale sections follow docstring changes"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "merge reach unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vocabulary.md#tasks-task-chains-words",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "task words, not docstrings"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#patterns-live-in-the-topic-sections-linked",
+    "pct" : 13,
+    "label" : "noise",
+    "why" : "patterns decision unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#mains-program-follows-the-tree",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : "import unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/meaning",
+    "pct" : 9,
+    "label" : "useful",
+    "why" : "what text relies on in a doc"
+  }, {
+    "kind" : "function",
+    "name" : "my.docs/reviewed!",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "reviewing section after code change"
+  }, {
+    "kind" : "function",
+    "name" : "seon.problems/stale-sections",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "docstring edits make sections stale"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "import unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, docstring edit"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "problem class generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/wiki-baseline",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : "wiki baseline unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/stall-ms",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "stall-ms key, docstring in changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":var/doc",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "docstring attribute"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/tests-dir",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "tests dir unrelated"
+  } ],
+  "missing" : [ "seon.agent/run-selection", "seon.cost/exact", "seon.fork-server/server-step", "seon.merge/merge-tx", "seon.writer/writer-proc" ]
+}, {
+  "task" : "seon.check/health-is-what-a-branch-caused",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/health.md#checks-are-callers-of-seon",
+    "pct" : 76,
+    "label" : "useful",
+    "why" : "in changed, health check section"
+  }, {
+    "kind" : "section",
+    "name" : "docs/checks.md#modes",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "in changed, check modes"
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 26,
+    "label" : "useful",
+    "why" : "in changed, edges section"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 25,
+    "label" : "noise",
+    "why" : "merge reach, not health"
+  }, {
+    "kind" : "section",
+    "name" : "docs/agent.md#what-you-read",
+    "pct" : 22,
+    "label" : "noise",
+    "why" : "agent context unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/check-steps",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "in changed, step list"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "import unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/checked",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "contract wrapper unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/on?",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "contract toggle unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.problems/stale-sections",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "stale sections, other health class"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/main",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "in changed, main key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/tree-excludes",
+    "pct" : 30,
+    "label" : "useful",
+    "why" : "tree id exclusions"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "problem class generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "task state generic"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/gate-checkout",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "gate checkout minor"
+  } ],
+  "missing" : [ "seon.problems/caused-split", "seon.fx/tree-id", "seon.fx/checkout-at", "seon.proofs/step-digests", "seon.fx/tree-of" ]
+}, {
+  "task" : "seon.reconcile/the-judge-reads-its-branch-in-one-request",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : "merge reach unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#the-test-service",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : "test service unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vocabulary.md#tasks-task-chains-words",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "vocabulary generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/storage.md#merges-read-what-changed",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "merge reads datoms, other path"
+  }, {
+    "kind" : "section",
+    "name" : "docs/root.md#runs-and-judging",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, judging"
+  }, {
+    "kind" : "function",
+    "name" : "seon.writer/other-op",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "in changed, branch-diff op"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/judge-tx",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, judge input"
+  }, {
+    "kind" : "function",
+    "name" : "seon.writer/octopus-merge",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "octopus merge not touched"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/prove!",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "prove ask, other step"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/take-answer",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : "flight step answer taken"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/step",
+    "pct" : 19,
+    "label" : "useful",
+    "why" : "read step removed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.merge/result",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : "merge result in branch-diff answer"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.writer/state",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "writer state minor"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/main",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "main key unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/tx-report",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "tx report unrelated"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.main/dead-code-goes",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#mains-program-follows-the-tree",
+    "pct" : 55,
+    "label" : "useful",
+    "why" : "source import and load order"
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#cost",
+    "pct" : 24,
+    "label" : "noise",
+    "why" : "health cost unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/storage.md#compiled-code",
+    "pct" : 24,
+    "label" : "noise",
+    "why" : "compiled code unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "test reach unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : "merge reach unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/run-tests-forked",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "test fork unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.source/load-order",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "in changed, reads each file once"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/advance",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "advance unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "test plan unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.problems/caused-split",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "caused-split unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/process-vars",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/actions",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.merge/changes",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/binary-vars",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "unrelated"
+  } ],
+  "missing" : [ "seon.writer/other-op", "docs/vocabulary.md#tasks-task-chains-words" ]
+}, {
+  "task" : "seon.turn/a-turn-shows-its-cost-against-its-budget",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#where-it-is-used",
+    "pct" : 60,
+    "label" : "useful",
+    "why" : "in changed, where measuring used"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#an-accepted-overrun-and-its-ratchet",
+    "pct" : 33,
+    "label" : "noise",
+    "why" : "ratchet unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 27,
+    "label" : "noise",
+    "why" : "proof measure generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#open-owner-questions-pending-rulings-the-plans-blockers-are-also-in-planmd",
+    "pct" : 27,
+    "label" : "noise",
+    "why" : "open questions unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/clocks.md#time-measured-recorded-never-compared-to-decide",
+    "pct" : 23,
+    "label" : "useful",
+    "why" : "in changed, recorded clock reads"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/exact",
+    "pct" : 16,
+    "label" : "noise",
+    "why" : "exact dims unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/act!",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "turn records split and cost"
+  }, {
+    "kind" : "function",
+    "name" : "seon.repl/middleware",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "middleware holding wrap-cost"
+  }, {
+    "kind" : "function",
+    "name" : "seon.profile/measure!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : "the measure to record from"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/context-block",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "context request unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.turn/split",
+    "pct" : 18,
+    "label" : "useful",
+    "why" : "the split being rendered"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/form-top-fns",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : "wrap-cost top functions"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "test ticks unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ai/judge-pass-usd",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "judge budget unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.eval/response",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "response shape unrelated"
+  } ],
+  "missing" : [ "seon.repl/eval-string", "seon.repl/record-tx", "seon.repl/item-keys", ":seon.cluster.eval/agent" ]
+}, {
+  "task" : "seon.render/walk",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct" : 18,
+    "label" : "noise",
+    "why" : "model prefix cache, other view"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#the-context-is-data-made-relevant-at-its-producer-renders-do-not-turn-it-into-prose",
+    "pct" : 17,
+    "label" : "useful",
+    "why" : "context rendered by the walk"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#the-page",
+    "pct" : 15,
+    "label" : "useful",
+    "why" : "in changed, page is a walk"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#one-rendering-system-the-data-describes-the-page-owner-2026-10-26",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : "owner's one-system ruling"
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#the-pattern",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : "pattern pulled by the walk"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.proc/agent-view",
+    "pct" : 9,
+    "label" : "useful",
+    "why" : "hand assembly the walk replaces"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/observed-keys",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "view entry keys minor"
+  }, {
+    "kind" : "function",
+    "name" : "seon.server/ops",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "server ops unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/act!",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : "model turn unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/start!",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "boot unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/root-fact",
+    "pct" : 32,
+    "label" : "useful",
+    "why" : "in changed, root fact units"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.run/run-fact",
+    "pct" : 30,
+    "label" : "useful",
+    "why" : "run fact units"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/line-budget",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : "render budget the walk uses"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/task-fact",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : "in changed, task fact units"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "related key unrelated"
+  } ],
+  "missing" : [ "docs/render.md#the-walk", "docs/references.md#resolving-and-showing", "seon.render/entity-schema", "seon.docs/resolve-ref", "seon.context/summary-of" ]
+}, {
+  "task" : "seon.program/an-import-reads-each-form-once",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#mains-program-follows-the-tree",
+    "pct" : 56,
+    "label" : "useful",
+    "why" : "import of the tree's forms"
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 42,
+    "label" : "noise",
+    "why" : "test reach, not import cost"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : "jolt fork unrelated"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#how-we-measure",
+    "pct" : 15,
+    "label" : "noise",
+    "why" : "measuring guide generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#where-it-is-used",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : "proof uses unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/account",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : "in changed, per-form account"
+  }, {
+    "kind" : "function",
+    "name" : "seon.source/text-tx",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : "calls account per form"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "import trigger, unchanged"
+  }, {
+    "kind" : "function",
+    "name" : "seon.source/load-order",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "load order unchanged"
+  }, {
+    "kind" : "function",
+    "name" : "seon.contract/checked",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : "contract wrapper unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ai/judge-pass-usd",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/sized",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : "unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/dims",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : "unrelated"
+  } ],
+  "missing" : [ "seon.source/accounts", "seon.repl/wrap-record" ]
+} ]

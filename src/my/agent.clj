@@ -18,6 +18,7 @@
                               refine what the page's related part showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
+    (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
     @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
                               kept current as it works; the page shows it as a block (@seon.ctx/ctx
                               from any namespace)
@@ -168,7 +169,10 @@
   the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
   sections naming it), :line the line of its text that holds q. opts, all optional: :kinds (a set of
   those kinds), :by (a set of :text :meaning :refs), :ns (a prefix: only vars and tests whose namespace
-  starts with it), :k (:seon.config.render/search). Each hit also holds :e, its entity, and :at, the line of its text
+  starts with it), :k (:seon.config.render/search), :min (a chance: 0.4, the page's cut, unless given). A
+  function, section or schema key hit holds :relevance, the chance it is worth reading for q (calibrated
+  on a judge's labels: docs/vector.md#relevance), and hits are best first by it; those below :min are
+  counted in the last entry, not shown. Each hit also holds :e, its entity, and :at, the line of its text
   (my.agent/help takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
   last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
   or key with no vector yet is searched without meaning."
@@ -209,14 +213,72 @@
   :judge, so the run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
-  given proofs, the tests of their namespaces. The process tests it reaches run at the judge,
-  before a merge (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused
-  :ms ...}) with :results {test :pass|:fail|:error}."
+  given proofs, the tests of their namespaces. The process tests it reaches, a proof among them, run
+  at the judge, before a merge (:deferred, and :why each: the process it reaches through which
+  calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
+  :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
+  :deferred or :none when it has no result), printed as its verdict (prove-summary: the schema
+  :seon.test/proved); the whole run is the value under the eval's handle. What it measured is also
+  what (my.task/status) shows next, each proof's status and a red one's assertions, as a turn's
+  observation of the same run would."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
    (let [test-run (agent/prove! :judge (into #{} (map (comp symbol namespace)) proofs))]
-     (cond-> test-run (not (contract/error? test-run)) (assoc :results (proofs/results test-run))))))
+     (if (contract/error? test-run)
+       test-run
+       (let [results (proofs/results test-run)
+             task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
+             deferred (set (:deferred test-run))]
+         ;; the observation my.task/status renders (seon.turn/input: the turn's observed input), updated
+         ;; by what this run measured, whichever call measured it: a proof's status, and the done rule's
+         ;; reason about a proof measured now (unknown or red) replaced by what it is now
+         (when (get-in @agent/state [:turn :observed :input])
+           (swap! agent/state update-in [:turn :observed :input]
+                  (fn [in] (-> in (update :results merge results)
+                               (assoc :reds (proofs/red-reports test-run (set (keys results))))
+                               (update :reasons (fn [rs] (-> (vec (remove #(and (#{:proof-unknown :proof-red} (:reason %)) (contains? results (:symbol %))) rs))
+                                                             (into (for [p (sort-by str task-proofs) :when (#{:fail :error} (results p))]
+                                                                     {:reason :proof-red :symbol p})))))))))
+         (do
+           (with-meta (assoc test-run :results results
+                             :proofs (into (sorted-map-by #(compare (str %1) (str %2)))
+                                           (for [p (into (set proofs) task-proofs)]
+                                             [p (or (results p) (when (deferred p) :deferred) :none)])))
+             {:seon.render/schema :seon.test/proved})))))))
+
+(defn prove-summary
+  "A prove's run r as the printer shows it (seon.render/summarized, the schema :seon.test/proved):
+  its verdict, each proof's status, each red test with its first failing assertion, each test whose
+  child died (not counted: a death is no verdict), and what ran, was left to the judge and was
+  reused; the lists behind it (:results :selected :deferred :why :reports) are r itself, the value
+  under the eval's handle. A part of the run (a select-keys of it keeps its metadata) shows what it
+  holds. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6, 2026-10-27)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r]
+  (let [died (into (sorted-set-by #(compare (str %1) (str %2))) (keep #(when (:exit %) (proofs/test-symbol (:var %)))) (:reports r))
+        red (into (sorted-map-by #(compare (str %1) (str %2)))
+                  (when (:reports r)
+                    (for [[t fs] (proofs/failures r) :when (not (died t))] [t (select-keys (first fs) [:message :expected :actual])])))]
+    (cond-> (array-map)
+      (:reports r) (assoc :verdict (cond (seq red) :red (seq died) :died :else :green)
+                          :counts (str "ran " (:ran r 0) ", deferred " (count (:deferred r)) ", reused " (:reused r 0)))
+      (not (:reports r)) (into (select-keys r [:ran :reused :deferred :results]))
+      (seq (:proofs r)) (assoc :proofs (:proofs r))
+      (seq red) (assoc :red red)
+      (seq died) (assoc :died (into (sorted-map-by #(compare (str %1) (str %2))) (for [t died] [t "died, not counted"])))
+      true (assoc :rest "the whole run is this value (its handle): :results :selected :deferred :why :reports"))))
+
+(defn process-test?
+  "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
+  seon.program/reach-index's :process?), so it runs at the judge's merge gate and never in this
+  agent's fork; with why ({:uses :through}: the process var it reaches and the calls to it,
+  seon.program/process-path), or nil when it does not."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :map]]}
+  [t]
+  (let [plan (agent/test-plan (agent/db) (:base @agent/state) #{t})]
+    (when (contains? (:process plan) t)
+      (program/process-path (:graph plan) t))))
 
 (defn grep
   "The program vars and tests whose recorded definition holds the words of s, best first: the text half of
