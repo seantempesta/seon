@@ -495,6 +495,39 @@
     (is (str/includes? task "What x does.") "the cited section's text, not only its address")
     (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
 
+(deftest a-cited-part-shows-its-source-beside-its-tests
+  ;; the second context audit (F1, F2): the cited part printed one map at one budget, so a long source
+  ;; crowded its tests out; and a var whose form was also another cited var's caller printed its source
+  ;; blank, with no cut (ctx holds an entity whole at its first path, {:db/id e} at the others). Its
+  ;; source and the rest are each a call of the printer under its own budget, the source read by id
+  (let [db (d/db-with (seeded 3) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
+                                  {:var/name 'app.x/f1 :var/form "f1"}])
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
+        calls (fn [h] (filterv #(and (vector? %) (= #'seon.render/html (first %))) h))]
+    (is (= "(defn f1 [] (f0 1))" (:seon.print/code (nth (first (calls (part "app.x_2Ff1"))) 2)))
+        (str "the source of a form ctx holds at another path (f1's form is f0's caller): " (pr-str (part "app.x_2Ff1"))))
+    (is (= 2 (count (calls (part "app.x_2Ff0")))) "the source and the tests, each its own call")
+    (is (= "(defn f0 [x] x)" (:seon.print/code (nth (first (calls (part "app.x_2Ff0"))) 2))) "the source first")
+    (is (contains? (nth (second (calls (part "app.x_2Ff0"))) 2) :tests) "then the tests, under their own budget")
+    (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
+
+(deftest a-component-is-styled-by-its-renders-name
+  ;; the owner's styling ruling (DECISIONS, compact hiccup): a component's root element carries one
+  ;; class, its render's name; the page's html adds the Tailwind classes its render's var states
+  ;; (:seon.render/style), and what the model reads holds the name only
+  (let [db (seeded 3)
+        as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (reset! seon.agent/state nil)))
+        hiccup (into {} (as seon.repl/render-ctx-hiccup))
+        units (:units (as seon.repl/render-ctx))
+        task-id (some #(when (str/starts-with? % "task-data-") %) (keys hiccup))
+        style (:seon.render/style (meta #'seon.render.ui/task-data))]
+    (is (string? style) "the render's var states its style")
+    (is (= "task-data" (:class (second (hiccup task-id)))) "its root's one class is its render's name")
+    (is (not (str/includes? (pr-str hiccup) style)) "the model reads no style")
+    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task-data " (first (str/split style #" "))))
+        "the page's html has the name, then its var's classes")))
+
 (deftest a-cited-vars-tests-are-shown-past-its-callers-window
   ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
   ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are
@@ -552,7 +585,12 @@
                                 (finally (reset! seon.agent/state nil)))
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
-          (is (= (map :html shown) (map seon.web.html/html (vals page))) "each component's hiccup is the html the page shows, byte for byte")
+          ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
+          (let [styles (keep #(some-> (requiring-resolve (symbol "seon.render.ui" %)) meta :seon.render/style) (map #(:class (second %)) (vals page)))
+                ;; a style as the html attribute holds it, escaped
+                unstyled (fn [h] (reduce #(str/replace %1 (str " " (-> %2 (str/replace "&" "&amp;") (str/replace ">" "&gt;"))) "") h styles))]
+            (is (= (map (comp unstyled :html) shown) (map (comp unstyled seon.web.html/html) (vals page)))
+                "each component's hiccup is the html the page shows, byte for byte, but for its render's style"))
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as hiccup, exactly as its render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [{:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k] :seon.eval/record rec}]))
