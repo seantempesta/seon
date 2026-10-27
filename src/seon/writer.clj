@@ -230,7 +230,7 @@
                                   :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
                                   :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
-                                  :caused (vec (problems/caused base head))
+                                  :caused (vec (problems/caused base head (:ours r)))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))
       ;; root's read of a branch (or main): its committed value from the store; :base is the

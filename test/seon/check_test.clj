@@ -283,6 +283,39 @@
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+(deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
+  ;; task seon.fx/the-tree-id-is-what-is-read: notes/ is no input (every merge appends its log line
+  ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
+  (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-tree-" (random-uuid))
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
+        write! (fn [f] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) (str f (random-uuid))))
+        commit! (fn [f] (write! f) (git "add" "-A") (git "commit" "-qm" f))]
+    (try
+      (.mkdirs (java.io.File. dir))
+      (git "init" "-q" "-b" "main")
+      (commit! "src/a.clj")
+      (let [t0 (seon.fx/tree-id dir)]
+        (write! "notes/merge-log.md")
+        (is (= t0 (seon.fx/tree-id dir)) "an untracked note")
+        (commit! "notes/merge-log.md")
+        (is (= t0 (seon.fx/tree-id dir)) "a committed note")
+        (commit! "docs/x.md")
+        (is (not= t0 (seon.fx/tree-id dir)) "a doc is in the tree")
+        (write! "src/a.clj")
+        (is (not= (seon.fx/tree-id dir) (do (commit! "src/a.clj") (seon.fx/tree-id dir))) "and so is a source file")
+        (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it")
+        (testing "bin/tree reads the same exclusions from the shipped config (its sed against cfg/value)"
+          (let [me (System/getProperty "user.dir")]
+            (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/resources/seon/config")))
+            (clojure.java.shell/sh "cp" (str me "/bin/tree") (str dir "/bin/tree"))
+            (clojure.java.shell/sh "cp" (str me "/resources/seon/config/default.edn") (str dir "/resources/seon/config/default.edn"))
+            (git "add" "-A") (git "commit" "-qm" "bin and config")
+            (let [same (fn [] (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))]
+              (is (same) "agree")
+              (write! "notes/more.md")
+              (is (same) "and agree with a note written")))))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
 (deftest bin-tree-names-the-tree-tree-id-names
   ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree

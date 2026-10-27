@@ -47,7 +47,8 @@
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed
-  and removed and the schemas it registered or changed, each sorted (seon.program/divergence
-  since its merge base); {} when nothing. Anything listed that the task does not need, put back."
+  and removed and the schemas it registered or changed, each sorted (seon.merge/divergence of
+  the turn's one diff since its merge base, seon.agent/branch-changes); {} when nothing.
+  Anything listed that the task does not need, put back."
   {:malli/schema [:=> [:cat] :map]}
-  [] (program/divergence (:base @agent/state) (agent/db)))
+  [] (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))

@@ -214,6 +214,29 @@
     (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
     (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
 
+(deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
+  ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
+  ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
+  ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
+  ;; edge there; quoted in src it stays data (schema-forms' renders, tree-readers)
+  (let [srcs {"src/app/pt_hq.clj" "(ns app.pt-hq)\n(defn f [x] x)\n(defn g [x] x)\n(defn run-by-name [sym] (@(requiring-resolve sym) 1))\n(def names ['app.pt-hq/g])\n"
+              "test/app/pt_hq_test.clj" "(ns app.pt-hq-test (:require [clojure.test :refer [deftest is]] [app.pt-hq]))\n(deftest by-name (is (= 1 (app.pt-hq/run-by-name 'app.pt-hq/f))))\n(deftest other (is (= 1 (app.pt-hq/run-by-name (first app.pt-hq/names)))))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        g (program/reach-graph db nil)]
+    (is (some #{'app.pt-hq-test/by-name} (program/tests-reaching g 'app.pt-hq/f)) "the test that quotes f reaches it")
+    (is (not (some #{'app.pt-hq-test/other} (program/tests-reaching g 'app.pt-hq/g))) "a name src quotes as data is no edge")
+    (let [g0 (program/reach-graph (d/db-with db (source/import-tx db (select-keys srcs ["src/app/pt_hq.clj"]))) nil)
+          f2 (record db 'app.pt-hq "(defn f [x] (identity x))")]
+      (is (= (program/graph-index (program/reach-graph f2 nil) {:env "e" :tree "t" :config {}} nil)
+             (program/graph-index (program/reach-update (program/reach-update g0 db) f2) {:env "e" :tree "t" :config {}} nil))
+          "an update agrees with a rebuild when a namespace gains its first test and when a quoted var changes")
+      (is (not= ((program/reach-digests db {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name)
+                ((program/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
+          "the quoted var changed: the test's digest moved"))
+    (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
+              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/program-store)) nil) 'seon.program/reach-update))
+        "Seon's own cost proof reaches the function it names")))
+
 (deftest load-order-reads-no-quoted-name
   ;; task seon.program/load-dependencies-leave-quoted-names-out: a form recorded at a REPL that
   ;; quotes a later var (an error's data naming it) is not ordered after it
@@ -503,7 +526,9 @@
     (is (= (before 'app.pt-res-test/plain-test) (changed 'app.pt-res-test/plain-test) (defined 'app.pt-res-test/plain-test))
         "a test resolving nothing kept its digest")
     (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")
-    (is (= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name passed to no resolver is data: no reference")))
+    ;; root, 2026-10-27: a name quoted in a test's namespace is one the test hands over by name
+    ;; (seon.program-test/a-name-a-test-hands-over-quoted-is-what-it-reaches): a rerun, never a stale green
+    (is (not= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name a test's namespace quotes is what it reaches")))
 
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
@@ -523,49 +548,6 @@
     (is (not= (before 'app.pt-sc-test/h-test) (after-base 'app.pt-sc-test/h-test)) "and a schema that schema names, on")
     (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
         "a test not reaching h kept its digest")))
-
-(deftest divergence-names-each-change-a-merge-carries
-  ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
-  ;; carry back to main: what it added, redefined and removed, and the schemas it registered
-  (let [base (d/db-with (ts/test-db)
-                        [{:db/id "a" :var/name 'app/a :var/form "fa"} {:db/id "fa" :form/id "a1" :form/src "(def a 1)"}
-                         {:db/id "b" :var/name 'app/b :var/form "fb"} {:db/id "fb" :form/id "b1" :form/src "(def b 1)"}
-                         {:db/id "k" :schema/key :app/k :schema/form ":int"}])
-        e (fn [db sym] (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db sym))
-        b-form (:db/id (:var/form (d/entity base (e base 'app/b))))
-        branch (d/db-with base [{:db/id (e base 'app/a) :var/form "fa2"} {:db/id "fa2" :form/id "a2" :form/src "(def a 2)"}
-                                [:db/retract (e base 'app/b) :var/form b-form]
-                                {:db/id "c" :var/name 'app/c :var/form "fc"} {:db/id "fc" :form/id "c1" :form/src "(def c 1)"}
-                                {:schema/key :app/k :schema/form ":string"} {:schema/key :app/n :schema/form ":int"}])]
-    (is (= {:added ['app/c] :changed ['app/a] :removed ['app/b] :schemas [:app/k :app/n]} (program/divergence base branch)))
-    (is (= #{'app/a 'app/b 'app/c} (program/changed-vars base branch)) "the changed vars are its vars")
-    (is (= {} (program/divergence base base)) "an unchanged branch carries nothing")))
-
-(deftest a-branch-that-merged-main-carries-only-its-own-changes
-  ;; root, 2026-10-22: entity ids are a branch's own, and a merge applies main's forms by
-  ;; content under the branch's ids; against its merge base (main's head once merged), the
-  ;; branch carries only what it changed itself, never main's changes
-  (let [base (d/db-with (ts/test-db) [{:db/id "f" :var/name 'app/f :var/form "ff"} {:db/id "ff" :form/id "(def f 1)" :form/src "(def f 1)"}
-                                      {:schema/key :app/k :schema/form ":int"}])
-        e (fn [db sym] (d/q '[:find ?e . :in $ ?n :where [?e :var/name ?n]] db sym))
-        ;; main redefines f, adds g, changes a schema
-        main (d/db-with base [{:db/id (e base 'app/f) :var/form "f2"} {:db/id "f2" :form/id "(def f 2)" :form/src "(def f 2)"}
-                              {:db/id "g" :var/name 'app/g :var/form "g1"} {:db/id "g1" :form/id "(def g 1)" :form/src "(def g 1)"}
-                              {:schema/key :app/k :schema/form ":string"}])
-        ;; the branch first writes entities of its own; identities still take their content ids
-        own (d/db-with base (vec (for [i (range 5)] {:db/id (str "x" i) :form/id (str "(comment " i ")") :form/src "x"})))
-        ;; it adds h, then merges main: main's forms by content, at the same content ids
-        merged (d/db-with own [{:db/id "h" :var/name 'app/h :var/form "h1"} {:db/id "h1" :form/id "(def h 1)" :form/src "(def h 1)"}
-                               {:db/id (e own 'app/f) :var/form "bf2"} {:db/id "bf2" :form/id "(def f 2)" :form/src "(def f 2)"}
-                               {:db/id "bg" :var/name 'app/g :var/form "bg1"} {:db/id "bg1" :form/id "(def g 1)" :form/src "(def g 1)"}
-                               {:schema/key :app/k :schema/form ":string"}])
-        form-e (fn [db v] (:db/id (:var/form (d/entity db (e db v)))))]
-    (is (= (form-e main 'app/f) (form-e merged 'app/f)) "f's form is one entity on both sides")
-    (is (= (e main 'app/g) (e merged 'app/g)) "and so is g")
-    (is (= {:added ['app/h]} (program/divergence main merged)) "only h, the branch's own")
-    (is (= #{'app/h} (program/changed-vars main merged)) "and the tests it reaches are h's")))
-
-;; ---- digests are the tree's, never the process's (root 2026-10-22: every bin/test --reach run reused nothing)
 
 (deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
   ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
@@ -588,8 +570,12 @@
         a (program/reach-digests (runner/program-db here (ts/program-store)) in)
         b (program/reach-digests (runner/program-db here (ts/program-store)) in)
         c (program/reach-digests (runner/program-db copy (ts/program-store)) in)
-        db (ts/test-db)
-        r (program/reach-digests (d/db-with db (source/import-tx db (:value (fx/read-source {:req {:root here :dirs dirs}})))) in)
+        ;; root imports into its own store, which holds no example program (the test store's seed
+        ;; does: names a test quotes would reach it)
+        {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
+        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
+               (program/reach-digests @conn in)
+               (finally (d/release conn true)))
         dir (scratch-dir "same-tree")]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
@@ -629,22 +615,20 @@
                       (:defines r))))
         "every form reading a computed config key is a config-key-reader")))
 
-(deftest only-a-test-reading-the-tree-takes-its-digest
-  ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
-  ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
-  ;; rerun on every edit (327 of 368 did); a reader of src, test, docs or the task files still does
+(deftest no-test-takes-the-tree-in-its-digest
+  ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
+  ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
+  ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
+  ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
+  ;; the tree when what it reaches reads it.
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
-        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
-        moved (set (for [[t d] a :when (not= d (b t))] t))]
-    (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
-    (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    ;; a-result-recorded-in-one-checkout-is-reused-in-another reads only checkouts it makes (git, not
-    ;; the tree's files): it took the tree only while seon.program/tree-readers' own quoted list
-    ;; counted as reading, which put every test reaching the reach walk under the tree
-    (is (not (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another)) "a test reading only the checkouts it makes: the tree is no input")
-    (is (moved 'seon.main-test/a-bound-is-a-config-key) "a test reading a tree file itself (slurp of docs/config.md): the tree is its input")
-    (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
+        in #(hash-map :env "e" :tree % :config {})
+        a (program/reach-digests db (in "t1"))
+        b (program/reach-digests db (in "t2"))
+        step #(program/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
+    (is (< 300 (count a)) "the whole suite")
+    (is (= a b) "a new tree moves no test's digest, one running the binary (seon.root-test's) included")
+    (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
 
 (deftest a-test-naming-another-test-does-not-reach-it
   ;; seon.agent-test's tests quote the proofs they ask for: data, never a call, so a change the
@@ -675,17 +659,6 @@
     (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
     (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
-
-(deftest a-test-running-the-binary-takes-the-tree
-  ;; seon.root-test runs target/seon (seon.test-store/binary-sh): what it proves is the whole
-  ;; program the binary is built from, so any change to the tree moves its digest
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
-        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
-        runs-binary '[seon.root-test/root-threads-are-what-root-declares seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
-                      seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote seon.agent-test/an-agent-holds-mains-tests-and-runs-them]]
-    (is (every? #(not= (a %) (b %)) runs-binary) "every test running the binary moves with the tree")
-    (is (= (a 'seon.reader-test/prose-without-a-fence-is-a-comment) (b 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that runs no binary does not")))
 
 (deftest the-config-in-force-is-an-input
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
