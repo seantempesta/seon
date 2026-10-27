@@ -238,7 +238,8 @@ under load, 2026-10-23 and 2026-10-26). `bin/check`'s `lmdb-sem` step (`target/l
 lock held, stays untouched while the store is opened, written and closed; a set gone under a
 holder; 16 processes opening one store and adding under its writer lock (no open fails, no
 addition lost); one process opening and writing 50 stores at once; and a process killed inside a
-write txn, whose set the next open takes and the next close removes.
+write txn, whose set is left with its writer lock given back, then taken by the next open and
+removed by its close. Each case counts the sets naming its store after the last close: none.
 
 A process holds a SEM_UNDO entry of its `kern.sysv.semume` (10 on macOS) only while it holds a
 lock (a writer's, a reader registering), as upstream does; an open env holds none. The fork before

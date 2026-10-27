@@ -6,13 +6,15 @@
  *    and closed by another process; the foreign set is still there, its identity and its held lock
  *    untouched (two envs whose keys meet never share a set), and a new process opens the env;
  * 2. an env whose recorded set is gone while a process holds it (what a process that waited on
- *    the lock file while the last user closed finds): a new process opens it and writes;
+ *    the lock file while the last user closed finds): a new process opens it and writes, and after
+ *    the last close no set names the env;
  * 3. 16 processes open one env at once 200 times each, adding one to a count under the writer
- *    lock: no open fails and no addition is lost;
+ *    lock: no open fails, no addition is lost, and no set names the env after;
  * 4. one process opens and writes 50 envs at once: none fails (the fork before this one held an
  *    undo entry for each env's life, and kern.sysv.semume, 10, stopped it at 5);
- * 5. a process that opened an env and was killed inside a write txn leaves its set; the next
- *    process opens the env, writes and closes it, and no set names the env after.
+ * 5. a process that opened an env and was killed inside a write txn leaves its set, its writer
+ *    lock given back by the kernel; the next process opens the env, writes and closes it, and no
+ *    set names the env after.
  * Prints LMDB-SEM OK and exits 0 only when every case holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -50,6 +52,17 @@ static int find_set(const char *l) {
     if (s >= 0 && semctl(s, 2, GETVAL) == id[0] && semctl(s, 3, GETVAL) == id[1]) return s;
   }
   return -1;
+}
+
+/* How many sets name lock file L, from its key on: one while its env is open, none after its
+ * last close */
+static int sets_naming(const char *l) {
+  int id[2], i, n = 0; key_t k; ident(l, id, &k);
+  for (i = 0; i < 64; i++, k = (key_t)(((k + 2) & 0x7fffffff) | 1)) {
+    int s = semget(k, 0, 0);
+    if (s >= 0 && semctl(s, 2, GETVAL) == id[0] && semctl(s, 3, GETVAL) == id[1]) n++;
+  }
+  return n;
 }
 
 union semun_ { int val; struct semid_ds *buf; unsigned short *array; };
@@ -115,7 +128,9 @@ static int removed(const char *base) {
   printf("  holder's set %d removed: %s\n", s, s >= 0 && !semctl(s, 0, IPC_RMID) ? "yes" : "no");
   int ok = s >= 0 && child_open_put(d, "joined", "a new process opens it and writes");
   mdb_env_close(held);
-  return ok;
+  int n = sets_naming(l);
+  printf("  sets naming the env after its last close: %d\n", n);
+  return ok && n == 0;
 }
 
 /* add one to the count under key "n", in a write txn (under the writer lock) */
@@ -157,8 +172,10 @@ static int race(const char *base, int n, int loops) {
   while (wait(NULL) > 0) ;
   MDB_env *e; unsigned got = 0;
   if (!open_env(d, &e)) { got = count(e); mdb_env_close(e); }
-  printf("3. %d processes open one env %d times each and add one: %d of %d failed, the count %u\n", n, loops, bad, n * loops, got);
-  return bad == 0 && got == (unsigned)(n * loops);
+  char l[600]; snprintf(l, sizeof l, "%s/lock.mdb", d);
+  int left = sets_naming(l);
+  printf("3. %d processes open one env %d times each and add one: %d of %d failed, the count %u, sets naming it after %d\n", n, loops, bad, n * loops, got, left);
+  return bad == 0 && got == (unsigned)(n * loops) && left == 0;
 }
 
 static int many(const char *base) {
@@ -187,12 +204,13 @@ static int crashed(const char *base) {
     kill(getpid(), SIGKILL);
   }
   int st; waitpid(p, &st, 0);
-  int left = find_set(l);
-  printf("  killed: %s; its set %s\n", WIFSIGNALED(st) ? "yes" : "no", left >= 0 ? "left" : "gone");
-  int ok = WIFSIGNALED(st) && child_open_put(d, "after", "the next process opens, writes and closes");
-  int after = find_set(l);
-  printf("  a set names the env after: %s\n", after >= 0 ? "yes" : "no");
-  return ok && after < 0;
+  int left = find_set(l), wfree = left >= 0 && semctl(left, 1, GETVAL) == 1;
+  printf("  killed: %s; its set %s, its writer lock %s\n", WIFSIGNALED(st) ? "yes" : "no",
+         left >= 0 ? "left" : "gone", wfree ? "given back (SEM_UNDO)" : "not free");
+  int ok = WIFSIGNALED(st) && left >= 0 && wfree && child_open_put(d, "after", "the next process opens, writes and closes");
+  int n = sets_naming(l);
+  printf("  sets naming the env after: %d\n", n);
+  return ok && n == 0;
 }
 
 int main(int argc, char **argv) {
