@@ -197,6 +197,14 @@
     (cond (and v (green? v)) :pass
           (or v (.isFile (java.io.File. ^String (result-path dir dg false)))) :fail)))
 
+(defn failures-at
+  "The failing assertions the red at digest dg in dir recorded (its :failures), or nil when dir
+  holds no red there: what a run's statuses read from the files leave out."
+  {:malli/schema [:=> [:cat :string :string] [:maybe [:vector :map]]]}
+  [dir dg]
+  (let [f (java.io.File. ^String (result-path dir dg false))]
+    (when (.isFile f) (not-empty (vec (:failures (edn/read-string (slurp f))))))))
+
 (defn stored-results
   "{digest result} of the results db holds at digests (:seon.proof/ facts, which the test service
   records, seon.prove/result-tx): one AVET seek per digest, and one seek of its status's history

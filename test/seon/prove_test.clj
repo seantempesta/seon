@@ -125,7 +125,8 @@
 ;; ---- the daily full run (the cron proc's request, :full mode) -----------------------------------
 
 (def ^:private full-answer
-  {:value {:results '{a.b-test/t :pass a.c-test/u :fail} :digests '{a.b-test/t "dg-t" a.c-test/u "dg-u"} :ms 9 :log "/x.log"}})
+  {:value {:results '{a.b-test/t :pass a.c-test/u :fail} :digests '{a.b-test/t "dg-t" a.c-test/u "dg-u"} :ms 9 :log "/x.log"
+           :failures '{a.c-test/u [{:type :fail :message "boom" :expected "1" :actual "2"}]}}})
 
 (deftest the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
   ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
@@ -165,7 +166,10 @@
           (testing "and the facts make the red test a :test-red row"
             (let [db (d/db-with (ts/test-db) facts)
                   rows (get-in (problems/report db) [:classes :test-red :rows])]
-              (is (= ['a.c-test/u] (mapv :test rows))))))))
+              (is (= ['a.c-test/u] (mapv :test rows)))
+              (is (= [{:type :fail :message "boom" :expected "1" :actual "2"}]
+                     (:seon.proof/failures (first (filter #(= "a.c-test/u" (:seon.proof/latest %)) facts))))
+                  "with why it is red: the failures its run recorded"))))))
     (testing "an effect that failed is a platform problem, and the lane is free for the next day"
       (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/full-run-tx "bin/worktree --at exited 1" {})
             [st5 o5] (feed st [(answer-of fx err)])]

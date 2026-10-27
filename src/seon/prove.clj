@@ -75,14 +75,15 @@
 
 (defn full-run-tx
   "The facts of the daily full run (:full mode) on main: result-tx's, from the effect's answer
-  {:results {test status} :digests {test digest} :ms}. A run records a status for every test the
-  plan named, so a test that was red stays visible as :test-red until a later run is green."
+  {:results {test status} :digests {test digest} :failures {test [failure ...]} :ms}. A run records
+  a status for every test the plan named, with a red's failures, so a test that was red stays
+  visible as :test-red, saying why, until a later run is green."
   {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
-  [run {:keys [results digests ms]}]
+  [run {:keys [results digests failures ms]}]
   (let [counts (frequencies (vals results))]
     (proof-facts (update run :t #(or % 0))
                  {:pass (:pass counts 0) :fail (:fail counts 0) :error (:error counts 0) :ms (or ms 0) :digests digests}
-                 results {} #{})))
+                 results (or failures {}) #{})))
 
 ;; ---- admission ---------------------------------------------------------------------------
 

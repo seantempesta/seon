@@ -546,7 +546,8 @@
   the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
   :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
   :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
-  also holds :digests {test digest}; repo defaults to this checkout and branch to git's main
+  also holds :digests {test digest} and :failures {test [failure ...]} of its reds (their red
+  verdicts' :failures, which the run's shard logs, removed with the worktree, otherwise held); repo defaults to this checkout and branch to git's main
   (:seon.config.source/main)."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch files tests all?]} :req}]
@@ -588,8 +589,14 @@
                   plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)]
               (spit log (str (:out r) (:err r)))
-              {:value (cond-> {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}
-                        all? (assoc :digests (select-keys (:digests plan) tests)))})))
+              (let [rs (test-results plan results tests)]
+                {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
+                          all? (assoc :digests (select-keys (:digests plan) tests)
+                                      ;; why each red is red: its run's shard logs go with the worktree
+                                      :failures (into {} (for [[t s] rs :when (not= :pass s)
+                                                               :let [fs (some->> (get-in plan [:digests t]) (proofs/failures-at results))]
+                                                               :when fs]
+                                                           [t fs]))))}))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
