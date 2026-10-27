@@ -1,0 +1,211 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.ctx-test/a-lookups-patch-costs-its-change
+ended seon.ctx-test/a-lookups-patch-costs-its-change
+started seon.ctx-test/ctx-is-the-record-after-every-transaction
+ended seon.ctx-test/ctx-is-the-record-after-every-transaction
+started seon.ctx-test/a-swap-costs-what-it-changed
+ended seon.ctx-test/a-swap-costs-what-it-changed
+RED seon.ctx-test/a-swap-costs-what-it-changed {:pass 0, :fail 1, :error 0}
+started seon.ctx-test/the-patch-costs-the-change-not-the-session
+ended seon.ctx-test/the-patch-costs-the-change-not-the-session
+started seon.ctx-test/a-turns-diff-costs-its-changed-paths-not-the-record
+ended seon.ctx-test/a-turns-diff-costs-its-changed-paths-not-the-record
+started seon.ctx-test/a-write-costs-its-change-not-the-record
+ended seon.ctx-test/a-write-costs-its-change-not-the-record
+started seon.ctx-test/a-window-moves-by-its-change
+ended seon.ctx-test/a-window-moves-by-its-change
+started seon.ctx-test/changes-answers-what-every-pair-walked-answers
+ended seon.ctx-test/changes-answers-what-every-pair-walked-answers
+started seon.ctx-test/a-turns-diff-is-what-changed-between-its-ts
+ended seon.ctx-test/a-turns-diff-is-what-changed-between-its-ts
+started seon.ctx-test/a-callers-window-costs-its-forms
+ended seon.ctx-test/a-callers-window-costs-its-forms
+started seon.ctx-test/a-swap-writes-the-record
+ended seon.ctx-test/a-swap-writes-the-record
+started seon.ctx-test/any-entitys-record-follows-mains-commits
+ended seon.ctx-test/any-entitys-record-follows-mains-commits
+started seon.ctx-test/an-agent-adds-a-datum-and-its-render
+ended seon.ctx-test/an-agent-adds-a-datum-and-its-render
+started seon.ctx-test/a-cited-vars-tests-are-shown-past-its-callers-window
+ended seon.ctx-test/a-cited-vars-tests-are-shown-past-its-callers-window
+started seon.ctx-test/the-agents-state-keeps-ctx
+ended seon.ctx-test/the-agents-state-keeps-ctx
+started seon.ctx-test/a-component-is-styled-by-its-renders-name
+ended seon.ctx-test/a-component-is-styled-by-its-renders-name
+started seon.ctx-test/a-fresh-build-shares-what-it-did-not-change
+ended seon.ctx-test/a-fresh-build-shares-what-it-did-not-change
+started seon.ctx-test/a-ref-asserted-back-leaves-its-member-as-it-was
+ended seon.ctx-test/a-ref-asserted-back-leaves-its-member-as-it-was
+started seon.ctx-test/a-symbol-joins-by-name
+ended seon.ctx-test/a-symbol-joins-by-name
+started seon.ctx-test/a-tasks-record-holds-what-its-work-needs
+ended seon.ctx-test/a-tasks-record-holds-what-its-work-needs
+started seon.ctx-test/a-change-names-its-eval
+ended seon.ctx-test/a-change-names-its-eval
+started seon.ctx-test/a-redefined-vars-record-holds-its-new-form
+ended seon.ctx-test/a-redefined-vars-record-holds-its-new-form
+
+FAIL in (a-swap-costs-what-it-changed) (:)
+seon.ctx-test/one-swap, N = evals in the session's record. The work: the task's plan changed: edits finds the one attribute (the evals unit skipped by one identical?), one d/with, the datom applied to the agent's db, the patch of it (the task rebuilt where it is held), the record installed, and one-swap itself; measured 39 calls, 117k-122k ticks and 400-409 KB at 100, 300, 1,000 and 3,000 evals (constant).
+n: calls measured/estimate (x)
+100: 40/39 (1.03x)
+OVER ESTIMATE
+OVER: calls at n=100 is 1.03x its estimate (allowed 1.0x).
+3000 left out past :seon.config.proofs/cost-max-n 1000; the full run measures it
+expected: (within-estimate seon.ctx-test/one-swap :constant)
+  actual: {:rows [{:n 100, :measured {:ticks 111178.0, :ns 620042.0, :bytes 392224.0, :calls 40.0}, :expected {:calls 39.0}}], :verdict {:ok? false, :over [{:dim :calls, :n 100, :ratio 1.0256410256410255}], :steeper [], :under [], :unmeasured []}, :left-out [3000]}
+started seon.proofs-test/a-process-plans-on-more-scratch-stores-than-its-undo-entries
+ended seon.proofs-test/a-process-plans-on-more-scratch-stores-than-its-undo-entries
+started seon.proofs-test/a-plan-reads-the-kept-program-db-of-its-tree
+ended seon.proofs-test/a-plan-reads-the-kept-program-db-of-its-tree
+started seon.proofs-test/a-kept-tree-costs-its-lookup-not-its-program
+ended seon.proofs-test/a-kept-tree-costs-its-lookup-not-its-program
+started seon.proofs-test/a-tree-changed-since-the-plan-stores-nothing
+ended seon.proofs-test/a-tree-changed-since-the-plan-stores-nothing
+started seon.proofs-test/a-run-that-names-nothing-leaves-out-what-reaches-a-process
+ended seon.proofs-test/a-run-that-names-nothing-leaves-out-what-reaches-a-process
+started seon.proofs-test/a-failed-import-leaves-no-branch
+ended seon.proofs-test/a-failed-import-leaves-no-branch
+started seon.proofs-test/a-macro-schema-or-config-change-widens-the-selection
+ended seon.proofs-test/a-macro-schema-or-config-change-widens-the-selection
+started seon.proofs-test/a-check-step-is-keyed-by-what-its-function-reaches
+ended seon.proofs-test/a-check-step-is-keyed-by-what-its-function-reaches
+started seon.proofs-test/a-one-defn-change-runs-only-what-reaches-it
+ended seon.proofs-test/a-one-defn-change-runs-only-what-reaches-it
+started seon.proofs-test/an-unchanged-tree-runs-nothing-and-reuses-everything
+ended seon.proofs-test/an-unchanged-tree-runs-nothing-and-reuses-everything
+started seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed
+ended seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed
+RED seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed {:pass 0, :fail 1, :error 0}
+
+FAIL in (a-commit-is-embedded-for-what-it-changed) (:)
+seon.vector/vectors-proc, N = texts in the store, one written by the commit. The work: the commit's text datoms (datoms-diff skips every subtree the two dbs share: log n) and, for each, one seek of its vector's facts: not a scan of every text (log).
+n: ticks measured/estimate (x)  bytes measured/estimate (x)  calls measured/estimate (x)
+100: 127.2k/1.53M (0.08x)  244.6k/8.27M (0.03x)  8/33 (0.24x)
+300: 161.8k/1.54M (0.11x)  274.1k/8.33M (0.03x)  8/36 (0.22x)
+1000: 177.5k/1.55M (0.11x)  367.5k/8.40M (0.04x)  8/40 (0.20x)
+OVER ESTIMATE
+STEEPER: bytes grew as n^1.19; log allows n^0.91. Something does more passes over the data than the work needs.
+LOOSE: ticks at n=1000 is 0.11x its estimate: tighten the estimate.
+LOOSE: bytes at n=1000 is 0.04x its estimate: tighten the estimate.
+LOOSE: calls at n=1000 is 0.20x its estimate: tighten the estimate.
+expected: (within-estimate seon.vector/vectors-proc :log)
+  actual: {:rows [{:n 100, :measured {:ticks 127247.0, :ns 348000.0, :bytes 244624.0, :calls 8.0}, :expected {:ticks 1533219.2809488736, :bytes 8265754.247590989, :calls 33.28771237954945}} {:n 300, :measured {:ticks 161828.0, :ns 584541.0, :bytes 274096.0, :calls 8.0}, :expected {:ticks 1541144.0934524795, :bytes 8329152.747619836, :calls 36.45763738099176}} {:n 1000, :measured {:ticks 177452.0, :ns 582917.0, :bytes 367472.0, :calls 8.0}, :expected {:ticks 1549828.9214233104, :bytes 8398631.371386483, :calls 39.93156856932417}}], :verdict {:ok? false, :over [], :steeper [{:dim :bytes, :exponent 1.185663956541531, :allowed 0.914619047018715}], :under [{:dim :ticks, :n 1000, :ratio 0.11449779878738751} {:dim :bytes, :n 1000, :ratio 0.04375379555911335} {:dim :calls, :n 1000, :ratio 0.20034274351410478}], :unmeasured []}, :left-out []}
+started seon.task-files-test/a-file-task-merges-itself
+ended seon.task-files-test/a-file-task-merges-itself
+started seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+ended seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+started seon.task-files-test/the-shipped-task-files-load
+ended seon.task-files-test/the-shipped-task-files-load
+started seon.render-test/a-render-reaches-no-process
+ended seon.render-test/a-render-reaches-no-process
+started seon.render-test/one-printer-and-no-cut-before-it
+ended seon.render-test/one-printer-and-no-cut-before-it
+started seon.render-test/the-walk-is-called-only-where-slice-5-says
+ended seon.render-test/the-walk-is-called-only-where-slice-5-says
+started seon.render-test/an-unrelated-change-redraws-none-of-the-merge-views
+ended seon.render-test/an-unrelated-change-redraws-none-of-the-merge-views
+started seon.render-test/the-merge-views-draw-what-the-merge-functions-answer
+ended seon.render-test/the-merge-views-draw-what-the-merge-functions-answer
+RED seon.render-test/the-merge-views-draw-what-the-merge-functions-answer {:pass 0, :fail 0, :error 1}
+started seon.render-test/the-debug-page-grows-with-its-rows-not-its-turns
+ended seon.render-test/the-debug-page-grows-with-its-rows-not-its-turns
+started seon.render-test/a-new-turn-is-one-new-row
+ended seon.render-test/a-new-turn-is-one-new-row
+started seon.render-test/the-debug-page-shows-what-each-turn-sent
+ended seon.render-test/the-debug-page-shows-what-each-turn-sent
+started seon.render-test/a-units-change-rerenders-that-unit
+ended seon.render-test/a-units-change-rerenders-that-unit
+started seon.render-test/a-transaction-touching-no-page-walks-nothing
+ended seon.render-test/a-transaction-touching-no-page-walks-nothing
+started seon.render-test/the-sidebar-is-roots-agents
+ended seon.render-test/the-sidebar-is-roots-agents
+started seon.render-test/a-dead-agents-page-renders-and-never-waits
+ended seon.render-test/a-dead-agents-page-renders-and-never-waits
+started seon.render-test/a-new-member-is-an-append
+ended seon.render-test/a-new-member-is-an-append
+started seon.render-test/an-unchanged-unit-never-re-renders
+ended seon.render-test/an-unchanged-unit-never-re-renders
+started seon.render-test/a-branch-commit-touches-its-page-by-its-datoms-diff
+ended seon.render-test/a-branch-commit-touches-its-page-by-its-datoms-diff
+started seon.render-test/a-new-evaluation-is-one-append
+ended seon.render-test/a-new-evaluation-is-one-append
+started seon.render-test/a-page-is-its-components
+ended seon.render-test/a-page-is-its-components
+started seon.render-test/a-branch-read-anew-renders-its-components-again
+ended seon.render-test/a-branch-read-anew-renders-its-components-again
+started seon.render-test/a-part-returns-its-data-as-a-call-of-the-printer
+ended seon.render-test/a-part-returns-its-data-as-a-call-of-the-printer
+started seon.render-test/a-handle-links-to-its-eval
+ended seon.render-test/a-handle-links-to-its-eval
+started seon.render-test/root-and-an-agent-are-one-chrome
+ended seon.render-test/root-and-an-agent-are-one-chrome
+started seon.render-test/every-view-of-an-agent-shows-one-read-of-its-branch
+ended seon.render-test/every-view-of-an-agent-shows-one-read-of-its-branch
+started seon.render-test/a-view-that-throws-answers-its-page-with-the-error
+ended seon.render-test/a-view-that-throws-answers-its-page-with-the-error
+started seon.render-test/a-page-keeps-what-it-read
+ended seon.render-test/a-page-keeps-what-it-read
+started seon.render-test/the-agent-page-is-its-conversation
+ended seon.render-test/the-agent-page-is-its-conversation
+started seon.render-test/a-change-below-a-unit-moves-its-revision
+ended seon.render-test/a-change-below-a-unit-moves-its-revision
+started seon.render-test/an-agents-run-tile-is-its-ctxs
+ended seon.render-test/an-agents-run-tile-is-its-ctxs
+started seon.render-test/the-status-shows-what-an-outside-read-observed
+ended seon.render-test/the-status-shows-what-an-outside-read-observed
+started seon.render-test/a-dead-agents-eval-opens
+ended seon.render-test/a-dead-agents-eval-opens
+started seon.render-test/an-eval-collapses-to-its-reference
+ended seon.render-test/an-eval-collapses-to-its-reference
+started seon.render-test/a-component-re-runs-on-what-it-read
+ended seon.render-test/a-component-re-runs-on-what-it-read
+started seon.render-test/root-context-is-its-page-printed-at-the-budget
+ended seon.render-test/root-context-is-its-page-printed-at-the-budget
+started seon.render-test/a-collection-keyed-by-id-prints
+ended seon.render-test/a-collection-keyed-by-id-prints
+started seon.render-test/a-cut-opens-its-path-in-the-row
+ended seon.render-test/a-cut-opens-its-path-in-the-row
+started seon.render-test/a-debug-page-of-an-agent-with-no-branch-answers
+ended seon.render-test/a-debug-page-of-an-agent-with-no-branch-answers
+started seon.render-test/a-whole-tasks-page-holds-its-instructions
+ended seon.render-test/a-whole-tasks-page-holds-its-instructions
+started seon.render-test/a-cut-with-its-whole-form-holds-no-copy
+ended seon.render-test/a-cut-with-its-whole-form-holds-no-copy
+started seon.render-test/an-eval-and-a-turn-say-what-they-cost
+ended seon.render-test/an-eval-and-a-turn-say-what-they-cost
+started seon.render-test/an-eval-row-renders-its-value-as-structure
+ended seon.render-test/an-eval-row-renders-its-value-as-structure
+started seon.render-test/render-proc-has-no-beat
+ended seon.render-test/render-proc-has-no-beat
+started seon.render-test/roots-context-is-its-debug-page
+ended seon.render-test/roots-context-is-its-debug-page
+
+ERROR in (the-merge-views-draw-what-the-merge-functions-answer) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.IllegalArgumentException: Unknown class program
+started seon.vector-test/a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+ended seon.vector-test/a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+started seon.vector-test/a-failed-embedding-waits-for-the-next-notice
+ended seon.vector-test/a-failed-embedding-waits-for-the-next-notice
+started seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there
+ended seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there
+started seon.vector-test/more-due-than-one-request-takes-waits-for-the-next
+ended seon.vector-test/more-due-than-one-request-takes-waits-for-the-next
+started seon.vector-test/a-turn-with-nothing-due-asks-nothing
+ended seon.vector-test/a-turn-with-nothing-due-asks-nothing
+started seon.merge-cost-test/a-main-that-only-embedded-costs-nothing
+ended seon.merge-cost-test/a-main-that-only-embedded-costs-nothing
+started seon.merge-cost-test/a-merge-reads-the-data-attributes-from-the-index
+2026-10-27T09:15:59.750Z :info datahike.query.estimate [42 5] :datahike/estimate-heuristic-fallback Index lacks precomputed subtree counts (old database format). Using heuristic estimates for query planning. Consider re-indexing for optimal performance.
+ended seon.merge-cost-test/a-merge-reads-the-data-attributes-from-the-index
+started seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program
+ended seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program
+started seon.merge-cost-test/a-main-that-only-embedded-changes-no-key
+ended seon.merge-cost-test/a-main-that-only-embedded-changes-no-key
+started seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+ended seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+started seon.source-test/a-restart-catches-up-and-a-new-generation-resumes
+jolt fiber dump: 0 live fibers of 156 held, on thread 0
+generation-resumes 32000 ms (bound 30000 ms, load 15.26, /Users/sean/src/seon-next/target/prove/shard-1.log)

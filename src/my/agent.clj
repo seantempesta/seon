@@ -227,7 +227,7 @@
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})
-           plan (agent/test-plan (agent/db) (:base @agent/state) proofs)]
+           plan (agent/test-plan (agent/db) (:base @agent/state) proofs (agent/heard-main))]
        (vec (for [t (filter (:process plan) (:selected plan))] (assoc (program/process-path (:graph plan) t) :test t)))))
 
 (defn pst

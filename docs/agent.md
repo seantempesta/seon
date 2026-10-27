@@ -6,7 +6,7 @@ This is the help page: what an agent reads when it asks, beside the short system
 
 ## Your turn
 
-You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call.
+You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call. (Attached from outside, your tools are the server's: `from-outside`, below.)
 
 - Evaluate a little, read the answer, then take the next step. Each eval call takes ``prose`` first, then ``code``: in the prose, say what you are doing and what you expect to see. The user sees all your prose, rendered as markdown.
 - A reference in your prose is looked up and shown by `(my.task/status)` at your next turn: a var written as ``ns/name`` shows its source and docstring, a task (``ns/task-name``) its plan and proofs, a wiki section (``docs/page.md#section``) its text, as docs/references.md reads them. Name what you want to see.
@@ -14,6 +14,17 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 - A reply with no eval call is a message to the user: your turn ends there, and the run waits for the user's answer. Finishing is an eval, not a reply.
 - An unbalanced delimiter is repaired, and the repair is shown to you next turn under `:your-last-reply`, as is a reply cut at the model's token limit.
 - Every cut in what you read names the form that reads its rest. Your last turn's responses, live: `(my.turn/evals)`.
+
+## From outside
+
+A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
+
+- `seon_attach` with the task (ns/name) starts your agent on the task's branch and answers its id; every other tool names that id.
+- `seon_context` is your turn: it answers what a model is sent now (the system prompt, your page and your conversation), runs your proofs and takes the messages sent to you. The first read shows the page whole, each later one what changed since the read before. Read it after every few evals, not after each.
+- `seon_eval` evaluates Clojure in your agent: the forms in this page, `@ctx` and its `swap!`, your definitions. It is your REPL, one call per eval, answered as an eval is (`:handle :value :out :err :ex`). Pass the agent `root` for root's own REPL.
+- `seon_prove` runs the tests your branch's change reaches, as the judge will; a result already green at its digest is not run again.
+- `seon_message` tells an agent something; `seon_agents` lists the agents and every task with its runs.
+- `seon_done` ends your run: your proofs run, then root judges the run and merges it when the done rule refuses nothing. It answers the verdict, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
 
 ## What you read
 
@@ -35,10 +46,7 @@ The turn's part, last, made again before each request:
 - `:refused`: what keeps you from done beyond your red proofs (the done rule, `seon.reconcile/done-explain`): `:regression` (green on main, red here: your change broke it), `:stray-red` (a red test that is no task's proof: if you wrote it as one, its `:do` registers it, ``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``; marked `:removed`, it is one of main's tests your branch removed, which still judges from main's definition), `:contract-gap` (a function you defined without a ``:malli/schema``), `:open-problem` (a problem your own work made true, such as a citation of a var you deleted: `seon.problems/caused`), `:proof-unknown` (a proof with no result: it never ran), `:unmerged` (a merge entry not resolved), `:no-proofs` (no proof registered yet, a design too: its `:do` registers one), and on a design task `:no-design` (your plan is unchanged since the run began; it shows the form that changes it).
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
-- `:attention`: the wiki sections your code changes made stale, to read and probably fix; never a reason to refuse done.
-- `:merge`: on a task that merges itself, whether it can merge now: `:main-moved`, what main changed since your branch's merge base; `:conflicts`, what merging main would leave unmerged (both sides changed it); `:ready`, true when the done rule refuses nothing and nothing would conflict. Once it is ready, your run ends when merging main brings nothing new, and root merges your branch; main's tests judge it, those you removed included.
-- `:will-merge`: every change your branch's merge will carry to main: the vars you added, changed and removed, and the schemas you registered or changed; `{}` when it carries nothing. Anything listed that the task does not need, put back.
-- `:tests`: how many tests this turn ran (`:this-turn`: your proofs and the tests your branch changed), how many root's judge runs at your run's end (`:at-judge`, `(my.agent/prove)` runs the same), and `:when-asked`: tests your change reaches that start a process of their own (an agent, a fork, a root; a shell call is none). Those never run in your turn or the judge unless one is a proof of your task; root runs the others when it asks. `(my.agent/deferred)` lists them, each with the process var it uses and the calls from the test to it; `(my.agent/prove)` answers the same under `:why`.
+- Beside the task, its views, each drawn when what it reads moves (main's commit or your merge base's), never per turn: on a task that merges itself, `merge` (what main changed since your merge base, `:main-moved`, and which of those you changed too, `:conflicts`: what merging main would leave unmerged; once your proofs pass and nothing conflicts, your run ends when merging main brings nothing new, and root merges your branch), `caused` (what your own work made wrong, which refuses done, and `:attention`: the wiki sections your code changes made stale, to read and probably fix, never a reason to refuse), `without a contract` (the functions you defined with no ``:malli/schema``), `its merge carries` (every var you added, changed and removed and every schema you changed: anything the task does not need, put back). Your tests: `(my.agent/prove)` runs them; `(my.agent/deferred)` lists the process tests root runs when it asks.
 - `:history`: how many earlier records the history budget left out of the conversation. Older records come collapsed before that: a result as its handle and its value in one line (`result/e12 ⇒ [0 1 2 …]`); evaluate the handle to read it whole.
 
 ## The REPL

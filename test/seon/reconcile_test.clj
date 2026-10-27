@@ -6,7 +6,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task]
-            [seon.reconcile :as r]
+            [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
             [seon.program :as program] [seon.writer :as writer] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
@@ -112,6 +112,37 @@
 (deftest held-kills-without-restart
   (let [db (db-of [(decl "x")] :extra (concat (run "x" 1 :running) (task/execution-tx ["demo/x"] :held)))]
     (is (= [{:op :kill :run "demo/x#1" :reason :held}] (actions-for db)))))
+
+(deftest an-outside-run-is-not-killed-for-the-tasks-own-model
+  ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 5): attach starts a run whose env
+  ;; says model "outside" and leaves the task's model alone, so the task's next run is its own
+  (let [db (db-of [(decl "x" :model "m1")] :extra (run "x" 1 :running :model "outside"))]
+    (is (= [] (actions-for db)) "a live outside run of a task of another model is not an env change"))
+  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :running :model "outside")
+                                                          (task/env-tx "demo/x" {:model "m2"})))]
+    (is (= [] (actions-for db)) "nor when the task's model changes: the run is the outside agent's"))
+  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :killed :model "outside")))]
+    (is (= [(spawn "x" 2 :model "m1")] (actions-for db)) "its next run is the task's own model, not outside"))
+  (testing "root cannot take back a task that is done: merged work keeps :running"
+    (let [db (db-of [(decl "z")] :extra (run "z" 1 :merged :outcome :green :results {(t "z") :pass}))
+          {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
+      (is (= [] taken))
+      (is (= ["task demo/z is done, not running: nothing to take back"] (map :seon.error/message not-running))))))
+
+(deftest root-takes-a-running-task-back-and-releases-it-again
+  ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running
+  ;; run (cancel! is final); run! releases it and its next run continues the branch
+  (let [db (db-of [(decl "x") (decl "y")] :extra (concat (run "x" 1 :running) (task/execution-tx ["demo/y"] :held)))
+        {:keys [taken tx not-running]} (my.root/take-back-tx db ["demo/x" "demo/y" "demo/none"] "taken back for a hand repair")
+        held (d/db-with db tx)]
+    (is (= ["demo/x"] taken) "only the running task")
+    (is (= :held (:seon.task/execution (task/task held "demo/x"))))
+    (is (= {:reason "taken back for a hand repair"} (:seon.task/failure (task/task held "demo/x"))))
+    (is (= #{["demo/y" :held] ["demo/none" nil]} (set (map (juxt :task :execution) not-running))) "the others are answered, not written")
+    (is (= [{:op :kill :run "demo/x#1" :reason :held}] (actions-for held)) "the reconciler kills the live run and keeps the task")
+    (let [ended (d/db-with held (task/status-tx held "demo/x#1" :running :killed {}))
+          released (d/db-with ended (vec (task/execution-tx ["demo/x"] :running)))]
+      (is (= [(spawn "x" 2)] (actions-for released)) "released again, its next run is a new run of the same task"))))
 
 (deftest environment-change-restarts-clean
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :running :model "m1")
