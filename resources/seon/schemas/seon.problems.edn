@@ -119,7 +119,8 @@
  :seon.error/first-ms :int
  :seon.error/last-ms :int
  :seon.error/last-agent :keyword
- :seon.error/last-task :string
+ ;; indexed: a task's record reads the errors last raised in it by the task's id (seon.ctx, the task pattern)
+ :seon.error/last-task [:and {:seon.db/index true} :string]
  :seon.error/form :string
  ;; the first occurrence's error map, as EDN
  :seon.error/example [:map]
