@@ -8,7 +8,8 @@
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
 # bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
 # bin/worktree --sync NAME|DIR move that worktree's submodules to the pins its branch records (after
-#                             merging main), by `git -C` on its own submodule checkouts only. Never
+#                             merging main; bin/build calls it first), by `git -C` on its own submodule
+#                             checkouts only; one with uncommitted changes is named, not moved (exit 1). Never
 #                             run `git submodule` in a worktree: it rewrites the module config every
 #                             checkout shares (core.worktree), and main's submodules break.
 #
@@ -71,13 +72,19 @@ setup() {
   # target/: an APFS clone (copy-on-write) of the builds, not of the runs: a cloned store opens
   # (it is named by the id it records, seon.db/store-cfg) but is the main tree's record, a
   # replica sharing its id, not a store of this worktree's; target/check/ is the source tree's record, not this one's,
-  # and target/tmp/ holds tests' scratch (a generation a test builds lives there); nor of the
+  # target/prove/ holds each run's logs (only its measured ms are cloned), and target/tmp/ holds tests' scratch (a generation a test builds lives there); nor of the
   # compile caches: target/cache is the one shared copy, and target/home/.jolt's caches are
   # what a checkout held before it was shared (bin/env)
   if [[ -d $MAIN/target ]]; then
     mkdir -p "$WT/target/home/.jolt"
     for e in "$MAIN"/target/*(N); do
-      [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
+      if [[ ${e:t} == prove ]]; then
+        # prove's runs are logs of the main tree's runs, not this worktree's; only the measured ms
+        # that order a run's shards (test-runner's ms-dir) are the checkout's to start from
+        [[ -d $e/ms ]] && { mkdir -p "$WT/target/prove"; cp -cR "$e/ms" "$WT/target/prove/" }
+      else
+        [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
+      fi
     done
     for e in "$MAIN"/target/home/*(ND); do
       [[ ${e:t} == .jolt ]] || cp -cR "$e" "$WT/target/home/"
@@ -124,9 +131,14 @@ if [[ ${1:-} == --sync ]]; then
     [[ -e $WT/$sub/.git ]] || continue
     cur=$(git -C "$WT/$sub" rev-parse HEAD)
     [[ $cur == $sha ]] && continue
+    # uncommitted work in a checkout it would move is someone's: named, never lost
+    if [[ -n $(git -C "$WT/$sub" status --porcelain -uno --ignore-submodules=all) ]]; then
+      print -u2 "$sub: at ${cur:0:8} with uncommitted changes, pinned at ${sha:0:8}: commit or move them, then bin/worktree --sync"
+      bad=1; continue
+    fi
     git -C "$WT/$sub" checkout -q --detach "$sha" && print "$sub: ${cur:0:8} -> ${sha:0:8}"
   done
-  exit 0
+  exit ${bad:-0}
 fi
 
 if [[ ${1:-} == --remove ]]; then
