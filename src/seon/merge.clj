@@ -348,13 +348,29 @@
       (vec (for [d tx :when (not (and (mine (:e d)) (not= :form/ns (:a d))))]
              (if (and (= :form/ns (:a d)) (:added d) (mine (:v d))) (d/datom (:e d) :form/ns (mine (:v d)) (:tx d)) d))))))
 
+(defn attribute-declarations
+  "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
+  that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
+  can land (Datahike refuses an attribute its schema does not define). Empty when onto holds
+  them all. One pass over tx's attributes, then the registry's declarations only when one is
+  lacking."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :seon.schema/declaration]]}
+  [onto tx]
+  (let [have (d/schema onto)
+        lacking (into #{} (comp (map :a) (filter #(and (keyword? %) (not (contains? have %))))) tx)]
+    (if (empty? lacking)
+      []
+      (filterv #(contains? lacking (:db/ident %)) (program/schema-declarations onto contract/registry)))))
+
 (defn merge-tx
   "The tx-data merging src's changes since base for program keys ks onto db onto: the
-  datoms src wrote, as they are (carried-tx), and the Datahike declarations a merged schema
+  Datahike declarations of the attributes its datoms use that onto lacks (attribute-declarations),
+  then the datoms src wrote, as they are (carried-tx), and the declarations a merged schema
   entry's population needs on onto (as a registration installs them)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
-  (let [tx (own-namespaces onto src (carried-tx base src ks data-attrs))]
+  (let [carried (own-namespaces onto src (carried-tx base src ks data-attrs))
+        tx (into (attribute-declarations onto carried) carried)]
     (if (some #(= :schema (first %)) ks)
       (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
       tx)))
