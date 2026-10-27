@@ -346,7 +346,7 @@
   (cond (identical? o n) o
         (and (map? o) (map? n))
         (let [n (reduce-kv (fn [m k v] (let [x (share (get o k) v)] (if (identical? x v) m (assoc m k x)))) n n)]
-          (if (and (= (count o) (count n)) (every? (fn [[k v]] (identical? v (get o k ::none))) n)) o n))
+          (if (same-node? o n) o n))
         (= o n) o
         :else n))
 
