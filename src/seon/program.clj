@@ -1115,18 +1115,13 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
-(def input-class-namespaces
-  "The namespaces of the :config entries that are a class of files rather than a config key
-  (seon.fx/inputs): :seon.env/* (env-class-readers) and :seon.pin/* (pin-reads). A test that
-  reads files or runs a process takes every one (graph-index)."
-  #{"seon.env" "seon.pin"})
-
 (defn- pin-rules
-  "pins (:seon.config.source/pin-namespaces: prefix -> submodules) as [prefix prefix. [:seon.pin/NAME ...]]
-  rows, matched against a namespace by = and starts-with?."
+  "pins (:seon.config.source/pin-namespaces: prefix -> submodules or source groups) as [prefix
+  prefix. [:seon.pin/NAME ...]] rows (seon.config/pin-class), matched against a namespace by = and
+  starts-with?."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [pins]
-  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv #(keyword "seon.pin" (last (str/split % #"/"))) ms)])))
+  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv cfg/pin-class ms)])))
 
 (defn- pin-reads
   "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
@@ -1392,9 +1387,11 @@
                        ks (map #(:config (flags %)) cs)
                        ;; the values of the config keys its reach reads (config-reads)
                        kvs (select-keys config (into #{} cat ks))
-                       ;; a reader of files or a process (the tree, a root, the binary) can read any class
+                       ;; a reader of files or a process (the tree, a root, the binary) can read any class of
+                       ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
+                       ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
                        kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
-                             (into kvs (filter (fn [[ck]] (input-class-namespaces (namespace ck)))) config)
+                             (into kvs (filter (fn [[ck]] (= "seon.env" (namespace ck)))) config)
                              kvs)]
                    {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
