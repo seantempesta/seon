@@ -225,6 +225,14 @@
         g (program/reach-graph db nil)]
     (is (some #{'app.pt-hq-test/by-name} (program/tests-reaching g 'app.pt-hq/f)) "the test that quotes f reaches it")
     (is (not (some #{'app.pt-hq-test/other} (program/tests-reaching g 'app.pt-hq/g))) "a name src quotes as data is no edge")
+    (let [g0 (program/reach-graph (d/db-with db (source/import-tx db (select-keys srcs ["src/app/pt_hq.clj"]))) nil)
+          f2 (record db 'app.pt-hq "(defn f [x] (identity x))")]
+      (is (= (program/graph-index (program/reach-graph f2 nil) {:env "e" :tree "t" :config {}} nil)
+             (program/graph-index (program/reach-update (program/reach-update g0 db) f2) {:env "e" :tree "t" :config {}} nil))
+          "an update agrees with a rebuild when a namespace gains its first test and when a quoted var changes")
+      (is (not= ((program/reach-digests db {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name)
+                ((program/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
+          "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
               (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/program-store)) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))

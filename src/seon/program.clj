@@ -1161,8 +1161,8 @@
 (defn- reach-step
   "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
-  referring to, or defining the methods, extensions or contract of, a var a changed form
-  defines), and the components of the changed forms and of every form reaching them re-folded
+  referring to, naming in a test's namespace (:quoted), or defining the methods, extensions or
+  contract of, a var a changed form defines), and the components of the changed forms and of every form reaching them re-folded
   (components over those alone, the rest kept). :affected, how many forms were re-folded."
   {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :string] [:sequential :map]] :map]}
   [g db removed added]
@@ -1191,7 +1191,7 @@
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
-        test-nss (into #{} (map (comp symbol namespace)) tests)
+        test-nss (if (identical? tests (:tests g)) (:test-nss g #{}) (into #{} (map (comp symbol namespace)) tests))
         named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
         refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
                      (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added)
@@ -1251,7 +1251,7 @@
                                    (transient (apply dissoc (:flags g) olds))
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
-    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :refd refd :adj adj :rev rev
+    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
            :reads reads :proc proc :bin bin :plain plain :own own
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))))
 
@@ -1280,14 +1280,17 @@
   "Graph g (reach-graph's, of another value) for db: the live forms g holds that db does not
   removed, db's that g does not added (live-ids: index scans, no entity read), and only the
   components those touch and their ancestors re-folded (reach-step), so a branch's graph is
-  its base's at the cost of what it changed. A schema entry added or changed rebuilds."
+  its base's at the cost of what it changed. A schema entry added or changed rebuilds, and so
+  does a namespace gaining its first test or losing its last (its forms' quoted names become
+  or stop being edges: reach-step's test-nss)."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [g db]
   (if (not= (:schemas g) (schema-texts db))
     (reach-graph db (:data-refs g))
-    (let [live (live-ids db) was (:live g)]
-      (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
-             :live live))))
+    (let [live (live-ids db) was (:live g)
+          g' (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
+                    :live live)]
+      (if (= (:test-nss g' #{}) (:test-nss g #{})) g' (reach-graph db (:data-refs g))))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
