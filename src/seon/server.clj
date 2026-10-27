@@ -223,10 +223,6 @@
                         (str (name ag) " works " task " for client " h ": name its task (task \"" task "\") to act on it")
                         {:agent ag :task task :holder h})))))
 
-(def ^:private held-ops
-  "The ops that act on an agent's run, which its holder's client (or a request naming its task) may ask."
-  #{:done :eval :message})
-
 (defmulti op-answer
   "A request's answer, by its :op: a function of root's system, the agent the request names
   (:root, an agent's keyword, or nil) and the request, one method per key of ops. One method
@@ -313,6 +309,10 @@
                                       (verdict db run task))))
             :else (refused (str ag " answered no end for " run))))
     (refused (str ag " works no task"))))
+
+(def ^:private held-ops
+  "The ops that act on an agent's run, which its holder's client (or a request naming its task) may ask."
+  #{:done :eval :message})
 
 (defn answer
   "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds."

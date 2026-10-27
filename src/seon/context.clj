@@ -605,10 +605,10 @@
   "Where agent a's work on task entity te points now, on db: the decayed sum of its trajectory, the
   plan's vector first and then each of the agent's evals' vectors in order, each item's weight
   halving every :seon.config.render/relevance-half-life items after it, so the plan is a prior the
-  agent's own work takes over from (the owner, 2026-10-27: \"the plan will often be fairly empty
-  ... we need to adapt to whatever they are doing\"); and the words of its last three evals, the
+  agent's own work takes over from (the owner: \"the plan will often be fairly empty
+  ... we need to adapt to whatever they are doing\"); and the words of its last :seon.config.render/relevance-words evals, the
   plan's before any. {:vector :words}, nil when neither the plan nor any eval has a vector yet.
-  Measured on 44 recorded turns of 10 runs (claude_scratch/relevance-replay-2026-10-27.md): R@10 0.441 and
+  Measured on 44 recorded turns of 10 runs (the relevance replay note in claude_scratch): R@10 0.441 and
   0.55 within 800 tokens of what the agent read next, against 0.402 and 0.48 by the plan alone and
   0.411 and 0.49 with the plan held at full weight beside the evals."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:map [:vector [:vector number?]] [:words :string]]]]}
@@ -623,7 +623,7 @@
       {:vector (unit (reduce (fn [acc [i v]] (mapv + acc (map #(* % (Math/pow 0.5 (/ (- n 1 i) h))) v)))
                              (vec (repeat (count (first items)) 0.0)) (map-indexed vector items)))
        :words (if (seq evs)
-                (str/join " " (map second (take-last 3 evs)))
+                (str/join " " (map second (take-last (cfg/value :seon.config.render/relevance-words) evs)))
                 (or (:seon.task/plan (d/entity db te)) ""))})))
 
 (defn selected
@@ -632,7 +632,7 @@
   or a schema key's name that `related` scores against the work's `focus`. One held before stays while
   its chance is :seon.config.render/relevance-summary or more; a new one enters at
   :seon.config.render/relevance-doc or more, best first, after every one before it, while the lines fit
-  :seon.config.render/relevance-budget tokens (the owner, 2026-10-27: 60% to enter, 40% to leave, items
+  :seon.config.render/relevance-budget tokens (the owner: 60% to enter, 40% to leave, items
   in entry order, so a turn's page moves by what crossed a cut and every earlier byte holds for the
   prompt cache). The turn calls it once and records its answer (seon.turn), so no frame waits on
   relevance and a replay draws the same units; nil when the work has no vector yet (nothing to decide,
