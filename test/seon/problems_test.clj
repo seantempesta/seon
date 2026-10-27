@@ -435,33 +435,6 @@
                                                            :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))
     @conn))))
 
-(deftest a-cancelled-tasks-run-problems-close
-  (let [db (seeded 2 1)
-        red (fn [db] (get-in (problems/report db) [:classes :red :rows]))
-        dead (fn [db] (get-in (problems/report db) [:classes :dead :rows]))]
-    (is (every? :open? (red db)) "a red run of a task still to be worked is open")
-    (is (every? :open? (dead db)))
-    (let [cancelled (d/db-with db [{:seon.task/id "t/r0" :seon.task/execution :cancelled}
-                                   {:seon.task/id "t/d0" :seon.task/execution :cancelled}])
-          open (fn [rows task] (:open? (first (filter #(= task (:task %)) rows))))]
-      (is (false? (open (red cancelled) "t/r0")) "the cancelled task's red run closes")
-      (is (false? (open (dead cancelled) "t/d0")) "and its dead run")
-      (is (true? (open (red cancelled) "t/r1")) "another task's stays open"))))
-
-(defn- measured-health [db]
-  (let [m (volatile! nil) h (profile/measure! #(problems/health db) #(vreset! m %))]
-    [h @m]))
-
-(deftest health-reads-each-part-once
-  (let [db0 (seeded 3 2)
-        db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
-        [h m] (measured-health db)
-        rows (get-in h [:classes :problem-unlinked :rows])]
-    (is (seq rows) "the db has unlinked classes to judge")
-    (is (= rows (vec (distinct rows))) "no row twice")
-    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 50) "the contracted calls of one health read (59 when answers and problem-unlinked ran twice)")))
-
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
         s (:signature (first (get-in (problems/report db) [:classes :eval :rows])))

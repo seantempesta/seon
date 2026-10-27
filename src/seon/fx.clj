@@ -52,7 +52,7 @@
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
 
-(declare inputs tree-id)
+(declare inputs)
 
 (defn- git-run
   "git in dir with args, under the environment variables env adds ({name value}), fed in when given:
@@ -120,39 +120,28 @@
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
   HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
   absent when root is no git repository (git answers none).
-  With :paths (relative paths, the files a watcher saw change) only those files, each nil when
-  it is gone, and none of the others read: the cost of what changed.
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
-  inputs only for a binary built from this very tree. In a git repository also :tree, the id
-  of the whole tree as it is on disk (tree-id: git's own index makes it the cost of what
-  changed), which stands for every file's content.
-  Answers {:value {path text} :commit sha :tree id :pins {path sha} :inputs :binary} or :seon.fx/io-error."
+  inputs only for a binary built from this very tree.
+  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree paths]} :req}]
+  [{{:keys [root dirs binary-tree]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
-          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
-          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
-          inputs (when (and binary-tree head) (inputs base))]
-      (cond-> {:value (if paths
-                        (into (sorted-map)
-                              (for [p paths :when (source? p) :let [f (java.io.File. (str base "/" p))]]
-                                [p (when (.isFile f) (slurp f))]))
-                        (into (sorted-map)
-                              (for [d dirs
-                                    f (file-seq (java.io.File. (str base "/" d)))
-                                    :let [p (.getCanonicalPath ^java.io.File f)]
-                                    :when (and (.isFile ^java.io.File f) (source? p))]
-                                [(subs p (inc (count base))) (slurp f)])))}
+          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))]
+      (cond-> {:value (into (sorted-map)
+                        (for [d dirs
+                              f (file-seq (java.io.File. (str base "/" d)))
+                              :let [p (.getCanonicalPath ^java.io.File f)]
+                              :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
+                          [(subs p (inc (count base))) (slurp f)]))}
         head (assoc :commit head
-                    :tree (or (:tree inputs) (tree-id base))
-                    :pins (into {}
-                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
-                                  [p sha])))
-        inputs (assoc :inputs inputs
-                      :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
+                                    :pins (into {}
+                                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
+                                                  [p sha])))
+        (and binary-tree head) (assoc :inputs (inputs base)
+                           :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
