@@ -8,7 +8,8 @@
 #                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
 # bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
 # bin/worktree --sync NAME|DIR move that worktree's submodules to the pins its branch records (after
-#                             merging main), by `git -C` on its own submodule checkouts only. Never
+#                             merging main; bin/build calls it first), by `git -C` on its own submodule
+#                             checkouts only; one with uncommitted changes is named, not moved (exit 1). Never
 #                             run `git submodule` in a worktree: it rewrites the module config every
 #                             checkout shares (core.worktree), and main's submodules break.
 #
@@ -124,9 +125,14 @@ if [[ ${1:-} == --sync ]]; then
     [[ -e $WT/$sub/.git ]] || continue
     cur=$(git -C "$WT/$sub" rev-parse HEAD)
     [[ $cur == $sha ]] && continue
+    # uncommitted work in a checkout it would move is someone's: named, never lost
+    if [[ -n $(git -C "$WT/$sub" status --porcelain -uno --ignore-submodules=all) ]]; then
+      print -u2 "$sub: at ${cur:0:8} with uncommitted changes, pinned at ${sha:0:8}: commit or move them, then bin/worktree --sync"
+      bad=1; continue
+    fi
     git -C "$WT/$sub" checkout -q --detach "$sha" && print "$sub: ${cur:0:8} -> ${sha:0:8}"
   done
-  exit 0
+  exit ${bad:-0}
 fi
 
 if [[ ${1:-} == --remove ]]; then
