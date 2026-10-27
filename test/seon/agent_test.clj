@@ -249,15 +249,15 @@
                   " (deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
                   " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) "))))) :defined)")
         defined (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str held) "))"))
-        ;; root's :tests request, straight to the agent (seon.root/request's run-tests!), in mode :turn
-        _ (eval-root "(def held-run (c/call! sys (c/request 'run-tests! :a1 {} (get (:agents (c/state sys)) :a1))))")
+        ;; the test service proves a1's branch (seon.root/run-tests!): it asks the idle agent for :tests
+        _ (eval-root "(def held-run (future @(c/run-tests! sys :a1)))")
         in (java.io.FileInputStream. ^String began)
         in-test (.read in)
         ;; the child holds in its test: the agent answers an eval meanwhile
         answered (eval-root "(seon.edn/decode (:text (:response @(c/submit! sys :a1 \"(+ 40 2)\"))))")
         out (java.io.FileOutputStream. ^String gate)
         _ (do (.write out 50) (.flush out) (.close out) (.close in))
-        result (eval-root "(let [r @held-run] (select-keys (if (:result r) (:result r) r) [:pass :fail :error]))")]
+        result (eval-root "(select-keys @held-run [:pass :fail :error])")]
     (ts/kill-root! root)
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs began gate)
