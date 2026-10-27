@@ -831,3 +831,16 @@
                :growth :constant
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
+
+(deftest a-source-the-image-cannot-analyze-is-an-error-not-a-throw
+  ;; the standing root's watcher died of "var: #'seon.db/install-missing! is not public": a changed file named a var
+  ;; the running (older) image held as private; the import threw out of the batch handler (task
+  ;; seon.source/analysis-failure-is-data)
+  (let [db (empty-db)
+        files {"src/app/priv.clj" "(ns app.priv)\n\n(defn f [] (seon.source/analyze 'x 'y))\n"}
+        e (source/tx-of db files true)]
+    (is (= :seon.source/unanalyzable (:seon.error/type e)) "the image holds seon.source/analyze as private")
+    (is (re-find #"not public" (:seon.error/message e)) "with the analyzer's words")
+    (is (= ["src/app/priv.clj"] (:files e)))
+    (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} true)) "a file that analyzes is its facts")
+    (is (vector? (source/tx-of db {"src/app/ok.clj" "(ns app.ok)\n\n(defn f [] 1)\n"} false)) "whole tree too")))
