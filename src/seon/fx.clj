@@ -192,11 +192,11 @@
   ([root excludes]
    (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
          env {"GIT_INDEX_FILE" (.getPath idx)}
-         out (map #(str ":(exclude)" %) excludes)]
+         top (map #(str ":(top)" %) excludes)]
      (try
        (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
-       (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] excludes) nil))
-       (git! env root (into ["add" "-A" "--" "."] out) nil)
+       (git! env root ["add" "-A"] nil)
+       (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
        (git! env root ["write-tree"] nil)
        (finally (.delete idx))))))
 

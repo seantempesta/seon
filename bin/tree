@@ -12,6 +12,6 @@ EX=(); [[ -f $CFG ]] && EX=($(sed -nE 's#^ :seon\.config\.source/tree-excludes \
 idx=$(mktemp -u)
 trap 'rm -f "$idx"' EXIT
 if git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree HEAD || exit 1; fi
-(( $#EX )) && { GIT_INDEX_FILE=$idx git -C "$ROOT" rm -r --cached -q --ignore-unmatch -- $EX || exit 1 }
-GIT_INDEX_FILE=$idx git -C "$ROOT" add -A -- . ${^EX/#/:(exclude)} || exit 1
+GIT_INDEX_FILE=$idx git -C "$ROOT" add -A || exit 1
+(( $#EX )) && { GIT_INDEX_FILE=$idx git -C "$ROOT" rm -r --cached -q --ignore-unmatch -- ${^EX/#/:(top)} || exit 1 }
 GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree
