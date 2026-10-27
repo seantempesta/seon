@@ -513,12 +513,17 @@
   ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
   (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})
+        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/unwritten-test}] :turn 1 :max-turns 4})
         r (first (:refused b))]
     (is (= :proof-unknown (:reason r)))
-    (is (= 'demo-test/f-test (:test r)))
-    (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
-    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
+    (is (= 'demo-test/unwritten-test (:test r)))
+    (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
+    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r)))
+  ;; a proof written but with no result was offered the same template, which overwrites it
+  ;; (the fixture's program defines demo-test/f-test)
+  (let [db (db-with-program)
+        r (first (:refused (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})))]
+    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's

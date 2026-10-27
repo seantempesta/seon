@@ -977,6 +977,16 @@
     (is (str/includes? h ":pass") (str "what it observed: " h))
     (is (not (str/includes? h " of ")) "an outside read has no turn count")))
 
+(deftest the-models-page-holds-the-plan-whole
+  ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
+  (let [[_ branch _] (paged-dbs)
+        plan (str "Make `demo/f` return its argument doubled. " (str/join " " (repeat 60 "Every word of this plan is what the task is.")))
+        db (d/db-with branch [{:seon.task/id "demo/f" :seon.task/plan plan}])
+        page (seon.context/page db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
+        text (seon.print/text (vary-meta page assoc :seon.print/full true))]
+    (is (< (:part seon.print/budgets) (seon.print.select/estimate plan)) "a plan over a part's budget")
+    (is (str/includes? text (subs plan (- (count plan) 60))) "the plan's end is on the page")))
+
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
   ;; printer, [#'seon.render/html opts value], which the page's serializer expands when it writes the
