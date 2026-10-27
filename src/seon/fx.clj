@@ -590,7 +590,7 @@
         r (when-not (str/blank? out) (edn/read-string {:default tagged-literal} out))]
     (if (map? (:results r))
       (:results r)
-      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (pr-str r)) {:path (str port)}))))
+      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (or (:seon.error/message r) "its answer holds no :results")) {:path (str port)}))))
 
 (defn branch-head
   "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
