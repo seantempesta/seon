@@ -105,7 +105,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
   [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
 
-(defn- heard-main
+(defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
   {:malli/schema [:=> [:cat] :seon.host/db]}
@@ -401,17 +401,6 @@
         (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:max-tx @conn) :datoms (count ops)}
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
-
-(defn main-db
-  "Main's committed value as the store holds it now (another process commits it)."
-  {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state))))
-
-(defn merge-readiness
-  "Whether this branch can merge into main now, as merge-main! would find it (seon.merge/readiness
-  of its merge base, its head and main's)."
-  {:malli/schema [:=> [:cat] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]}
-  [] (pm/readiness (:base @state) (db) (main-db)))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -804,7 +793,7 @@
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (:base @state) proofs (main-db))
+  (let [plan (test-plan (db) (:base @state) proofs (heard-main))
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has

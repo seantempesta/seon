@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm] [seon.agent]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -856,7 +856,7 @@
   [{db :seon.db/db} main base]
   (let [{:keys [main-moved conflicts]} (pm/readiness (commit-db db base) db (commit-db db main))]
     [:section [:h2 "merge"]
-     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.agent/merge-readiness)}
+     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.merge/readiness (:base @seon.agent/state) (seon.agent/db) (seon.agent/heard-main))}
       {:main-moved main-moved :conflicts conflicts}]]))
 
 (defn caused-view
@@ -887,21 +887,6 @@
   [{db :seon.db/db} base]
   [:section [:h2 "its merge carries"]
    [#'render/html {:budget (config/value :seon.config.render/value-budget)} (program/divergence (commit-db db base) db)]])
-
-(defn tests-view
-  "The branch's tests now (a component over the db; main's and the base's commits its children):
-  what the test plan selects (seon.agent/test-plan: the proofs and the tests the change reaches)
-  and each one's result at its digest, as the test service recorded it on main or a shared green
-  holds it, a test with none yet :running (the test service runs it: a result arrives on main)."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int :any :any] :any]}
-  [{db :seon.db/db} rid main base]
-  (let [proofs (or (some-> (d/pull db [{:seon.run/task [:seon.task/id]}] rid) :seon.run/task :seon.task/id (->> (task/task db)) :seon.task/accumulated :proofs set) #{})
-        p (seon.agent/test-plan db (commit-db db base) proofs (commit-db db main))]
-    [:section [:h2 "tests"]
-     [#'render/html {:budget (config/value :seon.config.render/value-budget)}
-      (into (sorted-map-by #(compare (str %1) (str %2)))
-            (for [t (:selected p)]
-              [t (if-let [r (get (:reused p) t)] (if (proofs/green? r) :green :red) :running)]))]]))
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
@@ -1029,15 +1014,13 @@
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} rid n]))
                        [#'related {} rid]
                        (when (seq (:turns run)) [#'status {} rid])
-                       ;; what the turn no longer computes, drawn when what it reads moves: main's and the
-                       ;; merge base's commits (ctx's :main-commit :base-commit) are their children; a
-                       ;; record that has heard neither yet has no such views (nothing measured)
-                       (when (and (:main-commit c) (:base-commit c))
-                         (list [#'tests-view {} rid (:main-commit c) (:base-commit c)]
-                               [#'caused-view {} (:base-commit c)]
-                               [#'gaps-view {} (:base-commit c)]
-                               [#'divergence-view {} (:base-commit c)]
-                               [#'merge-view {} (:main-commit c) (:base-commit c)]))))
+                       ;; what the turn no longer computes, drawn when what it reads moves: the merge
+                       ;; base's and main's commits (ctx's :base-commit :main-commit) are their children. A
+                       ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
+                       (when-let [b (:base-commit c)]
+                         (list [#'caused-view {} b] [#'gaps-view {} b] [#'divergence-view {} b]
+                               ;; a task that merges itself: whether it can merge now
+                               (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]

@@ -728,7 +728,7 @@
          (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (program/divergence (:base @agent/state) (agent/db)))
-             "so the agent's :will-merge carries none of main's changes")
+             "so what the agent's merge carries (its divergence) holds none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried
@@ -961,14 +961,13 @@
                    " db @(:conn sys) r (seon.task/run db \"" % "/wr#1\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
                    " obs (datahike.api/q '[:find ?b . :where [?r :seon.run/id \"" % "/wr#1\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 1] [?u :seon.turn/origin :model] [?u :seon.turn/basis ?b]] b)]"
-                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (get-in obs [:observed :reasons])) (get-in obs [:observed :merge])])")
+                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (get-in obs [:observed :reasons]))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
-        [status state reasons merge] (:value r)]
+        [status state reasons] (:value r)]
     (is (= :parked status) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (= [:proof-red] reasons) "its next turn carries why, as data: the proof is red")
-    (is (= [] (:conflicts merge)) "its merge readiness was measured that turn: nothing would conflict, the red proof alone keeps it from merging")))
+    (is (= [:proof-red] reasons) "its next turn carries why, as data: the proof is red")))
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own

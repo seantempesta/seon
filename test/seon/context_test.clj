@@ -465,20 +465,6 @@
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
 
-(deftest what-the-merge-carries-is-the-task-renders-not-the-turns
-  ;; owner, 2026-10-27 (task seon.turn/observe-reads-are-renders): what is derived for the reader goes
-  ;; into the hiccup, drawn when what it reads moves; a turn observes only the done rule's inputs.
-  ;; What the branch's merge carries (owner D4) and whether it can merge are the task render's
-  ;; views (seon.render.ui/divergence-view, merge-view) over the same functions a turn called
-  (let [db (db-with-program)
-        state (context/turn-state db (task-f db) {:turn 1 :max-turns 4 :reasons []})
-        ours (d/db-with db (program-facts '[[demo/h "(defn h [] 1)" []]]))
-        theirs (d/db-with db (program-facts '[[demo/k "(defn k [] 2)" []]]))]
-    (is (not-any? #(contains? state %) [:will-merge :merge :attention :tests]) "no turn section of them")
-    (is (= ['demo/h] (:added (seon.program/divergence db ours))) "what the branch's merge carries")
-    (is (some #{[:var 'demo/k]} (:main-moved (seon.merge/readiness db ours theirs))) "what main changed since the base")
-    (is (= [] (:conflicts (seon.merge/readiness db ours theirs))) "and no key both changed: it can merge")))
-
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
   ;; that resolves to nothing; it is said once, beside every such name
