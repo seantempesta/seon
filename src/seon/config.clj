@@ -63,6 +63,14 @@
   [opts _tag value]
   (str (::checkout opts) "/" value))
 
+(defmethod aero/reader 'seon/own-branch
+  ;; #seon/own-branch "jolt/seon-merges": the branch as named in the main tree, and in a git
+  ;; worktree (its .git a file, not a directory) the branch with -<worktree> appended: worktrees
+  ;; share refs, so each commits on a branch of its own (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1)
+  [opts _tag value]
+  (let [co (java.io.File. ^String (::checkout opts))]
+    (if (.isFile (java.io.File. co ".git")) (str value "-" (.getName co)) value)))
+
 ;; ---- the schemas: read once, when this namespace compiles --------------------------------
 
 (def schemas-dir
