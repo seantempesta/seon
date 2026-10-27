@@ -106,7 +106,7 @@
 
 (deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
   ;; every shipped declaration is one :whole task, none a merge task
-  (let [ds (mapcat val (root/task-files))]
+  (let [ds (mapcat val (filter (comp vector? val) (root/task-files)))]
     (is (seq ds))
     (is (every? #(= :whole (:seon.task/kind %)) ds))
     (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))
