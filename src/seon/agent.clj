@@ -1033,7 +1033,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
   (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
-    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state)}}])))
+    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
