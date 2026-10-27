@@ -349,6 +349,32 @@
   [branch]
   (let [w (a3-walk branch)] (try {:units (r/placed-units w)} (finally (r/dispose-walk! w)))))
 
+(deftest the-problems-tile-follows-main-without-reading-it-whole
+  ;; task seon.problems/health-at-the-cost-of-what-changed: root's walk holds main's health; a move of
+  ;; main changes it by the datoms that moved (seon.render.proc/health!), and the tile draws what it holds
+  (let [[main branch _] (paged-dbs)
+        st (root-state (proc-state main branch) main)
+        tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
+        main2 (datahike.api/db-with (:main-db st) [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
+                               {:seon.run/id "zz/dead#1" :seon.run/task [:seon.task/id "zz/dead"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/zz" :seon.agent/id :zz}
+                                :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :dead :seon.run/reason "its agent died"
+                                :seon.run/error (seon.contract/error :seon.agent/died 'seon.root/end-agent "agent zz died" {:agent :zz})}])
+        before (tile st)
+        st2 (#'p/advance-main st main2)]
+    (is (not (str/includes? before "zz/dead")) "main holds no such run yet")
+    (is (str/includes? (tile st2) "zz/dead") "the move shows its dead run in the tile")
+    (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
+    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+
+(deftest an-agents-page-draws-the-problems-of-its-own-run
+  ;; task seon.problems/health-in-context: its run's open problems, by the report's render, beside the
+  ;; run; none when none is open; another run's and main's classes are not drawn
+  (let [[_ branch _] (paged-dbs)
+        html (fn [db] (apply str (map :html (:units (drawn-parts db)))))
+        red (datahike.api/db-with branch [{:seon.run/id "demo/f#1" :seon.run/failures {'demo/f-test [{:type :fail :message "m" :expected "1" :actual "2"}]}}])]
+    (is (not (str/includes? (html branch) "red")) "no problem open: nothing drawn")
+    (is (str/includes? (html red) "red") "a red proof of its task, drawn as the report draws it")))
+
 (deftest root-and-an-agent-are-one-chrome
   (let [[main branch eid] (paged-dbs)
         st (root-state (proc-state main branch) main)

@@ -1,0 +1,4 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+jolt fiber dump: 0 live fibers of 132 held, on thread 0
+-are-one-store 156000 ms (bound 155424 ms, load 15.80, /Users/sean/src/seon-next/target/prove/shard-2.log)

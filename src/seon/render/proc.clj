@@ -29,7 +29,7 @@
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
-            [seon.config :as config] [seon.step :as step] [seon.context :as context]))
+            [seon.config :as config] [seon.step :as step] [seon.context :as context] [seon.problems :as problems]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
 (defn- history-cap "Rows a page renders at first, and more each time its list's end scrolls into view (:seon.config.render.list/history)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/history))
@@ -321,7 +321,7 @@
             before (side w)]
         (vreset! at db)
         ;; root's process (process!) is root's own data beside the pull: kept across a move of main
-        (reset! a (cond-> (:tree c') (:process @a) (assoc :process (:process @a))))
+        (reset! a (cond-> (:tree c') (:process @a) (assoc :process (:process @a)) (:health @a) (assoc :health (:health @a))))
         (render/frame! w (ctx/moved held db nil))
         (cond-> (assoc-in st [:root-walk :c] c')
           true (update :dirty (fnil conj #{}) :root)
@@ -340,6 +340,23 @@
       (do (reset! a (assoc @a :process p))
           (render/frame! w nil)
           (update st :dirty (fnil conj #{}) :root)))
+    st))
+
+(defn- health!
+  "St with main's health (the report the problems tile draws) in root's walk, beside root's process:
+  the held one changed by the datoms that moved between the main held and db (seon.problems/health-moved,
+  which reads the runs and sections they touched and not the closed history), or read whole when none is
+  held. When no class changed, the held report stays and nothing is framed."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db] :seon.host/db [:maybe [:sequential :any]]] :map]}
+  [st held db moved]
+  (if-let [{:keys [w a]} (:root-walk st)]
+    (let [prev (:health @a)
+          h (if (and prev held moved) (problems/health-moved prev held db moved) (problems/health db))]
+      (if (= (:classes h) (:classes prev))
+        st
+        (do (reset! a (assoc @a :health h))
+            (render/frame! w nil)
+            (update st :dirty (fnil conj #{}) :root))))
     st))
 
 (defn- root-page
@@ -439,7 +456,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (root-walk (main-info st db) db held)
+        (cond-> (-> (root-walk (main-info st db) db held) (health! held db moved))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- pass-view

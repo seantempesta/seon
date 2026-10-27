@@ -21,10 +21,11 @@
   finds main's results at their digests (seon.proofs/stored-results) and runs none of them again.
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head): it keeps the latest main t for a request that names
-  none, and a commit that moves main's program (seon.program/moves-program?) is a request to
-  prove main at it, with no waiter: main is proved at each program commit, whoever asks."
+  none, and with :seon.config.proofs/prove-main-on-commit a commit that moves main's program
+  (seon.program/moves-program?) is a request to prove main at it, with no waiter: main is proved
+  at each program commit, whoever asks."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn run-key
@@ -203,7 +204,7 @@
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
                      :main (let [st (assoc st :main-t (:t m))]
-                             (if (program/moves-program? (:ops m))
+                             (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
                                (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
                                [st []])))]
      [st (if (seq outs) {:to-api (vec outs)} {})])))
