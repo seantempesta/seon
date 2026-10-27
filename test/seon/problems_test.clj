@@ -72,17 +72,18 @@
             "the report reads the true count from the fold")))))))
 
 (deftest a-defect-in-the-reconciler-does-not-feed-itself
-  ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
-  ;; with no boot fact, what a refused boot left), the api folds the thrown error and writes
-  ;; it to main as one commit, and that commit is the reconciler's next input. A step that
-  ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
-  ;; Main's commits over ten rounds are the first record, and no more.
+  ;; root's path in miniature: the reconciler proc's step throws on a commit, the api folds the
+  ;; thrown error and writes it to main as one commit, and that commit is the reconciler's next
+  ;; input. A step that throws leaves the proc's state as it was, so it fails on every commit it is
+  ;; handed. Main's commits over ten rounds are the first record, and no more. (The original cause,
+  ;; root's entity with no boot fact, is fixed at its owner: seon.task/entity-value answers nil for it;
+  ;; the step here throws the contract error that cause raised, so the property stays proved.)
   (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :root-causes []}}]})
         t0 (:max-tx @conn)
         st (rec/reconciler-proc {:boot "boot-1"})
         round (fn [f i]
                 (let [db @conn
-                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)}) nil
+                      e (try (throw (ex-info "the step's contract" (contract/error :seon.instrument/contract-error 'seon.task/entity-value "invalid-output" {:t (:max-tx db)})))
                              (catch Throwable e e))
                       f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
                       [f tx] (err/flush-tx f db)]
@@ -934,25 +935,30 @@
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
 
 (defn caused-flat-input
-  "The cost proof's input at n: [base head] over a program of n catch sites and n citing sections,
-  the head one section rewritten to cite a dead name and one more catch site: a fixed change."
+  "The cost proof's input at n: [base head ch] over a program of n catch sites and n citing sections,
+  the head one section rewritten to cite a dead name and one more catch site: a fixed change. ch is
+  the branch's changes since base, which its caller holds (the turn reads them once: seon.agent/branch-changes), so
+  the proof measures what `caused` does with them and not the program diff that makes them."
   [n] (let [db0 (ts/test-db)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
             base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
             changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))]
-        [base (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]))
+        (let [head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
+          [base head (seon.merge/delta-changes base head #{})])))
 
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
   ;; site): the work is the scan of the attributes' datoms, a few bytes each, never a pull or a rule
-  ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
+  ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full. 24 contracted calls were its three
+  ;; classes; 32 since split-rows (1) and the old-word class, which reads the table and the changed texts on each side (6).
+  ;; The input holds the branch's changes (ch), as a caller does: the 1.5 M ticks and 40 calls of the program diff are not caused's.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
                :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               :fixed {:ticks 800000 :bytes 3800000 :calls 24}
+               :fixed {:ticks 800000 :bytes 3800000 :calls 32}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------

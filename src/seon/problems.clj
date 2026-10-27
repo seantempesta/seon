@@ -512,9 +512,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
   [base head ans ch]
   (let [bs (section-state base) hs (section-state head)
-        removed (set/difference (existing-names base) (existing-names head))
+        bn (existing-names base) hn (existing-names head)
+        removed (set/difference bn hn)
         changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
-        added (set/difference (existing-names head) (existing-names base))
+        added (set/difference hn bn)
         new-sections (set/difference (set (keys hs)) (set (keys bs)))
         ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
         secs (-> changed
