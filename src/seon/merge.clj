@@ -206,8 +206,12 @@
   on base or on that db, by each entity a datom of which one holds and the other does not
   (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
   attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
-  data (data-attr?), never a platform record such as an embedding. Cost: the datoms that
-  differ, not the program."
+  data (data-attr?), never a platform record such as an embedding. For data-attrs a set, one
+  :aevt range per such attribute: a whole :eavt diff walked every datom that differs, the
+  22,000 embedding datoms of a main that embedded after an agent forked, 313M ticks and 640 MB
+  for no key. For :all (the data is every attribute the store declares) the one :eavt diff,
+  filtered. Cost: a set, one descent per content attribute and the datoms of those that
+  differ, not the program and not what else main wrote; :all, the datoms that differ."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
@@ -215,11 +219,13 @@
                          (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base)]
     (into #{} (for [db dbs
-                    :let [[gone added] (d/datoms-diff base db :eavt [])
-                          d (read db)
-                          content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
-                    e (into #{} (comp (filter content?) (map :e)) (concat gone added))
-                    [side many das] [b d]
+                    :let [side-d (read db)
+                          content? (fn [a] (or ((nth b 3) a) ((nth side-d 3) a)))]
+                    e (if (= :all data-attrs)
+                        (into #{} (comp (filter #(content? (:a %))) (map :e)) (apply concat (d/datoms-diff base db :eavt [])))
+                        (into #{} (comp (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a])))) (map :e))
+                              (filter #(and (keyword? %) (content? %)) (set (concat (keys (:schema base)) (keys (:schema db)))))))
+                    [side many das] [b side-d]
                     k (entity-keys side many e das)]
                 k))))
 
