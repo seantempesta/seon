@@ -68,7 +68,6 @@ Owner, 2026-10-27: "Get rid of the double testing". Process tests read the whole
 - **The merge session** merges every ready branch into main, then runs one `nice -n 15 bin/build` and one `nice -n 15 bin/prove --merge` for the batch. In-process greens come back by digest wherever the batch did not move them, so the process tests run once for the whole batch. It does not wait for a batch to fill: it merges what is ready whenever no batch is verifying.
 - **A red** names its test. Revert only the branch whose change reaches it (`(my.agent/tests-reaching ...)`, or its diff against the test), send it back with the log, keep the rest, and reverify only if what was reverted moved something. Then `bin/update`.
 - Pin bumps and bin-only changes ride in a batch; `--merge` runs the cost proofs.
-- Heavy runs take one of `:seon.config.machine/heavy-runs` machine-wide flock slots (bin/env), so at most that many run at once.
 
 ## Every merge's `src` diff stat is read
 
