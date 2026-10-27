@@ -120,7 +120,7 @@
 (defn- full-request
   "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
   main, an OS child (the :tests effect), as a run of its own, so it never holds the run slot an
-  agent's turn waits on (a full run takes most of an hour, and can stall: measured 2026-10-27, its
+  agent's turn waits on (a full run takes most of an hour, and can stall: measured, its
   first one stalled in a process test). The same day's request again joins it or is answered by
   it; another day's while one runs is a :platform problem naming the one that has not ended.
   Answers [st outputs]."

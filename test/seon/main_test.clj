@@ -228,4 +228,6 @@
       (is (names-git? 'seon.fx '(defn x [d] (apply sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" [d])))))
     (testing "a shell line that names no git is not"
       (is (not (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "tar -x -C \"$1\"" "x" d))))))
-    (is (= #{'seon.fx/git-run 'seon.fx/checked-out?} readers))))
+    ;; seon.config's own-branch reader tests whether the checkout's .git is a file (a worktree): a file
+    ;; test at load, before any proc runs, not a read of git
+    (is (= #{'seon.fx/git-run 'seon.fx/checked-out? 'seon.config/reader} readers))))
