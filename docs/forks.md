@@ -258,9 +258,9 @@ The submodules we use as upstream has them, each with its pin and how it is buil
 - `reference-code/zstd` at `f8745da` (v1.5.7), upstream ``facebook/zstd``; built by `bin/build zstd` ([storage](storage.md#compression)).
 - `reference-code/awesome-jolt` at `9a04599`, upstream ``jlt-commons/awesome-jolt`` `main`; reference reading only.
 
-## Dropped fork: superv.async
+## superv.async
 
-The fork's only change printed a stack trace in the supervisor's error fn; `deps.edn` pins ``seantempesta/superv.async`` `501b4294`, the commit Datahike declares, with `core.async` excluded because Jolt ships its own.
+`deps.edn` pins ``seantempesta/superv.async`` `6f6c8231`, the tip of ``jolt/an-idle-supervisor-sets-no-timer``, on `501b4294` (the commit Datahike declares), with `core.async` excluded because Jolt ships its own. `6f6c8231`: the supervisor's stale-exception sweep is armed while an exception is pending, and only then; it re-armed itself every 10 s for the life of the process, and `superv.async/S` is a top-level def, so loading a store kept a timer pending forever: an idle root woke every 10 s, and Jolt could never tell a process that nothing would wake it ([failure points](failure-points.md)). Proof: `seon.db-test/an-idle-store-sets-no-timer`, red on `501b4294`. Generic. (An earlier fork change, a stack trace in the error fn, was dropped.)
 
 ## Unmodified, pinned in `deps.edn`
 
