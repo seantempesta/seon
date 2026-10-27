@@ -242,8 +242,9 @@
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
   seon.agent/branch-changes) carry to main: the vars it added, redefined and removed, and the
-  schema keys it registered or changed; each sorted, an empty kind left out ({}: nothing). A
-  schema registered with no file (a scratch one, my.schema) is no key of the program and never
+  schema keys it registered or changed; each sorted, an empty kind left out ({}: nothing). A var
+  is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
+  and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
   merges, so it is none of these."
   {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
   [ch]

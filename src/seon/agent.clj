@@ -665,6 +665,9 @@
   ([] (prove! :turn))
   ([mode]
   (commit!)
+  ;; the turn's one diff, read here at the committed db, so the test child forked for this run
+  ;; inherits it and the turn's other readers find it held (branch-changes)
+  (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
     (:result (await-op! :reply k :tests)))))

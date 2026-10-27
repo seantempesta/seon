@@ -46,7 +46,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
  {:seon.task/name "what-a-branch-will-merge-shows-on-the-page"
-  :seon.task/plan "What exists: what a branch's merge will carry (`seon.program/divergence`, the agent's :will-merge) is in the model's context only. Correct: a named schema for it with ai and html renders; the agent's page shows it as the model reads it."
+  :seon.task/plan "What exists: what a branch's merge will carry (`seon.merge/divergence`, the agent's :will-merge) is in the model's context only. Correct: a named schema for it with ai and html renders; the agent's page shows it as the model reads it."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-agent-page-shows-what-its-merge-will-carry}}
  {:seon.task/name "a-debug-view-of-any-agent"

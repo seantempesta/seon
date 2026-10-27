@@ -81,9 +81,6 @@
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
         _ (agent/embed-written!)
-        ;; the branch's one diff from its merge base this turn, read before the test child forks
-        ;; so the child inherits it (seon.agent/branch-changes)
-        _ (agent/branch-changes (:base @agent/state) (agent/db))
         t0 (profile/now-ns)
         test-run (agent/prove!)
         tests-ms (long (profile/ms-since t0))

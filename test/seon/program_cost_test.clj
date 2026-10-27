@@ -157,6 +157,8 @@
        :fixed {:ticks 1000.0 :bytes 4000.0 :calls 1}
        :sizes divergence-sizes})
     (finally
+      ;; the pair branch-changes' proof left held
+      (swap! seon.agent/state dissoc :branch-changes)
       ;; each store made, released whatever holds it (release-all) and removed
       (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
         (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
