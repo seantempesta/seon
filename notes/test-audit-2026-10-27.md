@@ -66,3 +66,26 @@ Order: 3 and the interim of 1 are hours, independent and small. 1+2 is the real 
 ## 4. How it was measured
 
 `stages.clj` runs `profile/measure!` around each stage of `plan-of` on the worktree's kept store. `cold.clj` runs `program-db` on (a) a copy of the kept store after one appended comment in src/seon/fx.clj, then src/seon/profile.clj, which is the refresh (reverted after; nothing committed), and (b) an empty store, which is the full import. Both run with `target/jolt/jolt -A:test run FILE` with bin/env sourced. Not measured: the no-op `bin/build seon`, the shard and step run times, the `:gate` checkout end to end, B in the 186 MB stores (another checkout's store was not opened), and an independent re-run of any number.
+
+## 5. Wastes not in root's six assignments (for root to assign)
+
+Root assigned these six: the kept program store → merge-readiness; reach graph at the cost of change → reach-index; fx/inputs → old-word; bin/prove asks the one service → one-wait; Jolt pin and whole config in digests → reuse; a per-run output dir with no cloned logs → ctx-atom. These are the rest:
+
+| # | Waste | Estimate now → after | Fix and what it deletes |
+|---|---|---|---|
+| A | **`bin/build seon` after any change rebuilds the whole program.** One appended comment in src/seon/profile.clj cost 48.6 s (jolt build 45 s, user 41 s); a no-op is 2.35 s. css is also rebuilt on every tree change (3 s), although input.css did not change. This runs before any shard or step that reaches the binary, which is every `--merge`. | O(program) → O(changed units + their dependents) | Jolt's AOT cache should reuse unchanged units; find why the whole binary relinks or recompiles (a Jolt-side task, `jolt/<topic>`). Key css on its inputs, not the tree. |
+| B | **`--merge` runs contracts and smoke twice:** once as digested steps, then unconditionally (bin/prove:71-72). | 2 full step runs per merge → 0 when green | Delete the two reruns; `merge_verdict` reads the steps' lines. |
+| C | **Two tree-id implementations** (fx/tree-id, bin/tree), and tree-id runs 2 + 2×shards times per run, each re-hashing every file from an empty index. | 0.4–0.7 s × 10 → 0.22 s × 1 plus the shards' after-checks | One implementation, fed from a copy of the repo's stat-cached index (same id, measured). Could fold into old-word's fx/inputs work. |
+| D | **Three per-test ms records:** target/prove/ms (one file per test per checkout), shard-*.time, and the result's :ms. | O(T) file writes per run → 0 | Deal shards from the results' :ms; delete ms-dir. Follows test-facts. |
+| E | **Dead whole-program twins** `reach-index` and `reach-digests` (test callers only), and test-runner re-deriving the process sets inline instead of calling `program/process-tests`. | — | Delete, or move into the tests. Natural for reach-index. |
+| F | **No daily full run exists.** AGENTS §3 and docs/merging.md promise "once a day"; no cron entry or code runs it (only a comment, program.clj:1100). Reach digests leave file reads and binaries to it, so without it those changes are never caught. | — | A cron message (the one allowed clock) that queues `bin/test --all` and `bin/check 100` on a clean main checkout. |
+| G | **Results grow without bound:** 359k files, 1.4 GB, plus 160 stray `proof-tree-<uuid>.edn` files a test writes into the shared directory. Reads stay O(C), so this is disk, not time. | +~1,000 files per unreused run | test-facts' one results store; file the stray writer as a defect. |
+| H | **The `:gate` builds a fresh checkout per merge** (`seon.fx/run-tests`: `bin/worktree --at`, then bin/prove): an APFS clone, a process start, a plan, and possibly a build (A). | one checkout plus a full plan per gated merge → a request to the service | Covered once one-wait makes bin/prove a caller of the service. Make sure the `:gate` is moved too. |
+
+## 6. Tracking (re-measured as each fix merges)
+
+The same method as §4, in this worktree after merging main, with `stages.clj` (a warm plan) and `cold.clj` (a new tree and an empty store). Reuse = keys found green at their digest, out of the candidates, on a tree one commit past main.
+
+| Date | Main at | Merged fix | Warm plan | One-file refresh | Schema-change / empty store | reach-graph | Reuse | Notes |
+|---|---|---|---|---|---|---|---|---|
+| 2026-10-27 19:15 | 971aef7397 | baseline | 2.5 s, 184 M ticks, 1.1 GB | 1.0–1.5 s, 30–68 M ticks | 17.7–27.7 s, 2.6–3.9 G ticks, 8–24 GB | 1.65 s, 254 M ticks, 1.31 GB | 884 of 977 on main's own tree; 0 of 990 on main's merges (merge-log) | load 38–55 |
