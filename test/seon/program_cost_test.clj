@@ -278,8 +278,8 @@
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
-     ;; per added form), 2026-10-27
-     :fixed {:ticks 350000 :bytes 4000000 :calls 18}
+     ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
+     :fixed {:ticks 350000 :bytes 4000000 :calls 19}
      :sizes [100 300 1000 10000]}))
 
 (defn- calls-form

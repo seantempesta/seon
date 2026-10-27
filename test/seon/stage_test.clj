@@ -11,6 +11,7 @@
                       'user "(ns app.st-stage)"
                       'app.st-stage "(defn kept [x] x)"
                       'app.st-stage "(defn dropped [x] x)"
+                      'app.st-stage "(deftype Pt [x y])"
                       'app.st-stage "(defmulti area :shape)"
                       'app.st-stage "(defmethod area :square [{:keys [s]}] (* s s))"
                       'app.st-stage "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
@@ -20,7 +21,8 @@
         mine (fn [tx] (filterv #(let [x (d/entity db (second %))]
                                   (= "app.st-stage" (or (some-> (:var/name x) namespace) (some-> (:method/multi x) namespace))))
                                tx))]
-    (testing "a runtime that matches the branch stages nothing"
+    (testing "a runtime that matches the branch stages nothing, a deftype's type included (Jolt interns no var for it)"
+      (is (= :type (:var/kind (d/entity db (pdb/eid db :var/name 'app.st-stage/Pt)))))
       (is (= [] (mine (stage/stage-tx db)))))
     (ns-unmap 'app.st-stage 'dropped)
     (remove-method @(find-var 'app.st-stage/area) :circle)
