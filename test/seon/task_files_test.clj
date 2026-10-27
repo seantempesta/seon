@@ -95,7 +95,6 @@
   {"seon.reconcile/one-observe-descends-once" "merged as the stored-shape measurement only; the one multi-prefix datoms-diff walk its plan asks for is still a per-attribute loop (low priority in its plan)"
    "seon.render/walk" "render work still moving: later branches finish it"
    "seon.render/page" "render work still moving: later branches finish it"
-   "seon.db/a-roots-heap-costs-what-it-reads" "the merge that names it filed it (jolt/test-audit, 3eface7bab); its holder census and fix are still to do"
    "seon.db/opening-a-store-costs-what-it-opens" "merged its install-missing! half (jolt/test-audit); ids!'s walk of every branch head is Datahike's set-ids!, still to do"})
 
 (deftest no-shipped-task-is-merged-work
