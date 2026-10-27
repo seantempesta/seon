@@ -121,8 +121,13 @@
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :running :model "outside")
                                                           (task/env-tx "demo/x" {:model "m2"})))]
     (is (= [] (actions-for db)) "nor when the task's model changes: the run is the outside agent's"))
-  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :ended :model "outside")))]
-    (is (not-any? #(= "outside" (get-in % [:env :model])) (actions-for db)) "its next run is the task's own, not outside")))
+  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :killed :model "outside")))]
+    (is (= [(spawn "x" 2 :model "m1")] (actions-for db)) "its next run is the task's own model, not outside"))
+  (testing "root cannot take back a task that is done: merged work keeps :running"
+    (let [db (db-of [(decl "z")] :extra (run "z" 1 :merged :outcome :green :results {(t "z") :pass}))
+          {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
+      (is (= [] taken))
+      (is (= ["task demo/z is done, not running: nothing to take back"] (map :seon.error/message not-running))))))
 
 (deftest root-takes-a-running-task-back-and-releases-it-again
   ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running

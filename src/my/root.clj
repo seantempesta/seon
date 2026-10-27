@@ -63,18 +63,22 @@
   "The write that takes the running tasks among ids back from their runs on db: each is held by
   compare-and-swap from :running (a cancel! or a hold between the read and the write refuses the write),
   with its failure naming reason; the reconciler kills a held task's live run (seon.reconcile/classify)
-  and keeps the task, which run! releases again. Answers {:tx :taken ids :not-running errors}: a
-  task that is held, cancelled, unknown or never released is answered :seon.root/not-running."
+  and keeps the task, which run! releases again (its failure, the reason, stays like any hold's: the
+  next run continues from it). Answers {:tx :taken ids :not-running errors}: a task that is held,
+  cancelled, unknown, never released or already done (merged work keeps :running) is answered
+  :seon.root/not-running."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids reason]
   (let [x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
-        taken (filterv #(= :running (x %)) ids)]
+        idx (reconcile/index db)
+        done? (fn [id] (contains? #{:done :merged} (reconcile/task-state idx id)))
+        taken (filterv #(and (= :running (x %)) (not (done? %))) ids)]
     {:taken taken
      :tx (vec (mapcat (fn [id] [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
                                 {:seon.task/id id :seon.task/failure {:reason reason}}]) taken))
-     :not-running (vec (for [id ids :when (not= :running (x id))]
+     :not-running (vec (for [id ids :when (not-any? #{id} taken)]
                          (contract/error :seon.root/not-running #'my.root/take-back-tx
-                                         (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not running: nothing to take back")
+                                         (str "task " id (cond (nil? (x id)) " does not exist" (and (= :running (x id)) (done? id)) " is done" :else (str " is " (name (x id)))) ", not running: nothing to take back")
                                          {:task id :execution (x id)})))}))
 
 (defn hold!
