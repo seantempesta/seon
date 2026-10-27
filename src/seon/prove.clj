@@ -34,8 +34,8 @@
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
   digest, the plan taking no base)."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
-  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main :full]] :string]}
+  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when (= :full mode) "!full")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
 
@@ -67,6 +67,25 @@
                            :seon.proof/t (:t run) :seon.proof/change change}
                     (fails t) (assoc :seon.proof/failures (fails t)))))))))
 
+(defn full-run-tx
+  "The facts of the daily full run (:full mode) on main, as result-tx's for main's run: the run's
+  entity with its counts, and each test's newest result on main (:seon.proof/latest, what :test-red
+  reads), with a red's failures, from the effect's answer {:results {test status} :digests {test
+  digest} :failures {test [failure ...]} :ms}; the results by digest are the run's own, recorded by
+  its shards. A test that was red stays visible as :test-red, saying why, until a later run is green."
+  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  [run {:keys [results digests failures ms]}]
+  (let [counts (frequencies (vals results))
+        t (or (:t run) 0)
+        change (select-keys (assoc run :t t) [:branch :t])]
+    (into [{:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t t
+            :seon.proof.run/pass (:pass counts 0) :seon.proof.run/fail (:fail counts 0) :seon.proof.run/error (:error counts 0)
+            :seon.proof.run/ms (long (or ms 0))}]
+          (for [[test s] results :when (get digests test)]
+            (cond-> {:seon.proof/latest (str test) :seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
+                     :seon.proof/t t :seon.proof/change change}
+              (get failures test) (assoc :seon.proof/failures (get failures test)))))))
+
 ;; ---- admission ---------------------------------------------------------------------------
 
 (defn- reply
@@ -77,7 +96,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
@@ -95,6 +114,40 @@
                  (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
                  (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
     [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
+
+;; ---- the daily full run: a lane of its own ------------------------------------------------
+
+(defn- full-request
+  "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
+  main, an OS child (the :tests effect), in a lane of its own, so it never holds the run slot an
+  agent's turn waits on (a full run takes most of an hour, and can stall: measured 2026-10-27, its
+  first one stalled in a process test). The same day's request again joins it or is answered by
+  it; another day's while one runs is a :platform problem naming the one that has not ended.
+  Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st req]
+  (let [cur (:full st)]
+    (cond
+      (and cur (= (:key cur) (:key req))) [st []]
+      cur [st [{:op :problem :class :platform
+                :error (contract/error :seon.prove/full-run-running #'seon.prove/full-request
+                                       (str "the full run " (:key req) " was asked while " (:key cur) " has not ended") {:running (:key cur)})}]]
+      (= (:key req) (:full-done st)) [st []]
+      :else (let [[st m] (step/ask st [:prove :answers] [:full (:key req)] {:op :fx :kind :tests :req {:all? true}})]
+              [(assoc st :full req) [m]]))))
+
+(defn- full-answered
+  "The full lane's chain: the effect's answer, its statuses written on main (full-run-tx: a red test
+  becomes a :test-red row), the lane free. A failed effect or write is a :platform problem."
+  {:malli/schema [:=> [:cat :map :keyword :any] [:tuple :map [:vector :map]]]}
+  [st step r]
+  (let [run (:full st)]
+    (cond
+      (contract/error? r) [(dissoc st :full) [{:op :problem :class :platform :error r}]]
+      (= :full step) (let [[st w] (step/ask st [:prove :answers] [:full-recorded (:key run)]
+                                            {:op :write :req {:op :tx :branch :db :tx-data (full-run-tx run (:value r))}})]
+                       [st [w]])
+      :else [(-> st (dissoc :full) (assoc :full-done (:key run))) []])))
 
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
@@ -144,6 +197,8 @@
         k (slot req)
         done (get-in st [:done k])]
     (cond
+      ;; the daily full run, in its own lane
+      (= :full mode) (full-request st req)
       (same? (:running st) req) [(update-in st [:running :waiters] into rids) []]
       (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] into rids) []]
       ;; asked again after its run, nothing it reads changed
@@ -175,6 +230,7 @@
   (let [run (:running st)]
     (cond
       (= :killed step) [st []]
+      (#{:full :full-recorded} step) (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
       (not= key (:key run)) [(update st :stale (fnil inc 0)) []]
       :else
       (case step
@@ -215,7 +271,7 @@
   ([] {:params {} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
-       :ping-map-fn (fn [st] {:running (some-> st :running :key) :waiting (count (:waiters (:running st))) :next (count (:next st))
+       :ping-map-fn (fn [st] {:running (some-> st :running :key) :full (some-> st :full :key) :waiting (count (:waiters (:running st))) :next (count (:next st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([_args] {:rid 0 :pending {} :next {} :done {}})
   ([st _tr] st)
