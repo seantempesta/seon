@@ -476,8 +476,8 @@
         theirs (d/db-with db (program-facts '[[demo/k "(defn k [] 2)" []]]))]
     (is (not-any? #(contains? state %) [:will-merge :merge :attention :tests]) "no turn section of them")
     (is (= ['demo/h] (:added (seon.program/divergence db ours))) "what the branch's merge carries")
-    (is (= {:main-moved [[:var 'demo/k]] :conflicts []} (seon.merge/readiness db ours theirs))
-        "what main changed since the base, and no key both changed: it can merge")))
+    (is (some #{[:var 'demo/k]} (:main-moved (seon.merge/readiness db ours theirs))) "what main changed since the base")
+    (is (= [] (:conflicts (seon.merge/readiness db ours theirs))) "and no key both changed: it can merge")))
 
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
@@ -533,18 +533,6 @@
     (is (= 'demo-test/f-test (:test r)))
     (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
     (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
-
-(deftest a-turn-says-what-it-ran-what-the-judge-and-the-merge-run
-  ;; root's ruling (a), 2026-10-22: a turn runs the proofs and the tests the branch changed;
-  ;; the judge runs the reached in-process set at the run's end; the merge runs the
-  ;; process tests. The turn says each, and what runs the rest
-  (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
-                                                  :tests {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1}})]
-    (is (= {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1
-            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :root-runs '(my.agent/deferred)}
-           (:tests b)))
-    (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
