@@ -42,7 +42,8 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
- :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
+ :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
+                                                     [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
