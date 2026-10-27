@@ -367,24 +367,31 @@
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:ran r) (:reused r)])")
+        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:key r)])")
         own "(select-keys (prove) [:results :ran :reused])"
-        digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
-        ;; how many of the two tests' results root's main holds, at the digests bin/test gives them
-        stored (str "(count (seon.proofs/stored-results @(:conn sys) " (pr-str [(digests proof) (digests reached)]) "))")
+        ;; how many of the two tests' results main holds (as the agent hears it), at the digests the agent's plan gives
+        ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
+        stored (str "(count (seon.proofs/stored-results (seon.agent/heard-main) (vec (vals (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
+                    (pr-str [proof reached]) ")))))")
         [_ inputs first-run files judged second-run]
+        ;; a real change that keeps them green (a vector of what the file's answers), so the reached
+        ;; test is selected: the agent's change reaches it
         (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                    {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
                    own
-                   {:op :eval :agent "root" :code stored}
+                   stored
                    {:op :eval :agent "root" :code (run (:agent %))}
                    own)
-                  {:dirs ["src" "test"] :proofs #{proof}})]
+                  ;; root imports the dirs bin/test does (:seon.config.source/dirs, schemas included), so
+                  ;; root's boot shares its source tree's inputs
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof}})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (:value files)) "and both are facts on root's main")
-    (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
-    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (:value second-run)) "and so does the agent's next run")))
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (:value files)) "and both are facts on main at the agent's digests")
+    ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
+    (is (= {proof :pass reached :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
+    (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
+    (is (= {proof :pass reached :pass} (:results (:value second-run))) "and so is the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
