@@ -277,48 +277,11 @@
         (if (instance? Throwable s)
           (error :seon.contract/invalid #'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
                  {:seon.contract/var (symbol v)})
-          (let [raw @v w (wrap (symbol v) s raw)]
+          (let [w (wrap (symbol v) s @v)]
             (alter-var-root v (constantly w))
-            (alter-meta! v assoc ::wrapper w ::raw raw)
+            (alter-meta! v assoc ::wrapper w)
             :armed))))))
 
-(defn disarm!
-  "Put var v's raw root back, the one arm! wrapped: answers :disarmed, or :unchanged when v's root is
-  not its own wrapper (never armed, or redefined since) or arm! kept no raw root for it: a definition
-  holds its checked function from the start (see \"contracts at definition\" above) and has none.
-  arm! arms it again."
-  {:malli/schema [:=> [:cat :seon.host/var] [:enum :disarmed :unchanged]]}
-  [v]
-  (if (and (contains? (meta v) ::raw) (armed? v))
-    ;; one swap: the raw root goes back only if the root still is the wrapper (a redefinition between the
-    ;; check and the swap keeps its new root)
-    (let [w (::wrapper (meta v)) raw (::raw (meta v))]
-      (alter-var-root v (fn [root] (if (identical? root w) raw root)))
-      (alter-meta! v dissoc ::wrapper ::raw)
-      :disarmed)
-    :unchanged))
-
-(defn unarmed
-  "thunk's value, called with every armed var of the process disarmed (disarm!) and armed again after,
-  exactly those, whatever thunk does. For a cost proof that measures a function's own work unarmed:
-  in a root or an agent the contracted functions are armed (+30% on the printer's proofs), in bin/test
-  none is, and the raw roots cost the same in both. Single-threaded by intent: while the thunk runs,
-  other threads call the raw roots unchecked. A var armed at its definition (the defn macro; a release
-  build direct-links it) has no raw root kept and stays armed: the residual in the measure, a contracted
-  call or two (254,768 against 254,736 B on the printer's map proof). A var that cannot be armed again is
-  an error naming it, raised after the thunk's own."
-  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
-  [thunk]
-  (let [armed (vec (for [n (all-ns) v (vals (ns-interns n)) :when (and (contains? (meta v) ::raw) (armed? v))] v))
-        rearm (fn [] (let [bad (vec (for [v armed :let [r (arm! v)] :when (not (#{:armed :unchanged} r))] [v r]))]
-                       (when (seq bad)
-                         (error :seon.contract/invalid #'seon.contract/unarmed
-                                (str "armed again after the thunk, " (count bad) " var(s) could not be: " (str/join ", " (map (comp str symbol first) bad)))
-                                {:seon.contract/var (symbol (ffirst bad))}))))]
-    (run! disarm! armed)
-    (let [v (try (thunk) (catch Throwable t (rearm) (throw t)))]
-      (when-let [e (rearm)] (throw (ex-info (:seon.error/message e) e)))
-      v)))
 (defn function-var?
   "Is v a var holding a function that needs a contract: not a macro, a test, a dynamic
   setting, a protocol's method (it dispatches to the types that implement it: :protocol) or a
