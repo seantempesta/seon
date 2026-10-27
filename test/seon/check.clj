@@ -881,7 +881,7 @@
     ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
     ;; count is recorded, not compared: a thread Thread.join answered for is still in the
     ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
-    ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md)
+    ;; pthread_join), and nothing can await its removal (docs/processes.md#a-stop-reaps-every-child)
     (let [stopped (thread-diff (declared-threads) (threads))]
       {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
        :health (set health)

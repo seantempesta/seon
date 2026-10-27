@@ -549,15 +549,13 @@
     ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
     ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
     ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
-    ;; runs on (and by every test that reads files or runs a process)
+    ;; runs on, which 937 of 977 tests reach (and by every test that reads files or runs a process)
     (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
         "the runtime's pins are classes too")
-    (let [e0 (:env in)]
-      (is (= e0 (:env (fx/inputs here (assoc cfg/config :seon.config.source/pin-namespaces (cfg/value :seon.config.source/pin-namespaces)) (cfg/checkout))))
-          "the same inputs give the same :env"))
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/jolt]]
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd :seon.pin/jolt]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
+    (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input

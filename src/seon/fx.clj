@@ -233,7 +233,7 @@
 (defn- pin-class
   "The class of the submodule at relative path p: :seon.pin/NAME when cfg's
   :seon.config.source/pin-namespaces names it (a test takes it by the namespaces its reach
-  references), else nil (the runtime and the binary: every test's)."
+  references), else nil (llama.cpp and awesome-jolt: every test's)."
   {:malli/schema [:=> [:cat :map :string] [:maybe :keyword]]}
   [cfg p]
   (when (some #(contains? % p) (vals (get cfg :seon.config.source/pin-namespaces)))
