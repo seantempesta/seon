@@ -14,7 +14,6 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 JOLT=$ROOT/target/jolt/jolt
 [[ -x $JOLT ]] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1 }
 . "$ROOT/bin/env"
-heavy_held || { heavy_hold "$0" "$@"; exit $? }   # one of the machine's heavy-run slots (bin/env)
 main_first   # main's merge verification goes first (bin/env)
 cd "$ROOT"
 # a root a test boots listens on no dashboard port

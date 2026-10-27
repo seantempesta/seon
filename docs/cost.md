@@ -52,6 +52,10 @@ A generated estimate (`:seon.cost/generated`: `:of`, `:n`, `:work`, `:cases`, an
 
 A function that takes a db has no generated input yet: `:seon.host/db` is a predicate, so its cases need a domain generator (a session's shape over a seeded db), and its bound is written in that generator's measures (task `seon.cost/a-db-function-draws-its-cases-from-a-domain-generator`).
 
+## What a contract costs
+
+A contract is checked on every call, so the schema of a value that many calls take costs that value's size on each of them. A large value passed among helpers is checked shallowly (its keys and their types, never each entry), and each entry is checked once, where it enters: `:seon.reconcile/index` (every reconciler helper takes it; put-task checks a task as `:seon.task/own`, put-run a run as `:seon.run/run`) and `:seon.ctx/ix` (the ctx walk's state). Checked deeply, the index's listing cost tasks x tasks; its proof is `seon.reconcile-test/an-index-is-listed-at-the-cost-of-its-tasks`.
+
 ## Where it is used
 
 An agent's task names its cost proofs as goals ([agent](agent.md)); `bin/test` runs them with every other test; a proof's `:ops` are priced in ticks, bytes and time from the unit table `seon.cost/units`, which `seon.cost-test/the-unit-table-is-current` measures again and holds to 1.25x. Clocks that order events are `seon.profile/now-ns` ([machine](machine.md#the-clock)); `cpu-ns` orders nothing ([clocks](clocks.md)).

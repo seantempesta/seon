@@ -320,28 +320,47 @@
    "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
    "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
 
-(defn- old-word-patterns
-  "Whole-word patterns for the table's old words, as the text spells them (a plural, \"merge train\"); \"admit\"
+(defn- old-word-spellings
+  "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
   and \"land\" are also plain English and Seon's admission, so only names are read for them."
   [agents]
   (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
-    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))]))
+    [w (if (= w "merge-train") ["merge train" "merge-train"] [w])]))
+
+(defn- word-char? [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
+
+(defn- whole-word?
+  "Does lower-case text low hold spelling s as a whole word, a plural too? What the pattern
+  (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here, so the tree's 59,000
+  lines against 17 patterns took 141 s; this reads the whole tree in ~150 ms)."
+  [^String low ^String s]
+  (let [n (.length low) k (.length s)]
+    (loop [i (.indexOf low s 0)]
+      (when (<= 0 i)
+        (let [e (+ i k)]
+          (if (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
+                   (or (>= e n) (not (word-char? (.charAt low e)))
+                       (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))
+            true
+            (recur (.indexOf low s (inc i)))))))))
 
 (deftest no-text-uses-an-old-word
   (let [root (config/checkout)
-        patterns (old-word-patterns (slurp (str root "/AGENTS.md")))
+        words (old-word-spellings (slurp (str root "/AGENTS.md")))
         kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
+        used (fn [^String line] (let [low (str/lower-case line)] (filter (fn [[_ ss]] (some #(whole-word? low %) ss)) words)))
         paths (for [dir ["bin" "docs" "resources" "src" "test" "web" "config" "native"]
                     f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
                     :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (text? p)]
                 p)
         hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
-                   :let [lines (str/split-lines (slurp (str root "/" p)))]
-                   [i line0] (map-indexed vector lines) :let [line (str/replace line0 kept-span "")]
-                   [w re] patterns :when (re-find re line)]
+                   [i line0] (map-indexed vector (str/split-lines (slurp (str root "/" p))))
+                   ;; the kept spans only remove text: a line that uses no word before they go uses none after
+                   :when (seq (used line0))
+                   [w _] (used (str/replace line0 kept-span ""))]
                [p (inc i) w])]
-    (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
+    (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
 
 (defn grep-db

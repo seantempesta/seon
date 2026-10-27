@@ -1,4 +1,3 @@
 ;; The machine Seon targets (owner, 2026-10-22: a 16 GB MacBook M1).
 {:seon.config.machine/memory-mb [:int {:min 256 :seon.config/unit "MB" :description "The memory Seon itself may use on the machine it targets; seon.check/scale fails past it."}]
- :seon.config.machine/heavy-runs [:int {:min 1 :seon.config/unit "runs" :description "How many heavy runs (bin/prove, bin/test, bin/check) run at once on the machine; a further one waits on a slot (bin/env's heavy_hold)."}]
  :seon.config.machine/relay-mb [:int {:min 1 :seon.config/unit "MB" :description "The most physical footprint one MCP relay (bin/mcp) may reach; seon.check/mcp-proof fails past it."}]}
