@@ -327,7 +327,7 @@
       (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
     (is (nil? (:value status)) "an in-process test is none")))
 
-(deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
+(deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
@@ -342,7 +342,7 @@
                              "  (vec (repeatedly 5 m)))")]))
         later (rest (:value reads))]
     (is (= 5 (count (:value reads))))
-    (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
+    (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
 

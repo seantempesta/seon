@@ -680,7 +680,7 @@
       ;; nothing enters below the doc cut: no unit the work is not likely to need, however empty the
       ;; page (the owner, 2026-10-27: "if there's nothing at the threshold then show nothing until we
       ;; have more context")
-      (when-let [r (related db te {:cut leave :focus fv :words words})]
+      (when-let [r (related db te {:cut (min enter leave) :focus fv :words words})]
         (let [ch (:relevance r)
               held (into [] (keep (fn [[x]] (when-let [p (ch x)] (when (>= p leave) [x p])))) prior)
               in? (set (map first held))
@@ -1074,11 +1074,11 @@
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
                               :else %)
-                  ;; the own task, which the page's task data and cited vars draw, is told by their
-                  ;; change in the page, never again as data (a task re-homed under a restart's new
-                  ;; run was 190 KB of :ctx in one read)
-                  own (into #{} (keep own-task) [(:tree r0) (:tree r1)])
-                  drawn? (fn [p] (some #(and (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) own))
+                  ;; the own task re-homed under a new run (a restart's: ctx holds it whole under the
+                  ;; newest) is the same task, which the page's task data and cited vars draw: its move
+                  ;; is not told as data (it was 190 KB of :ctx in one read); its own changes are
+                  [o0 o1] [(own-task (:tree r0)) (own-task (:tree r1))]
+                  drawn? (fn [p] (and (not= o0 o1) (some #(and % (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) [o0 o1])))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
                            (for [[p ov] (ctx/diff r0 r1) :when (not (drawn? p))] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
