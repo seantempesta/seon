@@ -454,10 +454,8 @@
   {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :string [:sequential :qualified-symbol]]
                   [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
   [plan dir tests]
-  (into {} (for [t tests :let [dg (get-in plan [:digests t]) v (when dg (get (proofs/verdicts dir [dg]) dg))]]
-             [t (cond (and v (proofs/green? v)) :pass
-                      (or v (and dg (.isFile (java.io.File. ^String (proofs/result-path dir dg false))))) :fail
-                      :else :error)])))
+  (into {} (for [t tests :let [dg (get-in plan [:digests t])]]
+             [t (or (when dg (proofs/status-at dir dg)) :error)])))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -475,6 +473,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
+        results (cfg/value :seon.config.source/test-results-dir)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
@@ -483,10 +482,12 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+        ;; the tree's shards store into this root's results directory, named to them, so the
+        ;; verdicts read below are the ones its run wrote
+        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
               plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
           (spit log (str (:out r) (:err r)))
-          {:value {:results (test-results plan (cfg/value :seon.config.source/test-results-dir) tests) :ms (profile/ms-since t0) :log log}})
+          {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))

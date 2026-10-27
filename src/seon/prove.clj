@@ -31,8 +31,9 @@
   "The key of the run of branch whose program has digest dg (seon.program/program-digest of its
   head: what a run reads, so a write that changes no form never makes a second run), of the tests of
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
-  what the branch changed, an agent's turn)."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge]] :string]}
+  what the branch changed, an agent's turn; :main: main's run, every test with no result at its
+  digest, the plan taking no base)."
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
   [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
@@ -75,7 +76,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
@@ -168,8 +169,7 @@
         :spawn (if (contract/error? r)
                  (finish st r)
                  (let [st (assoc-in st [:running :runner] (:id r))
-                       ;; mode :main: the plan with no base, since main's own tests did not move from the main it forked
-                       [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode :main} (:names run) (assoc :names (:names run))))]
+                       [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
                    [(assoc-in st [:running :stage] :tests) [m]]))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]
@@ -204,6 +204,6 @@
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
                      :main (let [st (assoc st :main-t (:t m))]
                              (if (program/moves-program? (:ops m))
-                               (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m))})
+                               (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
                                [st []])))]
      [st (if (seq outs) {:to-api (vec outs)} {})])))

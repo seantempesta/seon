@@ -57,9 +57,9 @@
         _ (is (empty? o) "a data commit runs nothing")
         [st o] (feed st [[:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
     (is (= 1 (count (asks o :spawn))) "a program commit: one run of main, by a prove agent forked from main")
-    (is (= (prove/run-key :main dg nil :judge) (:key (:running st))) "keyed by main's program digest")
+    (is (= (prove/run-key :main dg nil :main) (:key (:running st))) "keyed by main's program digest")
     (is (empty? (waiters-answered o)) "nobody waits on it")
-    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :t 6 :digest dg}]])
+    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :t 6 :digest dg :mode :main}]])
           [_ all] (run-through st (into o o2) test-run-answer)]
       (is (empty? (asks o2 :spawn)) "a session asking for the same key joins it")
       (is (= [7] (waiters-answered all)) "and is answered once, at its end")
@@ -191,7 +191,7 @@
   ;; forked after finds them at their digests and runs neither. Each read is a form of its own: a
   ;; form reads the db as it began
   (let [tests '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]
-        booted (str "(let [k #(seon.prove/run-key :main (seon.program/program-digest %) nil :judge)"
+        booted (str "(let [k #(seon.prove/run-key :main (seon.program/program-digest %) nil :main)"
                     "      db (seon.root/await-db sys nil #(d/entity % [:seon.proof.run/id (k %)]))]"
                     "  (pr-str {:key (k db) :facts (vec (sort (d/q '[:find ?t ?s :in $ ?k :where [?e :seon.proof/run ?k] [?e :seon.proof/digest]"
                     "                                                [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] db (k db))))}))")

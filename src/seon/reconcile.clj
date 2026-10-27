@@ -425,10 +425,12 @@
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; with no checkout declared (root's ruling (a)), the merge goes on, its
-                         ;; deferred tests unrun: an open :unrun problem
-                         (cond (or (empty? deferred) (nil? (get-in idx [:root :gate-checkout])))
-                               {:op :ready-to-merge :run aid :task id}
+                         ;; with no checkout to run them on (a root with no source), the merge is
+                         ;; held with that reason, never merged with them unrun
+                         (cond (empty? deferred) {:op :ready-to-merge :run aid :task id}
+                               (nil? (get-in idx [:root :gate-checkout]))
+                               (failed aid id (str "run " aid "'s change reaches process tests (" (str/join ", " deferred)
+                                                   ") and this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)"))
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}
                                :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
@@ -776,7 +778,7 @@
       :octopus-merge (let [bs (mapv #(get-in (task/run (:db st) (:run %)) [:seon.run/env :branch]) (:members act))]
                      (one (request (assoc-in st [:flights run :branches] bs) run :octopus-merged
                                    {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
-      ;; the merge gate (root asked: :seon.task/gate?): the candidate's files read from its
+      ;; the merge gate (a change reaching process tests): the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st run :gate-read
                           {:op :write :req {:op :branch-db :branch (get-in (task/run (:db st) run) [:seon.run/env :branch])}})))))

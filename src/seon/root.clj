@@ -915,8 +915,11 @@
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         provider (or provider (cfg/provider cfg/config))
-        ;; the config in force, written on main's root entity with the boot fact
-        config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
+        ;; the config in force, written on main's root entity with the boot fact; the merge gate's
+        ;; checkout, when none is declared, is this root's own source root
+        config (cond-> (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
+                 (and (nil? (cfg/value :seon.config.source/gate-checkout)) (:root source))
+                 (assoc :seon.config.source/gate-checkout (:root source)))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))
@@ -1177,16 +1180,17 @@
 (defn prove!
   "Ask the test service (seon.prove) to prove a branch at its head, the tests of namespaces names
   (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
-  proves it; mode :judge, as root's judge does), or main (agent nil) in mode :judge. The run is keyed by the digest of what it reads,
+  proves it; mode :judge, as root's judge does), or main (agent nil) in mode :main (every test
+  with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
   its branch's program (seon.program/program-digest), as its turn's seon.agent/prove! takes it,
   so a session's request and the turn's are one run, and a request for main and the run main's
   own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
   :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
                   [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge]] :seon.host/promise]]}
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]]}
   ([sys agent-id] (prove! sys agent-id #{}))
-  ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :judge)))
+  ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
   ([sys agent-id names mode]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
     (let [db (pdb/head (:conn sys) b)]

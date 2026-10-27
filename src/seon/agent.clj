@@ -762,9 +762,9 @@
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
-  the test service's runs) selects the plan's tests; mode :main (the test service's run of main,
-  whose prove agent is a branch of main with nothing changed) selects them with no base: every
-  test with no result at its digest, main's own tests among them. names (the test service's request: a set of
+  the test service's runs of a branch) selects the plan's tests; mode :main (the test service's
+  run of main, whose prove agent is a branch of main with nothing changed) selects them with no
+  base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
   is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).

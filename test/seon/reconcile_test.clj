@@ -570,8 +570,8 @@
   ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
   ;; checkout, with no my.root/gate! and no :seon.task/gate?, and gate it like proofs: unrun, the
   ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
-  ;; them (:error), is refused as a red proof is, never hidden. With no gate checkout declared
-  ;; (root's ruling (a)), it merges with them unrun (an open problem until they run)
+  ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
+  ;; (a root with no source), it is held, saying so: never merged with them unrun
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
         judged (fn [root go & kv] (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
@@ -589,7 +589,9 @@
         "nobody asked: gated all the same")
     (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail})))
         "and a branch that breaks a process test is not merged, with no gate! called")
-    (is (= octopus (judged nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
+    (let [held (judged nil asked)]
+      (is (= [:hold] (map :op held)) "no checkout to run them on: held, never merged with them unrun")
+      (is (str/includes? (:problem (first held)) "no checkout to run them on") (pr-str held)))))
 
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
