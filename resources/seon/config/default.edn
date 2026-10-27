@@ -258,6 +258,13 @@
  ;; Unit: merge turns without green. Past it the merge run ends (:merge-turns); a task's
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
+;; Unit: behind runs. A merge run the writer refuses as behind main (main moved under it) is green, so
+;; max-merge-turns never counts it and its task ran again without end (notes/root-repair-findings-2026-10-27.md
+;; gap 4: a namespace main gained made every merge behind). Past this many behind runs of one merge task the next
+;; behind answer holds the task for root with the writer's evidence. Provenance: worktree session
+;; a-behind-merge-is-bounded-and-merges-main-first; three reruns are three chances for main to hold still.
+;; At the bound: the task is held (my.root/run! releases it).
+:seon.config.merge/max-behind 3
 
 
  ;; ==== the build ==============================================================================

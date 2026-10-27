@@ -653,6 +653,42 @@
     (let [db (mdb [(decl "a")] :extra (concat (run "a" 1 :done) (run "a-merge" 1 :behind :outcome :green)))]
       (is (= [(mspawn "a-merge" 2)] (actions-for db))))))
 
+(deftest a-merge-behind-again-and-again-is-held-for-root
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind run is green, so max-merge-turns
+  ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
+  ;; behind runs of one merge task the next behind answer holds the task for root with the evidence
+  (let [cap (cfg/value :seon.config.merge/max-behind)
+        answer (fn [prior]
+                 (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done)
+                                                             (mapcat #(run "add-merge" % :behind :outcome :green) (range 1 (inc prior)))
+                                                             (run "add-merge" (inc prior) :ended :outcome :green :results {(t "add") :pass})))
+                       [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+                       asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
+                       behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s) since the branch's merge base: merge main into the branch first" {:tx 9 :behind 2})
+                       [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [behind]}})
+                       tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
+                       db' (d/db-with db tx)]
+                   [(task/task db' "demo/add-merge") (task/run db' (str "demo/add-merge#" (inc prior)))]))]
+    (let [[tk run'] (answer (dec cap))]
+      (is (= :running (:seon.task/execution tk)) "under the bound, behind runs again")
+      (is (= :behind (:seon.run/status run'))))
+    (let [[tk run'] (answer cap)]
+      (is (= :held (:seon.task/execution tk)) "past it, the task is held for root")
+      (is (re-find #"behind" (:reason (:seon.task/failure tk))))
+      (is (= :closed (:seon.run/status run')))
+      (is (= :seon.merge/behind (:seon.error/type (:seon.run/error run'))) "with the writer's evidence"))))
+
+(deftest a-branch-behind-main-is-told-so-first
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
+  ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the run
+  ;; records how far behind it was judged
+  (let [in {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :behind 3}]
+    (is (= [{:reason :behind :behind 3} {:reason :proof-unknown :symbol 'p/a}] (r/done-explain in)) "behind leads")
+    (is (= "behind 3; proof-unknown p/a" (r/explain-text (r/done-explain in))))
+    (is (= [{:reason :proof-unknown :symbol 'p/a}] (r/done-explain (dissoc in :behind))) "a branch not behind is judged as before"))
+  (is (= 3 (:seon.run/behind (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 3} 5 5))) "the end records it")
+  (is (not (contains? (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 0} 5 5) :seon.run/behind)) "none behind records nothing"))
+
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with
   (are [in expected] (= expected (mapv :reason (r/done-explain in)))
