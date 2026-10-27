@@ -254,7 +254,7 @@
   [co refs own batch]
   (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
     (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)))) source))
-      (into #{} (map (fn [[_ path]] (subs path (inc (count co))))) source))))
+      (into #{} (map (fn [[_ path]] (str/replace-first path (str co "/") ""))) source))))
 
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
