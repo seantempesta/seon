@@ -91,6 +91,14 @@
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, AGENTS.md "How work is handed out").
  :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
+ ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
+ ;; README.md). The pages root loads into main as wiki sections at boot (seon.root/wiki-tx), so one search
+ ;; and one view reach them (owner, 2026-10-27: "everything of consequence that is for seon agents use
+ ;; should be indexed into the db"). docs/ is also watched and reloaded on change (my.root/loader-dirs);
+ ;; the top level is read at boot only (watching it would watch the whole checkout, which kept
+ ;; fseventsd saturated). Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
+ ;; bound: n/a; a dir with no .md files loads nothing.
+ :seon.config.root/wiki-dirs ["docs" "."]
 
  ;; ==== the store ==============================================================================
 
@@ -452,6 +460,14 @@
  ;; every result, about 200 s of CPU per commit for nothing; named runs (seon_prove, a turn's)
  ;; are unaffected. On again when task seon.agent/a-test-run-streams-its-reports and the child's
  ;; death are fixed. At the bound: a program commit starts no run.
+ ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
+ ;; process tests included, green or not): the net under the narrow digests (a test takes only what
+ ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
+ ;; never. Off here because every root with this config would run it, a worktree's too, at once and
+ ;; on one machine: the standing root of the main tree sets it (config/local.edn or
+ ;; --set :seon.config.proofs/full-run-at="03:00"). A malformed time refuses the config. Provenance:
+ ;; root's task (2026-10-27): nothing ran the full run, the narrow digests' only net.
+ :seon.config.proofs/full-run-at ""
  :seon.config.proofs/prove-main-on-commit false
  ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
