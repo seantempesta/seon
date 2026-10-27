@@ -489,7 +489,7 @@
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
-  ;; every class when it reads files or runs a process
+  ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (System/getProperty "user.dir")
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
@@ -565,8 +565,8 @@
 (deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
-  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on)
-  ;; and by every test that reads files or runs a process; the runtime's pins stay every test's
+  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
+  ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
@@ -576,22 +576,30 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
-    ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
-    ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
-    ;; runs on, which 937 of 977 tests reach (and by every test that reads files or runs a process)
-    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
-        "the runtime's pins are classes too")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd :seon.pin/jolt]]
+    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
+    ;; class it moved 451 tests on every bump. Jolt is keyed by source group (its analyzer and IR,
+    ;; deps, nREPL, core.async), each taken by the tests reaching it; its runtime core and Chez, which
+    ;; every form runs on, by none: the forks' suites and the daily full run catch a change there
+    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt
+                                             :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async])
+        "every submodule and every source group is a class")
+    (is (= #{} (moved :seon.pin/jolt) (moved :seon.pin/chez)) "the runtime core takes no pin, a process test's digest included")
+    (is (not= (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj) (moved :seon.pin/jolt.stdlib.clojure.core.async))
+        "each group moves the tests that reach it")
+    (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
+    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd
+               :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
+    (is (< (count (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj)) (* 0.5 (count all-tests))) "a change to Jolt's analyzer moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
   ;; the test runtime loads its files as they are: a dependency edit not yet committed left
-  ;; every digest as it was, so a green proven on the old files was reused on the new
+  ;; every digest as it was, so a green proven on the old files was reused on the new. A submodule
+  ;; is a class (seon.config/pin-class), taken by the tests whose reach runs on it
   (let [p (checkout! "with-sub" {"deps.edn" "{}"})
         s (str p "/reference-code/lib")
         core (str s "/core.clj")]
@@ -600,11 +608,13 @@
     (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
       (apply sh/sh "git" "-C" s args))
     (sh/sh "git" "-C" p "add" "reference-code/lib")
-    (let [before (:env (fx/inputs p))]
+    (let [lib #(get-in (fx/inputs p) [:config :seon.pin/lib])
+          before (lib)]
+      (is (string? before) "the submodule is a class of the inputs")
       (spit core "(ns lib.core) (def edited 1)")
-      (is (not= before (:env (fx/inputs p))) "an edit in the submodule's files moves every test's :env")
+      (is (not= before (lib)) "an edit in the submodule's files moves its class")
       (spit core "(ns lib.core)")
-      (is (= before (:env (fx/inputs p))) "its files back as committed: the same input as before"))))
+      (is (= before (lib)) "its files back as committed: the same input as before"))))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 

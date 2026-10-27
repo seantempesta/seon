@@ -357,18 +357,20 @@
  ;; Unit: namespace prefix (or one var) -> submodules, or source groups inside one (a path under a
  ;; submodule: a file or a directory). The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
- ;; reach datahike.*, not every test. Each submodule and each group is a class (seon.config/pin-class);
- ;; one no prefix names (Chez, and Jolt's runtime core: its host layer, clojure.core, the reader,
- ;; which every form runs on) is taken only by a test that reads files or runs a process, and by the
- ;; daily full run (owner, 2026-10-27: "no test digests the whole tree"). Jolt is keyed by source
+ ;; reach datahike.*, not every test. Each submodule and each group is a class (seon.config/pin-class),
+ ;; taken by reach alone, by a test that reads files or runs a process too. Jolt is keyed by source
  ;; group: its analyzer and IR by jolt.analyzer and jolt.ir, deps and nREPL by theirs, core.async by
- ;; clojure.core.async and jolt.async (its Clojure and its host fibers), io/nio/zip by clojure.java.io,
- ;; slurp and spit; lmdb and zstd by konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by
- ;; seon.vector, awesome-jolt (prose and examples) by none. Measured 2026-10-27: a Jolt bump moved
- ;; 444 of 977 tests as one pin; by group, over the last 15 bumps, about 104 a bump, 10 of 15 none.
+ ;; clojure.core.async and jolt.async (its Clojure and its host fibers); lmdb and zstd by
+ ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none. What
+ ;; no prefix names takes no pin: Chez and Jolt's runtime core (its host layer, clojure.core, the
+ ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing). The trade: a
+ ;; change there in a Jolt or Chez bump is caught by the forks' own suites (bin/check forks) and the
+ ;; daily full run (:seon.config.proofs/full-run-at), not by the bump's own prove (owner, 2026-10-27:
+ ;; "no test digests the whole tree"). Measured 2026-10-27 over the last 15 Jolt bumps: 122 tests a
+ ;; bump (0 on 5 of them, 203 on the 10 that touch async), against 451 on every bump as one pin.
  ;; Provenance: root's task (2026-10-27): pins moved every digest in 3 of the last 12 --merge
  ;; batches (datahike 3, konserve 2, jolt 2), and the Jolt pin, in every test's :env, moved 15 times
- ;; in 3 days; the libraries' own suites run on a bump (bin/check forks, 4cdd5625f5).
+ ;; in 3 days; root's ruling D (2026-10-27).
  :seon.config.source/pin-namespaces
  {jolt.analyzer #{"reference-code/jolt/jolt-core/jolt/analyzer.clj" "reference-code/jolt/jolt-core/jolt/ir.clj"
                   "reference-code/jolt/jolt-core/jolt/passes" "reference-code/jolt/jolt-core/jolt/passes.clj"
@@ -380,14 +382,6 @@
   clojure.core.async #{"reference-code/jolt/stdlib/clojure/core/async.clj" "reference-code/jolt/stdlib/clojure/core/async"
                        "reference-code/jolt/host/chez/java/async.ss" "reference-code/jolt/host/chez/java/fibers-async.ss"}
   jolt.async #{"reference-code/jolt/stdlib/jolt/async"}
-  clojure.java.io #{"reference-code/jolt/host/chez/java/io.ss" "reference-code/jolt/host/chez/java/nio-file.ss"
-                    "reference-code/jolt/host/chez/java/zip-base.ss" "reference-code/jolt/host/chez/java/zip-file.ss"
-                    "reference-code/jolt/host/chez/java/zip-entries.ss" "reference-code/jolt/host/chez/java/zip-in-streams.ss"
-                    "reference-code/jolt/host/chez/java/zip-out-streams.ss" "reference-code/jolt/host/chez/java/zip-out-entries.ss"
-                    "reference-code/jolt/host/chez/java/zip-gzip.ss" "reference-code/jolt/host/chez/java/zip-deflater.ss"
-                    "reference-code/jolt/host/chez/java/zip-inflater.ss"}
-  clojure.core/slurp #{"reference-code/jolt/host/chez/java/io.ss" "reference-code/jolt/host/chez/java/nio-file.ss"}
-  clojure.core/spit #{"reference-code/jolt/host/chez/java/io.ss" "reference-code/jolt/host/chez/java/nio-file.ss"}
   datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
              "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
   konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
