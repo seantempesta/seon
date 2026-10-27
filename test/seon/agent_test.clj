@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
+            [seon.fx :as fx] [seon.config :as cfg] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -334,7 +334,7 @@
                    own]
                   {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
-    (is (= [#{:env :tree :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and stores both through root's :file owner, in the results directory")
     (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
@@ -398,7 +398,8 @@
         unstored (proofs/store-verdicts! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
         stored (proofs/verdicts dir [(digests p1)])
         [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
-                      {:dirs ["src" "test"] :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
+                      ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
+                      {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
         checkout (proofs/plan nil (select-keys digests [p2]) (proofs/verdicts dir [(digests p2)]) #{})]
     (sh/sh "rm" "-rf" dir)
     (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
@@ -408,7 +409,7 @@
 (deftest a-previous-roots-inputs-are-not-shared
   ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
   ;; source on the same main) must not key its agents' results by a fact an earlier boot wrote
-  (let [inputs {:env "e" :tree "t" :data-refs {}}
+  (let [inputs {:env "e" :tree "t" :config {} :data-refs {}}
         source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs inputs}
         db (fn [boot] (datahike.api/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot boot :seon.root/source source}]))]
     (is (some? (:dir (agent/test-plan (db "b1") (db "b1") #{}))) "this boot's inputs: its results are kept")
