@@ -691,9 +691,16 @@
           (first (reduce (fn [[us used] [x p]] (let [c (cost x)] (if (<= (+ used c) (cfg/value :seon.config.render/relevance-budget)) [(conj us [x p]) (+ used c)] [us used])))
                          [held (reduce + 0 (map (comp cost first) held))] fresh)))))))
 
+(defn included
+  "What agent key k's context includes beside task id now on db: `selected` over the work's focus, its
+  prior the agent's :seon.agent/included; nil when the work has no vector yet."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] [:maybe [:vector [:tuple :any number?]]]]}
+  [db task k]
+  (let [te (pdb/eid db :seon.task/id task) a (pdb/eid db :seon.agent/key k)]
+    (when (and te a) (selected db te a (or (:seon.agent/included (d/entity db a)) [])))))
+
 (defn shown
-  "Units [name chance] (what `selected` answers, what a turn recorded) as `related`'s map, every one
-  whole, for related-view to draw."
+  "Units [name chance] (`selected`'s) as `related`'s map, every one whole, for related-view."
   {:malli/schema [:=> [:cat [:sequential [:tuple :any number?]]]
                   [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                    [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword nat-int?]]]]}
@@ -1016,6 +1023,8 @@
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
 
+(def page-lists "The lists of an agent's page its model reads: its task's (#p-task)." ["#p-task"])
+
 (defn page
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
@@ -1025,28 +1034,19 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w page-lists)))
          (finally (render/dispose-walk! w)))))
-
-(defn own-task
-  "The path of the agent's own task in its ctx value v: its newest run's task (a window newest first:
-  docs/ctx.md), where ctx holds it whole (a task a session's runs share is whole under one of them,
-  {:db/id e} under the others); nil with no run."
-  {:malli/schema [:=> [:cat :map] [:maybe [:vector :any]]]}
-  [v]
-  (when-let [te (some-> (first (:runs v)) val :task :db/id)]
-    (some (fn [[rid r]] (when (and (= te (get-in r [:task :db/id])) (:seon.task/id (:task r))) [:runs rid :task])) (:runs v))))
 
 (defn world
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
   that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
   changed}, the empty ones left out; in the diff the agent's own records, which its conversation
-  already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
+  already shows, are told by what reads them: an eval by its handle, a turn by its id, a task (its page part draws it) by its id; with no c0, the page whole,
   {:page page}.
   Printed whole as one user message: the page and each change told once. pages, {commit page}
-  (the page drawn at the read before, which printed-run keeps): c0's page is taken from it when
-  it holds it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
+  (the page drawn at the read before, which printed-run keeps, and the live walk's at c1,
+  seon.repl/page-hiccup): a page it holds is taken from it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
   answer's metadata is {:commit c1 :page the page at c1}, the one printed-run keeps for the next."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]
                   [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any [:maybe :map]] [:vector :seon.model/message]]]}
@@ -1058,25 +1058,26 @@
         db1 (at c1)
         p1-of (volatile! nil)
         v (if (nil? c0)
-            (let [p1 (page db1 (ctx/build db1 a branch))] (vreset! p1-of p1) {:page p1})
+            (let [p1 (or (get pages c1) (page db1 (ctx/build db1 a branch)))] (vreset! p1-of p1) {:page p1})
             ;; the record at c0, built, then advanced to c1 by what the two commits differ by: one build
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
-                  p0 (or (get pages c0) (page db0 r0)) p1 (page db1 r1)
+                  p0 (or (get pages c0) (page db0 r0)) p1 (or (get pages c1) (page db1 r1))
                   _ (vreset! p1-of p1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
                   ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
                   told #(cond (not (map? %)) %
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
+                              ;; a task held whole, which the page's task data draws, by its id: a task
+                              ;; re-homed under a restart's new run was 190 KB of :ctx in one read
+                              (:seon.task/id %) (:seon.task/id %)
                               :else %)
-                  ;; the own task re-homed under a new run (a restart's: ctx holds it whole under the
-                  ;; newest) is the same task, which the page's task data and cited vars draw: its move
-                  ;; between two runs is not told as data (it was 190 KB of :ctx in one read): the page's task data
-                  ;; tells what changed of it; any other change of the task is told
-                  [o0 o1] [(own-task (:tree r0)) (own-task (:tree r1))]
-                  drawn? (fn [p] (and o0 o1 (not= o0 o1) (some #(and (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) [o0 o1])))
+                  ;; a task leaving a run's path as it re-homes (whole there before, a stub now), which
+                  ;; the diff tells key by key: its page part tells the move, never this
+                  whole? (fn [r rid] (some? (get-in (:tree r) [:runs rid :task :seon.task/id])))
+                  left? (fn [[k rid t]] (and (= [k t] [:runs :task]) (whole? r0 rid) (not (whole? r1 rid))))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
-                           (for [[p ov] (ctx/diff r0 r1) :when (not (drawn? p))] [p (mapv #(walk/prewalk told %) ov)]))]
+                           (for [[p ov] (ctx/diff r0 r1) :when (not (left? p))] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     (with-meta [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}] {:commit c1 :page @p1-of}))))
 
@@ -1129,7 +1130,7 @@
              (conj (turn-pages db e :outside) [(:max-tx db) (d/commit-id db)]))
         pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
                     :when (or (nil? since) (>= tx since))]
-                [[:page [e prev c]] (delay (world db e prev c (or pages (:pages printed)))) nil tx])
+                [[:page [e prev c]] (delay (world db e prev c (merge (:pages printed) pages))) nil tx])
         pages (if model? pages [(last pages)])
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))

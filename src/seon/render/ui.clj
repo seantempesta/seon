@@ -1026,12 +1026,12 @@
                        [#'related {} rid]
                        (when (seq (:turns run)) [#'status {} rid])
                        ;; what the turn no longer computes, drawn when what it reads moves: the merge
-                       ;; base's and main's commits (ctx's :base-commit :main-commit) are their children. A
+                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
                        ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
-                       (when-let [b (:base-commit c)]
+                       (when-let [b (:seon.agent/base-commit c)]
                          (list [#'caused-view {} b] [#'gaps-view {} b] [#'divergence-view {} b]
                                ;; a task that merges itself: whether it can merge now
-                               (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
+                               (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:seon.agent/main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when rid [#'own-problems {} rid])
