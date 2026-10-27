@@ -431,7 +431,9 @@
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
                        ;; 2026-10-27: process tests the change reaches run automatically at the judge)
                        (and (empty? rs) merge?)
-                       (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
+                       (let [self (get-in idx [:root :gate-self])
+                             ;; a test cannot be its own gate (:seon.config.source/gate-self): left out, with no result recorded
+                             deferred (sort-by str (remove #(= self (str %)) (:seon.run/deferred a #{}))) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
                          ;; with no checkout to run them on (a root with no source), the merge is
                          ;; held with that reason, never merged with them unrun
@@ -442,7 +444,12 @@
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}
                                :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
-                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))))))
+                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))
+                                                           ;; why they could not run, when the gate itself failed: the effect's error, or a changed
+                                                           ;; namespace with no file on the branch (each test then reads :error)
+                                                           (let [why (concat (some-> (:seon.run/error a) :seon.error/message vector)
+                                                                             (for [u (:seon.run/gate-unread a)] (str (:ns u) ": " (:reason u))))]
+                                                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))))))
                        (empty? rs) {:op :accept :run aid :task id}
                        ;; it parked (waiting, out of turns, no progress, a provider's error): never a
                        ;; hold, the session waits for its next message (design agent-loop section 1)

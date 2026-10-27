@@ -197,13 +197,13 @@
 (defn related
   "The wiki sections nearest x by meaning, a text or a var's definition, k of them
   (:seon.config.render/related unless given), each a line at summary depth with the forms that read one
-  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning}})
-  shown as the page's related part shows its own. A failed embedding answers its error."
+  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning} :min 0.0})
+  (the nearest k, whatever their relevance: the page's own cut is the page's) shown as the page's related part shows its own. A failed embedding answers its error."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
   ([x] (related x (cfg/value :seon.config.render/related)))
   ([x k]
-   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
+   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k) :min 0.0})]
      (cond (contract/error? r) r
            (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
            :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name)) r)})))))
@@ -252,22 +252,22 @@
   its verdict, each proof's status, each red test with its first failing assertion, each test whose
   child died (not counted: a death is no verdict), and what ran, was left to the judge and was
   reused; the lists behind it (:results :selected :deferred :why :reports) are r itself, the value
-  under the eval's handle. A part of the run (a select-keys of it keeps its metadata) shows what it
-  holds. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6, 2026-10-27)."
+  under the eval's handle. A part of the run (a select-keys of it keeps its metadata) is that part,
+  printed as data. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6, 2026-10-27)."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
-  (let [died (into (sorted-set-by #(compare (str %1) (str %2))) (keep #(when (:exit %) (proofs/test-symbol (:var %)))) (:reports r))
-        red (into (sorted-map-by #(compare (str %1) (str %2)))
-                  (when (:reports r)
-                    (for [[t fs] (proofs/failures r) :when (not (died t))] [t (select-keys (first fs) [:message :expected :actual])])))]
-    (cond-> (array-map)
-      (:reports r) (assoc :verdict (cond (seq red) :red (seq died) :died :else :green)
-                          :counts (str "ran " (:ran r 0) ", deferred " (count (:deferred r)) ", reused " (:reused r 0)))
-      (not (:reports r)) (into (select-keys r [:ran :reused :deferred :results]))
-      (seq (:proofs r)) (assoc :proofs (:proofs r))
-      (seq red) (assoc :red red)
-      (seq died) (assoc :died (into (sorted-map-by #(compare (str %1) (str %2))) (for [t died] [t "died, not counted"])))
-      true (assoc :rest "the whole run is this value (its handle): :results :selected :deferred :why :reports"))))
+  (if-not (:reports r)
+    ;; a part of the run (a select-keys of it keeps its metadata) is that part, as data
+    (with-meta r nil)
+    (let [died (into (sorted-set-by #(compare (str %1) (str %2))) (keep #(when (:exit %) (proofs/test-symbol (:var %)))) (:reports r))
+          red (into (sorted-map-by #(compare (str %1) (str %2)))
+                    (for [[t fs] (proofs/failures r) :when (not (died t))] [t (select-keys (first fs) [:message :expected :actual])]))]
+      (cond-> (array-map :verdict (cond (seq red) :red (seq died) :died :else :green)
+                         :counts (str "ran " (:ran r 0) ", deferred " (count (:deferred r)) ", reused " (:reused r 0)))
+        (seq (:proofs r)) (assoc :proofs (:proofs r))
+        (seq red) (assoc :red red)
+        (seq died) (assoc :died (into (sorted-map-by #(compare (str %1) (str %2))) (for [t died] [t "died, not counted"])))
+        true (assoc :rest "the whole run is this value (its handle): :results :selected :deferred :why :reports")))))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:

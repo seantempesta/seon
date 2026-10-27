@@ -283,8 +283,9 @@
         ;; and its own results (no results root: its gate's results land on its own main): a proof that resolves its var at run time
         ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
         ;; stored there closed its task with no turn and merged nothing
+        ;; this test started the root: its loop merges' gate leaves it out (:seon.config.source/gate-self)
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_RESULTS_PORT" "0"}}
+               :env {"SEON_RESULTS_PORT" "0" "SEON_GATE_SELF" "seon.source-test/a-restart-catches-up-and-a-new-generation-resumes"}}
         ;; any failure or error in this test keeps its boot logs: each report passes through
         red (volatile! false)
         report clojure.test/report
