@@ -61,7 +61,7 @@ Not this: a hand list of the tests a change touches, or a result keyed by time o
 
 ### A result is a function of its digest
 
-A green is reused forever, by any checkout or agent, so everything a result depends on is in its digest or out of the test (`notes/archive/pure-tests/FINDINGS.md`):
+A green is reused forever, by any checkout or agent, so everything a result depends on is in its digest or out of the test (`claude_scratch/archive/pure-tests/FINDINGS.md`):
 - **Seeds.** A generative check draws from a seed derived from its digest (```seon.proofs/seed```: the parts and `:seon.config.proofs/seed-salt`; ```seon.proofs/test-seed``` for the running test, bound by ```seon.proofs/run-tests!```; each mg-check contract from its var and the step's digest), so the same digest checks the same cases and a code change draws new ones; a failure prints its seed and a reproduction form. Before, mg/check drew from the wall clock (our malli fork ignored `:seed`; fixed on its `jolt/mg-seed`). A randomized property test draws `:seon.config.proofs/seeds` seeds, its test-seed and the next ones: one in the automatic run, five under `bin/test --all` (`SEON_SEEDS=5`, as the full run sets `SEON_COST_MAX_N`); `r3.inc-test`, 5 seeds of 150 steps, was 47 s of the automatic run's critical path.
 - **Work, not time.** A cost proof is judged on ticks, bytes and calls (```seon.cost/exact```, [cost](cost.md)), so the same code on the same input measures the same at any load; an estimate stating and measuring none of them is red, and CPU time is shown, never red.
 - **Dependencies as they are.** A submodule with uncommitted edits is its class by its content (```seon.fx/pin```: HEAD and the tree of its files), as bin/build builds it; a clean one is its gitlink.
