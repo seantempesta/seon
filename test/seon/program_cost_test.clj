@@ -5,7 +5,7 @@
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.merge] [seon.agent] [clojure.java.shell :as sh]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.merge] [seon.agent] [test-runner :as runner] [clojure.java.shell :as sh]))
 
 (defn- acct
   {:malli/schema [:=> [:cat :int :string] :map]}
@@ -273,7 +273,9 @@
      ;; The fixed part fell with it (~714 ticks a form, so ~356k fixed): the old 420k left 7k
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
-     :fixed {:ticks 350000 :bytes 4000000 :calls 16}
+     ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
+     ;; per added form), 2026-10-27
+     :fixed {:ticks 350000 :bytes 4000000 :calls 18}
      :sizes [100 300 1000 10000]}))
 
 (defn- calls-form
@@ -431,3 +433,32 @@
                :per-n {:bytes 60000 :calls 1}
                :fixed {:bytes 200000 :calls 1}
                :sizes [10 100 300]}))
+
+
+(defn stored-of
+  "reach-graph-of's arguments: a branch db of n forms (app.pc/f0..fn-1, each calling the one before)
+  with its last form redefined, no data-refs, and a store directory already holding the graph of the
+  branch before the redefinition."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :nil :string]]}
+  [n]
+  (let [[db] (branch-of n)
+        dir (str (System/getProperty "user.dir") "/target/tmp/stored-reach-" (random-uuid))]
+    (.mkdirs (java.io.File. dir))
+    (runner/reach-graph-of db nil dir)
+    [(d/db-with db (program/record-tx db (acct (dec n) "(dec x)"))) nil dir]))
+
+(deftest a-plan-reads-the-stored-reach-and-pays-for-what-moved
+  (cost/proof
+    {:of 'test-runner/reach-graph-of :input 'seon.program-cost-test/stored-of
+     :n "forms the stored graph holds (one redefined since)"
+     :work (str "the stored graph decoded (jfasl: one pass over its bytes), then reach-update: the live forms "
+                "scanned (live-ids) and only the redefined form's components re-folded; never reach-graph's "
+                "walk of every form (41k ticks and 260 KB a form against this). Linear in the graph's size "
+                "(decode and scan), not flat: the diff of the two dbs by datoms would make the scan flat")
+     :growth :linear
+     ;; measured 2026-10-27: 752k ticks / 4.29 MB at 100, 1.12M / 6.55 MB at 300, 2.36M / 14.4 MB at 1,000, 10 calls;
+     ;; reach-graph on the same dbs: 7.4M / 42 MB, 10.7M / 62 MB, 22.2M / 133 MB (9x more at 1,000). On Seon's
+     ;; program (3,540 forms) a stored graph decodes in 23M ticks against 146M to build it.
+     :per-n {:ticks 1900 :bytes 11500 :calls 0}
+     :fixed {:ticks 580000 :bytes 3200000 :calls 10}
+     :sizes [100 300 1000]}))

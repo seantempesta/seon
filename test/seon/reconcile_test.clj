@@ -123,6 +123,12 @@
     (is (= [] (actions-for db)) "nor when the task's model changes: the run is the outside agent's"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :killed :model "outside")))]
     (is (= [(spawn "x" 2 :model "m1")] (actions-for db)) "its next run is the task's own model, not outside"))
+  ;; a root restart lost an attached run, and its next run took the task's own model (none
+  ;; configured: "no model provider", the task held); a lost run was ended by nobody
+  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :lost :model "outside")))]
+    (is (= [(spawn "x" 2 :model "outside")] (actions-for db)) "a lost outside run's next run is outside"))
+  (let [db (db-of [(decl "x" :model "m1")] :extra (run "x" 1 :running :model "outside" :boot "boot-0"))]
+    (is (some #{(spawn "x" 2 :model "outside")} (actions-for db)) "and so is the next run of one the restart reaps in the same pass"))
   (testing "root cannot take back a task that is done: merged work keeps :running"
     (let [db (db-of [(decl "z")] :extra (run "z" 1 :merged :outcome :green :results {(t "z") :pass}))
           {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
@@ -680,7 +686,7 @@
                                                      :unmerged ["[:var app/f]"]))))))
 
 (deftest an-open-problem-its-work-caused-refuses-done
-  ;; notes/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
+  ;; notes/archive/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
   ;; the done rule, so the agent is told naming it (a :verdict); its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
     (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :open-problem :key msg}]}]
@@ -741,7 +747,7 @@
     {:kind :design :proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:proof-unknown]
     ;; a design that only rewrote its plan is not done: live agents, 2026-10-25, a design ended
     ;; green at its first plan edit, the proofs its plan named never written, and its implement
-    ;; started with none (notes/live-2026-10-25.md D3)
+    ;; started with none (notes/archive/live-2026-10-25.md D3)
     {:kind :design :proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:no-proofs]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
 

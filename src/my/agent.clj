@@ -116,6 +116,26 @@
           (into [] (comp (filter agent/judges?) (map (fn [t] {:test t :status (proofs/latest-status db t)})))
                 (program/tests-reaching g x))))))
 
+(defn cost
+  "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
+  ticks, bytes and calls per call as main's runs last recorded them (in all and its own: self-ticks,
+  self-bytes; seon.proofs/fns), and :tests, the tests at this branch's digests that called it, each
+  with its calls, ticks and bytes, most ticks first, read from the runs that recorded their results
+  (seon.proofs/exercising). :unmeasured counts the tests reaching x with no measure yet (their
+  digest moved since they last ran, or none ran). A symbol that names no var answers so
+  (:my.agent/no-var)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or :map :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db) x (if (var? x) (named x) (asked x))]
+    (or (no-var db x)
+        (let [main (or (agent/heard-main) db)
+              plan (agent/test-plan db (:base @agent/state) #{} main)
+              rows (proofs/exercising main x (vec (vals (:digests plan))))
+              reaching (set (filter (:digests plan) (program/tests-reaching (:graph plan) x)))
+              measured (some #(when (= x (:var %)) %) (proofs/fns main))]
+          (cond-> {:var x :tests rows :unmeasured (count (remove (set (map :test rows)) reaching))}
+            measured (assoc :per-call (dissoc measured :var)))))))
+
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or
@@ -185,7 +205,7 @@
    (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
      (cond (contract/error? r) r
            (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name) (take k)) r)})))))
+           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name)) r)})))))
 
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
@@ -269,22 +289,21 @@
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
                     (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#)))
-                  (str "Source not found for " (pr-str x#) ": source reads a name or a var"))))))
+                  (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address or heading holds a word of it (three letters or more), then the nearest by Jolt's
-  did-you-mean ranking (as no-var), at most six addresses. Not the page: (my.agent/help) lists it."
+  whose address holds a word of it (four letters or more), then the nearest by Jolt's did-you-mean
+  ranking (as no-var): a few addresses, never the page ((my.agent/help) lists it)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (docs/page db context/help-page :summary)
-        by-address (into {} (map (juxt :seon.ref/address :seon.ref/heading)) sections)
+        addresses (mapv :seon.ref/address sections)
         pages (docs/page-paths db)
-        words (re-seq #"[a-z0-9]{3,}" (str/lower-case address))
+        words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
         holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
-        named (concat (for [[a h] by-address :when (or (holds? a) (holds? (str h)))] a) (filter holds? pages))
-        ranked (jolt.analyzer/suggestions-for address (concat (keys by-address) pages))]
-    (vec (take 6 (distinct (concat named ranked))))))
+        ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
+    (vec (distinct (concat (filter holds? pages) (filter holds? addresses) ranked)))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help

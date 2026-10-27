@@ -433,9 +433,9 @@
   generate its arguments; seon.proofs reads and writes results)."
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
      seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
-     ;; seon.proofs reads and writes results (verdicts, store-verdicts!, run-tests!): its pure part
+     ;; seon.proofs reads and writes results (stored-results, record!, run-tests!): its pure part
      seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/test-run-errors
-     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/result-path seon.proofs/result-file
+     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/results-tx seon.proofs/detail seon.proofs/per-call
      seon.proofs/plan})
 
 (defn- fn-without-gen
@@ -881,7 +881,7 @@
     ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
     ;; count is recorded, not compared: a thread Thread.join answered for is still in the
     ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
-    ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md)
+    ;; pthread_join), and nothing can await its removal (docs/processes.md#a-stop-reaps-every-child)
     (let [stopped (thread-diff (declared-threads) (threads))]
       {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
        :health (set health)
