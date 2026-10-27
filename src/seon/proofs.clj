@@ -32,15 +32,21 @@
 
 (defn results
   "{test-symbol status} of a test run: :error or :fail when any assertion of the test was,
-  else :pass. A test with no assertion has no entry (a proof missing here is :none)."
+  else :pass. A test with no assertion has no entry (a proof missing here is :none), nor has a
+  test the run's child died in (a report with its :exit, seon.agent/test-run-answer): a death is
+  no verdict, so a proof it took is unknown and a test the change never reached is nothing to
+  the judge."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] :seon.proof/results]}
   [test-run]
-  (reduce (fn [acc {:keys [type var]}]
-            (if-let [t (test-symbol var)]
-              (let [rank {:pass 0 :fail 1 :error 2}]
-                (update acc t #(if (and % (>= (rank %) (rank type))) % type)))
-              acc))
-          {} (:reports test-run)))
+  (let [died (into #{} (keep #(when (:exit %) (test-symbol (:var %)))) (:reports test-run))]
+    (reduce (fn [acc {:keys [type var]}]
+              (if-let [t (test-symbol var)]
+                (if (died t)
+                  acc
+                  (let [rank {:pass 0 :fail 1 :error 2}]
+                    (update acc t #(if (and % (>= (rank %) (rank type))) % type))))
+                acc))
+            {} (:reports test-run))))
 
 (defn red-reports
   "The failing assertions of the test run for the tests in `tests`, as data for the context."

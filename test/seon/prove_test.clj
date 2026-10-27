@@ -63,6 +63,18 @@
       (is (= [7] (waiters-answered all)) "and is answered once, at its end")
       (is (= 1 (count (asks all :write))) "its results written once, as facts on main"))))
 
+(deftest an-answer-whose-child-died-is-never-remembered
+  ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
+  ;; of its key from memory, so the held task's next run (seon_done again, same branch, same
+  ;; program) got the same death and never ran its proof. A death is no verdict: the next ask runs
+  (let [died {:pass 0 :fail 0 :error 1 :reports [{:type :error :var "#'a.b-test/t" :exit {:exit 1} :message "test process died"}] :digests {} :ms 5}
+        [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5)])
+        [st all] (run-through st outs died)
+        _ (is (= [1] (waiters-answered all)) "its waiter is answered the death")
+        [_ o] (feed st [(req 2 :main 5)])]
+    (is (empty? (waiters-answered o)) "asked again: not answered from memory")
+    (is (= 1 (count (asks o :spawn))) "it runs again")))
+
 (deftest a-run-is-keyed-by-what-it-reads
   ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
   ;; moves with any write, the run's own facts, its prove agent's end and the eval that asked among them
