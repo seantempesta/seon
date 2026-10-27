@@ -331,6 +331,31 @@
  ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
  ;; (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
+ ;; Unit: vars. The vars the processes a test starts run from: a form using a process var or a binary
+ ;; var reaches them, so a test that starts a root or an agent is digested by the program those
+ ;; processes run. -main reaches root, the server and the agent's init (1,485 vars, measured
+ ;; 2026-10-27); seon.turn/work! is what root sends an agent as a quoted form, which no reference
+ ;; shows. Provenance: ctx-atom's evidence (2026-10-27): seon.server-test's in-agent tests kept one
+ ;; reach digest across two fixes to code their agent runs (a green and a red shared it, bin/test
+ ;; listed them flaky), because the agent's code is reached through a socket and a keyword :op.
+ :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
+ ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
+ ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
+ ;; reach datahike.*, not every test. The runtime and the binary (jolt, chez, lmdb, zstd, llama.cpp,
+ ;; awesome-jolt) are in no set: every test takes them. Provenance: root's task (2026-10-27): pins moved
+ ;; every digest in 3 of the last 12 --merge batches (datahike 3, konserve 2, jolt 2); the libraries'
+ ;; own suites run on a bump (bin/check forks, 4cdd5625f5).
+ :seon.config.source/pin-namespaces
+ {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
+             "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
+  konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
+  malli #{"reference-code/malli"}
+  jolt.crypto #{"reference-code/crypto"}
+  org.replikativ.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
+  me.tonsky.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
+  fress #{"reference-code/jolt-fressian"}
+  hasch #{"reference-code/jolt-overlay"}
+  clojure.spec #{"reference-code/jolt-overlay"}}
  ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
  ;; reach references one runs it, so bin/test builds it first; a process test that only shells
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
