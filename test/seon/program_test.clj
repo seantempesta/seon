@@ -873,3 +873,13 @@
       (is (= (moved i) (set (program/tests-reaching g (symbol "app.pc" (str "f" i))))) (str "f" i ": the tests its change selects")))
     (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
     (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))
+
+(deftest a-program-with-no-schema-change-declares-nothing-new
+  ;; THE PLAN 0.7's first merge through Seon (2026-10-27): (my.branch/merge-main!) on a branch whose
+  ;; merge carried no schema change failed with seon.schema.datahike/declarations invalid-input {}:
+  ;; schema-registry answered {} for "nothing changed", and seon.merge handed that to
+  ;; schema-declarations. Nothing changed is the built registry itself
+  (let [db (ts/test-db)]
+    (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
+    (is (identical? seon.contract/registry (program/schema-registry {})))))
+
