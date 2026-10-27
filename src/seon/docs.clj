@@ -5,7 +5,7 @@
   resolved on the db (a link to a section, a name to a var), so its backlinks are who cites
   it. Loading writes only what differs from what main holds, as task files do. A citation is
   pulled here at its depth (cited: a var, a section, a file, a task or a namespace), for the
-  model's context and every walk (seon.render/walk) alike."
+  model's context and every page alike."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-]] [seon.ref :as ref] [seon.source :as source] [seon.task :as task] [seon.db :as pdb]
             [datahike.api :as d] [clojure.string :as str] [clojure.java.io :as io]
@@ -355,7 +355,7 @@
           plan)))
 
 ;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
-;; what the model's context and every walk (seon.render/walk) pull of what a text cites
+;; what the model's context and every page pull of what a text cites
 
 (defn source-of
   "The recorded source of var sym on db (the text of the form that last defined it), or nil:

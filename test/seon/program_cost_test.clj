@@ -202,7 +202,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
   [n]
   (let [[db] (branch-of n)]
-    [db {:env "e" :tree "t"} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
+    [db {:env "e" :tree "t" :config {}} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
 
 (deftest the-reach-walk-is-one-pass-whatever-the-keys
   (cost/proof

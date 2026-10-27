@@ -349,3 +349,14 @@
   (is (false? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :disabled :seon.config.ai/replay-reasoning false))))
       "thinking off: nothing to send, left out is valid")
   (is (true? (:seon.config.ai/replay-reasoning (config/resolved (assoc config/config :seon.config.ai/thinking :enabled)))) "the default replays"))
+
+(deftest a-worktree-commits-its-merges-on-a-branch-of-its-own
+  ;; worktrees share refs: a root in one that wrote jolt/seon-merges would move the main tree's merges branch
+  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). bin/env names the branch of what it starts
+  (let [root (config/checkout)
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" root args))))
+        worktree? (not= (git "rev-parse" "--git-dir") (git "rev-parse" "--git-common-dir"))
+        branch (fn [env] (str/trim (:out (clojure.java.shell/sh "zsh" "-c" (str "env -u SEON_SOURCE_BRANCH ROOT=" root " " env " zsh -c '. " root "/bin/env; print -r -- ${SEON_SOURCE_BRANCH:-unset}'")))))]
+    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "unset") (branch ""))
+        "a worktree's own, the main tree's none: its config's default stands"))
+)
