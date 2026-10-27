@@ -959,7 +959,7 @@
         k (seon.task/agent-key "b1" :a3)
         task-hiccup #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                                      (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                       (try (second (first (r/placed-hiccup w "#p-task"))) (finally (r/dispose-walk! w))))
+                       (try (second (first (r/placed-hiccup w ["#p-task"]))) (finally (r/dispose-walk! w))))
         call-of (fn [h] (some #(when (and (vector? %) (= #'r/html (first %))) %) (tree-seq coll? seq h)))
         h0 (task-hiccup)
         call (call-of h0)]

@@ -386,14 +386,13 @@
            {:id (:id c) :container sel :rev r :html html}))))
 
 (defn placed-hiccup
-  "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as
+  "Walk w's components placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as
   [[id hiccup]]: each one's output with its children's resolved, exactly as its render returned it
-  (a call of the printer kept as the call: the model reads the data). Given sels, the components
-  of each, in their order, from one prewalk."
-  {:malli/schema [:=> [:cat :map [:or :string [:sequential :string]]] [:vector [:tuple :string :any]]]}
-  [w sel]
-  (let [sels (if (string? sel) [sel] sel)
-        by (group-by first (placed w))]
+  (a call of the printer kept as the call: the model reads the data); of each of sels, in their
+  order, from one prewalk."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string :any]]]}
+  [w sels]
+  (let [by (group-by first (placed w))]
     (vec (for [s sels [_ k] (get by s)] [(:id (get @(:cache w) k)) (resolved w k)]))))
 
 (defn draw

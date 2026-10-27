@@ -132,7 +132,7 @@
 .hljs-name, .hljs-title { color: var(--color-text-100); }
 pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--color-base-850); overflow-x: auto; }
 .seon-data-panel { display: inline; }
-/* the conversation (seon.render.ui/chat-part): prose as prose, each eval a block that opens to
+/* the conversation (seon.render.ui/eval-item): prose as prose, each eval a block that opens to
    its code and its value */
 .seon-prose { white-space: pre-wrap; font-family: var(--font-prose); font-size: 0.875rem; line-height: 1.6; color: var(--color-text-100); margin: 0; }
 .seon-eval { border: 1px solid var(--color-base-800); border-radius: 8px; background: var(--color-base-900); min-width: 0; }
@@ -148,7 +148,7 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-eval > summary::before { content: "▸"; color: var(--color-text-500); }
 .seon-eval[open] > summary::before { content: "▾"; color: var(--color-signal); }
 .seon-eval > summary > .seon-prose { flex-basis: 100%; order: -1; }
-.seon-form { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-200); }
+.seon-form { min-width: 0; flex: 1 1 0; overflow-wrap: anywhere; color: var(--color-text-200); }
 .seon-ms { font-size: 0.7rem; color: var(--color-text-500); font-variant-numeric: tabular-nums; }
 .seon-handle { font-size: 0.7rem; color: var(--color-eval); }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }

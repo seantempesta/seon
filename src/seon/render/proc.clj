@@ -16,7 +16,7 @@
   event carries is its owner's to emit. A pass: an event asks the api for its view; while that request is in
   flight, more events only queue, so a burst becomes one pass (the round trip is the
   coalescing window: no step sleeps). The answer is joined with health and the events into root's
-  process value (system-value), which is part of root's ctx (process!). Every page is the render
+  process value (process-value), which is part of root's ctx (process!). Every page is the render
   of a ctx through the one walk (seon.render/walker): / root's (root-walk, root's ctx on main),
   /agent/{id} an agent's (its process's walk, else its branch's drawn by root), /agent/{id}/debug
   what its model was sent; each laid out by seon.render.ui/page-chrome into units. Then, per unit: inputs
@@ -82,8 +82,8 @@
 
 (defn- main-info
   "St with main as db (when newer than the one held): its t, its db, and the reconciler's index of
-  it held and moved by what changed (seon.reconcile/index over the watched datoms that differ,
-  measured 5.5 ms for an eval's 14 datoms against 506 ms rebuilt whole on 902 tasks), whose runs
+  it held and moved by what changed (seon.reconcile/index over the watched datoms that differ:
+  seon.render-cost-test/a-move-of-main-costs-what-moved), whose runs
   give how each agent's work ended (:agent-run, the words root's process tile uses for its
   events). Nothing per task or per datom of main is read again."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}

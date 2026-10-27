@@ -58,7 +58,7 @@
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
 
 (deftest task-state-is-what-happened
-  ;; the one derivation of a task's observed state, from the index (seon.render.proc/task-rows reads it)
+  ;; the one derivation of a task's observed state, from the index
   (let [db (db-of diamond :extra (into (merged "a") (concat (run "b" 1 :done) (run "c" 1 :running))))
         idx (r/index db)]
     (is (= {"demo/a" :merged "demo/b" :done "demo/c" :running "demo/d" :blocked}

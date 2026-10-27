@@ -906,7 +906,8 @@
             [(when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
              ;; the mockup's collapsed line (notes/design-agent-view-2026-10-24.md §5): its code's first
              ;; line, its time, its handle; the value only when opened
-             [:code {:class "seon-form"} (prose (or (first (str/split-lines (or (:code rec) ""))) "") (cell) {:one-line? true})]
+             ;; the one printer's one-line cut, which names what it left
+             [:code {:class "seon-form"} (prose (or (:code rec) "") (cell) {:one-line? true})]
              (when-let [ms (get-in rec [:response :ms])] [:span {:class "seon-ms"} (ms-str ms)])
              [:code {:class "seon-handle"} (str (get-in rec [:response :handle]))]])
       (when (or opened? (nil? k)) (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
@@ -1045,8 +1046,7 @@
         on? (contains? #{:busy :running} status)]
     [:li [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
      [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
-     ;; an agent with no status has no process (the user's)
-     [:span {:class "text-2xs text-text-500"} (if status (name status) "no process")]]))
+     (when status [:span {:class "text-2xs text-text-500"} (name status)])]))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
@@ -1087,7 +1087,8 @@
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
                                  [:li [:span {:class "text-error"} (str (kname pid) " ✕" defects)] " " [:span {:class "text-text-300"} (some-> newest (print/line (cell)))]])])
      (when (seq events)
-       [:ol {:class "text-xs"} (for [ev (take (config/value :seon.config.render.list/history) events)]
+       ;; every event the proc keeps, newest first (its window, :seon.config.render.list/stream)
+       [:ol {:class "text-xs"} (for [ev events]
                                  [:li {:class "flex gap-2"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
                                   [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
                                   [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])])]))
