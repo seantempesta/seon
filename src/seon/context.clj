@@ -1016,11 +1016,6 @@
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
 
-(def page-lists
-  "The lists of an agent's page its model reads: its task's (the layout's #p-task); the conversation
-  is the request's own, in its order."
-  ["#p-task"])
-
 (defn page
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
@@ -1030,7 +1025,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w page-lists)))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
          (finally (render/dispose-walk! w)))))
 
 (defn own-task
@@ -1050,8 +1045,8 @@
   already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
   {:page page}.
   Printed whole as one user message: the page and each change told once. pages, {commit page}
-  (the page drawn at the read before, which printed-run keeps, and the page at c1 the agent's own
-  live walk placed, seon.repl/page-hiccup): a page it holds is taken from it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
+  (the page drawn at the read before, which printed-run keeps): c0's page is taken from it when
+  it holds it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
   answer's metadata is {:commit c1 :page the page at c1}, the one printed-run keeps for the next."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]
                   [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any [:maybe :map]] [:vector :seon.model/message]]]}
@@ -1063,10 +1058,10 @@
         db1 (at c1)
         p1-of (volatile! nil)
         v (if (nil? c0)
-            (let [p1 (or (get pages c1) (page db1 (ctx/build db1 a branch)))] (vreset! p1-of p1) {:page p1})
+            (let [p1 (page db1 (ctx/build db1 a branch))] (vreset! p1-of p1) {:page p1})
             ;; the record at c0, built, then advanced to c1 by what the two commits differ by: one build
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
-                  p0 (or (get pages c0) (page db0 r0)) p1 (or (get pages c1) (page db1 r1))
+                  p0 (or (get pages c0) (page db0 r0)) p1 (page db1 r1)
                   _ (vreset! p1-of p1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
                   ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
@@ -1134,7 +1129,7 @@
              (conj (turn-pages db e :outside) [(:max-tx db) (d/commit-id db)]))
         pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
                     :when (or (nil? since) (>= tx since))]
-                [[:page [e prev c]] (delay (world db e prev c (merge (:pages printed) pages))) nil tx])
+                [[:page [e prev c]] (delay (world db e prev c (or pages (:pages printed)))) nil tx])
         pages (if model? pages [(last pages)])
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))

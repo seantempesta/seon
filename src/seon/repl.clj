@@ -538,15 +538,6 @@
   {:malli/schema [:=> [:cat] :map]}
   [] (let [w (framed)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
 
-(defn page-hiccup
-  "This agent's page as its model reads it now (seon.context/page-lists of its render of ctx), from its
-  live walk: what the walk has placed, each component run again only where what it read changed, so a
-  turn's page costs what changed since the frame before (a cold draw, seon.context/page, costs every
-  component: 35M ticks and 109 MB on Seon's own tasks). [db page]: the db it framed at (a request
-  is made on that one, so its page and its commit are one) and {element-id hiccup}, in order."
-  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (framed)] [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
-
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step

@@ -1338,20 +1338,6 @@
     (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
     (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))
 
-(deftest the-live-walks-page-is-the-cold-page
-  ;; a turn takes its page from the agent's live walk (seon.repl/page-hiccup), which runs again only
-  ;; what changed; the cold draw (seon.context/page), which replay and root's parked agents read, gives
-  ;; the same hiccup on the same db, before and after a change
-  (let [[db] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
-        [w _ cell c :as walk] (walked db)
-        live #(apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
-        cold #(context/page @cell @c)]
-    (is (seq (live)) "the page has parts")
-    (is (= (cold) (live)) "the live walk's page is the cold draw's")
-    (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
-    (is (= (cold) (live)) "and after a change, what the walk ran again")
-    (render/dispose-walk! w)))
-
 (deftest related-draws-what-the-turn-included
   ;; the related part draws the units the turn recorded (:seon.agent/included), calling no relevance
   (let [[db] (sections-near "Make ```demo/g``` say one thing.")
