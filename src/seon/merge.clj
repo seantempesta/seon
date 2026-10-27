@@ -201,11 +201,12 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(defn- content-attr?
-  "Whether attribute a is one a program key's content reads: the program's (program/attr-namespaces)
-  or a data attribute (das, data-attr?'s predicate or a set)."
-  {:malli/schema [:=> [:cat ifn? :keyword] :boolean]}
-  [das a] (boolean (or (program/attr-namespaces (namespace a)) (das a))))
+(def ^:private content-attr?
+  "As a predicate of an attribute, whether it is one a program key's content reads: the program's
+  (program/attr-namespaces) or a data attribute (das, data-attr?'s predicate or a set). A def, not
+  a contracted function: a merge asks it of each differing datom, and a contract per datom would
+  make its calls grow with them."
+  (fn [das] (fn [a] (boolean (or (program/attr-namespaces (namespace a)) (das a))))))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs: the keys borne,
@@ -221,7 +222,9 @@
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
                           d (read db)
-                          content? (fn [{:keys [a]}] (or (content-attr? (nth b 2) a) (content-attr? (nth d 2) a)))]
+                          bc (content-attr? (nth b 2))
+                          dc (content-attr? (nth d 2))
+                          content? (fn [{:keys [a]}] (or (bc a) (dc a)))]
                     e (into #{} (comp (filter content?) (map :e)) (concat gone added))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
@@ -267,7 +270,8 @@
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
         das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (content-attr? das (:a d))))
+        carry-attr (content-attr? das)
+        carry? (fn [d] (and (es (:e d)) (carry-attr (:a d))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)

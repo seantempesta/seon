@@ -3,7 +3,7 @@
   seon.merge/program-cost-follows-what-changed): over branches that hold n forms and each
   changed one, seon.merge/delta-three-way reads only the keys the datoms that differ bear."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
+  (:require [clojure.test :refer [deftest is use-fixtures]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector] [seon.merge :as merge]
             [clojure.java.shell]))
 
@@ -97,14 +97,19 @@
                   "asked whether its attribute is data: never the schema, so never the attributes' count")
        :growth :constant
        ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000
-       ;; (43 calls since touched-keys asks each differing datom's attribute whether a key reads
-       ;; it); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
+       ;; (an attribute filter in touched-keys, a def and not a contracted function, adds none; as a
+       ;; contracted function it made 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
        ;; 8,126 calls
-       :fixed {:bytes 650000 :calls 43}
+       :fixed {:bytes 650000 :calls 39}
        :sizes [100 300 1000]})
     (finally (when (realized? data-store)
                (let [path (get-in @@data-store [:config :store :path])]
                  (d/release @data-store) (clojure.java.shell/sh "rm" "-rf" path))))))
+
+;; embedded-of's store, a third of this test's own, for the same reason as data-store: the other proofs
+;; release and remove theirs at their end, and tests of one shard share the process
+(def ^:private embedded-store
+  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/merge-embedded-cost-" (random-uuid)) 0 :db))))
 
 (defn embedded-of
   "delta-three-way's arguments for a main that only embedded: base holding n forms, ours changing
@@ -112,7 +117,7 @@
   seon.vector writes of a form's text), no form's program content changed."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
   [n]
-  (let [conn @store
+  (let [conn @embedded-store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
         b (keyword (str "e" n "-" (random-uuid)))
         _ (d/branch! conn :db b)
@@ -126,6 +131,13 @@
         r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s) #{}]]
     (d/release c) (d/release bc)
     r))
+
+(use-fixtures :once
+  (fn [run]
+    (try (run)
+         (finally (when (realized? embedded-store)
+                    (let [path (get-in @@embedded-store [:config :store :path])]
+                      (d/release @embedded-store) (clojure.java.shell/sh "rm" "-rf" path)))))))
 
 (deftest a-main-that-only-embedded-changes-no-key
   (let [[base ours theirs das] (embedded-of 10)]
