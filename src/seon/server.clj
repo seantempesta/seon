@@ -222,7 +222,13 @@
                   :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}
            :answer (fn [sys ag req]
                      (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
-                       (if (contract/error? r) r (select-keys r [:key :ran :pass :fail :error :red :reused :ms]))))}
+                       ;; each red named with its first failing assertion (message, expected, actual), and the
+                       ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
+                       (if (contract/error? r)
+                         r
+                         (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
+                           (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
+                           (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))}
    :record {:doc "Record a test run's results on main, by root's one writer: one request per bin/test shard or bin/prove step run, its tests' results at their digests (only what ran), the run with what each test's contracted functions cost (one value), and, for a run of main's tree, the functions whose cost per call moved (seon.proofs/record!). Answers {:recorded n :t} (the datoms written, main's t), or why not."
             :args {:run {:type "object" :description "{:id, :tree}"} :ran {:type "object" :description "{key result}: {:test or :step, :digest, :pass :fail :error, :ms :ticks :bytes :fns}"}
                    :failures {:type "object"} :main? {:type "boolean" :description "a run of main's tree"}}

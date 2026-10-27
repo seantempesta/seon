@@ -765,13 +765,17 @@
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
-  :process) runs only when asked for: its namespace is named, or it is one of the proofs;
-  otherwise it is left out and listed under :skipped (DECISIONS, Process tests are not automatic)."
+  :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
+  from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
+  out and listed under :skipped, and runs at the judge's merge gate on a checkout (seon.reconcile's
+  :gate; a deferred proof is no reason of the done rule's). proofs is kept for the contract's
+  callers: bin/test's own plan, on a checkout, still runs a named or proof process test
+  (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (proofs/left-out (:selected p) (:process p) (boolean (seq names)) proofs)]
+        skip? (proofs/left-out (:selected p) (:process p) false #{})]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 

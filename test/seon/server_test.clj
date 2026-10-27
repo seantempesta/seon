@@ -299,6 +299,28 @@
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
 
+(deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
+  ;; THE PLAN 0.7's first attempt (root, 2026-10-27): a deftest an agent defined at its REPL that
+  ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
+  ;; seon_prove answered only counts and red names. A process test is deferred to the judge (named, with
+  ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
+  (let [[defined deferred why answer status]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p-test (is (fn? seon.lib/fork!)))"
+                             " (deftest r-test (is (= 1 2) \"one is two\"))")
+                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:deferred :ran])"
+                        "(my.agent/process-test? 'app.ptest/p-test)"
+                        {:op :prove :agent agent :names ["app.ptest"]}
+                        "(my.agent/process-test? 'app.ptest/r-test)"]))]
+    (is (nil? (:ex defined)) (pr-str defined))
+    (is (some #{'app.ptest/p-test} (:deferred (:value deferred))) (str "the process test is left to the judge: " (pr-str deferred)))
+    (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
+    (let [r (or (:result answer) answer)]
+      (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
+      (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
+    (is (nil? (:value status)) "an in-process test is none")))
+
 (deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
@@ -317,6 +339,25 @@
     (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
+
+(deftest a-named-prove-counts-for-status-and-the-judge-and-answers-its-verdict
+  ;; the blind agent (root, 2026-10-27): a prove naming its proofs (171 green) left both proofs
+  ;; :proof-unknown in my.task/status and at the judge, and a bare prove answered 25k chars. A proof's
+  ;; result counts whichever call measured it, and the answer prints its verdict
+  (let [[_ _ _ proved status done]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [{:op :context :agent agent}
+                        "(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
+                        "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
+                        "(my.agent/prove #{'app.okt/ok-test})"
+                        "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
+                        {:op :done :agent agent}]))]
+    (is (clojure.string/includes? (:text proved) ":verdict :green") (:text proved))
+    (is (clojure.string/includes? (:text proved) "app.okt/ok-test :pass") "each proof's status")
+    (is (< (count (:text proved)) 1000) (str "the answer is its verdict, not the run: " (count (:text proved)) " chars"))
+    (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
+    ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
+    (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))
 
 (deftest an-attach-gives-the-caller-the-branch-or-names-who-holds-it
   ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live

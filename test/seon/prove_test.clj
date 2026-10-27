@@ -275,18 +275,26 @@
            (:facts a'))
         (str "main proved at its boot, nobody asking: " (pr-str a)))))
 
-(deftest a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
+(deftest an-agents-run-leaves-every-process-test-to-the-judge
+  ;; root, 2026-10-27 (THE PLAN 0.7's first attempt): a child forked from an agent has no process
+  ;; store, so a process test an agent ran there errored, named or a proof. It is left out and listed
+  ;; whatever the request names, and runs at the judge's merge gate (bin/test, on a checkout, still
+  ;; runs a named one: seon.proofs/left-out)
   (let [plan {:selected '[a.b-test/plain a.p-test/proc a.p-test/other] :run '[a.b-test/plain a.p-test/proc a.p-test/other]
               :process '#{a.p-test/proc}}
         sel (fn [names proofs] (let [r (seon.agent/run-selection plan names proofs)] (select-keys r [:selected :run :skipped])))]
     (testing "naming nothing: the process test is skipped, and listed"
       (is (= '{:selected [a.b-test/plain a.p-test/other] :run [a.b-test/plain a.p-test/other] :skipped [a.p-test/proc]} (sel nil #{}))))
-    (testing "naming its namespace: it runs"
-      (is (= '{:selected [a.p-test/proc a.p-test/other] :run [a.p-test/proc a.p-test/other] :skipped []} (sel '#{a.p-test} #{}))))
+    (testing "naming its namespace: still skipped, and listed"
+      (is (= '{:selected [a.p-test/other] :run [a.p-test/other] :skipped [a.p-test/proc]} (sel '#{a.p-test} #{}))))
     (testing "naming another namespace: it is not in the run"
       (is (= '{:selected [a.b-test/plain] :run [a.b-test/plain] :skipped []} (sel '#{a.b-test} #{}))))
-    (testing "a task's proof that reaches a process is named by the task: it runs"
-      (is (= '[a.b-test/plain a.p-test/proc a.p-test/other] (:run (sel nil '#{a.p-test/proc})))))
+    (testing "a task's proof that reaches a process: still the judge's"
+      (is (= '[a.b-test/plain a.p-test/other] (:run (sel nil '#{a.p-test/proc}))))
+      (is (= '[a.p-test/proc] (:skipped (sel nil '#{a.p-test/proc})))))
+    (testing "bin/test's plan on a checkout runs a named or proof process test"
+      (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} true #{})))
+      (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))
     (testing "the run fact lists what was skipped"
       (let [tx (prove/result-tx nil {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :deferred '[a.p-test/proc]})]
         (is (= '[a.p-test/proc] (:seon.proof.run/skipped-process (first tx))))))))
