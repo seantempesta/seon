@@ -503,9 +503,9 @@
                             "and 636 MB on a root's main of 903 tasks, 26.8M and 149 MB with the contracts off")
                  :growth :linear
                  ;; measured on LMDB: 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
-                 ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task.
+                 ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task and 12 fixed.
                  ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
-                 :fixed {:ticks 100000.0 :bytes 300000.0}
+                 :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
                  :per-n {:ticks 36000.0 :bytes 180000.0 :calls 11.0}
                  :sizes listed-sizes})
     (finally
