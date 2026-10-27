@@ -29,13 +29,14 @@
 (deftest a-measure-takes-a-count-of-samples-never-a-time
   ;; task seon.cost/ticks-are-exact: measure repeated a call until 20 ms of CPU time or 25 calls,
   ;; so a fast call took 25 samples and a slow or loaded one 3, and the minimum moved with the
-  ;; machine; it takes a warm call and then seon.cost/repeats, whatever a call costs
+  ;; machine; it takes calls until :seon.config.proofs/cost-settled in a row allocate no fewer bytes than the least,
+  ;; whatever a call costs
   (let [n (atom 0)]
     (cost/measure (fn [] (swap! n inc) nil) [])
-    (is (= (inc cost/repeats) @n) "a fast call: one warm call and the repeats"))
+    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap"))
   (let [n (atom 0)]
     (cost/measure (fn [] (swap! n inc) (reduce + (range 200000))) [])
-    (is (= (inc cost/repeats) @n) "a slow call: the same count")))
+    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a slow call: the same bounds, whatever it costs")))
 
 (deftest exponent-is-the-log-log-slope
   (is (< 0.99 (cost/exponent [[10 30] [100 300] [1000 3000]]) 1.01))

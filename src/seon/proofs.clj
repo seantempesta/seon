@@ -89,8 +89,10 @@
   functions: its key is the tree's digest (step-digests). health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
-  dead, which no function's reach shows, and the same tree against another base is another answer."
-  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  dead, which no function's reach shows, and the same tree against another base is another answer.
+  forks (bin/forks: the forks' own suites on Jolt) runs no function: its key is :env alone, so a
+  pin bump selects it and a change to Seon's .clj program does not."
+  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "forks" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -103,8 +105,8 @@
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
-  and lmdb-sem (each a binary of its own)."
-  #{"laws" "lmdb-kill" "lmdb-sem"})
+  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit)."
+  #{"laws" "lmdb-kill" "lmdb-sem" "forks"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
@@ -186,6 +188,15 @@
                    :let [r (read (result-path dir dg false))]]
                [dg (verdict dg g (when (and r (not (green? r))) r))]))))
 
+(defn status-at
+  "The verdict dir holds at digest dg, as a status: :pass (a green, not flaky), :fail (a red:
+  flaky, or a red alone, which verdicts reads as no result to rerun), or nil (none)."
+  {:malli/schema [:=> [:cat :string :string] [:maybe [:enum :pass :fail]]]}
+  [dir dg]
+  (let [v (get (verdicts dir [dg]) dg)]
+    (cond (and v (green? v)) :pass
+          (or v (.isFile (java.io.File. ^String (result-path dir dg false)))) :fail)))
+
 (defn stored-results
   "{digest result} of the results db holds at digests (:seon.proof/ facts, which the test service
   records, seon.prove/result-tx): one AVET seek per digest, and one seek of its status's history
@@ -228,6 +239,17 @@
   (vec (for [[k r] ran :when (and (:digest r) (not (:flaky r)) (not (:unreported r)))
              :let [w (write! (result-file dir r))] :when (:seon.error/type w)]
          {:key k :message (:seon.error/message w)})))
+
+(defn left-out
+  "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a
+  process of their own: a root, an agent, a fork, the binary; a shell call is none:
+  seon.program/reach-index's :process?), but none when the run asks for them (asked?: it names
+  their namespaces, or it is a merge's verification) and never one of proofs (DECISIONS, Process
+  tests are not automatic). The one filter bin/test's plan (test-runner/plan-of) and an agent's
+  (seon.agent/run-selection) apply."
+  {:malli/schema [:=> [:cat [:sequential :any] [:set :any] :boolean [:set :any]] [:set :any]]}
+  [ks process asked? proofs]
+  (if asked? #{} (into #{} (filter #(and (contains? process %) (not (contains? proofs %)))) ks)))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},

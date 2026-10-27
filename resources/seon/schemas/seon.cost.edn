@@ -4,6 +4,8 @@
 ;; costs; it measures the function at three or more sizes and is red when it costs more.
 {:seon.profile/fn-cost [:map {:closed true} [:var :qualified-symbol] [:calls nat-int?] [:ms [:double {:min 0.0}]]]
  ;; how the least work grows with N: W(n) = 1, log2 n, n, n log2 n, n², n³
+ ;; a cost measure whose bytes did not settle (seon.cost/measure): thrown, never judged
+ :seon.cost/unsettled [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/unsettled]] [:calls pos-int?] [:least nat-int?]]]
  :seon.cost/growth [:enum :constant :log :linear :n-log-n :quadratic :cubic]
  ;; the measured dimensions: engine ticks (the work done, counted), this thread's CPU ns (min over
  ;; repeats; shown, never red), allocated bytes, calls of contracted functions

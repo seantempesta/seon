@@ -141,15 +141,6 @@
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
 
-(defn automatic
-  "What a run that names nothing selects from cand ({key digest}): every key but those in
-  process, the tests and bin/check steps that reach a process of their own (a root, an agent,
-  a fork, the binary; a shell call is none: seon.program/reach-index's :process?). Owner, 2026-10-23: tests
-  shouldn't be running agent turns, not automatically at least. Those run when named (bin/test
-  NS, bin/check MODE), in the full run, or by root's gate before a merge that reaches them."
-  {:malli/schema [:=> [:cat [:map-of :any :string] [:set :any]] [:map-of :any :string]]}
-  [cand process] (apply dissoc cand process))
-
 (defn- refused-names
   "Why the arguments after --plan WHAT OUT [--all] cannot select tests, or nil: a flag this runner
   does not know (bin/test --reach ran nothing and passed: reach is the default since bin/prove),
@@ -261,7 +252,7 @@
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   tests of names (or all) and the bin/check steps with no green at their digest
   (seon.proofs/plan; all? true every one), less, when nothing is named, the ones that reach a
-  process (automatic). all? :merge is a merge's verification (bin/prove --merge): every key with
+  process (seon.proofs/left-out). all? :merge is a merge's verification (bin/prove --merge): every key with
   no green at its digest, the ones that reach a process too, so nothing is left out and none is
   named by hand. Its program read from the kept store at store (program-db). Answers
   {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
@@ -279,7 +270,7 @@
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
-        cand (if (or named? merge?) all-cand (automatic all-cand process))
+        cand (apply dissoc all-cand (proofs/left-out (keys all-cand) process (boolean (or named? merge?)) #{}))
         found (proofs/verdicts dir (vec (vals cand)))
         {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
         {run-steps true run-tests false} (group-by string? run)]
@@ -293,6 +284,7 @@
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
+  out/tests.edn ({:tree :digests {test digest}}) names each candidate test's digest;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
   them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound bin/test reads. Answers the exit
   status: 1 when a check step names a function the program does not define."
@@ -322,7 +314,9 @@
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
         _ (when (seq (filter binary run-tests)) (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))))
-        _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))]
+        _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))
+        ;; each candidate test's digest: where its verdict is read (seon.fx/test-results, the merge gate)
+        _ (when tests? (write! (str out "/tests.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys digests (filter symbol? (keys cand)))})))]
     (when left
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
                     " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))

@@ -14,14 +14,14 @@
   [n]
   (let [[db] (pc/branch-of n)
         ops [[:db/add 1 :seon.run/id "demo/a#1"] [:db/add 1 :seon.run/status :running]]]
-    [(cond-> {:db db :graph (program/reach-graph db nil)} (fs/moves-program? ops) (assoc :graph-moved true))]))
+    [(cond-> {:db db :graph (program/reach-graph db nil)} (program/moves-program? ops) (assoc :graph-moved true))]))
 
 (deftest a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
   (let [[st] (spawned-of 10)]
     (is (not (:graph-moved st)) "a run's facts move no program")
     (is (identical? (:graph st) (:graph (fs/graph-at-fork st))) "so the fork hands on the graph it holds"))
-  (is (fs/moves-program? [[:db/add 7 :form/id "app.pc/f0-x"]]) "a form's facts move it")
-  (is (fs/moves-program? [[:db/retract 7 :var/form 9]]) "and so does a definition's pointer"))
+  (is (program/moves-program? [[:db/add 7 :form/id "app.pc/f0-x"]]) "a form's facts move it")
+  (is (program/moves-program? [[:db/retract 7 :var/form 9]]) "and so does a definition's pointer"))
 
 (deftest a-program-commit-moves-the-graph-to-the-new-program
   ;; the graph a fork (or a standby: the self-review's finding, a standby forked before the next
@@ -33,7 +33,7 @@
               :refs #{'app.pc/f4} :requires #{} :banned #{} :inline-defs #{}}
         {db2 :db-after txd :tx-data} (d/with db (program/record-tx db acct))
         ops (for [dt txd] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
-        st2 (cond-> (assoc st :db db2) (fs/moves-program? ops) (assoc :graph-moved true))
+        st2 (cond-> (assoc st :db db2) (program/moves-program? ops) (assoc :graph-moved true))
         moved (fs/graph-at-fork st2)
         fresh (program/reach-graph db2 nil)]
     (is (:graph-moved st2) "a redefinition moves the program")

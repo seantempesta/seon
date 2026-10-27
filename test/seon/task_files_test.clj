@@ -103,7 +103,7 @@
   ;; run names an entry a merge left behind (the merge's own run precedes its commit)
   (let [root (config/checkout)
         merged (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%s" "main")))
-                          :let [m (re-find #"^Merge jolt/([^\s:]+)" l)] :when m]
+                          :let [m (re-find #"^(?:Merge|Land) jolt/([^\s:]+)" l)] :when m]
                       (second m)))
         left (for [[ns-sym ds] (root/task-files) :when (vector? ds) d ds
                    :let [k (str ns-sym "/" (:seon.task/name d))]
@@ -112,20 +112,24 @@
     (is (seq merged) "main's merges are read")
     (is (= [] (vec left)) "each is merged work: remove its entry from resources/seon/tasks/ (still-worked names the exceptions)")))
 
-(deftest a-file-task-reaches-main-through-its-merge-task
-  ;; task seon.task/a-file-task-reaches-main: a work task loaded from its task file is
-  ;; followed by its merge task, as seon.template/with-merge gives e2e's tasks, so a done
-  ;; task's change reaches main (v1: a single task is followed by a merge task)
+(deftest a-file-task-merges-itself
+  ;; task seon.reconcile/a-work-task-merges-itself-through-the-one-gate: a task loaded from a
+  ;; task file is one :whole task (seon.template/request), so no merge task is written and a
+  ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
         _ (spit (java.io.File. dir "demo.edn") file-a)
         load! (fn [db] (d/db-with db (task/load-tx db (root/task-files (str dir)))))
-        db (load! (empty-db))
-        merge-of (fn [db id] (d/q '[:find ?m . :in $ ?w :where [?t :seon.task/id ?w] [?mt :seon.task/needs ?t] [?mt :seon.task/kind :merge] [?mt :seon.task/id ?m]] db id))]
-    (is (some? (merge-of db "demo/parse")) "parse's merge task needs parse")
-    (is (some? (merge-of db "demo/index")) "and index's")
-    (is (= #{"demo/parse-merge"} (:seon.task/needs (task/task db "demo/index"))) "a need on a work task is a need on its merge")
+        db (load! (empty-db))]
+    (is (= :whole (:seon.task/kind (task/task db "demo/parse"))) "parse works and merges itself")
+    (is (nil? (task/task db "demo/parse-merge")) "and has no merge task")
+    (is (= #{"demo/parse"} (:seon.task/needs (task/task db "demo/index"))) "a need stays on the task")
     (is (= [] (task/load-tx db (root/task-files (str dir)))) "an unchanged file writes nothing")
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
-    (let [db (load! db)]
-      (is (= :cancelled (:seon.task/execution (task/task db "demo/index-merge"))) "a removed work task cancels its merge task")
-      (is (= :held (:seon.task/execution (task/task db "demo/parse-merge")))))))
+    (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
+
+(deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
+  ;; every shipped declaration is one :whole task, none a merge task
+  (let [ds (mapcat val (root/task-files))]
+    (is (seq ds))
+    (is (every? #(= :whole (:seon.task/kind %)) ds))
+    (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))

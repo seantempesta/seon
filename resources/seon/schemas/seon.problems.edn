@@ -63,8 +63,6 @@
  ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
- ;; the test service's prove agent could not load the checkout's tests (seon.prove)
- :seon.test/prepare [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/prepare]]]]
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
  :seon.lib/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/unwatched]] [:fd :int] [:pid :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]

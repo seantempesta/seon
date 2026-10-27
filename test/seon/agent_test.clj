@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.config :as cfg] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
+            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -334,9 +334,9 @@
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
-  (let [[sent proved taken] (in-agent [{:op :message :agent "a1" :body "while proving"}
-                                       "(select-keys (prove) [:results])"
-                                       "(my.agent/messages)"])]
+  (let [[sent proved taken] (in-agent #(vector {:op :message :agent (:agent %) :body "while proving"}
+                                               "(select-keys (prove) [:results])"
+                                               "(my.agent/messages)"))]
     (is (true? (:ok sent)))
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
@@ -713,7 +713,7 @@
            old @agent/state]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (is (empty? (program/changed-vars (:base @agent/state) (agent/db))) "the agent has changed nothing")
+         (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
@@ -725,9 +725,9 @@
              (is (= [(:branch cfg) (:max-tx @conn)] [(:seon.catch-up/from cu) (:seon.catch-up/from-t cu)])
                  "the catch-up a fact of the agent's record, in its ctx (task seon.ctx/one-derivation)")
              (is (some #{[:var 'app.m0/f1]} (:seon.catch-up/applied cu)) "with what it applied")))
-         (is (empty? (program/changed-vars (:base @agent/state) (agent/db)))
+         (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
              "and is main's, not the agent's: its base is the merge base")
-         (is (= {} (program/divergence (:base @agent/state) (agent/db)))
+         (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's :will-merge carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -913,7 +913,8 @@
                   " _ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'app.big text nil))"
                   " b (seon.root/spawn! sys {:branch (fresh)})]"
                   " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
-        [r] (in-agent [{:op :eval :agent "root" :code code}])
+        ;; a root of its own: it moves main's program, which every later test on a shared root would run
+        [r] (in-agent [{:op :eval :agent "root" :code code}] {:own-root? true})
         [before after phases] (:value r)]
     (is (= [:fork-server-in :reach-graph :index :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
            phases)

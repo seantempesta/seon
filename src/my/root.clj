@@ -99,11 +99,11 @@
       (seq not-lost) (assoc :not-lost not-lost))))
 
 (defn gate!
-  "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
-  root, the binary: never run automatically, DECISIONS, Process tests are not automatic) run on
-  the gate
-  checkout (:seon.config.source/gate-checkout). Before the merge task's run is judged,
-  its deferred tests run before it merges and a red holds it (:seon.task/gate?). A run
+  "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
+  gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges
+  with nobody asking (seon.reconcile's :gate), so the :seon.task/gate? this sets is no longer
+  read; it stays until THE PLAN step 0.7 has exercised the gate (task
+  seon.proofs/prove-is-the-one-runner). A run
   that already merged unasked (its open :unrun problem) has them run now, through the
   :tests effect on the merges branch's head, which holds its change; their results are
   recorded on it (:seon.run/deferred-results), which closes the problem when each passed.
@@ -134,10 +134,9 @@
 
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or error}. A file's name is its owning namespace. Each work
-  task is followed by its merge task (seon.template/with-merge, over all files, so a need
-  on another file's work task is a need on its merge), derived here and never written in
-  a file."
+  {owning-ns declarations or error}. A file's name is its owning namespace. Each
+  declaration is one :whole task (seon.template/request) that merges itself, so a need on
+  another file's task is a need on it; the kind is derived here and never written in a file."
   {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
   ([] (task-files (config/value :seon.config.root/tasks-dir)))
   ([dir]
@@ -149,7 +148,7 @@
      (if (seq refused)
        read
        (merge (zipmap (keys read) (repeat []))
-              (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
+              (group-by :seon.task/ns (into [] (mapcat tpl/request) (apply concat (vals read)))))))))
 
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
@@ -236,12 +235,21 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [loaded] (filterv contract/error? (vals loaded)))
 
+(defn- source-root
+  "Seon's own source tree the import reads (:seon.config.source/root), canonical, or nil when root
+  follows none."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  [] (some-> (get config/config :seon.config.source/root) java.io.File. .getCanonicalPath))
+
 (defn- loader-dirs
-  "Where each of main's loaders reads under checkout co: {kind [dir]}, absolute."
+  "Where each of main's loaders reads: {kind [dir]}, absolute. The wiki and the task files are the
+  checkout co's; the source is the source root's (Seon's own source tree, the write-back checkout
+  the import reads: seon.fx/read-source), or co's when root follows none."
   {:malli/schema [:=> [:cat :string] [:map-of [:enum :docs :tasks :source] [:vector :string]]]}
   [co]
-  {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
-   :source (mapv #(str co "/" %) (config/value :seon.config.source/dirs))})
+  (let [src (source-root)]
+    {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
+     :source (mapv #(str (or src co) "/" %) (config/value :seon.config.source/dirs))}))
 
 (defn- loader
   "Which of main's loaders reads path (absolute) under checkout co: :docs (a page, .md, under the
@@ -258,11 +266,11 @@
 (defn watch-loads
   "What a watcher's batch makes root load, each kind with the first record of the batch that made
   it ({kind [record-kind path]}: what root's watch fact keeps as :last-load, so a load says why): a changed path by its loader; the
-  checkout's own branch moving (own, its ref under refs: a commit or merge on it) the source, and
-  no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
+  checkout's own branch or the source root's moving (own, their refs under refs: a commit or
+  merge on either) the source, and no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
   coalesced or dropped what happened under it) the loaders reading under that path (a rescan of
   a loader's dir that loader), and of refs the source alone."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]]
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]]
                   [:map-of [:enum :docs :tasks :source] [:tuple :keyword :string]]]}
   [co refs own batch]
   (let [dirs (loader-dirs co)
@@ -271,7 +279,7 @@
               (let [under-refs? (and refs (or (= path refs) (str/starts-with? path (str refs "/"))))
                     ks (cond (and (#{:rescan :root} kind) under-refs?) [:source]
                              (#{:rescan :root} kind) (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
-                             under-refs? (when (= path own) [:source])
+                             under-refs? (when (own path) [:source])
                              :else (keep identity [(loader co path)]))]
                 ;; the first record that made each kind keeps it
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
@@ -316,7 +324,7 @@
   [sys]
   (let [co (config/checkout)
         refs (fx/git-refs co)
-        own (fx/head-ref co)
+        own (into #{} (keep #(some-> % fx/head-ref)) [co (source-root)])
         roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}

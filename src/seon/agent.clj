@@ -14,15 +14,16 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
+;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
@@ -105,6 +106,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
   [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
 
+(defn- heard-main
+  "Main's head as the store holds it now, held on the state as what this agent last heard of main
+  (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (let [m (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))] (swap! state assoc :main m) m))
+
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
   names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
@@ -115,7 +122,7 @@
   O(the entries to the session's runs)."
   {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
   []
-  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+  (let [main (heard-main)
         b (db)
         br (session-branch main)]
     (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
@@ -146,7 +153,7 @@
   runs and the opened evals on main)."
   {:malli/schema [:=> [:cat] :seon.db/tx-data]}
   []
-  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+  (let [main (heard-main)
         b (db)
         pattern (into [:seon.run/id] taken-attributes)
         br (session-branch main)]
@@ -372,7 +379,7 @@
   (commit!)
   (let [conn (:store-conn @state)
         main-b (pdb/main-branch (:cfg @state))
-        main (pdb/head conn main-b)
+        main (heard-main)
         head @conn
         r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
@@ -562,6 +569,21 @@
         (swap! state assoc :branch-graph {:db db :graph g :inputs in})
         g))))
 
+(defn branch-changes
+  "What branch db changed since base, its merge base (seon.merge/delta-changes, declared data
+  left out): read once per (base, db) pair and held while db is the newest asked, as
+  branch-graph is, so a turn's readers (its contract gaps, what it will merge, the problems it
+  caused, its test plan, my.branch/changes) take one diff, and a test child forked after it
+  inherits it. {} with no base."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :seon.merge/changes]}
+  [base db]
+  (let [{w-base :base w-db :db ch :changes} (:branch-changes @state)]
+    (cond (nil? base) {}
+          (and ch (identical? base w-base) (identical? db w-db)) ch
+          :else (let [ch (pm/delta-changes base db #{})]
+                  (swap! state assoc :branch-changes {:base base :db db :changes ch})
+                  ch))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -583,7 +605,7 @@
   :digests {test digest}, :dir (the results directory when shared), :graph (the reach graph it
   walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
-  are not automatic). The tests base holds that the branch removed (seon.program/divergence's
+  are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
   (:removed {test src}): main's tests judge a branch whether or not it still holds them (owner:
   \"deleting the old test doesn't stop the old test from running\")."
@@ -604,7 +626,7 @@
         ;; that reaches a process of its own (base's index says) stays a process test
         removed (into (sorted-map-by #(compare (str %1) (str %2)))
                       (when base
-                        (for [v (:removed (program/divergence base db))
+                        (for [v (:removed (pm/divergence (branch-changes base db)))
                               :let [e (some->> (pdb/eid base :var/name v) (d/entity base))
                                     nsym (symbol (namespace v))
                                     head (when-not (find-ns nsym)
@@ -620,37 +642,28 @@
 
 (declare handle!)
 
-(defn load-tests!
-  "Make the checkout's tests (the files under dirs, read here by the :source performer: the tree
-  is megabytes, more than a frame to root carries) part of this
-  agent's program: their namespaces loaded here and their forms recorded on its branch
-  (seon.source/import-tx), so test-plan finds them and their reach digests. What the test
-  service's prove agent does before it runs (seon.prove). Answers the files loaded, or the
-  :source effect's error."
-  {:malli/schema [:=> [:cat [:sequential :string]] [:or :int :map]]}
-  [dirs]
-  (let [r (fx/read-source {:req {:root (cfg/checkout) :dirs (vec dirs)}})]
-    (if (:value r)
-      (let [files (:value r)]
-        (doseq [[_ _ text] (source/load-order files)] (load-string text))
-        (transact! (source/import-tx (db) files))
-        (count files))
-      r)))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
-  asks, the key the digest of what the run reads (seon.prove/read-digest of this branch's
-  program, as seon.root/prove! takes it of the same head): a session's request and this ask are one run; when it is
+  asks, the key the digest of what the run reads (seon.program/program-digest of this branch's
+  head, as seon.root/prove! takes it): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
   messages wait for the loop. :dead when root is gone (the process then ends). mode :turn (a
-  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request)."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]]}
+  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
+  names, the tests of those namespaces only (none: all it selects)."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]
+                  [:=> [:cat [:enum :turn :judge] [:set :symbol]] :map]]}
   ([] (prove! :turn))
-  ([mode]
+  ([mode] (prove! mode #{}))
+  ([mode names]
   (commit!)
+  ;; the turn's one diff, read here at the committed db, so the test child forked for this run
+  ;; inherits it and the turn's other readers find it held (branch-changes)
+  (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
+    (when (= :dead (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
+                            (seq names) (assoc :names names))))
+      (lib/c-exit 0))
     (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
@@ -753,7 +766,7 @@
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (fn [t] (and (contains? (:process p) t) (not (seq names)) (not (contains? proofs t))))]
+        skip? (proofs/left-out (:selected p) (:process p) (boolean (seq names)) proofs)]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
@@ -774,26 +787,28 @@
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
-  the test service's runs) selects the plan's tests. names (the test service's request: a set of
+  the test service's runs of a branch) selects the plan's tests; mode :main (the test service's
+  run of main, whose prove agent is a branch of main with nothing changed) selects them with no
+  base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
-  is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
+  is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (:base @state) proofs)
+  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs)
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has
                    ;; no digest and is selected all the same), and the tests the branch changed
                    (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
-                                                             (into (filter (:digests plan) (program/changed-vars (:base @state) (db))))
+                                                             (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
                                                              (into (keys (:removed plan)))))))
                    judge)
         {:keys [reused digests dir]} plan
@@ -1024,7 +1039,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
   (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
-    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state)}}])))
+    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
@@ -1062,7 +1077,7 @@
     (mark! :handlers)
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
-    ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
+    ;; read main's later changes as the branch's (branch-changes)
     (let [base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
           ;; a kept branch, resumed: this process (forked holding main's program) runs the
           ;; branch's own changes since its base on top, as merging main would; from main's
@@ -1079,8 +1094,10 @@
           _ (mark! :misaligned)]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state (cond-> {:id id :key (or session (key-of db0 id)) :branch branch :task task :run run :fd fd :conn c :db @store-conn
-                   :base base :store-conn store-conn :cfg cfg :results {} :n 0
+     ;; its key as root named it in its boot (seon.root's :spawn), never pulled from main here: that
+     ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
+     (reset! state (cond-> {:id id :key session :branch branch :task task :run run :fd fd :conn c :db @store-conn
+                   :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}
