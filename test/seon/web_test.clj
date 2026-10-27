@@ -18,8 +18,8 @@
     (is (= [:a1 :a3] (mapv second (w/requests {:var 'seon.root/submit! :agent :all :forms "1"} index)))))
   (testing "interrupt!: an effect this proc performs, no request"
     (is (= [] (w/requests {:var 'seon.root/interrupt! :agent :a1} index))))
-  (testing "run-tests!: the agent's tests, with no deadline"
-    (is (= [[{:op :tests :id :a1} :a1]] (w/requests {:var 'seon.root/run-tests! :agent :a1} index))))
+  (testing "run-tests!: the agent proves its branch through the test service, as root's judge does (task seon.proofs/the-dashboards-run-tests-asks-the-service)"
+    (is (= [[{:op :judge :id :a1} :a1]] (w/requests {:var 'seon.root/run-tests! :agent :a1} index))))
   (testing "spawn n with the form's task"
     (let [rs (w/requests {:var 'seon.root/spawn! :agent :root :args {:n 3 :task "x"}} index)]
       (is (= 3 (count rs)))
