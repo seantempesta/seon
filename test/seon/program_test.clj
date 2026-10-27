@@ -384,6 +384,31 @@
             (str "the walk's rows are the whole rows' id, namespace, definitions and references (scan " scan? ")")))
       (is (every? #(= (:id %) (:own %)) (vals (rows true))) "a form's own digest is its id"))))
 
+(deftest a-stored-reach-gives-the-digests-a-rebuild-gives
+  ;; task seon.program/reach-graph-is-stored: a plan reads the graph the last one stored (jfasl in the
+  ;; program store) and folds what moved (reach-update); its digests are a rebuild's, and a store
+  ;; written under other code or other data-refs is built over
+  (let [dir (scratch-dir "stored-reach")
+        in {:env "e" :tree "t" :config {}}
+        db (calc-db)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        file (java.io.File. dir "reach-graph.fasl")
+        digests (fn [g] (update-vals (program/graph-index g in nil) :digest))
+        first-run (runner/reach-graph-of db nil dir)]
+    (is (.isFile file) "the first plan stores the graph")
+    (is (= (digests (program/reach-graph db nil)) (digests first-run)) "built: a rebuild's digests")
+    (let [stamp (.lastModified file)
+          second-run (runner/reach-graph-of db' nil dir)]
+      (is (= (digests (program/reach-graph db' nil)) (digests second-run)) "stored and updated: a rebuild's digests of the changed program")
+      (is (< (:affected second-run) (count (:rows second-run))) "and only what the change reaches was re-folded")
+      (is (not= (digests first-run) (digests second-run)) "the change moved some digest")
+      (is (= (digests (program/reach-graph db nil)) (digests (runner/reach-graph-of db nil dir)))
+          "and back to the first program: its digests again")
+      (is (<= stamp (.lastModified file)) "the store moved with the program"))
+    (testing "other data-refs: built over"
+      (let [refs {'seon.system/read-decl #{'app.pt-calc/add}}]
+        (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
+
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}
