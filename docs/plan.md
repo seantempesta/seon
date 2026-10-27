@@ -21,7 +21,7 @@ Every Claude session that worked last night has ended; these are their branches,
 |---|---|---|
 | jolt/the-source-tree-follows-main | approved, not built | e2e proof red first (task seon.fx/the-source-tree-follows-main) |
 | jolt/every-page-is-its-parts | 3b-root in progress | finish per task seon.render/every-page-is-its-parts; browser-check every page |
-| jolt/a-cited-vars-tests-are-its-own-query | tests-reaching, verifying when its session ended | bin/prove --merge, then merge; then swap the clause in :work/:whole |
+| (task my.agent/tests-reaching-finds-the-tests-a-change-selects) | tests-reaching merged | swap (my.agent/callers 'ns/f) for (my.agent/tests-reaching 'ns/f) in the :work and :whole texts |
 | (task seon.root/root-repairs-a-failed-merge-from-its-repl) | merged as a task | stage the four failures on a worktree root and write the playbook into docs/merging.md |
 | jolt/the-request-is-the-page-and-its-diffs | build 4, proofs red | after 3b-root |
 
@@ -40,7 +40,7 @@ The destination is **E: a request worked as one whole task by a Seon agent, end 
    2. **A merge's write-back is never lost** (seon.root/root-repairs-a-failed-merge-from-its-repl, gaps 1-2): a failed write-back is a root cause with a retry (my.root/write-back!), and a worktree root never writes the shared merges ref.
    3. **An outside agent is a first-class worker:** attach no longer leaves the task's model "outside" for good (gap 5); my.root/hold! takes a running run back (gap 6); a merge never stays :behind forever, and :behind reruns are bounded (gaps 3-4); a behind branch merges main before it is judged (gap 7).
    4. **The gate is cheap:** results reused across bin/test and the root's judge (today 0 of 917, because :env digests the whole config in force; seon.merge/an-outside-branch-hands-back-through-the-store), so a merge reruns only what it moved.
-   5. **The tools an agent needs at the REPL are there:** tests-reaching merged (ready branch), the root-repair playbook written into docs/merging.md with runnable forms, and help that names every form an outside agent uses.
+   5. **The tools an agent needs at the REPL are there:** tests-reaching merged, the root-repair playbook written into docs/merging.md with runnable forms, and help that names every form an outside agent uses.
    6. **Watchable:** 3b-root finished, so root's page and an agent's page and debug panel show the work live.
    7. **The first real piece of work done entirely through the server** on the standing root by a Claude session: one small src change from the task files, attached, worked at its branch's REPL, merged by Seon, written back. Every place it needed git, a worktree or a workaround becomes a task.
    8. **From then on, new work starts as a Seon task worked through the server;** a worktree only for what the store doesn't hold yet (docs/, bin/, deps.edn, pins, native code), each such case a task to bring it inside: docs and task files are already data in the store, so their write-back comes first.
