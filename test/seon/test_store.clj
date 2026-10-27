@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib] [seon.program :as program] [hasch.core :as hasch]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -173,7 +173,10 @@
   runs per main makes unreachable. Its task files are its own (:seon.config.root/tasks-dir under
   runs, unless args name another): the checkout's are every session's, and an event on one (a
   merge's write, which FSEvents also delivers to a watcher begun just after it) made a test root
-  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks)."
+  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks). The test
+  running it (clojure.test/*testing-vars*) is the root's --started-by, so its merge gate never
+  runs the test that started it (docs/merging.md#a-merge-runs-what-the-change-reaches); called
+  outside a test, it names none, and every deferred test is gated."
   {:malli/schema [:=> [:cat [:map [:store :string] [:main :string] [:runs :string]
                              [:env {:optional true} [:map-of :string :string]] [:args {:optional true} [:sequential :string]]]]
                   :map]}
@@ -182,7 +185,11 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (into ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))] args))
+  (root-sh root "start" (-> ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))]
+                            ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
+                            (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
+                                    ["--started-by" (str (ns-name ns) "/" name)]))
+                            (into args)))
   (let [port (bound-port runs) log (java.io.File. (str runs "/root.log"))]
     (cond-> (assoc root :port port)
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
