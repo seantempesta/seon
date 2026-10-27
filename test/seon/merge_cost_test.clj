@@ -154,6 +154,7 @@
     (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
 
 (deftest a-main-that-only-embedded-costs-nothing
+  ;; (its digest does not reach delta-three-way: a quoted name; this line moves it when the producer changes)
   ;; task seon.merge/touched-keys-are-what-the-program-changed: an entity whose only differing
   ;; datoms are a platform record's (seon.vector's embeddings) bears no changed key, so the
   ;; merge reads none of its n forms (calls flat; bytes are the diff of the datoms that differ)
