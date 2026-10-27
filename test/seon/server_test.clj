@@ -196,3 +196,25 @@
     (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
+
+(deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
+  ;; THE PLAN 0.7's first attempt (root, 2026-10-27): a deftest an agent defined at its REPL that
+  ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
+  ;; seon_prove answered only counts and red names. A process test is deferred to the judge (named, with
+  ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
+  (let [[defined deferred why answer status]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p-test (is (fn? seon.lib/fork!)))"
+                             " (deftest r-test (is (= 1 2) \"one is two\"))")
+                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:deferred :ran])"
+                        "(my.agent/process-test? 'app.ptest/p-test)"
+                        {:op :prove :agent agent :names ["app.ptest"]}
+                        "(my.agent/process-test? 'app.ptest/r-test)"]))]
+    (is (nil? (:ex defined)) (pr-str defined))
+    (is (some #{'app.ptest/p-test} (:deferred (:value deferred))) (str "the process test is left to the judge: " (pr-str deferred)))
+    (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
+    (let [r (or (:result answer) answer)]
+      (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
+      (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
+    (is (nil? (:value status)) "an in-process test is none")))
