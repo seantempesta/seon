@@ -1192,6 +1192,17 @@
   (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
         (reached-by rev (get defs v))))
 
+(defn- indexed
+  "{k ids} of pairs [k id], in order, each ids a vector (a set when set? is true): the map a graph's
+  defs, refd, rev and plain are, built in one pass over transients. reach-step builds a graph from
+  nothing this way, where folding the pairs in one at a time copied a vector or a set per pair."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :any :any]] :boolean] :map]}
+  [pairs set?]
+  (let [empty-of (fn [] (if set? (transient #{}) (transient [])))
+        m (reduce (fn [m [k id]] (let [t (get m k)] (if t (do (conj! t id) m) (assoc! m k (conj! (empty-of) id)))))
+                  (transient {}) pairs)]
+    (persistent! (reduce-kv (fn [m k t] (assoc! m k (persistent! t))) (transient {}) (persistent! m)))))
+
 (defn- reach-step
   "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
@@ -1202,6 +1213,7 @@
   [g db removed added]
   (let [data-refs (:data-refs g)
         old (:rows g)
+        bulk? (empty? old)
         gone (keep old removed)
         defined (fn [f kind] (for [[k a] (:defines f) :when (= kind k)] a))
         V (set (mapcat #(defined % :var) (concat gone added)))
@@ -1223,19 +1235,29 @@
                                                          (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
                                       (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
-        defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
+        defs (if bulk? (indexed (for [f added a (defined f :var)] [a (:id f)]) false) (by (:defs g) :var))
+        methods (if bulk? (indexed (for [f added a (defined f :method)] [a (:id f)]) false) (by (:methods g) :method))
+        impls (if bulk? (indexed (for [f added a (defined f :impl)] [a (:id f)]) false) (by (:impls g) :impl))
         var-form #(peek (get defs %))
-        facts (for [v V] [v (d/entity db [:var/name v])])
+        ;; a var's contract text and kind: one pass over the three indexes for a whole build, else a seek per var
+        facts (if bulk?
+                (let [scan (fn [a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
+                      contract (scan :var/contract) kind (scan :var/kind)]
+                  (into {} (for [{e :e v :v} (d/datoms db :aevt :var/name) :when (V v)] [v {:contract (contract e) :kind (kind e)}])))
+                (into {} (for [v V :let [e (:e (first (d/datoms db :avet :var/name v)))]]
+                           [v (when e {:contract (:v (first (d/datoms db :eavt e :var/contract))) :kind (:v (first (d/datoms db :eavt e :var/kind)))})])))
         sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
-        contract (reduce (fn [m [v e]] (if-let [t (:var/contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
-        tests (reduce (fn [s [v e]] (if (= :test (:var/kind e)) (conj s v) (disj s v))) (:tests g) facts)
+        contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
+        tests (reduce (fn [s [v e]] (if (= :test (:kind e)) (conj s v) (disj s v))) (:tests g) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
         test-nss (if (identical? tests (:tests g)) (:test-nss g #{}) (into #{} (map (comp symbol namespace)) tests))
         named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
-        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
-                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added)
+        refd (if bulk?
+               (indexed (for [f added r (named f)] [r (:id f)]) true)
+               (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
+                       (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added))
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
@@ -1265,14 +1287,18 @@
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
-        rev (as-> (:rev g) r
-              (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
-              (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
-              (apply dissoc r gone-ids))
+        rev (if bulk?
+              (indexed (for [id dirty t (adj id)] [t id]) true)
+              (as-> (:rev g) r
+                (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
+                (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
+                (apply dissoc r gone-ids)))
         plain? (fn [f] (and (not (schema-row? f)) (not-any? (fn [[k]] (= :var k)) (:defines f))))
-        plain (as-> (:plain g) pl
-                (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
-                (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added)))
+        plain (if bulk?
+                (indexed (for [f added :when (plain? f)] [(:ns f) (:id f)]) true)
+                (as-> (:plain g) pl
+                  (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
+                  (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added))))
         own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (:own f)]))
         changed (into dirty (map :id) added)
         affected (into changed (reached-by rev changed))
