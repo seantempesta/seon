@@ -737,7 +737,7 @@
       (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
             [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :cited f0 :form :form/src] "(defn f0 [x] (inc x))"))]
         (is (= :seon.ctx/invalid (:seon.error/type r)))
-        (is (str/includes? (:why (first (:invalid r))) "(defn f ...)") (pr-str r))
+        (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
         (is same)
         (is (= (:max-tx db) (:max-tx db')))))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"

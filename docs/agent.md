@@ -56,17 +56,18 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 ## ctx
 
-`@ctx` is your record as one map: your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process). It is kept current by a patch from each transaction you make, so a read is a deref and builds nothing; `(keys @ctx)` lists what it holds.
+`@ctx` is your record as one map (in your own namespace; `@seon.ctx/ctx` and `(swap! seon.ctx/ctx ...)` from any other): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process). It is kept current by a patch from each transaction you make, so a read is a deref and builds nothing; `(keys @ctx)` lists what it holds.
 
 - To see more or less of it, change its pattern: Datahike's pull syntax, held as data at `:seon.ctx/pattern`. `(:seon.ctx/pattern @ctx)` is your own edit (nil until you make one), and ``(swap! ctx assoc :seon.ctx/pattern [...])`` writes it; the record is built again by it (`(my.agent/help "docs/ctx.md#the-pattern")`). A window (your evals, a run's turns) holds the newest few, and a printed cut names the form that reads the rest.
 - To change something, `swap!` it as any atom, with no query to write: a collection (your runs, a run's turns and messages, your evals) is keyed by each member's id, newest first, so your run is `(key (first (:runs @ctx)))`:
   - your task's plan: ``(swap! ctx assoc-in [:runs rid :task :seon.task/plan] "...")``, or ``(swap! ctx update-in [:runs rid :task :seon.task/plan] str "\n\nFound: ...")``;
   - its proofs, or what it cites: ``(swap! ctx update-in [:runs rid :task :seon.task/proofs] conj 'app.x-test/t1)``;
   - a member gone: ``(swap! ctx update :evals dissoc eid)``; a new one, its identity in its value: ``(swap! ctx assoc-in [:runs rid :messages "m-note"] {:seon.message/id "m-note" :seon.message/from "agent" :seon.message/body "..."})``;
-  - your own datum: register its key, then ``(swap! ctx assoc :app.x/notes [...])``.
+  - your own datum: register its key, then ``(swap! ctx assoc :app.x/notes [...])``;
+  - a var the task cites is changed by its definition, as at any REPL: ``(in-ns 'app.x)`` then ``(defn f0 ...)``, and `:cited` holds the new source at the next deref (a `swap!` of it is refused, naming that form).
   
   The change is one transaction on your branch, each value checked by its schema, or it is refused with the error that says why and nothing is written: ``:seon.ctx/invalid`` (no schema, or a value its schema refuses), ``:seon.ctx/not-held`` (the db would not hold it), ``:seon.ctx/basis`` (the swap!'s function wrote the db itself, or wrote `:t`, `:branch` or `:commit`, which are read-only). A refused swap! is never retried.
-- What arrives each turn: your first request shows your page whole; each later turn shows what changed since your last, `{:page {part-key hiccup} :ctx {path [old new]}}`: the parts whose drawing changed, and each path of your record that changed and no part shows (old nil for what joined, new nil for what went; ``seon.ctx/diff``). An eval runs once, when you send it: nothing is evaluated again for you, and what changed is told.
+- What arrives each turn: your first request shows your page whole; each later turn shows what changed since your last, `{:page {part-key hiccup} :ctx {path [old new]}}`: the parts whose drawing changed, and each path of your record that changed (old nil for what joined, new nil for what went; ``seon.ctx/diff``). An eval runs once, when you send it: nothing is evaluated again for you, and what changed is told.
 
 ## Finding your way
 

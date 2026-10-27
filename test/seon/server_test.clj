@@ -136,11 +136,13 @@
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
   ;; function), and the change is on its branch, in its next @ctx, on its page and in its next turn
   (let [plan "Work: f0 returns its input."
-        [first-turn swapped page on-branch next-turn]
+        [first-turn swapped page elsewhere on-branch next-turn]
         (at/in-agent [{:op :context :agent "a1"}
                       (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
                            " (get-in @ctx [:runs rid :task :seon.task/plan]))")
                       "(pr-str (seon.repl/render-ctx-hiccup))"
+                      ;; from any namespace, the record by its qualified name
+                      "(in-ns 'demo) (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan])"
                       {:op :eval :agent "root"
                        :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\")))"
                                   " [:seon.task/id \"demo/t\"]))")}
@@ -148,5 +150,8 @@
     (is (clojure.string/includes? (:context first-turn) "Work.") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
+    (is (= plan (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
-    (is (clojure.string/includes? (:context next-turn) plan) "the next turn shows it")))
+    (is (clojure.string/includes? (:context next-turn) plan) "the next turn shows it")
+    (is (re-find #":seon\.task/plan\] \["Work\." (:context next-turn))
+        "and tells it as a diff in ctx's shape, {path [old new]}")))

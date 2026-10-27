@@ -454,8 +454,9 @@
            (cond
              (identical? om nm) acc
              ;; a var is defined by its definition, evaluated as at any REPL; its record follows it
-             (= :var/name by) (refuse acc path (str "a var changes by its definition, not by swap!: evaluate it, (in-ns 'its.ns) (defn f ...), and "
-                                                   "its record follows; what the task cites follows " attr))
+             (= :var/name by) (let [v (or (some (fn [[k m]] (when-not (identical? m (get om k)) (:var/name m))) nm) 'its.ns/f)]
+                                (refuse acc path (str "a var changes by its definition, not by swap!: evaluate (in-ns '" (namespace v) ") (defn " (name v)
+                                                      " ...), and @seon.ctx/ctx holds its new source; what the task cites follows " attr)))
              by (refuse acc path (str "a lookup's members follow " attr ": change it"))
              (and rev? (many? db j))
              (as-> acc acc
