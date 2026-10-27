@@ -404,30 +404,9 @@
       :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id x) :rank (if (in? (:seon.task/id x)) 0 2)}])
       :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key x) :rank (if (in? (str (:schema/key x))) 0 2)}]))))
 
-(defn exact
-  "The texts on db that hold the string s, over each of kinds (text-attrs), as [{:kind :name :line
-  :rank}], unsorted: one scan of each kind's attribute, then per match its names and the line it
-  begins in. ci? ignores case. A name once per kind, at its best rank (two live forms may define one: a
-  method, an extension). Cost: one scan of each attribute asked; the one reader my.agent/grep and
-  my.agent/search ask."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :boolean] [:vector :map]]}
-  [db s kinds ci?]
-  (let [q (if ci? (str/lower-case s) s)
-        has? (fn [t] (some? (str/index-of (if ci? (str/lower-case t) t) q)))
-        hits (for [a (distinct (keep text-attrs kinds))
-                   {:keys [e v]} (d/datoms db :aevt a)
-                   :let [low (if ci? (str/lower-case v) v) i (str/index-of low q)] :when i
-                   h (named-hits db e a kinds has?)]
-               (if (= (count low) (count v))
-                 (assoc h :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))
-                 h))]
-    (->> hits (sort-by (juxt :rank (comp str :name)))
-         (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)]))) [#{} []])
-         second)))
-
 (defn words
   "The words of text s, lower case: runs of letters and digits, a run split where a lower case letter or
-  a digit meets an upper case one (datomsDiff -> datoms diff), so an identifier (datoms-diff, seon.docs/grep,
+  a digit meets an upper case one (datomsDiff -> datoms diff), so an identifier (datoms-diff, seon.docs/words,
   :seon.run/outcome) is its parts. Distinct, in order."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [s]
@@ -482,16 +461,6 @@
                  (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
                          [#{} []])
                  second)))))))
-
-(defn grep
-  "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a
-  var whose name holds it, then one whose docstring does, then the rest, each sorted by name, as
-  {:var :line}, :line the source's line where s first begins; a var once, at its best rank; the exact
-  half of my.agent/search over code alone (`exact`). Cost: one scan of :form/src, then per matching
-  form its definitions and a line cut at the match."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
-  [db s]
-  (vec (for [h (exact db s #{:var :test} false)] {:var (:name h) :line (:line h)})))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):

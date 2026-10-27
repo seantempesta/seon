@@ -861,8 +861,11 @@
   ([db checkout baseline]
    ;; each of the checkout's wiki dirs in turn, on the db the ones before it made (a page links to the
    ;; sections of the others, which are stored by then)
-   (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
-           [] (cfg/value :seon.config.root/wiki-dirs))))
+   ;; twice: a link from a dir's page to a later dir's page is a dead link until that page's sections are
+   ;; stored, and the second pass resolves it, so the load is a fixpoint (an unchanged wiki writes nothing)
+   (let [dirs (cfg/value :seon.config.root/wiki-dirs)]
+     (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
+             [] (concat dirs dirs)))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
