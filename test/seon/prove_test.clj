@@ -49,7 +49,7 @@
   ;; task seon.proofs/main-is-proved-in-a-fork: the writer's commit notice records main's t and, with
   ;; :seon.config.proofs/prove-main-on-commit (off by default: the run of all of main's tests dies
   ;; in its child), a commit that moves the program starts a run of main (the process test below,
-  ;; main-is-proved-at-each-program-commit-...). Off, neither a data commit nor a program commit
+  ;; main-is-proved-at-boot-with-the-config-on-nobody-asking). Off, neither a data commit nor a program commit
   ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)

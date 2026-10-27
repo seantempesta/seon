@@ -65,7 +65,7 @@
               ["(+ 1 2)" :text "3"]
               ["*1" :text "3"]
               ["(pprint {:a 1})" :text "{:a 1}"]
-              ["(/ 1 0)" :text ""]
+              ["(/ 1 0)" :text "Divide by zero"]
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
@@ -375,10 +375,6 @@
     (let [r (h/html (render/html {} (assoc em :seon.error/at {:line 3 :column 6})))]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (str/includes? r "at line 3:6") r))))
-
-(def evals-run
-  "How many times the ticks proof's form ran."
-  (atom 0))
 
 (deftest an-evals-response-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees

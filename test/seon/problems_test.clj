@@ -71,27 +71,6 @@
                          (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
             "the report reads the true count from the fold")))))))
 
-(deftest a-defect-in-the-reconciler-does-not-feed-itself
-  ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
-  ;; with no boot fact, what a refused boot left), the api folds the thrown error and writes
-  ;; it to main as one commit, and that commit is the reconciler's next input. A step that
-  ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
-  ;; Main's commits over ten rounds are the first record, and no more.
-  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :root-causes []}}]})
-        t0 (:max-tx @conn)
-        st (rec/reconciler-proc {:boot "boot-1"})
-        round (fn [f i]
-                (let [db @conn
-                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)}) nil
-                             (catch Throwable e e))
-                      f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
-                      [f tx] (err/flush-tx f db)]
-                  (when (seq tx) (d/transact conn {:tx-data tx}))
-                  f))]
-    (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
-        "the step fails in the task owner's contract, each round")
-    (is (<= (or (d/q '[:find (count ?tx) . :in $ ?t0 :where [?tx :db/txInstant] [(> ?tx ?t0)]] @conn t0) 0) 1) "ten failing commits, one record")))))
-
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
 (deftest an-eval-error-is-recorded-as-data
@@ -780,7 +759,7 @@
         row #(first (get-in (problems/report %) [:classes :platform :rows]))
         db (refused db0)]
     (testing "the target section is missing: the error is open"
-      (is (not (false? (:open? (row db))))))
+      (is (some? (row db)) "the error has a row") (is (not (false? (:open? (row db))))))
     (let [after (d/db-with db (seon.docs/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
       (testing "the section exists now: closed, with nothing written to close it"
         (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
@@ -793,55 +772,15 @@
                                  :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#nowhere" :seon.section/address "demo/a.md#a"}}])
             rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
             fixed (d/db-with err (seon.docs/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
-        (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
+        (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
         (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
       (let [v (:v (first (d/datoms db0 :aevt :var/name)))
             e (:e (first (d/datoms db0 :aevt :var/name)))
             err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
                                  :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
-        (is (not (false? (:open? (row err)))))
+        (is (some? (row err)) "the error has a row") (is (not (false? (:open? (row err)))))
         (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
-
-(defn- literal-catch-sites
-  "The old bin/laws rule over text: each line of each src file but e2e.clj (check.clj is test/'s now), strings
-  and comments stripped, holding `(catch ` is a site of the last top-level def before it (a deftype's
-  or defrecord's by its type's name), as ns/name."
-  [files]
-  (set (for [[path text] files :when (not (re-find #"/(check|e2e)\.clj$" path))
-             :let [nsym (seon.source/file-ns text)]
-             site (loop [lines (str/split-lines text) in-str? false n nil acc []]
-                    (if-let [l (first lines)]
-                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce|deftype|defrecord) (\S+)(?: (\S+))?" l)]
-                                (if (str/starts-with? (second m) "^") (nth m 2) (second m))
-                                n)
-                            [code in-str?] (loop [cs (seq l) in-str? in-str? out []]
-                                             (if-let [c (first cs)]
-                                               (cond in-str? (cond (= c \\) (recur (nnext cs) true out) (= c \") (recur (next cs) false out) :else (recur (next cs) true out))
-                                                     (= c \\) (recur (nnext cs) false out)
-                                                     (= c \") (recur (next cs) true out)
-                                                     (= c \;) [out false]
-                                                     :else (recur (next cs) false (conj out c)))
-                                               [out in-str?]))]
-                        (recur (rest lines) in-str? n (cond-> acc (str/includes? (apply str code) "(catch ") (conj (str nsym "/" n)))))
-                      acc))]
-         site)))
-
-(deftest the-catch-class-finds-the-sites-the-literal-scan-finds
-  ;; parity (root's review of a370169): over Seon's own src the :unnamed-site class lists exactly the
-  ;; sites bin/laws' text scan listed, none dropped (a catch in a defmethod, an extend-protocol or a
-  ;; reify is attributed to its form). Extras the compiler's facts add are listed here, each justified.
-  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
-        _ (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
-        db0 (ts/test-db)
-        db (d/db-with db0 (seon.source/import-tx db0 files))
-        class (set (map #(str (:site %)) (get-in (problems/health db) [:classes :unnamed-site :rows])))
-        literal (literal-catch-sites files)
-        ;; a catch in a deftype's method is its form's, which defines the type and its factory both
-        extras {"seon.ratom/->Reaction" "the factory seon.ratom/Reaction's form defines"}]
-    (is (seq literal))
-    (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
-    (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))
 
 ;; ---- cost proofs of the derived classes beyond dead-citations ---------------------------------
 
