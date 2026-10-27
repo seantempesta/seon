@@ -1,0 +1,1129 @@
+[ {
+  "task" : "seon.turn/observe-reads-are-renders",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/turn.md#observe",
+    "pct" : 55,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#the-test-service",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/storage.md#merges-read-what-changed",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/act!",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/turn-state",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/context-block",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.problems/caused-split",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/status",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.turn/basis",
+    "pct" : 28,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.turn/not-observed",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.run/run-fact",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/agent-fact",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.render.ui/merge-view", "seon.render.ui/render-ctx", "seon.agent/run-tests-forked", "seon.agent/test-plan", "seon.turn/observed" ]
+}, {
+  "task" : "seon.fx/the-source-tree-follows-main",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#import-the-running-generations-source-as-mains-program",
+    "pct" : 56,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#every-writer-root-loads-what-changed",
+    "pct" : 43,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 19,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#mains-program-follows-the-tree",
+    "pct" : 15,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.root/watch!",
+    "pct" : 9,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 7,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/start!",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.root/loader",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.fx/follow-main",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/root",
+    "pct" : 39,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/gate-checkout",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/tasks-dir",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "my.root/watch-loads", "my.root/loader-dirs", "my.root/source-root", "seon.fx/read-source" ]
+}, {
+  "task" : "datahike.db/a-diff-records-its-reads",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 55,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#reactive-renders",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/turn.md#observe",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/empty-index",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/patch",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/world",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/reconciler-proc",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.render/frame!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/step",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.ctx/ctx",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/index",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/tx-report",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "docs/forks.md#jolt", "seon.render/render!" ]
+}, {
+  "task" : "seon.context/a-prose-request-finds-its-functions",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/vector.md#fused-with-the-call-graph",
+    "pct" : 82,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct" : 59,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#a-section-read-at-a-depth-with-its-edges",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#sections-in-a-tasks-context",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#cuts-in-a-display-namespace-that-are-not-cuts-of-output",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.task/related",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/view",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/task-data",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/related",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/related",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related-seeds-near",
+    "pct" : 50,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related-near",
+    "pct" : 38,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related-rarity",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.ref/view",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.context/related" ]
+}, {
+  "task" : "seon.ctx/share-assocs-what-it-shares",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct" : 50,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#changing-it-swap",
+    "pct" : 23,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 15,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/ctx.md#the-pattern",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/patch",
+    "pct" : 8,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/join",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/window-moves",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/same-node?",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ctx/changes",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.ctx/spec",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.merge/entry-value",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.catch-up/fact",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.ref/citation",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.merge/result",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.ctx/node", "seon.ctx/share" ]
+}, {
+  "task" : "my.agent/a-missing-name-says-the-nearest",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/agent.md#finding-your-way",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#task-references",
+    "pct" : 23,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#resolving-and-showing",
+    "pct" : 19,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/resolution.md#sanctioned",
+    "pct" : 16,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.task/references-of",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/tests-reaching",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/callers",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/callees",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ref/namespace-view",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":my.agent/no-var",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ctx/callers",
+    "pct" : 8,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/references",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related-seeds-near",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "my.agent/source", ":seon.turn/not-observed" ]
+}, {
+  "task" : "my.agent/grep-ranks-definitions-first",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/agent.md#finding-your-way",
+    "pct" : 18,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct" : 14,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#prose-and-the-one-string-cutter",
+    "pct" : 13,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/agent.md#what-you-read",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/grep",
+    "pct" : 29,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/warm!",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/related-view",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/callees",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.agent/grep",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related-seeds-near",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":form/defines",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.ai/judge-pass-usd",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "seon.docs/a-section-reads-at-each-level",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/references.md#a-section-read-at-a-depth-with-its-edges",
+    "pct" : 78,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#sections-in-a-tasks-context",
+    "pct" : 22,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/references.md#files-and-namespaces-on-demand",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#a-dead-citation",
+    "pct" : 13,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#a-stale-section",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/related-view",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/help-page",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.ref/namespace-view",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/cited-code",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/meaning-changes",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.ref/view",
+    "pct" : 35,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 16,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.section/references",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/wiki-baseline",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.docs/view", "seon.docs/page", "my.agent/help", ":seon.ref/edge", "seon.docs/edge" ]
+}, {
+  "task" : "seon.cost/a-cost-proof-is-the-same-under-load",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 81,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#a-bound-in-the-contract",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#chez",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#datahike",
+    "pct" : 10,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/once",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/units",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/run",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/baseline",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/related",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-max-samples",
+    "pct" : 36,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/cost-settled",
+    "pct" : 31,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/unsettled",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.cost/dims",
+    "pct" : 14,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/gc-sweepers",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.profile/measure!" ]
+}, {
+  "task" : "seon.watch/a-vanished-file-is-a-fact",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct" : 60,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#every-writer-root-loads-what-changed",
+    "pct" : 46,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 26,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#lmdb-robust-locks",
+    "pct" : 18,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/health.md#two-kinds-of-problem",
+    "pct" : 12,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.root/load-tasks!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "my.root/watch!",
+    "pct" : 4,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/wiki-baseline",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.watch/start!",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/load-dir-tx",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/tasks-dir",
+    "pct" : 16,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.watch/died",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/tree-excludes",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.docs/pages", "seon.lib/dir-texts", "my.root/task-files" ]
+}, {
+  "task" : "seon.server/an-outside-run-writes-its-end",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/server.md#ops",
+    "pct" : 57,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/root.md#runs-and-judging",
+    "pct" : 44,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/turn.md#one-run-from-release-to-judge",
+    "pct" : 13,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/plan.md#the-plan-1",
+    "pct" : 11,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/agent.md#what-you-read",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/end!",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.server/ops",
+    "pct" : 6,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/died!",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/advance",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/observe",
+    "pct" : 3,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.turn/end",
+    "pct" : 12,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 9,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/step",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/form-ticks",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.turn/hand-back!", "seon.agent/write-end!" ]
+}, {
+  "task" : "seon.task/a-runs-lifecycle-is-read-once",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#tiles-are-data-the-context-reads-the-pages-derivations",
+    "pct" : 80,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/root.md#runs-and-judging",
+    "pct" : 13,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/turn.md#observe",
+    "pct" : 7,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/vocabulary.md#tasks-task-chains-words",
+    "pct" : 5,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "section",
+    "name" : "docs/plan.md#the-plan-1",
+    "pct" : 4,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.task/finished",
+    "pct" : 25,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.task/done?",
+    "pct" : 11,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/idx-ready?",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/actions",
+    "pct" : 6,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/finished",
+    "pct" : 5,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 17,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.run/status",
+    "pct" : 10,
+    "label" : "useful",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/execution",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 3,
+    "label" : "noise",
+    "why" : ""
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/task-fact",
+    "pct" : 2,
+    "label" : "noise",
+    "why" : ""
+  } ],
+  "missing" : [ "seon.task/judged", "seon.task/failed", "seon.task/running", "seon.reconcile/finished", "seon.server/run-of" ]
+} ]

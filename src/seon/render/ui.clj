@@ -881,15 +881,19 @@
    [#'render/html {:budget (config/value :seon.config.render/value-budget)} (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]])
 
 (defn related
-  "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
-  seon.context/related over the db as seon.context/related-view lines it (each section its first
-  sentence, each function its doc's, with the forms that read more), what (my.task/related)
+  "What the agent's work on its task is likely to need beyond what the plan cites (a component over
+  ctx and the db): seon.context/selected, the units its plan and its recent evals point to, each at
+  doc depth with its chance, appended as they enter and never dropped within the session (so the
+  model's page diff only grows), as seon.context/related-view lines it (with the forms that read more), what (my.task/related)
   answers, as a call of the one printer; a line saying so when there is nothing yet."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [r (some->> (context/related db (get-in c [:runs rid :task :db/id])) (context/related-view db))]
+  (let [r (some->> (context/selected db (get-in c [:runs rid :task :db/id]) (:db/id c)) (context/related-view db))]
     [:section [:h2 "related"]
-     (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
+     ;; its budget the selection's (seon.context/selected fills relevance-budget) and a value's for the
+     ;; forms beside it, so the printer never cuts a unit the selection chose
+     (if r [#'render/html {:budget (+ (config/value :seon.config.render/relevance-budget) (config/value :seon.config.render/value-budget)) :handle '(my.task/related)} r]
+         [:p {:class "muted"} "nothing related yet"])]))
 
 (defn run-head
   "The run (a component over ctx): its relevant attributes and the turns it took, by its schema's

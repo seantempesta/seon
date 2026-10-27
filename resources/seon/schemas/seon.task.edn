@@ -18,7 +18,10 @@
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the functions near its plan its task data lists (seon.context/similar: off by default, on to measure it)
-                    [:seon.config.render/similar {:optional true} :seon.config.render/similar]]
+                    [:seon.config.render/similar {:optional true} :seon.config.render/similar]
+                    ;; the relevance at which its related part shows an item (seon.context/related)
+                    [:seon.config.render/relevance-summary {:optional true} :seon.config.render/relevance-summary]
+                    [:seon.config.render/relevance-doc {:optional true} :seon.config.render/relevance-doc]]
  :seon.task/need-ids [:set :seon.task/id]
  :seon.task/declaration [:map {:closed true}
                          [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
@@ -49,7 +52,9 @@
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment a run runs in; desired (the task's) = observed (the run's), or restart
- :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]]
+ :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
+                 ;; an outside run's: the client that attached it (seon.server/held)
+                 [:holder {:optional true} :string]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
  :seon.run/run [:map {:seon.render/html seon.render.ui/run-row}
                         [:seon.run/id :seon.run/id] [:seon.run/task :seon.task/id]

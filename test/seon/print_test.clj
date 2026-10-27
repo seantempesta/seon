@@ -446,3 +446,17 @@
     (is (= {:seon.print/code "def"} (seon/read-rest '(subs (:seon.print/code (get-in result/e5 [:value :src])) 3) 'result/e5 v)) "code reads on as code")
     (is (= "lo" (seon/read-rest '(subs (get-in result/e5 [:value :s]) 3) 'result/e5 v)))
     (is (= 2 (seon/read-rest '(val (nth (seq (get-in result/e5 [:value :proofs 1])) 0)) 'result/e5 v)))))
+
+(deftest a-lifted-map-indents-its-keys-past-its-opener
+  ;; a namespace-lifted map prints `#:a{:kind :work,` and its later keys under the whole opener (four
+  ;; columns), not under the `#` as the parent's; the selection decides the lift once over the keys
+  ;; it holds and charges the opener and the unqualified keys, so what is laid out is what is charged
+  ;; (the counterexample from the task's failure: an emit-only nest threw charge-exceeded, 74 charged
+  ;; against 77 laid out)
+  (let [text (:text (seon/print-value #:a{:kind :work, :plan "a plan of some length", :proofs #{'x/y}} {:width 20 :budget 400}))
+        lines (str/split-lines text)]
+    (is (str/starts-with? text "#:a{:kind :work,") text)
+    (is (every? #(or (str/starts-with? % "#:a{") (str/starts-with? % "    ")) lines) "every later line under the whole opener")
+    (testing "keys of one namespace beside a key of another are not lifted, and a lone key is not"
+      (is (str/starts-with? (:text (seon/print-value {:a/x 1 :b/y 2} {:width 20 :budget 400})) "{:a/x 1"))
+      (is (str/starts-with? (:text (seon/print-value {:a/x 1} {:width 20 :budget 400})) "{:a/x 1")))))

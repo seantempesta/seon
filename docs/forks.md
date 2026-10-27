@@ -19,7 +19,7 @@ A pin bump runs the forks' own tests on Jolt, so a fork commit cannot change cor
 
 ## jolt
 
-`reference-code/jolt` pinned at `6e604ac8`, the tip of ``jolt/emit-string-literals``, on `eba8826a`, the tip of ``jolt/image-fn-forms-opt-in``, on `2a6ae8f8`, the tip of ``jolt/arrays-compare``, on `86f49de8`, the tip of ``jolt/analysis-lookups``, on ``jolt/record-field-binds`` `0d39edc3`, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in).
+`reference-code/jolt` pinned at `329c39f2`, the tip of ``jolt/a-fork-runs-none-of-its-parents-fibers``, 59 commits past `6e604ac8`, the tip of ``jolt/emit-string-literals``, on `eba8826a`, the tip of ``jolt/image-fn-forms-opt-in``, on `2a6ae8f8`, the tip of ``jolt/arrays-compare``, on `86f49de8`, the tip of ``jolt/analysis-lookups``, on ``jolt/record-field-binds`` `0d39edc3`, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in).
 
 - Fork repo: ``https://github.com/seantempesta/jolt``. Upstream: ``jolt-lang/jolt``. Fork: ``seantempesta/jolt``.
 - Base: `f714b0ed`, upstream main (nightly + 10), the merge-base with upstream's main.

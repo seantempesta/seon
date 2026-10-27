@@ -39,9 +39,11 @@
   :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
   :dirs and :sets; :decls, more task declarations in the task's file beside t (a function of
   {:ns :task}, or a vector); :own-root?, a root of its own for this test (its main dropped with
-  it): a test whose agent merges into main, which would move the program every later test runs."
+  it): a test whose agent merges into main, which would move the program every later test runs;
+  :client, the client its attach names (seon.server: then only that client's requests, or ones
+  naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets decls own-root?] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
@@ -86,7 +88,7 @@
                          ;; the agent's :ready event, tapped before the attach that spawns it and
                          ;; awaited after: its hello (a ping of :agents until idle was a poll)
                          (eval-root "(def ready-ev (c/events sys))")
-                         (ask {:op :attach :task (:task names)}))
+                         (ask (cond-> {:op :attach :task (:task names)} client (assoc :client client))))
                 agent (some-> (:agent attach) name)
                 names (assoc names :agent agent :run (:run attach))]
             (vreset! made agent)
@@ -1196,7 +1198,9 @@
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
   (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
         ;; the agent working the task, as a session holds it: its entity and its running run
-        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}
+                          ;; the toy's chances sit far below the page's entry cut, so every item scored enters
+                          [:db/add te :seon.config.render/relevance-doc 0.0]])
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try

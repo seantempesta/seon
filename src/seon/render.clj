@@ -55,7 +55,12 @@
   "What the printer shows in place of v (seon.print/print-value's :render): {:value summary}
   when v's schema (its metadata :seon.render/schema) declares a summary function, which makes a
   value (an array map of what matters, docs/render.md#a-render-is-a-value-printed-once) that the
-  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read."
+  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read.
+  The summary is a render declared on the value's schema, the mechanism AGENTS 9 sanctions (output
+  improves only through the one printer or such a render), and the printer's part is four lines (a
+  render may answer {:value x} as well as {:text :html}, as its `call` clause already prints a value in
+  place); the producer-side alternative, keeping host objects out of seon.agent/state, is a rewrite
+  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8, 2026-10-27)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v]
   (when-let [sym (summary-declared (:seon.render/schema (meta v)))]

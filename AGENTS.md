@@ -27,6 +27,8 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 
 ## 2. Who does what
 
+The owner rules, root directs and merges, worktree sessions each work one task, and Seon agents work the same tasks through the same server.
+
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time, with evidence and, for a big one, priced options (the simplest viable first, your recommendation marked).
 - **Root** (the orchestrating session; in Seon, the root agent) owns **direction, THE PLAN, merging into main and the docs**. Its output is the whole system moving forward, not findings it made itself. Root:
   - keeps several things in flight at once (worktrees implementing, agents researching, a batch merging) and records them in the plan's "In flight";
@@ -39,6 +41,9 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 - **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
 ### Root's working rules (what a fresh root needs; the owner's rulings behind them are in docs/decisions.md)
+
+What a fresh root needs to run the work; the owner's ruling behind each rule is in [decisions](docs/decisions.md).
+
 - **On resume, read before replying to anything:** this file, `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand), `docs/restart.md`, and the last lines of `claude_scratch/merge-log.md`. Then `git log --oneline --first-parent -15`, `uptime`, `bin/root status` and the sessions list, and write the owner a five-line state summary before acting.
 - **Sessions:** Claude sessions are filed in the project's sidebar group, with titles that say their current work. Model by task: Opus for design and dependencies, Sonnet for mechanical work, reviews and the merge session, Haiku or Sonnet for browser testers. Archive a session once its branch has merged and it holds nothing else.
 - **The app caps one session's cross-session messages at about 10 per owner message.** So standing rules go in this file, not in messages, and root's current orders and assignments go in `claude_scratch/root-orders.md` (gitignored, edited in place), which every session reads before each new task, branch, run or ready report; each session keeps its status in `claude_scratch/status/<name>.md`, rewritten in place. Batch what must be sent, most important first. Sessions report ready to the merge session when one runs, else to root.
@@ -160,6 +165,8 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 
 ## 5. Laws
 
+The laws every change is held to; a check or a test reads each of them.
+
 - **Only documented config.** Every limit, bound or default is a key in `resources/seon/config/default.edn`, with its unit, provenance and what happens at the bound, under a `seon.config.*` schema.
   - It's read through one resolver (task → model → provider → config).
   - No literals, no `System/getenv` outside the loader.
@@ -205,6 +212,8 @@ printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 1
 ## 7. The wiki is the one home for how the system works
 
 **Use the wiki for everything about the system** (owner, 2026-10-27: "we should be using the wiki for everything so it gets better because that's what agents are pulling into their context"). `docs/` is what a task's context pulls, so a fact that lives anywhere else is a fact no agent reads. Mechanisms, rulings, measurements and the reasons for them are written into the wiki page where the problem lives, in the commit that changes the system. Never duplicate the wiki: say a thing once, where it belongs, and cite it from everywhere else.
+
+Where each kind of information lives, and how the wiki that holds the system's memory is kept.
 
 - **Pages:** ``docs/<topic>.md``, one concept per page; `docs/README.md` is the map, and it states how the wiki is kept (one home per concept, a leading sentence that stands alone, patterns in their topic sections, everything linked, current truth rather than a dated log). Sections are addressed `topic#slug` and mirrored in the database.
 - **Every function, schema entry and deftest carries a citation to the wiki section (or the plan step) that describes its mechanism.** Its docstring says what this var is, in a sentence, and cites the section for how it works; it never restates the section. A function's docstring is checked (the `:uncited-var` problem class, [health](docs/health.md)); a deftest's leading `;;` comment and a schema entry's `:description` carry the citation too, not yet checked. The citations are read by one parser from the text itself ([references](docs/references.md)), and these are the forms it looks up:
@@ -254,6 +263,8 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 
 ## 8. The machine
 
+The machine Seon is built on and for, and the rules that keep it from being flooded.
+
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
@@ -264,6 +275,8 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
 ## 9. Mistakes we have made, and do not repeat
+
+The mistakes made so far, each stated so it is not made again.
 
 - **Root doing the work itself** (owner, 2026-10-22: "you spent most of the session just debugging rather than outsourcing with agents"): debugging, measuring or reading many files personally, step by step, while the plan stood still. Delegate it with a brief (§2).
 - **Trees before the forest:** a detail chased past its worth with no step of THE PLAN asking for it; guessing at a cause instead of launching agents to find it.

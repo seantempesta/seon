@@ -4,11 +4,15 @@ Seon is where many agents do real work for their user, each in its own process o
 
 ## Start here
 
+Three places to start, by what you are here to do:
+
 - **Working here, as a person or an agent:** [AGENTS.md](AGENTS.md) is how work is handed out and done, and the laws. Then the wiki's map, [docs/README.md](docs/README.md): one page a concept, each section addressed `page#section` and citable from any task.
 - **What is in flight:** [docs/plan.md](docs/plan.md) (the plan and what is running). **What was ruled:** [docs/decisions.md](docs/decisions.md).
 - **What v1 did and where this stands:** [docs/parity.md](docs/parity.md); what was left behind on purpose: [BAGGAGE.md](BAGGAGE.md).
 
 ## Clone and build
+
+Clone with the submodules and build once; every checkout builds its own binary.
 
 ```sh
 git clone --recurse-submodules https://github.com/seantempesta/seon-next   # or the folder you were given
@@ -21,6 +25,8 @@ bin/prove                # run exactly the tests and checks the change reaches
 **Prerequisites** (not installed by the build): a C compiler and make (macOS: the Xcode command line tools), git, network access to GitHub and Maven Central on the first build, and OpenSSL 3 at run time (Homebrew `openssl@3` on macOS). The fork submodules are on GitHub; two of them (`persistent-sorted-set`, `jolt-overlay`) are private, so the clone needs your GitHub login (`gh auth login`).
 
 ## Layout
+
+Where things live in the repository:
 
 | Path | What it is |
 |---|---|
