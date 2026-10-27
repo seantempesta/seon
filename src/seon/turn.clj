@@ -20,7 +20,7 @@
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
-            [seon.error :as err] [datahike.api :as d]))
+            [seon.error :as err] [datahike.api :as d] [seon.db :as pdb]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
 ;; works, and a stop a function requested.
@@ -224,6 +224,19 @@
                         (str "the prompt cache hit " cache-hit-tokens " tokens of the " expected " this request shares with the one before")
                             {:hit cache-hit-tokens :expected expected :block block :shared shared :messages (count ms)})))))))
 
+(defn- included-tx
+  "What this agent's context includes beside task now (seon.context/selected over the work's focus, its
+  prior the agent's :seon.agent/included), as the transaction that records it on the agent, so the page
+  and this turn's request draw the same units and no frame calls relevance; none when the work has no
+  vector yet or nothing moved."
+  {:malli/schema [:=> [:cat :seon.task/id] [:vector :map]]}
+  [task]
+  (let [db (agent/db) k (:key @agent/state)
+        te (pdb/eid db :seon.task/id task) a (pdb/eid db :seon.agent/key k)
+        prior (or (when a (:seon.agent/included (d/entity db a))) [])
+        units (when (and te a) (context/selected db te a prior))]
+    (if (and units (not= units prior)) [{:seon.agent/key k :seon.agent/included units}] [])))
+
 (defn- act!
   "One model turn: the context of what was observed to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
@@ -242,11 +255,14 @@
         ;; the turn first, what it was made from: its page is drawn on the db that holds it (its
         ;; proofs as this turn observed them), then what it sent, committed, so a page shows the
         ;; call in flight and a call that fails keeps what it sent
-        _ (agent/transact! [{:db/id "run" :seon.run/id run}
-                            {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}])
+        _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
+                                  {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}]
+                                 (included-tx (:seon.task/id t))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
-        {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
+        ;; its page at this commit is the live walk's (what changed since the frame before), never drawn cold
+        {:keys [block messages sent printed]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])
+                                                                               :pages {(d/commit-id (agent/db)) (repl/page-hiccup)}})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
         _ (when sent (agent/transact! [{:seon.turn/id id :seon.turn/sent sent}]))
@@ -346,8 +362,11 @@
         ;; observer's read records nothing on the branch beyond the read and leaves the print cache
         taken (take! take?)
         _ (when take? (observed! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
+        ;; the read's related units, decided as a model turn's are, before its request is drawn
+        _ (when take? (when-let [tx (not-empty (included-tx task))] (agent/transact! tx) (agent/commit!)))
         basis (assoc (basis! task run n 1 :outside ob taken) :agent (:key @agent/state))
-        {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run]) :pages (get-in @agent/state [:pages run])})
+        {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])
+                                                                          :pages (assoc (get-in @agent/state [:pages run]) (d/commit-id (agent/db)) (repl/page-hiccup))})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
         ;; the page it drew, kept by every read (an observer's too, which records a turn): the next diff draws no page twice
         _ (swap! agent/state assoc-in [:pages run] (:pages printed))

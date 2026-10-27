@@ -162,6 +162,10 @@
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set :string]
+ ;; what its context includes beside its task (seon.context/selected: the wiki sections, functions and schema keys
+ ;; its work points to), [name chance] in the order they entered, written by its turn before its request is drawn,
+ ;; so the page and the request draw the same units (seon.render.ui/related) and a replay at that commit too
+ :seon.agent/included [:vector [:tuple [:or :string :qualified-symbol :qualified-keyword] number?]]
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
@@ -175,7 +179,8 @@
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/stall {:optional true} :seon.agent/stall]
-                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]]
+                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
+                       [:seon.agent/included {:optional true} :seon.agent/included]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]

@@ -826,8 +826,9 @@
         lst (some #(when (= :model (:seon.turn/origin %)) %) older)
         task (:seon.task/id (held-task c rid))]
     (when turn
-      (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] (:db/id turn)))
-            l (when lst (d/pull db [:seon.turn/truncated :seon.turn/calls] (:db/id lst)))]
+      ;; the turns as ctx's pull holds them ([*]): their basis, and the last model turn's calls
+      (let [b (ratom/realize (:seon.turn/basis turn))
+            l (some-> lst ratom/realize (select-keys [:seon.turn/truncated :seon.turn/calls]))]
         [:section [:h2 "status"]
          [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
           (context/turn-state db (task/task db task) (context/turn-input db b l))]]))))
@@ -882,13 +883,13 @@
 
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
-  ctx and the db): seon.context/selected, the units its plan and its recent evals point to, each at
-  doc depth with its chance, appended as they enter and never dropped within the session (so the
-  model's page diff only grows), as seon.context/related-view lines it (with the forms that read more), what (my.task/related)
-  answers, as a call of the one printer; a line saying so when there is nothing yet."
+  ctx and the db): the units its last turn included (:seon.agent/included, seon.context/selected:
+  what its plan and recent evals point to, each whole with its chance, in the order they entered), as
+  seon.context/related-view lines them (with the forms that read more), as a call of the one printer;
+  a line saying so when there is nothing yet. No relevance call here: the turn decides, the page draws."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [r (some->> (context/selected db (get-in c [:runs rid :task :db/id]) (:db/id c)) (context/related-view db))]
+  (let [r (some->> (not-empty (:seon.agent/included c)) context/shown (context/related-view db))]
     [:section [:h2 "related"]
      ;; its budget the selection's (seon.context/selected fills relevance-budget) and a value's for the
      ;; forms beside it, so the printer never cuts a unit the selection chose

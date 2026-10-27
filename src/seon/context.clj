@@ -660,43 +660,48 @@
                 (or (:seon.task/plan (d/entity db te)) ""))})))
 
 (defn selected
-  "What the page shows beside agent a's work on task entity te: the units `related` scores at
-  :seon.config.render/relevance-doc or more against the work's `focus`, each at doc depth (whole),
-  the best first, appended in the order they first reached it while their lines fit
-  :seon.config.render/relevance-budget tokens; none when none reaches it; a unit once shown stays (its chance as it entered), so a turn's page grows by what newly
-  entered and every earlier byte of it holds for the model's prompt cache (the owner, 2026-10-27:
-  pay the context up front, then refine as the task goes on; docs/render.md#the-models-context-a-cached-prefix-then-the-turn).
-  What was shown is the agent process's, kept beside its other per-db reads (seon.agent/state
-  :selected, by task); a process that holds none starts from what enters now. Answers related's map
-  over the units shown, :doc those at doc depth, :hidden what scored past the cut and did not fit."
-  {:malli/schema [:=> [:cat :seon.host/db :int :int]
-                  [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
-                           [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword nat-int?]]]]]}
-  [db te a]
+  "What agent a's context includes beside its work on task entity te now, given prior (what its last
+  turn included, :seon.agent/included): units [name chance], each a section's address, a function's
+  or a schema key's name that `related` scores against the work's `focus`. One held before stays while
+  its chance is :seon.config.render/relevance-summary or more; a new one enters at
+  :seon.config.render/relevance-doc or more, best first, after every one before it, while the lines fit
+  :seon.config.render/relevance-budget tokens (the owner, 2026-10-27: 60% to enter, 40% to leave, items
+  in entry order, so a turn's page moves by what crossed a cut and every earlier byte holds for the
+  prompt cache). The turn calls it once and records its answer (seon.turn), so no frame waits on
+  relevance and a replay draws the same units; nil when the work has no vector yet (nothing to decide,
+  the record stands)."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int [:sequential [:tuple :any number?]]] [:maybe [:vector [:tuple :any number?]]]]}
+  [db te a prior]
   (when-let [{fv :vector words :words} (focus db te a)]
-    ;; nothing enters below the doc cut: no unit the work is not likely to need, however empty the
-    ;; page (the owner, 2026-10-27: "if there's nothing at the threshold then show nothing until we
-    ;; have more context")
-    (when-let [r (related db te {:cut (let [t (d/pull db [:seon.task/model :seon.config.render/relevance-doc] te)]
-                                        (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)}))
-                                 :focus fv :words words})]
-      (let [prior (let [s (:selected @agent/state)] (if (= te (:te s)) (:units s) []))
-            kind-of (fn [x] (cond (string? x) :sections (keyword? x) :schemas :else :functions))
-            fresh (sort-by (comp - second) (remove (comp (set (map first prior)) first) (:relevance r)))
-            deep (:doc r)
-            ;; a line's tokens as it is drawn: whole at doc depth, else its first sentence (chars/4)
-            cost (fn [x] (quot (count (str (first (vals (dissoc (related-view db {(kind-of x) [x] :relevance {x 1.0} :doc (if (or (deep x) (some (fn [[y _ w]] (and w (= y x))) prior)) #{x} #{})}) :read :more))))) 4))
-            budget (cfg/value :seon.config.render/relevance-budget)
-            ;; each unit [name chance whole?], its depth as it entered, so a later draw draws it the same
-            [units _ left] (reduce (fn [[us used left] [x p]]
-                                     (let [c (cost x)]
-                                       (if (<= (+ used c) budget) [(conj us [x p (boolean (deep x))]) (+ used c) left] [us used (update left (kind-of x) (fnil inc 0))])))
-                                   [prior (reduce + 0 (map (comp cost first) prior)) {}] fresh)]
-        (when (seq @agent/state) (swap! agent/state assoc :selected {:te te :units units}))
-        {:sections (vec (for [[x] units :when (string? x)] x))
-         :functions (vec (for [[x] units :when (symbol? x)] x))
-         :schemas (vec (for [[x] units :when (keyword? x)] x))
-         :relevance (into {} (map (juxt first second)) units) :doc (into #{} (comp (filter #(nth % 2 false)) (map first)) units) :hidden left}))))
+    (let [t (d/pull db [:seon.task/model :seon.config.render/relevance-doc :seon.config.render/relevance-summary] te)
+          at #(cfg/value % {:task t :model (:seon.task/model t)})
+          enter (at :seon.config.render/relevance-doc)
+          leave (at :seon.config.render/relevance-summary)]
+      ;; nothing enters below the doc cut: no unit the work is not likely to need, however empty the
+      ;; page (the owner, 2026-10-27: "if there's nothing at the threshold then show nothing until we
+      ;; have more context")
+      (when-let [r (related db te {:cut leave :focus fv :words words})]
+        (let [ch (:relevance r)
+              held (into [] (keep (fn [[x]] (when-let [p (ch x)] (when (>= p leave) [x p])))) prior)
+              in? (set (map first held))
+              kind-of (fn [x] (cond (string? x) :sections (keyword? x) :schemas :else :functions))
+              ;; a line's tokens as it is drawn, whole (chars/4)
+              cost (fn [x] (quot (count (str (first (vals (dissoc (related-view db {(kind-of x) [x] :relevance {x 1.0} :doc #{x}}) :read :more))))) 4))
+              fresh (sort-by (comp - second) (filter (fn [[x p]] (and (>= p enter) (not (in? x)))) ch))]
+          (first (reduce (fn [[us used] [x p]] (let [c (cost x)] (if (<= (+ used c) (cfg/value :seon.config.render/relevance-budget)) [(conj us [x p]) (+ used c)] [us used])))
+                         [held (reduce + 0 (map (comp cost first) held))] fresh)))))))
+
+(defn shown
+  "Units [name chance] (what `selected` answers, what a turn recorded) as `related`'s map, every one
+  whole, for related-view to draw."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :any number?]]]
+                  [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
+                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword nat-int?]]]]}
+  [units]
+  {:sections (vec (for [[x] units :when (string? x)] x))
+   :functions (vec (for [[x] units :when (symbol? x)] x))
+   :schemas (vec (for [[x] units :when (keyword? x)] x))
+   :relevance (into {} units) :doc (set (map first units)) :hidden {}})
 
 (defn related-view
   "What `related` answers, each a line: a section its address and its lead's first sentence
@@ -1011,6 +1016,11 @@
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
 
+(def page-lists
+  "The lists of an agent's page its model reads: its task's (the layout's #p-task); the conversation
+  is the request's own, in its order."
+  ["#p-task"])
+
 (defn page
   "An agent's page as its model reads it, from its record c on db (its branch as of a turn's
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
@@ -1020,8 +1030,17 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w page-lists)))
          (finally (render/dispose-walk! w)))))
+
+(defn own-task
+  "The path of the agent's own task in its ctx value v: its newest run's task (a window newest first:
+  docs/ctx.md), where ctx holds it whole (a task a session's runs share is whole under one of them,
+  {:db/id e} under the others); nil with no run."
+  {:malli/schema [:=> [:cat :map] [:maybe [:vector :any]]]}
+  [v]
+  (when-let [te (some-> (first (:runs v)) val :task :db/id)]
+    (some (fn [[rid r]] (when (and (= te (get-in r [:task :db/id])) (:seon.task/id (:task r))) [:runs rid :task])) (:runs v))))
 
 (defn world
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
@@ -1031,8 +1050,8 @@
   already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
   {:page page}.
   Printed whole as one user message: the page and each change told once. pages, {commit page}
-  (the page drawn at the read before, which printed-run keeps): c0's page is taken from it when
-  it holds it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
+  (the page drawn at the read before, which printed-run keeps, and the page at c1 the agent's own
+  live walk placed, seon.repl/page-hiccup): a page it holds is taken from it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
   answer's metadata is {:commit c1 :page the page at c1}, the one printed-run keeps for the next."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]
                   [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any [:maybe :map]] [:vector :seon.model/message]]]}
@@ -1044,10 +1063,10 @@
         db1 (at c1)
         p1-of (volatile! nil)
         v (if (nil? c0)
-            (let [p1 (page db1 (ctx/build db1 a branch))] (vreset! p1-of p1) {:page p1})
+            (let [p1 (or (get pages c1) (page db1 (ctx/build db1 a branch)))] (vreset! p1-of p1) {:page p1})
             ;; the record at c0, built, then advanced to c1 by what the two commits differ by: one build
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
-                  p0 (or (get pages c0) (page db0 r0)) p1 (page db1 r1)
+                  p0 (or (get pages c0) (page db0 r0)) p1 (or (get pages c1) (page db1 r1))
                   _ (vreset! p1-of p1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
                   ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
@@ -1055,8 +1074,13 @@
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
                               :else %)
+                  ;; the own task, which the page's task data and cited vars draw, is told by their
+                  ;; change in the page, never again as data (a task re-homed under a restart's new
+                  ;; run was 190 KB of :ctx in one read)
+                  own (into #{} (keep own-task) [(:tree r0) (:tree r1)])
+                  drawn? (fn [p] (some #(and (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) own))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
-                           (for [[p ov] (ctx/diff r0 r1)] [p (mapv #(walk/prewalk told %) ov)]))]
+                           (for [[p ov] (ctx/diff r0 r1) :when (not (drawn? p))] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     (with-meta [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}] {:commit c1 :page @p1-of}))))
 
@@ -1109,7 +1133,7 @@
              (conj (turn-pages db e :outside) [(:max-tx db) (d/commit-id db)]))
         pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
                     :when (or (nil? since) (>= tx since))]
-                [[:page [e prev c]] (delay (world db e prev c (or pages (:pages printed)))) nil tx])
+                [[:page [e prev c]] (delay (world db e prev c (merge (:pages printed) pages))) nil tx])
         pages (if model? pages [(last pages)])
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))

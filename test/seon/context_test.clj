@@ -1028,10 +1028,11 @@
   (let [[x y] (#'seon.context/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}])]
     (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
 
-(deftest the-page-follows-the-work-and-only-grows
+(deftest the-page-follows-the-work-and-moves-by-its-cuts
   ;; seon.context/focus and selected (docs/vector.md#relevance): the focus is the plan plus the agent's
-  ;; evals, decayed; what the page shows enters in order and stays (the owner, 2026-10-27: pay the
-  ;; context up front, then refine as the task goes on), so each turn's page diff only adds
+  ;; evals, decayed; what the page shows enters at 60% in order and stays until below 40% (the owner,
+  ;; 2026-10-27), from the prior the turn recorded (:seon.agent/included), so each turn's page diff moves
+  ;; by what crossed a cut
   (let [[db te dir] (sections-near "Make the page say one thing.")
         db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
                           ;; every unit shown, at doc depth, here, where every chance is low (a corpus of five)
@@ -1051,17 +1052,20 @@
     (is (> (cos (:vector f1) far) (cos (:vector f0) far)) "the focus follows the agent's evals")
     (is (> (cos (:vector f1) (vector/vector-of db e)) (cos (:vector f1) (vector/vector-of db te))) "the newest eval outweighs the plan, which decays")
     (is (= "(the-last-section)" (:words f1)) "and the words are the evals'")
-    (let [saved @agent/state]
-      (try
-        (reset! agent/state {:id :a1 :selected {:te te :units [["docs/vector.md#the-pyramid" 0.9 false]]}})
-        (let [r (context/selected db te a)]
-          (is (= "docs/vector.md#the-pyramid" (first (:sections r))) "a unit shown before stays first")
-          (is (= 0.9 ((:relevance r) "docs/vector.md#the-pyramid")) "with the chance it entered at")
-          (is (< 1 (count (:sections r))) "what enters now is appended after it")
-          (is (not ((:doc r) "docs/vector.md#the-pyramid")) "at the depth it entered at")
-          (is (= (:doc r) (set (concat (rest (:sections r)) (:functions r) (:schemas r)))) "what enters now at doc depth (its cut 0 here)")
-          (is (= (count (get-in @agent/state [:selected :units])) (count (:relevance r))) "and kept for the next turn"))
-        (finally (reset! agent/state saved))))))
+    (let [pyramid "docs/vector.md#the-pyramid"
+          prior [[pyramid 0.9]]
+          ;; every chance here is low (a corpus of five): the cuts set on the task to place them
+          at (fn [doc summary] (d/db-with db [[:db/add te :seon.config.render/relevance-doc doc] [:db/add te :seon.config.render/relevance-summary summary]]))
+          held (context/selected (at 0.0 0.0) te a prior)
+          left (context/selected (at 0.0 1.0) te a prior)
+          none (context/selected (at 1.0 1.0) te a prior)]
+      (is (= pyramid (ffirst held)) "a unit included before stays first while its chance holds the leave cut")
+      (is (< 1 (count held)) "what enters now is appended after it")
+      (is (apply distinct? (map first held)) "each unit once")
+      (is (not= pyramid (ffirst left)) "below the leave cut it goes")
+      (is (= [] none) "nothing enters below the entry cut, and nothing below the leave cut stays")
+      (is (= (set (map first held)) (set (concat (:sections (context/shown held)) (:functions (context/shown held)) (:schemas (context/shown held)))))
+          "shown draws every unit"))))
 
 (deftest a-tokens-words-are-its-identifiers-parts
   (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
@@ -1333,3 +1337,36 @@
     (is (every? #(= #{:meaning} (:by %)) hits))
     (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
     (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))
+
+(deftest the-live-walks-page-is-the-cold-page
+  ;; a turn takes its page from the agent's live walk (seon.repl/page-hiccup), which runs again only
+  ;; what changed; the cold draw (seon.context/page), which replay and root's parked agents read, gives
+  ;; the same hiccup on the same db, before and after a change
+  (let [[db] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
+        [w _ cell c :as walk] (walked db)
+        live #(apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
+        cold #(context/page @cell @c)]
+    (is (seq (live)) "the page has parts")
+    (is (= (cold) (live)) "the live walk's page is the cold draw's")
+    (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])
+    (is (= (cold) (live)) "and after a change, what the walk ran again")
+    (render/dispose-walk! w)))
+
+(deftest related-draws-what-the-turn-included
+  ;; the related part draws the units the turn recorded (:seon.agent/included), calling no relevance
+  (let [[db] (sections-near "Make ```demo/g``` say one thing.")
+        db (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/included [["docs/vector.md#the-pyramid" 0.71]]}])
+        _ (seon.profile/begin!)
+        [w] (walked db)
+        relevance-calls (some #(when (= 'seon.context/relevance (:var %)) (:calls %)) (seon.profile/touched))
+        h (:html (some #(when (str/starts-with? (:id %) "related-") %) (render/placed-units w)))]
+    (is (str/includes? h "docs/vector.md#the-pyramid") (str "the recorded unit: " h))
+    (is (str/includes? h "71%") "with its chance")
+    (is (nil? relevance-calls) "no relevance call in the frame")
+    (render/dispose-walk! w)))
+
+(deftest the-own-task-is-where-ctx-holds-it-whole
+  ;; a session's runs share their task, held whole under one run only (docs/ctx.md); the newest run is first
+  (let [v {:runs (array-map 2 {:task {:db/id 3}} 9 {:task {:db/id 3 :seon.task/id "t"}} 4 {:task {:db/id 8 :seon.task/id "u"}})}]
+    (is (= [:runs 9 :task] (context/own-task v)) "the newest run's task, where it is whole")
+    (is (nil? (context/own-task {})) "no run, none")))

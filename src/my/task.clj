@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -73,6 +73,7 @@
                  ;; what the page shows (seon.context/selected), or, given a cut, every item at or above it
                  (if cut
                    (context/related db te {:cut cut})
-                   (context/selected db te (pdb/eid db :seon.agent/key (:key @agent/state)))))]
+                   (let [k (:key @agent/state)]
+                     (some-> (context/selected db te (pdb/eid db :seon.agent/key k) (or (:seon.agent/included (d/pull db [:seon.agent/included] [:seon.agent/key k])) [])) context/shown))))]
       (or (context/related-view db r) {:nothing "nothing nearer the plan than what it cites"})
       {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"}))))
