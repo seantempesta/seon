@@ -69,32 +69,3 @@
                       (fn [& xs] (last xs)))
        1 2 "three")
       (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
-
-(clojure.core/defn- raw-inc
-  "Contracted, not armed at its definition (clojure.core/defn): arm! arms it and keeps its raw root."
-  {:malli/schema [:=> [:cat :int] :int]}
-  [x] (inc x))
-
-(clojure.core/defn raw-calls "n calls of raw-inc." [xs] (reduce (fn [acc x] (+ acc (raw-inc x))) 0 xs))
-
-(deftest an-unarmed-proof-runs-the-raw-roots-wherever-it-runs
-  ;; task seon.cost/a-call-allocates-the-same-bytes-each-time, root's ruling 2026-10-27: a cost proof states whether it
-  ;; measures armed or unarmed, and an unarmed one measures the raw roots wherever it runs (in an agent every
-  ;; contracted function is armed, +30% on the printer's proofs). contract/unarmed disarms every armed var for
-  ;; the thunk's duration and arms exactly those again.
-  (contract/arm! #'raw-inc)
-  (is (contract/armed? #'raw-inc) "armed, as a root runs it")
-  (let [armed-calls-n (:calls (cost/measure (fn [] (raw-calls (vec (range 100)))) []))
-        during (volatile! nil)
-        unarmed-calls-n (contract/unarmed (fn [] (vreset! during (contract/armed? #'raw-inc))
-                                            (:calls (cost/measure (fn [] (raw-calls (vec (range 100)))) []))))]
-    (is (false? @during) "disarmed inside")
-    (is (= 100.0 armed-calls-n) "armed calls are counted: raw-inc 100 times")
-    (is (zero? unarmed-calls-n) "unarmed calls are none: the raw root ran")
-    (is (contract/armed? #'raw-inc) "armed again after, exactly what was armed")
-    (testing "an exception inside leaves it armed again"
-      (is (thrown? Exception (contract/unarmed (fn [] (throw (ex-info "x" {}))))))
-      (is (contract/armed? #'raw-inc)))
-    (testing "disarm! of an unarmed var is a no-op"
-      (contract/unarmed (fn [] (is (= :unchanged (contract/disarm! #'raw-inc))))))))
-

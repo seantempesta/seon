@@ -61,6 +61,28 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector number?]]]}
   [db e] (some-> (stored db e :seon.vector/f16) unpack))
 
+(defn scores
+  "The cosine of vector q with the vector of each entity of es on db, in es's order (the fine level,
+  c-fine, over their first fd dims, each prefix renormalized: all of q's unless given), nil for an
+  entity with no vector: `near`'s ranking of its shortlist, and seon.context/relevance's of a pool.
+  Cost: one EAVT seek an entity."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int]] [:vector [:maybe number?]]]
+                  [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int] pos-int?] [:vector [:maybe number?]]]]}
+  ([db q es] (scores db q es (count q)))
+  ([db q es fd]
+   (let [dims (count q) fd (min fd dims)
+         rows (mapv #(stored db % :seon.vector/f16) es)
+         have (filterv some? rows) m (count have)]
+     (if (zero? m)
+       (mapv (constantly nil) es)
+       (ffi/with-arena [a]
+         (let [fp (ffi/alloc a (* m 2 dims)) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (* 4 m))]
+           (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (nth have j)))
+           (ffi/write-array qf :float (float-array q) 0)
+           (c-fine fp m dims fd qf fs)
+           (let [ss (ffi/read-array fs :float m 0)]
+             (first (reduce (fn [[out j] r] (if r [(conj out (double (nth ss j))) (inc j)] [(conj out nil) j])) [[] 0] rows)))))))))
+
 (defn near
   "The k entities of db nearest q, [[e score] ...] best first, score the cosine: a Datalog
   function, [(seon.vector/near $ ?q 10) [[?e ?score]]]. q is an entity with a vector (the k
@@ -93,13 +115,9 @@
              (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (:v (nth rows i))))
              (ffi/write-bytes qp (:seon.vector/coarse (pack-dims qv cd)))
              (let [m (c-coarse cp n cd qp sl ip sp)
-                   es (mapv #(:e (nth rows %)) (ffi/read-array ip :int64 m 0))
-                   fp (ffi/alloc a (max 1 (* m 2 dims))) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (max 4 (* 4 m)))]
-               (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (stored db (nth es j) :seon.vector/f16)))
-               (ffi/write-array qf :float (float-array qv) 0)
-               (c-fine fp m dims fd qf fs)
+                   es (mapv #(:e (nth rows %)) (ffi/read-array ip :int64 m 0))]
                ;; best first; the entity id breaks a tie, so one db answers one order
-               (->> (map (fn [e s] [(- s) e]) es (ffi/read-array fs :float m 0))
+               (->> (map (fn [e s] [(- s) e]) es (scores db qv es fd))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
 (defmacro fused
@@ -134,27 +152,59 @@
 ;; EmbeddingGemma's prompts (its model card; v1's script/embed/gemma_text.py): a document is
 ;; embedded with the document prompt, a task's plan as what a search asks.
 
-(def document-prompt "The prompt before a document's text." "title: none | text: ")
-(def query-prompt "The prompt before a query's text." "task: code retrieval | query: ")
+(def query-prompt
+  "The prompt before a query's text: the model card's search prompt, which ranked 0.33 at 5 against
+  code retrieval's 0.24 on 20 queries (docs/vector.md#relevance)."
+  "task: search result | query: ")
+
+(defn document
+  "A document's text as the model reads it: its title (a var's name, a section's heading, a schema
+  key; \"none\" when it has none) in the prompt's title slot, then its text. Titled, functions and
+  sections ranked 0.58 at 5 against 0.44 untitled (docs/vector.md#relevance)."
+  {:malli/schema [:=> [:cat [:maybe :string] :string] :string]}
+  [title text] (str "title: " (or title "none") " | text: " text))
 
 (def ^:private texts
-  "Each embedded kind: the attribute holding its text, and the text the model reads."
-  {:form/src (fn [src] (str document-prompt src))
-   :seon.section/text (fn [text] (str document-prompt text))
+  "Each embedded kind: the attribute holding its text, and the text the model reads, of its title
+  (`title`'s, nil when it has none) and its text."
+  {:form/src (fn [title src] (document title src))
+   :seon.section/text (fn [title text] (document title text))
    ;; a schema's form, so the related part's schema keys are found by meaning too
    ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
-   :schema/form (fn [form] (str document-prompt form))
-   :seon.task/plan (fn [plan] (str query-prompt plan))})
+   :schema/form (fn [title form] (document title form))
+   :seon.task/plan (fn [_ plan] (str query-prompt plan))
+   ;; an eval: what the agent asked and what it got, as a search asks, so the agent's recent work is a
+   ;; direction a page can follow (seon.context/selected; docs/vector.md#relevance)
+   :seon.eval/record (fn [_ record] (str query-prompt (:code record) "\n" (:line record)))})
+
+(defn- titles
+  "Each titled entity's title on db, {e title}: a form's by the first of its vars' names, a
+  section's heading, a schema entry's key. One scan of each attribute, as `due` reads its others."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :int :string]]}
+  [db]
+  (let [names (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/name))]
+    (merge (into {} (map (fn [[f ds]] [f (str (first (sort (keep (comp names :e) ds))))]))
+                 (group-by :v (d/datoms db :aevt :var/form)))
+           (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/heading))
+           (into {} (map (fn [d] [(:e d) (str (:v d))])) (d/datoms db :aevt :schema/key)))))
+
+(defn- title
+  "Entity e's title on db, as `titles` reads it, by seeks: for a few entities, not a scan."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
+  [db e]
+  (or (some->> (d/datoms db :avet :var/form e) (keep #(stored db (:e %) :var/name)) sort first str)
+      (stored db e :seon.section/heading)
+      (some-> (stored db e :schema/key) str)))
 
 (defn- due-among
   "Of the text datoms ds, those whose vector is due for model, made (an entity's
-  :seon.vector/text-t) and of (its :seon.vector/model) read as functions of the entity:
+  :seon.vector/text-t), of (its :seon.vector/model) and title-of (its title) read as functions of the entity:
   [[e text t] ...] in entity order."
-  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
-  [ds made of model]
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
+  [ds made of title-of model]
   (vec (sort (for [{:keys [e a v tx]} ds
                    :when (or (not= model (of e)) (not= tx (made e)))]
-               [e ((texts a) v) tx]))))
+               [e ((texts a) (title-of e) v) tx]))))
 
 (defn due
   "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
@@ -167,9 +217,10 @@
   ([db model]
    (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
          of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
-     (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) model)))
+     (let [title-of (titles db)]
+       (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) model)))
+   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) #(title db %) model)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
@@ -194,11 +245,16 @@
 (lib/defc c-dims "seon_embed_dims" [:pointer] :int)
 (lib/defc c-batch "seon_embed_batch" [:pointer :pointer :pointer :int :int :pointer :pointer] :int {:blocking true})
 
+(def ^:private texts-version
+  "The version of what is embedded (`texts`, `document`, query-prompt): part of every vector's
+  model id, so a change to the texts makes every vector due once, as a new model does."
+  "titled")
+
 (defn model-id
-  "The id of the model file at path, on every vector it makes: its name, which bin/build makes its
-  sha256 (bin/env's SEON_EMBED_MODEL)."
+  "The id of the model file at path and of the texts it embeds, on every vector it makes: the
+  file's name, which bin/build makes its sha256 (bin/env's SEON_EMBED_MODEL), and texts-version."
   {:malli/schema [:=> [:cat :string] :string]}
-  [path] (let [f (.getName (java.io.File. path))] (subs f 0 (or (str/last-index-of f ".") (count f)))))
+  [path] (let [f (.getName (java.io.File. path))] (str (subs f 0 (or (str/last-index-of f ".") (count f))) "+" texts-version)))
 
 (defn open
   "The :embed kind's host object: the model at :seon.config.vector/model, loaded in this process

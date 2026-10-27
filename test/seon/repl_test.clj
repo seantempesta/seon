@@ -27,6 +27,22 @@
       (is (contains? e :ex)))
     (is (not (contains? (ev "(+ 1 2)") :values)) "one form answers its value alone")))
 
+(deftest a-def-beside-calls-stays-a-recorded-eval
+  ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
+  ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a
+  ;; java.util.concurrent.Future is required"). A form is program when its top-level form is a
+  ;; definition; a def nested beside calls stays the recorded eval, and its record says so
+  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task]}]
+                                           [(str "(ns " ns ".core) (def a 1)")
+                                            (str "(in-ns '" ns ".core) (let [r (+ 1 1)] (def b r) r)")
+                                            {:op :eval :agent "root"
+                                             :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b]))")}]))]
+    (is (some #(= "a" (name %)) (:recorded top)) (str "a top-level def is program: " (pr-str top)))
+    (is (empty? (:recorded nested)) (pr-str nested))
+    (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
+    (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
+
 (deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
   ;; agent's reply to root carries the text, never the live values (which no wire encodes)

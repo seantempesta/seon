@@ -1,0 +1,2642 @@
+[
+ {
+  "task": "seon.reader/a-backslash-starts-a-character-anywhere-in-a-token#1 turn 2",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 9,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#tasks-task-chains-words",
+    "pct": 7,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 6,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reader/closers",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reader/code-tags",
+    "pct": 54,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.template/instructions",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reader/openers",
+    "pct": 50,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/scenarios",
+    "pct": 48,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.fx/in-test",
+    "pct": 50,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.fx/defect",
+    "pct": 30,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/status",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/failure",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 10",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 70,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 53,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 50,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/cited-of",
+    "pct": 54,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "form:1134201626011395210",
+    "pct": 40,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/tests-reaching",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 39,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/pulled",
+    "pct": 23,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run-fact",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/pulled",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 4",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 89,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 78,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 39,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#resolving-and-showing",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#a-value-on-the-page-is-its-structure",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/nests",
+    "pct": 84,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-begin",
+    "pct": 77,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/outdent",
+    "pct": 76,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/line",
+    "pct": 76,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/end",
+    "pct": 75,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/alloc",
+    "pct": 90,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 90,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/node",
+    "pct": 79,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/op",
+    "pct": 65,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 65,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.ref/an-alias-is-resolved-in-its-namespace#1 turn 0",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#one-parse",
+    "pct": 55,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#context-printing-the-page",
+    "pct": 38,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 29,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#files-and-namespaces-on-demand",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/alias-form?",
+    "pct": 82,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/kept",
+    "pct": 58,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/names-on-db?",
+    "pct": 57,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "form:962081948129917965",
+    "pct": 56,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.docs/resolve-ref",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/not-observed",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/resolved?",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ref/citation",
+    "pct": 24,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/reply",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":var/ns",
+    "pct": 17,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 2",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 90,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 34,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 72,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/allot",
+    "pct": 69,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 58,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/requests",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 93,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/alloc",
+    "pct": 90,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/answer",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/prose",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 0",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 91,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 61,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 46,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#your-turn",
+    "pct": 24,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#a-value-on-the-page-is-its-structure",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 76,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/requests",
+    "pct": 60,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/allot",
+    "pct": 59,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 57,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 93,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/alloc",
+    "pct": 92,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/prose",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/answer",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 31,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 7",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 67,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 51,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/errors.md#an-eval-errors-diagnostics",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-report",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/cut-reserve",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 54,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/run-tests-forked",
+    "pct": 51,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/report",
+    "pct": 65,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 50,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/ticks-spent",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/result",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 17",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 53,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#observe",
+    "pct": 44,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/prompt.md#you-are-a-seon-agent",
+    "pct": 8,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#tasks-task-chains-words",
+    "pct": 6,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 91,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/observe",
+    "pct": 50,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/act!",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run-fact",
+    "pct": 30,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/status",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.ref/an-alias-is-resolved-in-its-namespace#1 turn 3",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/references.md#one-parse",
+    "pct": 59,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#files-and-namespaces-on-demand",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 25,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#context-printing-the-page",
+    "pct": 17,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/alias-form?",
+    "pct": 85,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/kept",
+    "pct": 58,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/no-var",
+    "pct": 56,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.docs/resolve-ref",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "form:962081948129917965",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":var/ns",
+    "pct": 45,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":form/ns",
+    "pct": 34,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/run",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.section/references",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":ns/name",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 21",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 47,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/README.md#the-program-and-its-loop",
+    "pct": 7,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "form:1134201626011395210",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/help",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/requests",
+    "pct": 41,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "form:1086366926124602827",
+    "pct": 38,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":my.agent/no-var",
+    "pct": 39,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.eval/agent",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/agent",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/no-agent",
+    "pct": 13,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 14",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 49,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#done",
+    "pct": 25,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 11,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 8,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 56,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.check/robust",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/prove",
+    "pct": 41,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 40,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":my.agent/no-var",
+    "pct": 39,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/stalled",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/cause",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/stall",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/request",
+    "pct": 17,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 6",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 89,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 32,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 27,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 9,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 8,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 84,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/cut-reserve",
+    "pct": 67,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/allot",
+    "pct": 64,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/whole",
+    "pct": 61,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 59,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 29,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/report",
+    "pct": 28,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/ticks-spent",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/test-ticks",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.db/agent-fact",
+    "pct": 11,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 15",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 86,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 24,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#the-repl",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 9,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 6,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-begin",
+    "pct": 81,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/outdent",
+    "pct": 76,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-end",
+    "pct": 76,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/line",
+    "pct": 75,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/begin",
+    "pct": 75,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 70,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/op",
+    "pct": 67,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/hiccup",
+    "pct": 27,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/no-agent",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 22",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/errors.md#an-eval-errors-diagnostics",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#the-test-service",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 50,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 50,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/prove",
+    "pct": 47,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "form:1134201626011395210",
+    "pct": 42,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/requests",
+    "pct": 38,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":my.agent/no-var",
+    "pct": 51,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/no-agent",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 17,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 5",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 87,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 51,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 48,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/nests",
+    "pct": 85,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-begin",
+    "pct": 77,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/outdent",
+    "pct": 76,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/line",
+    "pct": 75,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/end",
+    "pct": 74,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/alloc",
+    "pct": 91,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 89,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/node",
+    "pct": 77,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 62,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/op",
+    "pct": 52,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   }
+  ]
+ },
+ {
+  "task": "seon.server/seon-agents-answers-what-is-live#2 turn 1",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 84,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 25,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#mcp",
+    "pct": 23,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#context-printing-the-page",
+    "pct": 10,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 77,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.e2e/run-scenario",
+    "pct": 54,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/act!",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/context-block",
+    "pct": 50,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.e2e/loop-run",
+    "pct": 49,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/turns",
+    "pct": 68,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run-fact",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/max-turns",
+    "pct": 32,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/failure",
+    "pct": 29,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/pulled",
+    "pct": 24,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.ref/the-parser-reads-with-options-built-once#1 turn 4",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/references.md#files-and-namespaces-on-demand",
+    "pct": 77,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#one-parse",
+    "pct": 59,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#references",
+    "pct": 40,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reader/definition-head",
+    "pct": 61,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.learn/form-reads",
+    "pct": 60,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.learn/aliases",
+    "pct": 55,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reader/literal-line?",
+    "pct": 53,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/span-candidate",
+    "pct": 52,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/unit",
+    "pct": 31,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/gate-unread",
+    "pct": 30,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/tx-result",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/dim",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/no-source-text",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 26",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 43,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 33,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 10,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 53,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/ext-op",
+    "pct": 48,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 45,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 39,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/observe",
+    "pct": 37,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 25,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 23,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/pulled",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run-fact",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config/config",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 5",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 90,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 40,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 32,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 7,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 5,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 87,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/cut-reserve",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/allot",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/whole",
+    "pct": 67,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 65,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 54,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/request",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.error/problem",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/proofs",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 5",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 90,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 40,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 32,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 7,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 5,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 87,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/cut-reserve",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/allot",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/whole",
+    "pct": 67,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 65,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 54,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 20,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/request",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.error/problem",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/proofs",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 9",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 88,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 63,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 25,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 15,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 8,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/nests",
+    "pct": 70,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-begin",
+    "pct": 66,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/line",
+    "pct": 58,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/entry-end",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fixtures/requests",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/alloc",
+    "pct": 93,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/node",
+    "pct": 71,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/context",
+    "pct": 67,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/op",
+    "pct": 63,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/opts",
+    "pct": 28,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 8",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 87,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#prose-and-the-one-string-cutter",
+    "pct": 48,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 23,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/errors.md#an-eval-errors-diagnostics",
+    "pct": 11,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 64,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 63,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 57,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/cut-reserve",
+    "pct": 56,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-report",
+    "pct": 52,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 41,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.prove/answer",
+    "pct": 30,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/result",
+    "pct": 29,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/nothing-lost",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/report",
+    "pct": 17,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 10",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 88,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 24,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#tasks-task-chains-words",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 14,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 11,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/shows?",
+    "pct": 78,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/separator",
+    "pct": 71,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/row-class",
+    "pct": 68,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 65,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/child",
+    "pct": 59,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/proofs",
+    "pct": 26,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task",
+    "pct": 24,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/nothing-lost",
+    "pct": 21,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/not-observed",
+    "pct": 18,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 16,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 13",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 44,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 12,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#done",
+    "pct": 7,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#your-turn",
+    "pct": 5,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/status",
+    "pct": 68,
+    "label": "useful",
+    "why": "work touches or mirrors this"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 49,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.check/robust",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 37,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "function",
+    "name": "form:242155594797913394",
+    "pct": 36,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 35,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 33,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":my.agent/no-var",
+    "pct": 31,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 22,
+    "label": "noise",
+    "why": "not needed for this work"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/not-observed",
+    "pct": 19,
+    "label": "noise",
+    "why": "not needed for this work"
+   }
+  ]
+ }
+]

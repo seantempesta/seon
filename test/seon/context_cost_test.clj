@@ -82,25 +82,63 @@
 (deftest related-ranks-each-kind-by-one-search
   (cost/proof {:of 'seon.context/related :input 'seon.context-cost-test/related-of-changed
                :n "wiki sections with vectors"
-               :work (str "the plan's citations parsed once, and one seon.vector/near a kind (each reads every coarse "
-                          "row, its shortlist of 400 reranked: one seek a row), the graph's seeks for what the plan "
-                          "cites (none here; each neighbour also one bounded count of the forms naming it, at most "
-                          ":seon.config.render/related-rarity datoms), and one rrf of each kind's two rankings: linear in the vectors")
+               :work (str "the plan's citations parsed once; seon.context/relevance for each kind: one seon.vector/near "
+                          "(every coarse row read, its shortlist of 400 reranked: one seek a row), its pool (the "
+                          ":seon.config.render/relevance-pool nearest and the seeds' neighbourhood, none here) "
+                          "scored: each pool item's vector one seek, its text tokenized once, the sections' names "
+                          "read once: linear in the vectors, flat in them past the pool")
                :growth :linear
-               ;; measured 2026-10-25: 145 calls, 3.39 MB at n=100 (below the shortlist); 445 calls
-               ;; at 500 and at 1,000, 8.18 MB and 8.92 MB (~1.48 KB a row). The calls are one
-               ;; seon.vector/stored seek per row the fine level reranks (the 400 of
-               ;; :seon.config.vector/shortlist, each row once: the shortlist's rows are scattered, a
-               ;; batch read would scan every f16 row) and ~45 fixed: three near (each its vector-of,
-               ;; unpack and pack-dims), the citation parse and the resolver's read; constant past
-               ;; the shortlist, as seon.vector-cost-test/a-search-reads-each-row-once measures past
-               ;; it. A row is its coarse datom read (~590 B) and its kind's membership set, the :of
-               ;; attribute's datoms (~790 B for sections); the second and third coarse scans add
-               ;; ~40 B (measured, seon.vector/one-scan-ranks-every-kind). Two calls more since the
-               ;; plan's cited vars are the program's (seon.context/program-vars, seon.program/program-names).
+               ;; measured 2026-10-27: 695 calls and 11.05 MB at n=250, 845 and 13.08 MB at 500, where
+               ;; near's shortlist reaches its 400 rows (one seek a row reranked) and stays. Over the rank
+               ;; fusion before it (447 calls, 7.81 MB): the pool's scoring, a few contracted calls an
+               ;; item (its text, tokens, scores) for at most 100 items a kind. A row is still near's
+               ;; coarse datom read and its kind's membership (~1.48 KB, seon.vector/one-scan-ranks-every-kind).
                :per-n {:bytes 1480.0 :calls 0.0}
-               :fixed {:bytes 7440000.0 :calls 447.0}
-               :sizes [250 500 1000 2000]}))
+               :fixed {:bytes 12400000.0 :calls 845.0}
+               :sizes [450 700 1000 2000]}))
+
+(defn ring-of
+  "seon.context/pushed's arguments at n forms in a ring, each calling the next: every node two
+  neighbours, so the push's reach is bounded by its threshold, not by n. Seeded at the first."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  [n]
+  (let [db (d/db-with (ts/test-db) (vec (mapcat (fn [i] [{:db/id (str "f" i) :form/id (str "demo/r" i) :form/src "(r)"
+                                                          :form/refs #{(symbol "demo" (str "r" (mod (inc i) n)))}}
+                                                         {:var/name (symbol "demo" (str "r" i)) :var/form (str "f" i)}])
+                                                 (range n))))]
+    [db {} #{(pdb/eid db :form/id "demo/r0")} 0.001]))
+
+(deftest a-push-reads-what-its-threshold-reaches
+  (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/ring-of
+               :n "forms in the reference graph"
+               :work (str "a local push (Andersen, Chung and Lang 2006): each push keeps at least alpha eps of the "
+                          "one unit of mass, so at most 1/(alpha eps) pushes, each node's neighbours read once: "
+                          "flat in the store's size")
+               :growth :constant
+               ;; measured 2026-10-27: 46 calls and 5.23 MB at 50, 48 and 5.45 MB at 200: the ring's first pushes, each node's
+               ;; degree counted once (bounded, `degree`) and its neighbours read once
+               :fixed {:calls 48 :bytes 5600000}
+               :sizes [50 200 1000]}))
+
+(defn hub-of
+  "seon.context/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
+  h (as a function calls seon.contract/checked): the push's mass reaches h's form, whose callers are
+  read to :hub (seon.config.render/relevance-features), so it is never read whole."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  [n]
+  (let [db (d/db-with (ts/test-db) (into [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h"}
+                                          {:db/id "s" :form/id "demo/s" :form/src "(defn s [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/s :var/form "s"}]
+                                         (for [i (range n)] {:form/id (str "demo/u" i) :form/src "(h)" :form/refs #{'demo/h}})))]
+    [db {} #{(pdb/eid db :form/id "demo/s")} 0.001]))
+
+(deftest a-push-counts-a-hub-and-reads-it-not
+  (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/hub-of
+               :n "forms naming the hub its seed calls"
+               :work (str "the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it "
+                          "is not pushed and the rest of its callers are never read: flat in them")
+               :growth :constant
+               :fixed {:calls 10 :bytes 1000000}
+               :sizes [200 500 1000]}))
 
 (defn kept-of
   "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third
