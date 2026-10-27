@@ -943,8 +943,8 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
-        "the task, what is related, what its newest turn observed, the run (and the keys the agent added, when it added one): each keyed by what it shows")
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, what is related, what its newest turn observed, the run, the problems open on its run, task and branch (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
       (is (str/includes? h ":fail"))
