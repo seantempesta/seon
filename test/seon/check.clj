@@ -394,7 +394,11 @@
                  (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
         _ (my.root/create! sys ds)
         _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        _ (seon.root/await-db sys #(let [p (seon.problems/report %)]
+        ;; named: the report is made of what the reconciler's runs write (the judge's red and cost
+        ;; rows), so the wait ends when root goes quiet with a class missing (:seon.root/quiet-before-true)
+        ;; and the :checks below name which one, never a wait for a row that cannot come
+        _ (seon.root/await-db sys "the provoked problems (a red proof, a cost verdict, a platform defect, a death) are on main"
+                              #(let [p (seon.problems/report %)]
                                     (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows]))
                                          (pos? (get-in p [:classes :cost :n])) (pos? (get-in p [:classes :platform :n]))
                                          (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))))
