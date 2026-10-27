@@ -1083,14 +1083,29 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
-(defn- reach-row
-  "Form entity e as the reach walk reads it (reach-step): form-row's :id, :ns, :src, :defines
-  and :refs, and none of the other facts, which no edge, digest or flag reads."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
-  [db e]
-  (let [f (d/entity db e)]
-    {:id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f))
-     :defines (into #{} (keep definition-key) (:form/defines f)) :refs (set (:form/refs f))}))
+(defn- reach-rows
+  "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
+  :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
+  is not read again), :ns, :defines and :refs, and none of the other facts, which no edge, digest
+  or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
+  (es is most of the db's forms), else a seek per entity."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
+  [db es scan?]
+  (let [at (fn [a es] (if scan?
+                        (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
+                                             (transient {}) (d/datoms db :aevt a)))
+                        (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
+        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es)
+        ds (set (mapcat val dv))
+        nn (at :ns/name (set (mapcat val nsv)))
+        key-of (merge ;; definition-key's order: the earlier kind wins
+                 (update-vals (at :ns/name ds) (fn [[v]] [:ns v]))
+                 (update-vals (at :impl/key ds) (fn [[v]] (into [:impl] (sedn/decode v))))
+                 (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
+                 (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
+    (vec (for [e es :let [[i] (id e)]]
+           {:id i :own (str/replace i #"#\d+$" "") :ns (first (nn (first (nsv e)))) :refs (set (rv e))
+            :defines (into #{} (keep key-of) (dv e))}))))
 
 (defn reached-by
   "The forms that reach forms ids through a reach graph's reverse edges rev ({form [form ...]}),
@@ -1110,7 +1125,7 @@
         (reached-by rev (get defs v))))
 
 (defn- reach-step
-  "Graph g after the forms removed (ids) and the rows added (reach-row's, live on db): each
+  "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
   referring to, or defining the methods, extensions or contract of, a var a changed form
   defines), and the components of the changed forms and of every form reaching them re-folded
@@ -1166,7 +1181,7 @@
         plain (as-> (:plain g) pl
                 (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
                 (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added)))
-        own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
+        own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (:own f)]))
         changed (into dirty (map :id) added)
         affected (into changed (reached-by rev changed))
         old-comp (:comp-of g)
@@ -1206,9 +1221,9 @@
                  :reads #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
                  :data-refs data-refs :schemas schemas :live live}
                 db []
-                (into (mapv #(reach-row db %) (vals live))
+                (into (reach-rows db (set (vals live)) true)
                       (for [[k text] schemas]
-                        {:id (sid k) :ns k :src text :refs #{} :defines #{}
+                        {:id (sid k) :own (error/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
                          :schema (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text)))})))))
 
 (defn reach-update
@@ -1221,7 +1236,7 @@
   (if (not= (:schemas g) (schema-texts db))
     (reach-graph db (:data-refs g))
     (let [live (live-ids db) was (:live g)]
-      (assoc (reach-step g db (vec (remove live (keys was))) (vec (for [[id e] live :when (not (was id))] (reach-row db e))))
+      (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
              :live live))))
 
 (defn graph-index
