@@ -1042,7 +1042,7 @@
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
   that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
   changed}, the empty ones left out; in the diff the agent's own records, which its conversation
-  already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
+  already shows, are told by what reads them: an eval by its handle, a turn by its id, a task (its page part draws it) by its id; with no c0, the page whole,
   {:page page}.
   Printed whole as one user message: the page and each change told once. pages, {commit page}
   (the page drawn at the read before, which printed-run keeps, and the live walk's at c1,
@@ -1068,13 +1068,16 @@
                   told #(cond (not (map? %)) %
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
+                              ;; a task held whole, which the page's task data draws, by its id: a task
+                              ;; re-homed under a restart's new run was 190 KB of :ctx in one read
+                              (:seon.task/id %) (:seon.task/id %)
                               :else %)
-                  ;; a task re-homed between runs (ctx holds it whole under one run, the newest) is told by
-                  ;; the page's task data, not as data (a restart's move was 190 KB of :ctx in one read)
+                  ;; a task leaving a run's path as it re-homes (whole there before, a stub now), which
+                  ;; the diff tells key by key: its page part tells the move, never this
                   whole? (fn [r rid] (some? (get-in (:tree r) [:runs rid :task :seon.task/id])))
-                  moved? (fn [[k rid t]] (and (= [k t] [:runs :task]) (not= (whole? r0 rid) (whole? r1 rid))))
+                  left? (fn [[k rid t]] (and (= [k t] [:runs :task]) (whole? r0 rid) (not (whole? r1 rid))))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
-                           (for [[p ov] (ctx/diff r0 r1) :when (not (moved? p))] [p (mapv #(walk/prewalk told %) ov)]))]
+                           (for [[p ov] (ctx/diff r0 r1) :when (not (left? p))] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     (with-meta [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}] {:commit c1 :page @p1-of}))))
 
