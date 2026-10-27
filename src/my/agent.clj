@@ -92,6 +92,24 @@
   (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))]
     (or (when (symbol? x) (no-var db x)) (docs/callers db x))))
 
+(defn tests-reaching
+  "The tests whose reach includes var x on this branch, nearest first, each with its last result on
+  main as this branch holds it ({:test :status}, :none when main holds none): the tests a change to
+  x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same
+  reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
+  this on the function you will change, before writing its proof, to find the test that goes red
+  first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
+  library's var, which the reach graph holds no form of, answers []. A symbol that names no var
+  answers so (:my.agent/no-var)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol] [:status :keyword]]] :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db) x (if (var? x) (named x) (asked x))]
+    (or (no-var db x)
+        (let [[_ in] (agent/test-inputs db)
+              g (agent/branch-graph db (:base @agent/state) in)]
+          (into [] (comp (filter agent/judges?) (map (fn [t] {:test t :status (proofs/latest-status db t)})))
+                (program/tests-reaching g x))))))
+
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or

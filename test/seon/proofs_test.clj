@@ -35,9 +35,9 @@
   "What bin/test does for the candidate db: plan against base digests, run the rest."
   [base db env dir]
   (let [cand (digests db env)
-        p (proofs/plan base cand (proofs/greens dir (vec (vals cand))) #{})
+        p (proofs/plan base cand (proofs/verdicts dir (vec (vals cand))) #{})
         ran (proofs/run-tests! (:run p) cand (fn [_]))]
-    (proofs/store-greens! #(fx/write-file {:req %}) dir ran)
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir ran)
     (assoc p :cand cand :ran ran)))
 
 (deftest an-unchanged-tree-runs-nothing-and-reuses-everything
@@ -49,7 +49,7 @@
     (is (= [] (:run second-run)) "the same tree again: nothing runs")
     (is (= ts (set (keys (:reused second-run)))) "every result is reused from its digest")
     (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")
-    (is (= {} (proofs/greens dir (vec (vals {})))) "a branch holding no test reads no greens (an agent died on (vals {}), nil)")))
+    (is (= {} (proofs/verdicts dir (vec (vals {})))) "a branch holding no test reads no greens (an agent died on (vals {}), nil)")))
 
 (deftest a-one-defn-change-runs-only-what-reaches-it
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
@@ -60,14 +60,14 @@
     (is (= '[app.pv-neg-test/neg-test] (:selected r)) "and only it is selected against the base")
     (is (proofs/green? (get (:ran r) 'app.pv-neg-test/neg-test)))
     (testing "a proof always judges: selected, and reused when green at its digest"
-      (let [p (proofs/plan base (:cand r) (proofs/greens dir (vec (vals (:cand r)))) '#{app.pv-calc-test/add-test})]
+      (let [p (proofs/plan base (:cand r) (proofs/verdicts dir (vec (vals (:cand r)))) '#{app.pv-calc-test/add-test})]
         (is (= '[app.pv-calc-test/add-test app.pv-neg-test/neg-test] (:selected p)))
         (is (= [] (:run p)) "both are green at their digests now")))))
 
 (deftest a-macro-schema-or-config-change-widens-the-selection
   (let [db (schema (prog) :app.pv-calc/n "int?") dir (scratch-dir)
         base (:cand (prove! nil db "e" dir))
-        run-of (fn [db env] (:run (proofs/plan base (digests db env) (proofs/greens dir (vec (vals (digests db env)))) #{})))]
+        run-of (fn [db env] (:run (proofs/plan base (digests db env) (proofs/verdicts dir (vec (vals (digests db env)))) #{})))]
     (is (= '[app.pv-calc-test/twice-test] (run-of (record db 'app.pv-calc "(defmacro twice [x] `(+ ~x ~x))") "e"))
         "a macro's body changed: the test expanding it runs, not the others in its namespace")
     (is (= '[app.pv-neg-test/half-test] (run-of (schema db :app.pv-calc/n "pos-int?") "e"))
@@ -151,7 +151,7 @@
         dg (zipmap tests ["d-red" "d-fx" "d-add" "d-twice" "d-neg"])
         notes (atom [])
         ran (proofs/run-tests! tests dg #(swap! notes conj %))
-        unstored (proofs/store-greens! #(fx/write-file {:req %}) dir ran)]
+        unstored (proofs/store-verdicts! #(fx/write-file {:req %}) dir ran)]
     (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/fixture-test" "app.pv-red-test/red-test"]]
            (sort-by first (map #(sort (mapv str %)) (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
         "a namespace within its share of the measured ms stays in one shard")
@@ -162,7 +162,8 @@
     (is (proofs/green? (ran 'app.pv-red-test/fixture-test)) "its namespace's fixtures ran around it")
     (is (= (count tests) (count (filter :seon.test/started @notes))) "each test named as it starts")
     (is (every? #(.isFile (java.io.File. (proofs/result-path dir (dg %)))) (remove #{'app.pv-red-test/red-test} tests)) "each green stored at its digest")
-    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/greens dir (vec (vals dg)))))) "the files hold greens only: a red is reused from the test service's facts (seon.proofs/stored-results)")))
+    (is (.isFile (java.io.File. (proofs/result-path dir "d-red" false))) "the red stored at its digest too, beside where a green would be")
+    (is (= #{"d-fx" "d-add" "d-twice" "d-neg"} (set (keys (proofs/verdicts dir (vec (vals dg)))))) "a red alone in the files is no result: it runs again (its failures reused are the test service's facts, seon.proofs/stored-results)")))
 
 (deftest a-failed-write-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
@@ -172,7 +173,7 @@
           'app.pv-fx-test "(use-fixtures :once (fn [f] (throw (ex-info \"the fixture's store is gone\" {:store :gone}))))"
           'app.pv-fx-test "(deftest never-runs (is true))")
   (let [ran (proofs/run-tests! '[app.pv-calc-test/add-test] '{app.pv-calc-test/add-test "d-add"} (fn [_]))
-        unstored (proofs/store-greens! #(fx/write-file {:req %}) "/dev/null/results" ran)
+        unstored (proofs/store-verdicts! #(fx/write-file {:req %}) "/dev/null/results" ran)
         notes (atom [])
         thrown (proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} #(swap! notes conj %))
         t (thrown 'app.pv-fx-test/never-runs)]
@@ -389,3 +390,57 @@
      ;; and the branch's connect); a whole import was ~1.8G ticks for the 2,400 forms of src and test
      :fixed {:ticks 1300000.0 :bytes 5000000.0}
      :sizes [10 100 1000]}))
+
+;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
+
+(deftest a-digest-green-and-red-is-flaky-red-and-never-runs
+  ;; the merge-cost proof was red once and green on its next run at one digest: with one verdict
+  ;; kept per digest the red was gone, and the green reused
+  (let [dir (scratch-dir)
+        green {:test 'app.f-test/t :digest "d-flaky" :pass 1 :fail 0 :error 0}
+        red {:test 'app.f-test/t :digest "d-flaky" :pass 0 :fail 1 :error 0 :failures [{:type :fail :message "1 is not 2"}]}
+        store! #(proofs/store-verdicts! (fn [req] (fx/write-file {:req req})) dir {'app.f-test/t %})
+        cand {'app.f-test/t "d-flaky" 'app.f-test/g "d-green" 'app.f-test/r "d-red"}]
+    (store! green)
+    (store! red)
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir {'app.f-test/g (assoc green :test 'app.f-test/g :digest "d-green")
+                                                          'app.f-test/r (assoc red :test 'app.f-test/r :digest "d-red")})
+    (let [found (proofs/verdicts dir (vec (vals cand)))
+          {:keys [run reused selected]} (proofs/plan nil cand found #{})
+          f (found "d-flaky")]
+      (is (:flaky f) "a digest that holds a green and a red is flaky")
+      (is (not (proofs/green? f)) "judged red, never reused as green")
+      (is (= {:type :fail :flaky true :message "flaky: green and red at digest d-flaky (seon.proofs/flaky)"} (first (:failures f)))
+          "its failures lead with one saying so, then the red's own")
+      (is (= "1 is not 2" (:message (second (:failures f)))))
+      (is (= ['app.f-test/r] run) "a red alone runs again; the flaky one is not run, and the green is reused")
+      (is (= #{'app.f-test/t 'app.f-test/r} (set selected)) "the flaky one is selected: it judges")
+      (is (= #{'app.f-test/t 'app.f-test/g} (set (keys reused))))
+      (is (= [] (proofs/store-verdicts! (fn [_] (throw (ex-info "written" {}))) dir {'app.f-test/t f}))
+          "a flaky result, judged and not run, is never written")
+      (proofs/store-verdicts! #(fx/write-file {:req %}) dir {'app.f-test/u (assoc red :digest "d-unreported" :unreported true)})
+      (is (not (.isFile (java.io.File. (proofs/result-path dir "d-unreported" false))))
+          "a test that never reported (its namespace's run threw first) has no verdict to keep"))))
+
+(deftest the-test-services-facts-keep-every-verdict-a-digest-had
+  ;; :seon.proof/digest is an identity: a second result at it is the same entity, so its earlier
+  ;; status lives in the history (:seon.config.store/keep-history?), which stored-results reads
+  (ts/test-branch!
+   (fn [_ conn]
+  (let [fact (fn [dg s] (cond-> {:seon.proof/digest dg :seon.proof/test 'app.f-test/t :seon.proof/status s
+                                 :seon.proof/run "r" :seon.proof/branch "main" :seon.proof/t 1}
+                          (not= :pass s) (assoc :seon.proof/failures [{:type s :message "red"}])))]
+    (d/transact conn [(fact "d-once" :pass) (fact "d-twice" :fail) (fact "d-red" :error)])
+    (d/transact conn [(fact "d-twice" :pass)])
+    (let [r (proofs/stored-results @conn ["d-once" "d-twice" "d-red" "d-none"])]
+      (is (proofs/green? (r "d-once")))
+      (is (= {:pass 0 :fail 0 :error 1} (select-keys (r "d-red") [:pass :fail :error])) "a red alone is reused red")
+      (is (:flaky (r "d-twice")) "red then green at one digest: flaky, though its newest status is green")
+      (is (= "red" (:message (second (:failures (r "d-twice"))))) "with the red's own failures after the flaky one")
+      (is (not (proofs/green? (r "d-twice"))))
+      (is (nil? (r "d-none"))))
+    (testing "a green in the files and a red in the facts is flaky too"
+      (let [f (proofs/found {"d-x" {:digest "d-x" :pass 1 :fail 0 :error 0}}
+                            {"d-x" {:digest "d-x" :pass 0 :fail 1 :error 0 :failures []} "d-y" {:digest "d-y" :pass 1 :fail 0 :error 0}})]
+        (is (:flaky (f "d-x")))
+        (is (proofs/green? (f "d-y")))))))))

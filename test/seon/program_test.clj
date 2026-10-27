@@ -360,9 +360,9 @@
   (let [db (calc-db)
         dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
-        plan #(proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{})
+        plan #(proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{})
         first-plan (plan)
-        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-greens! #(fx/write-file {:req %}) dir)))
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-verdicts! #(fx/write-file {:req %}) dir)))
         second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
@@ -371,7 +371,7 @@
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
 
 (defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
-  (proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{}))
+  (proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{}))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -391,7 +391,7 @@
         in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
     (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
-    (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
     (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
@@ -566,7 +566,7 @@
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
-                                  (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+                                  (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
                                   dir))))
         "with each green stored, a second run on the unchanged tree runs nothing")))
 
@@ -666,3 +666,30 @@
     (is (nil? (program/meaning-changes db [{:var/name 'app/f :var/doc "Old words."} {:var/name 'app/g :var/form -1}])) "the same docstring, a body alone: nothing")
     (is (nil? (program/meaning-changes db [{:var/name 'app/new :var/doc "Fresh."}])) "a new var changes nothing a section relied on")
     (is (nil? (program/meaning-changes db [])) "an eval that defines nothing")))
+
+(defn- chain-account
+  "Form i of a chain app.pc/f0..: f i calls f i-1; a test t names the one form it calls."
+  [i body]
+  {:id (str "app.pc/f" i "-" body) :src (str "(defn f" i " [x] " body ")") :ns 'app.pc :ns-form? false
+   :defs [{:var (symbol "app.pc" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls []
+   :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
+
+(deftest the-tests-reaching-a-var-are-what-its-change-selects
+  ;; root's ruling (audit 2, item 2): (my.agent/tests-reaching 'v) answers from the reach graph by
+  ;; the one reverse walk a change re-folds by (seon.program/reached-by), so its tests are exactly
+  ;; those whose reach digest moves when v changes, the tests prove then runs; nearest first
+  (let [test-acct (fn [t i] {:id (str "app.pc-test/" t) :src (str "(deftest " t " (f" i " 1))") :ns 'app.pc-test :ns-form? false
+                             :defs [{:var (symbol "app.pc-test" t) :kind :test}] :declares #{} :methods [] :impls []
+                             :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
+        db (ts/test-db)
+        db (d/db-with db (vec (concat (mapcat #(program/account-tx db (chain-account % "x") %) (range 10))
+                                      (mapcat (fn [[t i] k] (program/account-tx db (test-acct t i) (+ 10 k))) [["ta" 2] ["tb" 7] ["tc" 9]] (range)))))
+        g (program/reach-graph db nil)
+        in {:env "e" :tree "t"}
+        moved (fn [i] (let [db2 (d/db-with db (program/record-tx db (chain-account i "(dec x)")))
+                            before (program/graph-index g in nil) after (program/graph-index (program/reach-update g db2) in nil)]
+                        (set (for [[t {d :digest}] after :when (not= d (:digest (before t)))] t))))]
+    (doseq [i [2 5 9]]
+      (is (= (moved i) (set (program/tests-reaching g (symbol "app.pc" (str "f" i))))) (str "f" i ": the tests its change selects")))
+    (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
+    (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))

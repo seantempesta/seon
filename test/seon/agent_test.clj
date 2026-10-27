@@ -385,11 +385,11 @@
         _ (.mkdirs (java.io.File. ^String dir))
         ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
         ;; would report through it)
-        unstored (proofs/store-greens! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
-        stored (proofs/greens dir [(digests p1)])
+        unstored (proofs/store-verdicts! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
+        stored (proofs/verdicts dir [(digests p1)])
         [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
                       {:dirs ["src" "test"] :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
-        checkout (proofs/plan nil (select-keys digests [p2]) (proofs/greens dir [(digests p2)]) #{})]
+        checkout (proofs/plan nil (select-keys digests [p2]) (proofs/verdicts dir [(digests p2)]) #{})]
     (sh/sh "rm" "-rf" dir)
     (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
