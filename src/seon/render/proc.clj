@@ -25,7 +25,7 @@
   proc serializes each patch once and fans it out; a tab that opened or fell behind gets a
   keyframe composed here from the retained fragments, rendering nothing."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
             [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
@@ -80,50 +80,21 @@
 
 ;;; --- main --------------------------------------------------------------------------------
 
-(defn task-rows
-  "Each task's row as observed, read from the reconciler's index (`seon.reconcile/task-state`):
-  {id {:state :blocked-by #{id} :needs :runs n :tokens n :newest run :kind :green n
-  :red n :allowed-red n :proofs n}}. The desired execution stays on the task; this is what
-  happened."
-  {:malli/schema [:=> [:cat :seon.reconcile/index] :map]}
-  [idx]
-  (into {} (for [[id t] (:tasks idx)
-                 :let [as (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id])))
-                       results (:seon.run/results (last as) {})
-                       own (get-in idx [:acc id] #{})]]
-             [id {:state (reconcile/task-state idx id) :blocked-by (reconcile/blocked-by idx id) :needs (:seon.task/needs t)
-                  :runs (count as)
-                  ;; unknown is not 0: a run records its tokens at its end
-                  :tokens (when-let [ts (seq (keep :seon.run/tokens as))] (reduce + ts)) :newest (last as) :kind (:seon.task/kind t)
-                  ;; its own proofs (red blocks it) apart from other tasks' (an allowed red)
-                  :green (count (filter #(= :pass (get results %)) own)) :red (count (filter #(and (contains? results %) (not= :pass (get results %))) own))
-                  :allowed-red (count (filter (fn [[p r]] (and (not= :pass r) (not (contains? own p)))) results))
-                  :proofs (count own)}])))
-
 (defn- main-info
-  "What the tiles show of main's db value: t, program vars, tasks and runs, read when
-  main's t moved: O(vars) for the vars (an index count), O(tasks) for the rest, nothing per
-  datom of main (seon.render-cost-test/main-info-reads-what-the-page-shows: was a count of
-  every datom, 15 ms at 47k datoms, 174 ms on the owner's main). Main's datom count is root's
-  state's on demand ((c/state sys {:datoms true}))."
+  "St with main as db (when newer than the one held): its t, its db, and the reconciler's index of
+  it held and moved by what changed (seon.reconcile/index over the watched datoms that differ,
+  measured 5.5 ms for an eval's 14 datoms against 506 ms rebuilt whole on 902 tasks), whose runs
+  give how each agent's work ended (:agent-run, the words root's process tile uses for its
+  events). Nothing per task or per datom of main is read again."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
   ;; a db no newer than the one held (a first read answered after a commit already came) changes nothing
   (if (<= (:max-tx db) (get-in st [:main :t] -1))
     st
-    (let [tasks (task/tasks db) idx (reconcile/index db) runs (:runs idx)
-          vars (count (d/datoms db :aevt :var/name))]
-      (assoc st :main {:t (:max-tx db) :vars vars}
-             :main-db db :tasks tasks :runs runs
-             ;; the config in force, as root wrote it on main's root entity (one pull)
-             :config (config/from-db db)
-             ;; main's open problems, recorded (D2's one read; ~2.7 ms, costs the problems) and
-             ;; derived (dead citations: a set of var names and a lookup per cited name,
-             ;; docs/health.md#cost), read when main moved
-             :recorded (problems/health db)
-             :task-rows (task-rows idx)
-             ;; how each agent's work ended, for the words its card and its events use
-             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals runs))] [(:seon.run/agent a) a]))))))
+    (let [held (:main-db st)
+          idx (if (and (:idx st) held) (reconcile/index (:idx st) held db) (reconcile/index db))]
+      (assoc st :main {:t (:max-tx db)} :main-db db :idx idx
+             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a]))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -411,8 +382,7 @@
 
 (defn- extra-of
   "What view's page reads besides its dbs: the rows its tab scrolled to and opened, its branch's read
-  (whether there is one) and error, its agent's liveness in root's view of this boot, and for root's page main's open
-  problems. A page whose dbs no transaction touched walks again only when this changed."
+  (whether there is one) and error, and its agent's liveness in root's view of this boot. A page whose dbs no transaction touched walks again only when this changed."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st view]
   (let [db (:main-db st)
@@ -420,9 +390,7 @@
     {:shown (get-in st [:shown view]) :open (get-in st [:open view]) :error (get-in st [:branches view :error])
      ;; whether its branch is read at all: what moved on it after that is its datoms-diff
      :branch? (some? (get-in st [:branches view :db]))
-     :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))
-     ;; main's recorded problems, as this proc holds them (a page's own render may show them: root's)
-     :recorded (:recorded st)}))
+     :live (when id (ui/live (ui/shown-status (get-in st [:view :agents id] {}))))}))
 
 (defn- walk?
   "Does view's page walk this pass: not held yet, a transaction touched what it read (:dirty),

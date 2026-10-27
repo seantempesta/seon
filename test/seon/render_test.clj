@@ -55,25 +55,6 @@
 (deftest compose-fills-slots-recursively
   (is (= "<a><b>x</b></a>" (p/compose "<a><!--s:b--></a>" {"b" {:html "<b><!--s:c--></b>"} "c" {:html "x"}}))))
 
-(deftest observed-task-states
-  (let [decl (fn [nm proofs & needs] (cond-> {:seon.task/ns 't :seon.task/name nm :seon.task/plan (str "Make " nm ".") :seon.task/proofs proofs}
-                                       needs (assoc :seon.task/needs (set needs))))
-        db (ts/test-db)
-        db (-> db (d/db-with (seon.task/create-tx db [(decl "a" #{'p/x}) (decl "b" #{'p/z} "t/a") (decl "c" #{'p/w})]))
-               (d/db-with (seon.task/execution-tx ["t/a" "t/b"] :running))
-               (d/db-with (seon.task/execution-tx ["t/c"] :cancelled))
-               (d/db-with (conj (seon.task/run-start-tx "t/a#1" "t/a" "boot-1" :a1 {:branch :task-t-a :model nil :max-turns 40} 1 "Make a.")
-                                {:seon.run/id "t/a#1" :seon.run/tokens 7
-                                 :seon.run/results [{:seon.proof/test 'p/x :seon.proof/status :pass} {:seon.proof/test 'p/y :seon.proof/status :fail}]})))
-        rows (p/task-rows (seon.reconcile/index db))]
-    (testing "what happened, not the desired execution: running, blocked by its need, cancelled"
-      (is (= :running (get-in rows ["t/a" :state])))
-      (is (= :blocked (get-in rows ["t/b" :state])))
-      (is (= #{"t/a"} (get-in rows ["t/b" :blocked-by])))
-      (is (= :cancelled (get-in rows ["t/c" :state]))))
-    (testing "its own proofs on its newest run (another task's red is allowed), runs so far, tokens"
-      (is (= [1 0 1 1 7] ((juxt :green :red :allowed-red :runs :tokens) (get rows "t/a")))))))
-
 ;; ---- root's process, and no clipping ---------------------------------------------------------
 
 (deftest root-process-is-root-own-data
@@ -325,7 +306,7 @@
   {:rid 1 :pending {} :watch #{:root :a3} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
-   :merges 0 :main-db main :recorded (seon.problems/health main) :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
+   :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
 
 (defn- branch-state
   "proc-state with a3's branch read named (its branch, :task-demo-f), as ask-branches records it."
@@ -850,7 +831,7 @@
         o (volatile! {})
         st {:rid 1 :pending {} :watch #{debug :a1} :waiting {1 debug 2 :a1} :kf-wanted #{} :new-events [] :events [] :views {}
             ;; a1's process ended: root draws its page from its branch, in the same pass
-            :main-db db :recorded (seon.problems/health db) :view {:agents {:a1 {:status :ended}}}
+            :main-db db :view {:agents {:a1 {:status :ended}}}
             :branches {debug {:db db :read [:task-x]} :a1 {:db db :read [:task-x]}}}
         st' (#'p/pass st o)
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
@@ -863,7 +844,7 @@
     (is (empty? (:waiting st')) "nothing left waiting")
     (testing "a pass after it, nothing changed: the same error is not sent again (its record walks no view into another)"
       (let [o2 (volatile! {})]
-        (#'p/pass (assoc st' :waiting {3 debug} :recorded (seon.problems/health db)) o2)
+        (#'p/pass (assoc st' :waiting {3 debug}) o2)
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 

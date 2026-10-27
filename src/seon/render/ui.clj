@@ -732,6 +732,16 @@
   {:malli/schema [:=> [:cat :map] [:maybe [:tuple :int :map]]]}
   [c] (when-let [rs (:runs c)] (when-let [[rid run] (first rs)] [rid run])))
 
+(defn- held-task
+  "The task run rid of ctx c works, as ctx holds it: every entity is held once (docs/ctx.md), so
+  the task a session's runs share is whole under one of them and {:db/id e} under the others."
+  {:malli/schema [:=> [:cat :map :int] [:maybe :map]]}
+  [c rid]
+  (let [t (get-in c [:runs rid :task])]
+    (if (or (nil? t) (contains? t :seon.task/id))
+      t
+      (some (fn [[_ r]] (let [x (:task r)] (when (and (= (:db/id t) (:db/id x)) (contains? x :seon.task/id)) x))) (:runs c)))))
+
 (defn task-data
   "The task its run works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
@@ -742,7 +752,7 @@
   the plan cites is a component of its own (`cited`)."
   {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300") :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [{:seon.task/keys [id kind execution] :as t} (get-in c [:runs rid :task])
+  (let [{:seon.task/keys [id kind execution] :as t} (held-task c rid)
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
         sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))]
     [:section
@@ -778,7 +788,7 @@
   task cites no v. What the cited component draws, and the form its cut names."
   {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol] [:maybe :map]]}
   [db c v]
-  (when-let [cv (some #(when (= v (:var/name %)) %) (vals (get-in (second (the-run c)) [:task :cited])))]
+  (when-let [cv (some #(when (= v (:var/name %)) %) (vals (:cited (some->> (the-run c) first (held-task c)))))]
     (let [;; each caller form's var: the var whose :var/form it is (a ref, in :avet)
           vars (for [f (vals (:callers cv)) dt (d/datoms db :avet :var/form (:db/id f))
                      :let [m (d/pull db [:var/name :var/kind] (:e dt))] :when (not= v (:var/name m))] m)
@@ -821,7 +831,7 @@
         ;; its turns by eid, newest first: the newest of either origin, and the model turn before it
         [turn & older] (vals (:turns run))
         lst (some #(when (= :model (:seon.turn/origin %)) %) older)
-        task (get-in run [:task :seon.task/id])]
+        task (:seon.task/id (held-task c rid))]
     (when turn
       (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] (:db/id turn)))
             l (when lst (d/pull db [:seon.turn/truncated :seon.turn/calls] (:db/id lst)))]
@@ -938,7 +948,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [[rid run] (the-run c)
-        task (:task run)
+        task (when rid (held-task c rid))
         evals (:evals c)
         ;; in the order written: the transaction of each member's identity datom, then its id
         born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
@@ -1035,7 +1045,8 @@
         on? (contains? #{:busy :running} status)]
     [:li [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
      [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
-     [:span {:class "text-2xs text-text-500"} (some-> status name)]]))
+     ;; an agent with no status has no process (the user's)
+     [:span {:class "text-2xs text-text-500"} (if status (name status) "no process")]]))
 
 (defn root-head
   "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
@@ -1079,7 +1090,7 @@
        [:ol {:class "text-xs"} (for [ev (take (config/value :seon.config.render.list/history) events)]
                                  [:li {:class "flex gap-2"} [:span {:class "text-eval w-14 shrink-0"} (event-kind ev)]
                                   [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
-                                  [:span {:class "min-w-0 truncate text-text-300"} (event-detail ev)]])])]))
+                                  [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])])]))
 
 (defn root-ctx
   "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
@@ -1110,7 +1121,7 @@
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
       (top-bar id false)
-      [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
+      [:div {:class "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]

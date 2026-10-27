@@ -90,24 +90,42 @@
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
   ;; of one loop turn; its count of every datom grew with main (15 ms at 47k datoms). What the
-  ;; page shows of main is its t, its definitions (an index count over :var/name), its tasks,
-  ;; runs, config and problems: none grows with main's other data
+  ;; render proc reads of main is its t and the reconciler's index (its runs, for :agent-run):
+  ;; none grows with main's other data
   (cost/proof
     {:of 'seon.render.proc/main-info :input 'seon.render-cost-test/main-of
      :n "units of 20 evaluation records on main (data that is neither program, task nor problem)"
-     :work (str "none per record: the vars are an index count over :var/name, the tasks and runs the "
-                "reconciler's index over their own attributes, the config one pull of root's entity, the "
-                "problems their own indexes; a record is never walked")
+     :work (str "none per record: the runs are the reconciler's index over their own attributes; a record "
+                "is never walked")
      :growth :constant
-     ;; the contracted calls a read of main makes, whatever main holds: 33 (the reconciler's
-     ;; index, the task rows, the config, the problems by area and their parts, and
-     ;; seon.problems/uncited-tasks and stalled-agents, one call each however many), never one per
-     ;; record; and its bytes, which a walk over every datom would grow with the records (measured
-     ;; 2026-10-23 at 100 units of 20 records: 3.6 MB, 0.79M ticks).
-     ;; Timed 2026-10-23 at 1k / 10k / 50k records (8k / 35k / 155k datoms): 1.8 / 1.4 / 1.6 ms,
-     ;; where the count of every datom it no longer does took 1.7 / 8.4 / 33.4 ms
+     ;; the contracted calls a first read of main makes, whatever main holds, never one per record;
+     ;; and its bytes, which a walk over every datom would grow with the records
      :per-n {:calls 33 :bytes 4000000}
      :sizes [100 400 1000]}))
+
+(defn moved-of
+  "The input of size n: the render state holding main with n tasks (main-info's first read), and
+  main one agent status later (one of the four status and running commits an eval makes)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  [n]
+  (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}})))
+        db0 (d/db-with db0 [{:db/id "a" :seon.agent/id :a1 :seon.agent/status :idle}])
+        st (#'seon.render.proc/main-info {} db0)
+        db1 (d/db-with db0 [[:db/add (:db/id (d/entity db0 [:seon.agent/id :a1])) :seon.agent/status :busy]])]
+    [st db1]))
+
+(deftest a-move-of-main-costs-what-moved
+  ;; the 1.2 s an agent's page took after an eval (root's baseline, 2026-10-27): each of an eval's
+  ;; four commits on main rebuilt the reconciler's index of every task (506 ms on 902 tasks), the
+  ;; task rows (203), main's problems (181) and its tasks (79), about 970 ms a commit, before the
+  ;; pass. Now the held index moves by the watched datoms that differ
+  (cost/proof
+    {:of 'seon.render.proc/main-info :input 'seon.render-cost-test/moved-of
+     :n "tasks on main"
+     :work "the index moved by the one status datom (seon.reconcile/index over the watched datoms that differ), never one step per task"
+     :growth :constant
+     :per-n {:calls 40 :bytes 2000000}
+     :sizes [50 200 800]}))
 
 (defn agent-of
   "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
