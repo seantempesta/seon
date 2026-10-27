@@ -245,6 +245,7 @@
         ch (pm/delta-changes b branch #{})]
     (is (= {:added ['app/c] :changed ['app/f] :removed ['app/g] :schemas [:app/k :app/n]} (pm/divergence ch)))
     (is (= #{'app/c 'app/f 'app/g} (pm/changed-vars ch)) "the changed vars are its vars")
+    (is (= ch (pm/delta-changes b branch #{} (apply concat (d/datoms-diff b branch :eavt [])))) "given the datoms that differ, nothing is diffed again and the changes are the same")
     (is (= {} (pm/divergence (pm/delta-changes b b #{}))) "an unchanged branch carries nothing")))
 
 (deftest a-branch-that-merged-main-carries-only-its-own-changes

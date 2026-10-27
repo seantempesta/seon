@@ -473,22 +473,20 @@
       (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
     (is (< (count web) (count bin)) "fewer tests read the web handler than may run a script")))
 
-(deftest only-a-test-reading-the-tree-takes-its-digest
-  ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
-  ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
-  ;; rerun on every edit (327 of 368 did); a reader of src, test, docs or the task files still does
+(deftest no-test-takes-the-tree-in-its-digest
+  ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
+  ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
+  ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
+  ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
+  ;; the tree when what it reaches reads it.
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
-        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
-        moved (set (for [[t d] a :when (not= d (b t))] t))]
-    (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
-    (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
-    ;; a-result-recorded-in-one-checkout-is-reused-in-another reads only checkouts it makes (git, not
-    ;; the tree's files): it took the tree only while seon.program/tree-readers' own quoted list
-    ;; counted as reading, which put every test reaching the reach walk under the tree
-    (is (not (moved 'seon.program-test/a-result-recorded-in-one-checkout-is-reused-in-another)) "a test reading only the checkouts it makes: the tree is no input")
-    (is (moved 'seon.main-test/a-bound-is-a-config-key) "a test reading a tree file itself (slurp of docs/config.md): the tree is its input")
-    (is (< (count moved) (quot (count a) 2)) (str (count moved) " of " (count a) " tests take the tree: fewer than half"))))
+        in #(hash-map :env "e" :tree % :config {})
+        a (program/reach-digests db (in "t1"))
+        b (program/reach-digests db (in "t2"))
+        step #(program/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
+    (is (< 300 (count a)) "the whole suite")
+    (is (= a b) "a new tree moves no test's digest, one running the binary (seon.root-test's) included")
+    (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
 
 (deftest a-test-naming-another-test-does-not-reach-it
   ;; seon.agent-test's tests quote the proofs they ask for: data, never a call, so a change the
@@ -519,17 +517,6 @@
     (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
     (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
-
-(deftest a-test-running-the-binary-takes-the-tree
-  ;; seon.root-test runs target/seon (seon.test-store/binary-sh): what it proves is the whole
-  ;; program the binary is built from, so any change to the tree moves its digest
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
-        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
-        runs-binary '[seon.root-test/root-threads-are-what-root-declares seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
-                      seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote seon.agent-test/an-agent-holds-mains-tests-and-runs-them]]
-    (is (every? #(not= (a %) (b %)) runs-binary) "every test running the binary moves with the tree")
-    (is (= (a 'seon.reader-test/prose-without-a-fence-is-a-comment) (b 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that runs no binary does not")))
 
 (deftest the-config-in-force-is-an-input
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
