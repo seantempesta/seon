@@ -345,6 +345,9 @@
             (recur (.indexOf low s (inc i)))))))))
 
 (deftest no-text-uses-an-old-word
+  ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
+  ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
+  ;; kept at the digest the green tree has, seon.proofs/flaky)
   (let [root (config/checkout)
         words (old-word-spellings (slurp (str root "/AGENTS.md")))
         kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
