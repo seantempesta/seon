@@ -460,3 +460,11 @@
                        {:type :error :var "#'a.b-test/died" :exit {:exit 1} :message "test process died: {:exit 1} while #'a.b-test/died ran"}]}]
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
+(deftest a-results-read-that-fails-is-an-error-never-zero-greens
+  ;; root, 2026-10-27 (test-audit's re-measure): an ask refused while the standing root restarted
+  ;; (bin/update after a merge: 20:00:21 down, 20:00:46 listening) read as "nothing is reused", a
+  ;; failed read taken for zero greens. A port nothing listens on refuses as a restarting root does
+  (let [r (runner/read-results 1 ["d-any"])]
+    (is (= :seon.proofs/unread (:seon.error/type r)) (pr-str r))
+    (is (= :refused (:why r)))))
+
