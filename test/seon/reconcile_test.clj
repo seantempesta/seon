@@ -613,28 +613,23 @@
   ;; the owner's ruling (2026-10-27: process tests the change reaches run automatically at the
   ;; judge; it replaces 2026-10-23's "never automatically" for merges): the process tests a
   ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
-  ;; checkout, with no my.root/gate! and no :seon.task/gate?, and gate it like proofs: unrun, the
+  ;; checkout, with no one asking for it, and gate it like proofs: unrun, the
   ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
   ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
   ;; (a root with no source), it is held, saying so: never merged with them unrun
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
         judged (fn [root go & kv] (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
                                                                              (apply run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
                                                                                     :deferred ['seon.root-test/boots] kv)
                                                                              (when go [go])
                                                                              (when root [root])))))
         octopus [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]]
-    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate asked)))
-    (is (= octopus (judged gate asked :deferred-results {'seon.root-test/boots :pass})))
-    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :fail}))))
-    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
-    (is (str/includes? (:problem (first (judged gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
-    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate nil))
-        "nobody asked: gated all the same")
-    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail})))
-        "and a branch that breaks a process test is not merged, with no gate! called")
-    (let [held (judged nil asked)]
+    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate nil)))
+    (is (= octopus (judged gate nil :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (judged gate nil :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (let [held (judged nil nil)]
       (is (= [:hold] (map :op held)) "no checkout to run them on: held, never merged with them unrun")
       (is (str/includes? (:problem (first held)) "no checkout to run them on") (pr-str held)))))
 

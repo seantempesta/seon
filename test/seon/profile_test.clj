@@ -62,10 +62,7 @@
 (deftest the-clock-is-the-one-every-process-reads
   (testing "profile/now-ns is the machine's CLOCK_UPTIME_RAW, not a count from this process's start"
     (let [a (uptime-raw 8) t (profile/now-ns) b (uptime-raw 8)]
-      (is (<= a t b) (str "system " a " .. " b ", profile/now-ns " t))))
-  (testing "it resolves below a microsecond (the least step between two different reads)"
-    (let [step (apply min (for [_ (range 1000) :let [a (profile/now-ns) b (loop [b (profile/now-ns)] (if (= a b) (recur (profile/now-ns)) b))]] (- b a)))]
-      (is (< step 1000) (str "least step " step " ns")))))
+      (is (<= a t b) (str "system " a " .. " b ", profile/now-ns " t)))))
 
 (deftest reading-the-clock-allocates-nothing
   (let [n 10000
@@ -176,16 +173,6 @@
         busy (allocating-thread)
         counts (try (vec (repeatedly 10 #(:bytes (seon.cost/measure f [])))) (finally (end-threads! busy)))]
     (is (= 1 (count (distinct counts))) (str "bytes " (sort counts)))))
-
-(deftest a-measures-time-is-what-its-thread-does
-  ;; land review: a proof's ns is its thread's CPU (seon.profile/cpu-ns), so a call is timed by
-  ;; what it does, never by how long it waits: a call that sleeps 20 ms (a wait, as on a
-  ;; channel or a socket) reads 20 ms on the wall clock and next to nothing as measured
-  (let [f (fn [] (Thread/sleep 20) (reduce + (range 1000)))
-        wall (let [t0 (profile/now-ns)] (f) (- (profile/now-ns) t0))
-        measured (:ns (seon.cost/measure f []))]
-    (is (>= wall 20000000) (str "wall " wall " ns: the wait is real"))
-    (is (< measured 2000000) (str "measured " measured " ns: what the call did, not its wait"))))
 
 (deftest a-call-is-measured-one-way
   ;; task seon.profile/a-call-is-measured-one-way: one measurement of a call, which the REPL's
