@@ -925,7 +925,7 @@
         ;; the config in force, written on main's root entity with the boot fact; the merge gate's
         ;; checkout, when none is declared, is this root's own source root
         config (cond-> (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
-                 (and (nil? (cfg/value :seon.config.source/gate-checkout)) (:root source))
+                 (and (nil? (get cfg/config :seon.config.source/gate-checkout)) (:root source))
                  (assoc :seon.config.source/gate-checkout (:root source)))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
