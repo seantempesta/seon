@@ -1,0 +1,16 @@
+COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF                NODE NAME
+jolt    35922 sean  cwd    DIR   1,13      832          1130899663 /Users/sean/src/seon-next
+jolt    35922 sean  txt    REG   1,13 30512744          1160657207 /Users/sean/src/seon-next/target/jolt/jolt
+jolt    35922 sean  txt    REG   1,13  4129840 1152921500312609216 /usr/lib/dyld
+jolt    35922 sean  txt    REG   1,13   177504          1130920919 /Users/sean/src/seon-next/target/lib/liblz4.dylib
+jolt    35922 sean  txt    REG   1,13   884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+jolt    35922 sean  txt    REG   1,13    34656          1148292216 /Users/sean/src/seon-next/target/lib/libprobe.dylib
+jolt    35922 sean  txt    REG   1,13   633920          1130921102 /Users/sean/src/seon-next/target/lib/libzstd.dylib
+jolt    35922 sean  txt    REG   1,13   130880          1140801700 /Users/sean/src/seon-next/target/lib/liblmdb.dylib
+jolt    35922 sean  txt    REG   1,13  4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+jolt    35922 sean    0r   CHR    3,2      0t0                 336 /dev/null
+jolt    35922 sean    1w   REG   1,13     7993          1161804291 /Users/sean/src/seon-next/target/prove/shard-1.log
+jolt    35922 sean    2w   REG   1,13     7993          1161804291 /Users/sean/src/seon-next/target/prove/shard-1.log
+jolt    35922 sean    3w   REG   1,13     5911          1161804366 /Users/sean/src/seon-next/target/cache/aot/v0.8.23-139-g67e7bf3e-A43E84-C8CC8105-211719.188FF1C1.111D22.C7EC2563-tr/v1/aot-jobs-35922.edn
+jolt    35922 sean    4u  FIFO             0t0          1161805239 /Users/sean/src/seon-next/target/tmp/test-starter-35922.fifo
+jolt    35922 sean    7r   CHR   17,1  0t16336                 612 /dev/urandom
