@@ -148,24 +148,43 @@
   [title text] (str "title: " (or title "none") " | text: " text))
 
 (def ^:private texts
-  "Each embedded kind: the attribute holding its text, and the text the model reads, of the db, the
-  entity and its text."
-  {:form/src (fn [db e src] (document (some-> (d/entity db e) :var/_form first :var/name str) src))
-   :seon.section/text (fn [db e text] (document (:seon.section/heading (d/entity db e)) text))
+  "Each embedded kind: the attribute holding its text, and the text the model reads, of its title
+  (`title`'s, nil when it has none) and its text."
+  {:form/src (fn [title src] (document title src))
+   :seon.section/text (fn [title text] (document title text))
    ;; a schema's form, so the related part's schema keys are found by meaning too
    ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
-   :schema/form (fn [db e form] (document (some-> (:schema/key (d/entity db e)) str) form))
-   :seon.task/plan (fn [_ _ plan] (str query-prompt plan))})
+   :schema/form (fn [title form] (document title form))
+   :seon.task/plan (fn [_ plan] (str query-prompt plan))})
+
+(defn- titles
+  "Each titled entity's title on db, {e title}: a form's by the first of its vars' names, a
+  section's heading, a schema entry's key. One scan of each attribute, as `due` reads its others."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :int :string]]}
+  [db]
+  (let [names (into {} (map (juxt :e :v)) (d/datoms db :aevt :var/name))]
+    (merge (into {} (map (fn [[f ds]] [f (str (first (sort (keep (comp names :e) ds))))]))
+                 (group-by :v (d/datoms db :aevt :var/form)))
+           (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/heading))
+           (into {} (map (fn [d] [(:e d) (str (:v d))])) (d/datoms db :aevt :schema/key)))))
+
+(defn- title
+  "Entity e's title on db, as `titles` reads it, by seeks: for a few entities, not a scan."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
+  [db e]
+  (or (some->> (d/datoms db :avet :var/form e) (keep #(stored db (:e %) :var/name)) sort first str)
+      (stored db e :seon.section/heading)
+      (some-> (stored db e :schema/key) str)))
 
 (defn- due-among
-  "Of the text datoms ds on db, those whose vector is due for model, made (an entity's
-  :seon.vector/text-t) and of (its :seon.vector/model) read as functions of the entity:
+  "Of the text datoms ds, those whose vector is due for model, made (an entity's
+  :seon.vector/text-t), of (its :seon.vector/model) and title-of (its title) read as functions of the entity:
   [[e text t] ...] in entity order."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any] :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
-  [db ds made of model]
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
+  [ds made of title-of model]
   (vec (sort (for [{:keys [e a v tx]} ds
                    :when (or (not= model (of e)) (not= tx (made e)))]
-               [e ((texts a) db e v) tx]))))
+               [e ((texts a) (title-of e) v) tx]))))
 
 (defn due
   "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
@@ -178,9 +197,10 @@
   ([db model]
    (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
          of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
-     (due-among db (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) model)))
+     (let [title-of (titles db)]
+       (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among db (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) model)))
+   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) #(title db %) model)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the

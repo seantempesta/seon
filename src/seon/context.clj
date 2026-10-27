@@ -421,8 +421,8 @@
   data shows it); nil when the count is 0 (none shown) or the plan has no vector yet. opts: :touched
   the vars the branch changed, :cut a cut in place of the configured one, which then lists every
   item at or above it, uncounted (0: every item scored).
-  Unlike before relevance, nothing below the cut fills the count: the owner, 2026-10-27 (\"expose more
-  of it but not if it's not related\")."
+  Unlike before relevance, nothing below the cut fills the count: the owner's \"expose more of it but
+  not if it's not related\" (docs/vector.md#relevance)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]
                   [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:cut {:optional true} number?]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]

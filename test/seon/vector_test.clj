@@ -82,13 +82,15 @@
                                      {:db/id "s" :seon.section/address "p.md#a" :seon.section/heading "a" :seon.section/text "old"}])
         due (vector/due db "m")
         mine (filterv #(#{"title: x/g | text: (defn g [])" "title: a | text: old"} (second %)) due)
-        [f s] (map first mine)
+        ;; each by its text: due answers in entity order, which says nothing of which is which
+        f (some #(when (= "title: x/g | text: (defn g [])" (second %)) (first %)) mine)
+        s (some #(when (= "title: a | text: old" (second %)) (first %)) mine)
         db (d/db-with db (embedded mine (vectors 3 2 2 768) "m"))]
     (is (and f s) "a form and a section with no vector are due, as the model reads them")
     (is (not-any? (comp #{f s} first) (vector/due db "m")) "embedded, they are not due again")
     (let [db (d/db-with db [[:db/add s :seon.section/text "new"]])]
-      (is (= [[s (vector/document (:seon.section/heading (d/entity db s)) "new")]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m"))))
-          "a changed text is due again, and only it, titled by its heading as the db holds it"))
+      (is (= [[s "title: a | text: new"]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m"))))
+          "a changed text is due again, and only it, titled by its heading"))
     (let [[_ _ t] (first (filter (comp #{s} first) mine))
           db (d/db-with db [[:db/add s :seon.section/text "changed while its round was out"]])
           db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) [10] "m"))]
