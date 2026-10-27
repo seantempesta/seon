@@ -762,20 +762,22 @@
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
-  the test service's runs) selects the plan's tests. names (the test service's request: a set of
+  the test service's runs) selects the plan's tests; mode :main (the test service's run of main,
+  whose prove agent is a branch of main with nothing changed) selects them with no base: every
+  test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
   is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (:base @state) proofs)
+  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs)
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has
