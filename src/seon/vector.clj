@@ -273,7 +273,7 @@
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{}})
+  ([args] {:rid 0 :pending {} :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]

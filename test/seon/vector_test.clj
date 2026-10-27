@@ -121,17 +121,52 @@
           (is (empty? (:to-api o5)) "nothing due: nothing asked, the proc idles")
           (is (= 1 (:embedded st))))))))
 
-(deftest a-caught-up-proc-looks-only-at-a-commits-texts
-  ;; task one-index step 2: with everything due asked for, the next notice reads the texts that commit
-  ;; changed (seon.vector/written), not every text of the store
-  (let [db (db-due-only)
-        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
-        _ (is (seq (:to-api o)) "the first round reads the store: x/1 is due")
-        [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
-        [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api (second (vector/vectors-proc st :main {:t 10 :db db}))))) :r {:ok true :t 11}})
-        db2 (d/db-with db [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
-        [_ o2] (vector/vectors-proc (assoc st :running false :written-t 10) :main {:t 12 :db db2})]
-    (is (= ["title: none | text: (defn h [])"] (get-in (first (:to-api o2)) [:req :req :texts])) "the commit's new text alone is asked")))
+(defn- round
+  "One whole round of the proc st at db, notice t: the notice, the :embed answered with vectors, the
+  write answered. [st' db' the texts asked] (db' holds the vectors written), or [st db []] when
+  nothing was asked."
+  [st db t]
+  (let [[st o] (vector/vectors-proc st :main {:t t :db db})
+        ask (first (:to-api o))
+        texts (get-in ask [:req :req :texts])]
+    (if-not ask
+      [st db []]
+      (let [[st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 (count texts) 1 768) :tokens (vec (repeat (count texts) 5))}}})
+            w (first (:to-api o2))
+            [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t (inc t)}})]
+        [st (d/db-with db (get-in w [:req :req :tx-data])) texts]))))
+
+(deftest a-caught-up-proc-asks-for-exactly-what-a-full-scan-would
+  ;; once everything due is asked for the proc looks only at the texts a commit changed
+  ;; (seon.vector/written): what it asks must still be what is due, whatever happened between
+  (let [st0 (vector/vectors-proc {:model "m" :texts 64})
+        db (db-due-only)
+        [st db1 asked] (round st0 db 10)]
+    (is (= ["title: none | text: (defn g [])"] asked) "the first round reads the store")
+    (testing "a commit's new text alone"
+      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            [st db3 asked] (round st db2 12)]
+        (is (= ["title: none | text: (defn h [])"] asked))
+        (is (= [] (map first (vector/due db3 "m"))) "and nothing is due after it")))
+    (testing "a backlog larger than a round leaves the proc not caught up: the rest is asked next"
+      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+            [st2 db3 asked1] (round (assoc st :texts 1) db2 12)
+            [_ _ asked2] (round st2 db3 14)]
+        (is (= 1 (count asked1)))
+        (is (= 1 (count asked2)) "the other text, from a full scan")
+        (is (not= asked1 asked2))))
+    (testing "a text changed while its round was out is asked again"
+      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            [st o] (vector/vectors-proc st :main {:t 12 :db db2})
+            ask (first (:to-api o))
+            x2 (:e (first (d/datoms db2 :avet :form/id "x/2")))
+            changed (d/db-with db2 [[:db/add x2 :form/src "(defn h [] 1)"]])
+            [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+            w (first (:to-api o2))
+            [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 13}})
+            written (d/db-with changed (get-in w [:req :req :tx-data]))
+            [_ o3] (vector/vectors-proc st :main {:t 14 :db written})]
+        (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts])))))))
 
 (deftest a-failed-embedding-waits-for-the-next-notice
   (let [db (db-due-only)
