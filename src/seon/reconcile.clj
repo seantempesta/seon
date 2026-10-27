@@ -431,7 +431,9 @@
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
                        ;; 2026-10-27: process tests the change reaches run automatically at the judge)
                        (and (empty? rs) merge?)
-                       (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
+                       (let [self (get-in idx [:root :gate-self])
+                             ;; a test cannot be its own gate (:seon.config.source/gate-self): left out, with no result recorded
+                             deferred (sort-by str (remove #(= self (str %)) (:seon.run/deferred a #{}))) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
                          ;; with no checkout to run them on (a root with no source), the merge is
                          ;; held with that reason, never merged with them unrun

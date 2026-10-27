@@ -635,6 +635,15 @@
     (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail}))))
     (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
     (is (str/includes? (:problem (first (judged gate nil :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (testing "the test whose process started this root is left out: a test cannot be its own gate (gate-self)"
+      (let [self (assoc gate :seon.config.source/gate-self "seon.root-test/boots")]
+        (is (= octopus (judged self nil)) "the only deferred test is the root's own: merged, nothing run")
+        (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/other]}]
+               (judged self nil :deferred ['seon.root-test/boots 'seon.root-test/other]))
+            "another test beside it is still gated, itself not named")
+        (is (= [:hold] (map :op (judged self nil :deferred ['seon.root-test/boots 'seon.root-test/other]
+                                        :deferred-results {'seon.root-test/other :fail})))
+            "and its result still judges")))
     (let [held (judged nil nil)]
       (is (= [:hold] (map :op held)) "no checkout to run them on: held, never merged with them unrun")
       (is (str/includes? (:problem (first held)) "no checkout to run them on") (pr-str held)))))
