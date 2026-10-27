@@ -760,20 +760,25 @@
   write of it answered.
   With changed (the relative paths a watcher saw change, or none), only those files are read and
   main's program is brought up to date with them (seon.source/refresh-tx, the cost of what
-  changed, not of the tree), and the fact's digest is still the tree's: the git tree id
+  changed in the program), and the fact's digest is still the tree's: the git tree id
   (seon.fx/read-source's :tree) with the pins, the same whether the tree was read whole or by
-  its changes, so a result keyed by the inputs stays shared. A repository git does not hold has no
-  tree id and is read whole."
+  its changes, so a result keyed by the inputs stays shared. It covers every file git sees, so a
+  boot after an edit to a page or a task file reads the source again, and writes nothing if the
+  program is the same. Only a root whose last import left a digest takes the changes (the program
+  it holds is then the tree's before them), and a repository git does not hold has no tree id:
+  both read the whole tree. The read of the inputs (seon.fx/inputs) is git's, the tree's, whichever
+  files are asked for; the files read and the forms written are the changes'."
   {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map :map [:maybe [:set :string]]] :map]]}
   ([sys source] (import-source! sys source nil))
   ([sys {:keys [root dirs]} changed]
   (let [t0 (profile/now-ns)
         ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
+        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
+        changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
         changed (when (:tree r) changed)
         files (:value r)
         digest (when files (err/digest (sedn/encode [(or (:tree r) files) (:pins r)])))
-        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
         this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
                                built? (assoc :inputs (:inputs r))
@@ -783,7 +788,7 @@
                (this-boot held)
                (let [tx (when files ((if changed source/refresh-tx source/replace-tx) @(:conn sys) files))
                      w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
-                 (this-boot (cond-> {:root root :files (if changed (:files held) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
+                 (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
