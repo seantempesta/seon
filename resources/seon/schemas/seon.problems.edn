@@ -42,7 +42,8 @@
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
- :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]]]
+ :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
+                                                     [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
  :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
@@ -61,6 +62,7 @@
                                                 [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
+ :seon.server/held [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/held]] [:agent :keyword] [:task :seon.task/id] [:holder :string]]]
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
