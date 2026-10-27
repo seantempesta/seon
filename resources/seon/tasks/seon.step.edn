@@ -5,13 +5,6 @@
              :proofs
              #{seon.step-test/a-reload-retries-the-held-message
                seon.step-test/a-throw-holds-the-message-and-records-the-cause}}
- {:seon.task/name "an-errors-message-is-read-one-way"
-  :seon.task/plan "Found by the one-offs survey (notes/archive/one-offs-2026-10-23.md; owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 4. What exists: (or (ex-message e) (str (type e))) written out 15 times (seon.fx eight times, seon.docs, seon.program, seon.agent, seon.server, seon.model, my.schema) beside seon.step/error-msg, which is that function and has 5 users. Correct: every site calls step/error-msg (or the error map's owner, where one is built). A law over the compiler's facts: no src form but error-msg holds that shape (read as data)."
-  :seon.task/kind :work}
  {:seon.task/name "an-event-is-stamped-one-way"
   :seon.task/plan "Found by the one-offs survey (notes/archive/one-offs-2026-10-23.md; owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 9. What exists: System/currentTimeMillis read at 30 sites; docs/clocks.md names them, but seon.reconcile (7) and seon.root (9) stamp inline instead of through seon.step/event. Correct: one stamp (seon.step's), so bin/laws measures lists one site where a recorded time is made."
-  :seon.task/kind :work}
- {:seon.task/name "an-edge-asks-one-way"
-  :seon.task/plan "Found by the one-offs survey (notes/archive/one-offs-2026-10-23.md, item 8; owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). What existed: an edge's request to a proc written three times: seon.root/call! (a promise put with the request, a closed :ext answered root stopped), seon.web's ask! (the same, but a closed channel left its HTTP thread waiting forever) and seon.root/stop!'s :shutdown (a closed :ext waited out both of stop!'s bounds, about 18 s, on a promise nothing would deliver). Correct: seon.step/ask-edge, beside the asker's side every proc shares (pend, ask, answered), puts the request with a fresh promise and answers a closed channel at once with the caller's closed value; the three call it. A law: no src form outside seon.step puts a request carrying :p on a channel (read as data from the compiler's facts)."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.step-test/an-edge-asks-one-way seon.main-test/an-edge-asks-one-way}}]
+  :seon.task/kind :work}]

@@ -263,8 +263,10 @@
         [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
         [t] (tasks o1)]
     (is (= ["root/stall-a1-demo-t-1"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its run")
-    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (get-in t [:seon.task/cause :stall]))
+    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
         "its cause pre-filled with the stall")
+    (is (= {:open [] :prove nil} (get-in t [:seon.task/cause :stall :api]))
+        "and what the api held then: no ask open, no report from the test service yet")
     (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
         "held, for an outside worker, its proofs the boundary conditions")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
@@ -934,14 +936,17 @@
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
 
 (defn caused-flat-input
-  "The cost proof's input at n: [base head] over a program of n catch sites and n citing sections,
-  the head one section rewritten to cite a dead name and one more catch site: a fixed change."
+  "The cost proof's input at n: [base head changes] over a program of n catch sites and n citing
+  sections, the head one section rewritten to cite a dead name and one more catch site: a fixed
+  change, its changes since base read as the turn and the writer hold them (seon.merge/delta-changes,
+  read once: its own cost is proved at seon.program-cost-test/a-turns-diff-reads-what-the-branch-changed)."
   [n] (let [db0 (ts/test-db)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
             base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
-            changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))]
-        [base (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]))
+            changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
+            head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
+        [base head (seon.merge/delta-changes base head #{})]))
 
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one

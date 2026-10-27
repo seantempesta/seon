@@ -331,6 +331,31 @@
  ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
  ;; (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
+ ;; Unit: vars. The vars the processes a test starts run from: a form using a process var or a binary
+ ;; var reaches them, so a test that starts a root or an agent is digested by the program those
+ ;; processes run. -main reaches root, the server and the agent's init (1,485 vars, measured
+ ;; 2026-10-27); seon.turn/work! is what root sends an agent as a quoted form, which no reference
+ ;; shows. Provenance: ctx-atom's evidence (2026-10-27): seon.server-test's in-agent tests kept one
+ ;; reach digest across two fixes to code their agent runs (a green and a red shared it, bin/test
+ ;; listed them flaky), because the agent's code is reached through a socket and a keyword :op.
+ :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
+ ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
+ ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
+ ;; reach datahike.*, not every test. The runtime and the binary (jolt, chez, lmdb, zstd, llama.cpp,
+ ;; awesome-jolt) are in no set: every test takes them. Provenance: root's task (2026-10-27): pins moved
+ ;; every digest in 3 of the last 12 --merge batches (datahike 3, konserve 2, jolt 2); the libraries'
+ ;; own suites run on a bump (bin/check forks, 4cdd5625f5).
+ :seon.config.source/pin-namespaces
+ {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
+             "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
+  konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
+  malli #{"reference-code/malli"}
+  jolt.crypto #{"reference-code/crypto"}
+  org.replikativ.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
+  me.tonsky.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
+  fress #{"reference-code/jolt-fressian"}
+  hasch #{"reference-code/jolt-overlay"}
+  clojure.spec #{"reference-code/jolt-overlay"}}
  ;; Unit: vars. The vars through which a test reaches the built binary (target/seon): a test whose
  ;; reach references one runs it, so bin/test builds it first; a process test that only shells
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
@@ -655,6 +680,34 @@
  ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
  ;; turn (docs/vector.md#what-was-compared-and-what-it-left-out).
  :seon.config.render/related 5
+ ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
+ ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
+ ;; my.agent/similar took (owner, 2026-10-27: "fix the search so it includes docs ... params to
+ ;; specify what to focus on"). At the bound: the hits past it are not answered; ask a larger :k.
+ :seon.config.render/search 10
+ ;; How much each ranking weighs in my.agent/search's fusion: a hit scores the sum, over the rankings it
+ ;; is in, of the ranking's weight / (:seon.config.vector/rrf-k + its rank). 1.0 each is plain reciprocal
+ ;; rank fusion, as related's. Provenance: none measured for search yet (an embeddings eval of exact
+ ;; text against meaning against references is under way, owner 2026-10-27); change it by a measurement.
+ ;; At 0 a ranking only decides which hits are listed, never their order.
+ :seon.config.render/search-weights {:text 1.0 :meaning 1.0 :refs 1.0}
+ ;; Unit: standard deviations. my.agent/search keeps a text hit (BM25 over the query's identifier-split
+ ;; words) only when its score is this many standard deviations above the mean of every text's score for
+ ;; that query. Provenance: embeddings lab, 2026-10-27 (20 hand-checked queries; scratchpad
+ ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
+ ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
+ :seon.config.render/search-token-z 2.0
+ ;; Unit: [z precision] pairs, z ascending. How a hit's score in standard deviations above its query's mean
+ ;; becomes its :relevance in my.agent/search, linearly between the pairs (below the first: 0, past the
+ ;; last: its precision). Provenance: the observed precision at each z over the 20 queries of the embeddings
+ ;; lab (z 3.0 .13, 3.5 .24, 4.0 .34, 4.5 .50, 5.0 .73; a lower bound, the truth lists 2-8 items a query);
+ ;; the lab replaces it by a fit on the search log.
+ :seon.config.render/search-relevance [[2.0 0.05] [3.0 0.13] [3.5 0.24] [4.0 0.34] [4.5 0.5] [5.0 0.73]]
+ ;; Unit: relevance, 0 to 1. The :min of my.agent/search when its options give none: a hit whose
+ ;; :relevance is known and below it is left out (and counted in the :more entry). A hit found by meaning
+ ;; alone has no relevance yet and is kept. Provenance: root's spec, 2026-10-27. At the bound: a hit at
+ ;; exactly it is kept.
+ :seon.config.render/search-min 0.25
  ;; How far related counts the forms naming a call-graph neighbour, weighing it 1/(1 + that count):
  ;; past the cap a neighbour is plumbing every form names. Provenance: on 31 merged tasks the
  ;; fused top 5 held 26 plumbing lines of 155 by plain counts and none weighed so, at caps 16, 64

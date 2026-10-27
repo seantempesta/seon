@@ -121,6 +121,15 @@
     (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
     [base @bc]))
 
+(defn- release-stores!
+  "Each store the divergence proofs made, released whatever holds it (release-all) and removed,
+  and the pair branch-changes' proof left held."
+  []
+  (swap! seon.agent/state dissoc :branch-changes)
+  (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
+    (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
+    (sh/sh "rm" "-rf" path)))
+
 (defn on-disk-changes-of
   "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its
   branch redefining one, no declared data."
@@ -136,24 +145,27 @@
       {:of 'seon.merge/delta-changes :input 'seon.program-cost-test/on-disk-changes-of
        :n "forms main and the branch hold (the branch redefines one)"
        :work (str "the datoms that differ (d/datoms-diff over :eavt, skipping the stored subtrees both share: "
-                  "one index path per changed entity, log n), the keys they bear and those keys' content on both sides; "
+                  "one index path per changed entity), the keys they bear and those keys' content on both sides; "
                   "nothing reads the forms they share")
-       :growth :log
-       ;; measured 2026-10-27 on LMDB: 439k ticks / 1.26 MB at 100 forms, 549k / 1.61 MB at 1,000,
-       ;; 629k / 1.83 MB at 10,000; 56 contracted calls each. The bytes move with where the stored
-       ;; index's node boundaries fall (divergence's proof measured +-30% over layouts): the bound is
-       ;; over layouts, not one. What it replaced per turn: this, plus divergence three or four times
-       ;; (453-678 KB each), so a turn's diff reads went from ~2.5-3.3 MB to one of these
-       ;; Since touched-keys walks one :aevt range per program attribute (task
-       ;; seon.merge/touched-keys-skips-platform-records) instead of the one :eavt diff: 1.27M ticks /
-       ;; 4.7 MB at 100 forms, the 44 descents (10-13k ticks, 70 KB each) being the fixed part. A branch
-       ;; that changed one form pays about 0.8M ticks and 3.5 MB more than the :eavt diff read; the
-       ;; :eavt diff also read every datom a branch writes besides the program (its evals, turns,
-       ;; messages: thousands in a long run) and every embedding main wrote since the fork (22,000
-       ;; datoms, 313M ticks), which the ranges never touch
-       :per-n {:ticks 34000.0 :bytes 100000.0}
-       :fixed {:ticks 1100000.0 :bytes 3900000.0 :calls 56}
+       :growth :constant
+       ;; measured 2026-10-27 on LMDB, after touched-keys walked one :aevt range per program attribute
+       ;; (task seon.merge/touched-keys-skips-platform-records): 437k ticks / 1.26 MB at 100 forms,
+       ;; 462k / 1.37 MB at 300, 547k / 1.61 MB at 1,000 (629k / 1.83 MB at 10,000 in an earlier layout);
+       ;; 56 contracted calls each. The rise from 100 to 1,000 is the stored index gaining a level (64
+       ;; datoms a node), which three sizes cannot fit as a log: it is bounded, a program scan (1 MB
+       ;; per 1,000 forms) would not be. A branch that wrote besides the program (evals, turns,
+       ;; messages) and main's embeddings since the fork are never read: the ranges skip them. What it
+       ;; replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
+       ;; diff reads went from ~2.5-3.3 MB to one of these
+       :per-n {}
+       :fixed {:ticks 700000.0 :bytes 2000000.0 :calls 56}
        :sizes divergence-sizes})
+    (finally (release-stores!))))
+
+(deftest a-turns-held-diff-is-a-lookup
+  ;; the proof above builds its stores at on-disk-path n and releases them; this one builds its own,
+  ;; one set of stores at a time (a second build at a path a proof still holds is "Branch already exists")
+  (try
     (cost/proof
       {:of 'seon.agent/branch-changes :input 'seon.program-cost-test/on-disk-diverged-of
        :n "forms main and the branch hold"
@@ -163,13 +175,7 @@
        :per-n {}
        :fixed {:ticks 1000.0 :bytes 4000.0 :calls 1}
        :sizes divergence-sizes})
-    (finally
-      ;; the pair branch-changes' proof left held
-      (swap! seon.agent/state dissoc :branch-changes)
-      ;; each store made, released whatever holds it (release-all) and removed
-      (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
-        (doseq [b [:db :branch]] (d/release (d/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
-        (sh/sh "rm" "-rf" path)))))
+    (finally (release-stores!))))
 
 (defn fan
   "closure's arguments of size n: one root whose neighbors are n leaves (the frontier n wide)."

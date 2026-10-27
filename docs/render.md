@@ -65,9 +65,9 @@ A component's root element carries one class, its render's name, and its render'
 
 Each fact the page and root's context both show has one producer they share:
 - **A lifecycle is declared once, on its enum's schema,** and read through one reader, `seon.contract/properties` (an enum's members, in order: `seon.contract/enum-values`):
-  - `:seon.agent/status` carries its live, stopped and gone sets (`seon.root/gone-statuses`, read by root, the web, the server and the check harness; `seon.render.ui/live`; `seon.render.ui/status-order`);
+  - `:seon.agent/status` carries its live, stopped and gone sets (`seon.root/gone-statuses`, read by root, the web, the server and the check harness; `seon.render.ui/live`);
   - `:seon.run/status` its finished, judged and failed sets, read once, by `seon.task` (`seon.task/finished`, `judged`, `failed`; with `seon.task/done?`, a task's done on a db, and `seon.task/running`, the running runs by one index seek), which the reconciler, problems, the render UI and the server require (`seon.main-test/a-runs-lifecycle-is-read-once`);
-  - `:seon.task/state` a task's observed states with each pill's title (`seon.render.ui/state-title`). A task's state is derived once, from the reconciler's index (`seon.reconcile/task-state`), which every reader of a task's state calls.
+  - `:seon.task/state` a task's observed states with each state's meaning (its `:seon.status/title`, read with `seon.contract/properties`). A task's state is derived once, from the reconciler's index (`seon.reconcile/task-state`), which every reader of a task's state calls.
 
   A new status is one enum entry. Not this: a status set typed out at each site that asks.
 - **How an agent is:** `seon.render.ui/shown-status` and `seon.render.ui/ended-as`; its newest events are the stream's own words (`seon.render.ui/event-detail`); a cost verdict's lines are `seon.cost/verdict-lines`. The writer, the fork server and main are root's process (```seon.render.proc/process-value```), drawn by ```seon.render.ui/process-tile```.

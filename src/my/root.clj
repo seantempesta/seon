@@ -243,8 +243,6 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
   [sys] (problems/health @(:conn sys) (root/errors sys)))
 
-(def ^:private kinds "Main's loaders, each a kind of what changed on disk." #{:docs :tasks :source})
-
 (defn- load-kinds!
   "Each of ks loaded into main once by its own loader: the wiki (load-docs!), the task files
   (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,

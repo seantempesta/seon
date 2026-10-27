@@ -114,23 +114,11 @@
   {:malli/schema [:=> [:cat :string] :any]}
   [id] (h/raw (str "<!--s:" id "-->")))
 
-(defn slot-id
-  "The element id slot marker x holds (`slot`), or nil when x is no slot."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [x] (when (h/raw? x) (second (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x)))))
-
 (defn- kicker {:malli/schema [:=> [:cat :any :any] :any]}
   [k sub] [:header [:span {:class "kicker"} k] (if (vector? sub) sub [:span {:class "sub"} sub])])
 
-(defn context-read?
-  "Is eval record e a context read: an outside agent reading its current-state block through
-  root's server (by \"context\"; seon.server)? Its output is the block itself."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [e] (and (map? e) (= "context" (:by e))))
-
 ;;; --- status -------------------------------------------------------------------
 
-(def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (contract/enum-values :seon.agent/status))
 (def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
 (def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
 (def ^:private finished task/finished)
@@ -146,8 +134,6 @@
         :else (or (:status a) :unknown)))
 
 ;;; --- the load, as data -------------------------------------------------------------
-
-(def state-title "What each observed state means, for its pill's title (:seon.task/state)." (:seon.status/title (contract/properties :seon.task/state)))
 
 (defn run-row
   "A run: its agent, status, turns, tokens and outcome (from main's facts)."
