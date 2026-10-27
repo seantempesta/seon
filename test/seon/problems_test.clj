@@ -263,8 +263,10 @@
         [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
         [t] (tasks o1)]
     (is (= ["root/stall-a1-demo-t-1"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its run")
-    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (get-in t [:seon.task/cause :stall]))
+    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
         "its cause pre-filled with the stall")
+    (is (= {:open [] :prove nil} (get-in t [:seon.task/cause :stall :api]))
+        "and what the api held then: no ask open, no report from the test service yet")
     (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
         "held, for an outside worker, its proofs the boundary conditions")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
