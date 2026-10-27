@@ -268,10 +268,9 @@
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
 (defn tree-id
-  "git's id of the tree at root as it is on disk: the checkout's own index (its stat cache: only a
-  file whose size or mtime moved is read again, 0.2 s against 1.1 s to hash every file; HEAD's tree
-  before a first commit) with every changed and untracked unignored file added, in a copy of its
-  own (the repository's index untouched), less the top-level paths excludes names (default
+  "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
+  changed and untracked unignored file added, in an index of its own (the repository's untouched), less
+  the top-level paths excludes names (default
   :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
   it moves nothing). bin/tree computes the same, which bin/build records for the tree it
   builds (target/seon.tree), so a root can tell whether its binary is built from its source."
@@ -282,9 +281,17 @@
          env {"GIT_INDEX_FILE" (.getPath idx)}
          top (map #(str ":(top)" %) excludes)]
      (try
-       (let [real (java.io.File. ^String (git! {} root ["rev-parse" "--path-format=absolute" "--git-path" "index"] nil))]
-         (cond (.isFile real) (java.nio.file.Files/copy (.toPath real) (.toPath idx) (into-array java.nio.file.CopyOption []))
-               (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil)))
+       ;; that index starts as a copy of the checkout's own (with its mtime, which git's racy-clean check
+       ;; compares) when that is HEAD's tree with no skipped entry: its stat cache then spares reading every
+       ;; file that did not move. A staged change, an assume-unchanged or skip-worktree entry, or a forced
+       ;; ignored file would survive `add -A`, so those read HEAD's tree afresh
+       (let [real (java.io.File. ^String (git! {} root ["rev-parse" "--path-format=absolute" "--git-path" "index"] nil))
+             head? (some? (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))
+             plain? (and head? (.isFile real)
+                         (zero? (:exit (git-run {} root ["diff-index" "--cached" "--quiet" "HEAD"] nil)))
+                         (every? #(str/starts-with? % "H ") (str/split-lines (git! {} root ["ls-files" "-v"] nil))))]
+         (cond plain? (java.nio.file.Files/copy (.toPath real) (.toPath idx) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/COPY_ATTRIBUTES]))
+               head? (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
        (git! env root ["write-tree"] nil)
@@ -338,7 +345,8 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]
   (let [status (str/split-lines (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil))
-        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))]
+        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))
+        _ (when (or (nil? head) (= "(initial)" head)) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
     (if (every? #(str/starts-with? % "# ") status)
       head
       (str head "+" (tree-id dir [])))))
@@ -352,10 +360,13 @@
   :seon.config.agent/test-ticks) :config (the config in force, config-input, and a digest of each
   env-class of files and of each pin the config names (pin-class): each test's digest takes the keys and classes it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
-  {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
+  {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]
+                  [:=> [:cat :string :map :string :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
-  ([root cfg checkout]
-   (let [tree (tree-id root)
+  ([root cfg checkout] (inputs root cfg checkout (tree-id root)))
+  ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
+  ([root cfg checkout tree]
+   (let []
          entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)

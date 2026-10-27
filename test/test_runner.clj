@@ -94,12 +94,13 @@
   per store (two runs never share a checkout, AGENTS section 3). A store past
   :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
   before it is opened, and starts again from this tree. The branch's connection stays open for
-  the process (the db value reads the store); the store's main connection is released."
-  [root store]
+  the process (the db value reads the store); the store's main connection is released. tree: the
+  checkout's tree-id when the caller holds it (the plan computes it once)."
+  ([root store] (program-db root store (fx/tree-id root)))
+  ([root store tree]
   (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
     (sh/sh "rm" "-rf" store))
-  (let [tree (fx/tree-id root)
-        b (tree-branch tree)
+  (let [b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
     (when-not (contains? (set branches) b)
@@ -120,7 +121,7 @@
              (vreset! committed true)
              (finally (when-not @committed (d/delete-branch! conn b))))))
     (d/release conn)
-    @(d/connect (assoc cfg :branch b))))
+    @(d/connect (assoc cfg :branch b)))))
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
@@ -131,8 +132,9 @@
   it: never an empty selection that says OK)."
   [root names store]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
-        db (program-db root store)
-        in (fx/inputs root)
+        tree (fx/tree-id root)
+        db (program-db root store tree)
+        in (fx/inputs root config/config (config/checkout) tree)
         g (program/reach-graph db (:data-refs in))
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
     {:graph g :inputs in
@@ -224,8 +226,7 @@
   (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
-    (let [before (fx/tree-id (System/getProperty "user.dir"))
-          ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
+    (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
@@ -235,9 +236,10 @@
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks))
-          ;; the tree the tests read is the plan's from before the run to after it: an edit
-          ;; during the run (a test reading files reads it) is not what the digests name
-          same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
+          ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
+          ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
+          ;; tree-id per shard, not two)
+          same? (= tree (fx/tree-id (System/getProperty "user.dir")))
           unstored (when same? (proofs/store-verdicts! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
           _ (.mkdirs (io/file ms-dir))
           _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
