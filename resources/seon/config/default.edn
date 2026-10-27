@@ -366,7 +366,7 @@
  ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing; their classes are
  ;; recorded in the inputs and read by no test's digest). The trade: a
  ;; change there in a Jolt or Chez bump is caught by the forks' own suites (bin/check forks) and the
- ;; daily full run (:seon.config.proofs/full-run-at), not by the bump's own prove (owner, 2026-10-27:
+ ;; full run the merge session runs after every pin bump, not by the bump's own prove (owner, 2026-10-27:
  ;; "no test digests the whole tree"). Measured 2026-10-27 over the last 15 Jolt bumps: 122 tests a
  ;; bump (0 on 5 of them, 203 on the 10 that touch async), against 451 on every bump as one pin.
  ;; Provenance: root's task (2026-10-27): pins moved every digest in 3 of the last 12 --merge

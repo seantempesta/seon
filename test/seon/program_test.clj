@@ -579,7 +579,7 @@
     ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
     ;; class it moved 451 tests on every bump. Jolt is keyed by source group (its analyzer and IR,
     ;; deps, nREPL, core.async), each taken by the tests reaching it; its runtime core and Chez, which
-    ;; every form runs on, by none: the forks' suites and the daily full run catch a change there
+    ;; every form runs on, by none: the forks' suites and the full run after a pin bump catch a change there
     (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt
                                              :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async])
         "every submodule and every source group is a class")
