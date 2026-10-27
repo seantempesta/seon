@@ -1034,12 +1034,12 @@
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the
   tree (env-class-readers: the schema resources, system.edn, deps.edn, web/public) or of no
-  checkout file at all (seon.proofs/verdicts: the results directory, by digest), so reaching them
+  checkout file at all, so reaching them
   does not make a test read the tree. A reader not named here counts as reading the tree
   (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
-  (conj (set (keys env-class-readers)) 'seon.proofs/verdicts 'seon.config/baked-schema-forms))
+  (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms))
 
 (def config-key-readers
   "The vars that read a config key named in data rather than in their own code: a form defining

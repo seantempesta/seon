@@ -1,6 +1,9 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
 ;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
 {:seon.config.proofs/prove-main-on-commit [:boolean {:seon.config/unit "boolean" :description "Whether each commit that moves main's program starts a run of main's tests in a prove agent forked from main (seon.prove)."}]
+ :seon.config.proofs/results-port [:int {:min 0 :seon.config/unit "port" :description "The standing root whose main holds every result: bin/test and bin/prove send theirs to its server and read by digest from it; 0: none."}]
+ :seon.config.proofs/unsent-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "Where a run keeps the results no root took, a file a request, until bin/test sends them."}]
+ :seon.config.proofs/fn-noise [:double {:min 0.0 :seon.config/unit "ratio" :description "How far a function's per-call self ticks or bytes must move before main's fact of it is rewritten, or it is called slower."}]
  :seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
  :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the store is removed before it is opened and starts again from the run's tree."}]
  :seon.config.proofs/stall-factor [:int {:min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]

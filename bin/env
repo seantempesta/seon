@@ -46,9 +46,12 @@ export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GEN
 # read from its one line, as bin/ports reads its ports
 JOLT_COMPILER_OPTIONS=${JOLT_COMPILER_OPTIONS:-$(sed -nE 's#^ :seon\.config\.build/jolt-compiler-options "(.*)"$#\1#p' "$ROOT/resources/seon/config/default.edn")}
 export JOLT_COMPILER_OPTIONS
-# Test results by reach digest (:seon.config.source/test-results-dir) are shared the same way:
-# one directory in the main tree (gitignored), the same for every worktree and generation worktree
-export SEON_TEST_RESULTS=${SEON_TEST_RESULTS:-$MAIN_TREE/test-results}
+# Test results by reach digest are facts on the standing root's main: every checkout sends its
+# results to the main tree's root (:seon.config.proofs/results-port) and keeps what none took in
+# one directory of the main tree (:seon.config.proofs/unsent-dir) until it is sent
+MAIN_PORT=$(sed -nE 's#.*:seon\.config\.root/server-port .*[^0-9]([0-9]+)\].*#\1#p' "$MAIN_TREE/config/local.edn" 2>/dev/null | head -1)
+export SEON_RESULTS_PORT=${SEON_RESULTS_PORT:-${MAIN_PORT:-7888}}
+export SEON_UNSENT_DIR=${SEON_UNSENT_DIR:-$MAIN_TREE/target/prove/unsent}
 # The embedding model (bin/build embed, seon.vector): EmbeddingGemma-2 as ggml-org's Q8_0 GGUF, one copy
 # in the main tree's target/cache for every checkout, named by its sha256 (bin/build checks it).
 # :seon.config.vector/model reads SEON_EMBED_MODEL; its file name is the model's id on every vector.

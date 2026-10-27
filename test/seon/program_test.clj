@@ -425,22 +425,27 @@
     (is (= (program/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
         "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
+(defn- run-plan "bin/test's plan of digests against the results the store on conn holds." [digests conn]
+  (proofs/plan nil digests (proofs/stored-results @conn (vec (vals digests))) #{}))
+
+(defn- record-ran!
+  "Record ran ({test result}) on conn as bin/test does, one commit."
+  [conn ran] (proofs/record! (fn [tx] (d/transact conn {:tx-data tx})) @conn {:run {:id "program-test"} :ran ran}))
+
 (deftest a-second-run-with-nothing-changed-runs-nothing
+  (ts/test-branch!
+   (fn [_ conn]
   (let [db (calc-db)
-        dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
-        plan #(proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{})
+        plan #(run-plan digests conn)
         first-plan (plan)
-        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-verdicts! #(fx/write-file {:req %}) dir)))
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (record-ran! conn)))
         second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
     (is (= [] (:run second-plan)) "the second run runs nothing")
     (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
-    (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
-
-(defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
-  (proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{}))
+    (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -452,16 +457,16 @@
     d))
 
 (deftest a-result-recorded-in-one-checkout-is-reused-in-another
+  (ts/test-branch! (fn [_ conn]
   (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
         a (checkout! "a" files)
         b (checkout! "b" files)
-        dir (scratch-dir "shared")
         db (calc-db)
         in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
     (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
-    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
-    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
+    (record-ran! conn (proofs/run-tests! (:run (run-plan da conn)) da (fn [_])))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) conn)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
     (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
@@ -478,7 +483,7 @@
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
-    (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))
+    (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
 
 (deftest a-test-takes-only-the-file-classes-its-reach-reads
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
@@ -714,14 +719,15 @@
         {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
         r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
                (program/reach-digests @conn in)
-               (finally (d/release conn true)))
-        dir (scratch-dir "same-tree")]
+               (finally (d/release conn true)))]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
-    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
-    (is (= [] (:run (run-plan a dir))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))
+    (ts/test-branch!
+     (fn [_ rconn]
+       (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+       (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
 (deftest a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
@@ -810,8 +816,8 @@
     ;; runs (its :seon.config/place keys) is no input; how a test behaves still is
     (is (= (config cfg) (config (assoc cfg :seon.config.web/port 9999 :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
                                        :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
-                                       :seon.config.source/test-results-dir "/x/results")))
-        "a checkout's own ports, main, store, source and results directory are no input")
+                                      )))
+        "a checkout's own ports, main, store and source are no input")
     (is (= (config cfg) (:config (fx/inputs here (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")
     (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))
