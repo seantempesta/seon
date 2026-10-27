@@ -151,6 +151,27 @@
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
+(deftest an-agent-attached-by-one-client-is-refused-to-another
+  ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
+  ;; and ended that run red. An agent attached by a client (bin/mcp stamps each request with its
+  ;; own) answers done, eval and message to that client, or to a request that names its task; any
+  ;; other is refused, naming who holds it, and the run stays open
+  (let [[other-done other-eval other-message own named open]
+        (at/in-agent (fn [{:keys [agent task]}]
+                       [{:op :done :agent agent :client "c2"}
+                        {:op :eval :agent agent :code "(+ 1 2)" :client "c2"}
+                        {:op :message :agent agent :body "hi" :client "c2"}
+                        {:op :eval :agent agent :code "(+ 1 2)" :client "c1"}
+                        {:op :eval :agent agent :code "(+ 2 2)" :client "c2" :task task}
+                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:seon.run/task %)) (seon.task/running @(:conn sys))))")}])
+                     {:client "c1"})]
+    (doseq [a [other-done other-eval other-message]]
+      (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
+      (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
+    (is (= 3 (:value own)) "its own client's eval answers")
+    (is (= 4 (:value named)) "and so does one that names the agent's task")
+    (is (true? (:value open)) "the refused done left the run open")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message

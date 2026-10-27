@@ -249,6 +249,8 @@
  :seon.run/end-ms :int
  :seon.run/branch :keyword
  :seon.run/model :string
+ ;; an outside run's: the client that attached it (seon.server/held), whose requests act on its agent
+ :seon.run/holder :string
  :seon.run/max-turns :int
  ;; how a run ended: the agent's own end, judged, or root's (:dead, :lost, :killed, :refused). Every
  ;; way a run leaves :running writes one, so a run with none is running (its page tile reads it so)
@@ -300,7 +302,7 @@
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
                              [:seon.run/agent {:optional true} :seon.run/agent] [:seon.run/start-ms :seon.run/start-ms]
                              [:seon.run/pid {:optional true} :seon.run/pid] [:seon.run/end-ms {:optional true} :seon.run/end-ms]
-                             [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model]
+                             [:seon.run/branch {:optional true} :seon.run/branch] [:seon.run/model {:optional true} :seon.run/model] [:seon.run/holder {:optional true} :seon.run/holder]
                              [:seon.run/max-turns {:optional true} :seon.run/max-turns]
                              [:seon.run/outcome {:optional true} :seon.run/outcome] [:seon.run/reason {:optional true} :seon.run/reason]
                              [:seon.run/turns {:optional true} :seon.run/turns] [:seon.run/taken {:optional true} :seon.run/taken] [:seon.run/model-calls {:optional true} :seon.run/model-calls]

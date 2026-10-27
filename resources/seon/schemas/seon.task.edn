@@ -49,7 +49,9 @@
  ;; its plan and proofs accumulated along :needs (derived by the reader)
  :seon.task/task [:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]
  ;; the environment a run runs in; desired (the task's) = observed (the run's), or restart
- :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]]
+ :seon.task/env [:map {:closed true} [:branch :keyword] [:model [:maybe :string]] [:max-turns pos-int?]
+                 ;; an outside run's: the client that attached it (seon.server/held)
+                 [:holder {:optional true} :string]]
  :seon.proof/results [:map-of :qualified-symbol :seon.proof/status]
  :seon.run/run [:map {:seon.render/html seon.render.ui/run-row}
                         [:seon.run/id :seon.run/id] [:seon.run/task :seon.task/id]
