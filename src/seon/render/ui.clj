@@ -16,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -1072,21 +1072,23 @@
   prose\"): the prose the agent wrote beside it and its handle (result/e12), which names its value
   wherever the transcript and a printed cut name it; the model reads its content once, in its
   transcript. Opened (:seon.eval/opened: a reader opened it, a fact that reaches the branch by
-  take!), its value is drawn under it. Its <details> carries its handle's anchor (eval-<id>): a
-  handle printed anywhere links here, open or not."
+  take!), its value is drawn under it. Root's evals (a ctx with no agent key) post nothing: each
+  holds its value, which the browser shows when it is opened. Its <details> carries its handle's
+  anchor (eval-<id>): a handle printed anywhere links here, open or not."
   {:seon.render/style "[&>details>summary]:flex [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
         rec (:seon.eval/record e)
-        opened? (:seon.eval/opened e)]
+        opened? (:seon.eval/opened e)
+        k (:seon.agent/key c)]
     [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} opened? (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
-      [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c)
-                 :seon/args {:key (:seon.agent/key c) :eval (:seon.eval/id e)}}
-       (when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
-       [:code (str (get-in rec [:response :handle]))]]
-      (when opened? (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
+      (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
+            (remove nil?)
+            [(when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
+             [:code (str (get-in rec [:response :handle]))]])
+      (when (or opened? (nil? k)) (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
 (defn turn-item
   "A model turn or an outside read of the run (a component over ctx): its header by its schema's
@@ -1246,6 +1248,94 @@
     [:span {:class "text-signal"} "all=>"]
     [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]])
 
+;;; --- root-ctx: root's ctx as components (docs/render.md#components) ---------------------------
+
+(def ^:private side-style
+  "An entry of the agents list: a dot lit while it works, its name linking to its page, its status."
+  "flex shrink-0 items-baseline gap-2 rounded-md bg-base-900 px-2 py-1 lg:bg-transparent lg:px-1 hover:bg-base-850")
+
+(defn root-side
+  "Root's own entry in its agents list (a component over ctx): lit, as root is the process answering
+  the page, linking to root's page."
+  {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_]
+  [:li [:span {:class "text-signal"} "●"] [:a {:href "/" :class "font-semibold text-text-100"} "root"] [:span {:class "text-2xs text-text-500"} "main"]])
+
+(defn agent-side
+  "An agent of root's in its agents list (a component over root's ctx, its :agents member eid): lit
+  while busy or running, its id linking to its page, its status."
+  {:seon.render/style side-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} eid]
+  (let [{:seon.agent/keys [id status]} (relevant :seon.db/agent-fact (get-in c [:agents eid]))
+        on? (contains? #{:busy :running} status)]
+    [:li [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
+     [:a {:href (str "/agent/" (kname id)) :class "font-semibold text-text-100"} (kname id)]
+     [:span {:class "text-2xs text-text-500"} (some-> status name)]]))
+
+(defn root-head
+  "Root's head (a component over its ctx): its boot, its generation and, when it last went quiet,
+  its root causes, by root's own render (`root`)."
+  {:seon.render/style "rounded-md bg-base-900 p-3 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:section (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))])
+
+(defn problems-tile
+  "Main's open problems (a component over the db): seon.problems/health by its render, every class's
+  rows; it runs again when a transaction touches what health read."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [{db :seon.db/db}]
+  [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} (problems/health db))])
+
+(defn runs-tile
+  "Main's runs (a component over the db): how many by status and each running one (runs-of)."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [{db :seon.db/db}]
+  [:section [:h2 "runs"] (render/html {:schema :seon.render/runs} (runs-of db))])
+
+(defn root-ctx
+  "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
+  branch overrides like any render), drawn by the walk as components in its lists: its agents list
+  (c-side: root, then each agent its ctx holds, by entity id), its head (p-head), its conversation
+  (c-rows: its evals, in the order written) and its tiles (p-tiles: main's problems and runs). An
+  agent's page shows the same agents list (seon.render.proc's agent page). It reads the ids of its
+  ctx's agents and evals, so it runs again only when one comes or goes."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:div {:id "root-ctx"}
+   [:ol {:id "c-side"} [#'root-side {}] (for [eid (sort (keys (:agents c)))] [#'agent-side {} eid])]
+   [:div {:id "p-head"} [#'root-head {}]]
+   [:ol {:id "c-rows"} (for [eid (sort (keys (:evals c)))] [#'eval-item {} eid])]
+   [:aside {:id "p-tiles"} [#'problems-tile {}] [#'runs-tile {}]]])
+
+(defn page-chrome
+  "A page in root's chrome (root's, an agent's): the top bar, then the units its walks drew, each
+  placed in the list it was drawn in ({:id :container :rev :html}: the agents list, the head, the
+  task's list, the conversation, the tiles), and its caption and input. Each unit's input is its
+  revision, so the render proc sends one only when its output changed, and a new one into its list
+  where its walk placed it (an append). opts {:units :view :input :caption}; id, the page's focus."
+  {:malli/schema [:=> [:cat :map :keyword] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
+  [{:keys [units view input caption]} id]
+  (let [in (fn [sel] (filterv #(= sel (:container %)) units))
+        unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
+    {:seon.render/html
+     [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
+      (top-bar id false)
+      [:div {:class "grid gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
+       [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
+        [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
+        [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
+       [:main {:class "flex min-w-0 flex-col gap-3"}
+        [:div {:id "p-head"} (for [u (in "#p-head")] (slot (:id u)))]
+        (slot "p-caption")
+        [:div {:id "p-task" :class "flex flex-col gap-2"} (for [u (in "#p-task")] (slot (:id u)))]
+        [:ol {:id "c-rows" :class "flex flex-col gap-1" :data-view view} (for [u (in "#c-rows")] (slot (:id u)))]
+        (when input (slot "p-input"))]
+       [:aside {:id "p-tiles" :class "grid content-start gap-2 lg:sticky lg:top-14 lg:max-h-[calc(100vh-4rem)] lg:overflow-y-auto"} (for [u (in "#p-tiles")] (slot (:id u)))]]]
+     :seon.render/units
+     (vec (concat [{:id "p-caption" :input {:caption caption} :html (h/html [:p {:id "p-caption" :class "text-2xs text-text-500"} (or caption "")])}]
+                  (when input [{:id "p-input" :input (:value input) :schema (:schema input)}])
+                  (map unit units)))}))
+
 (defn page
   "Page walk w (seon.render/walk) laid out: the entity as the main pane, the input at the top, its
   list (the units whose schema shows them :as :row) newest first, only the newest opts :shown rows
@@ -1299,7 +1389,7 @@
       [:header {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model was sent"))]
        [:p {:class "text-text-400"} (if context
-                                      "Its context as the render proc holds it now: the system's value printed, the text /context.txt serves, rendered again when the system changes."
+                                      "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "Newest first: each turn, what it added to the request; its whole request opens on demand.")]]
       (when context (slot (:id context)))
       [:ol {:id "d-turns" :class "flex flex-col gap-3"} (for [u turns] (slot (:id u)))]

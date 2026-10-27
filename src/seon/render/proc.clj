@@ -27,8 +27,8 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.problems :as problems] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.render.system :as system] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
-            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.db] [datahike.index.interface]
+            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.context :as context]))
 
 (defn- event-cap "Events the stream keeps (:seon.config.render.list/stream)." {:malli/schema [:=> [:cat] pos-int?]} [] (config/value :seon.config.render.list/stream))
@@ -315,8 +315,12 @@
                 (cond bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
-        root (:db/id (d/entity db [:seon.root/id :root]))]
-    (ui/render-ctx-chrome {:units (or units []) :view (ui/view-param view) :head [0 eid]
+        ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
+        sides (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units))
+        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/pid :seon.agent/description] eid)
+        head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
+                   :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
+    (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when-not own?
                                  (str "drawn by root from its branch with main's renders: "
@@ -326,12 +330,47 @@
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id)
-                                      :held (d/q '[:find ?id . :in $ ?a :where [?r :seon.run/agent ?a] [?r :seon.run/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}
-                      ;; root, then its agents: page chrome, read on main
-                      :sides (vec (when root (cons {:eid root :db 0}
-                                                   (for [nd (:seon.render/nodes (render/walk [db] root)) :when (= :seon.db/agent-fact (:seon.render/schema nd))]
-                                                     {:eid (:seon.render/eid nd) :db 0}))))}
+                                      :held (d/q '[:find ?id . :in $ ?a :where [?r :seon.run/agent ?a] [?r :seon.run/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      (:seon.agent/id e))))
+
+(defn- root-walk
+  "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
+  held in a reactive atom its walk draws by root's layout (:seon.render/root-ctx), built at main's
+  first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
+  framed): the walk draws the components their change reached, nothing else. Every page whose
+  agents list it shows (root's, each agent's) is dirty when one of its units moved."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
+  [st db held]
+  (let [root (:db/id (d/entity db [:seon.root/id :root]))
+        rw (:root-walk st)
+        side (fn [w] (into {} (for [u (render/placed-units w) :when (= "#c-side" (:container u))] [(:id u) (:rev u)])))]
+    (cond
+      (nil? root) st
+      (nil? rw)
+      (let [c (ctx/build db root :main) a (ratom/atom (:tree c)) at (volatile! db)
+            w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/declared-var :seon.render/root-ctx) {}])]
+        (render/frame! w nil)
+        (-> (assoc st :root-walk {:w w :a a :c c :at at})
+            (update :dirty (fnil into #{}) (keys (:views st)))))
+      (nil? held) st
+      :else
+      (let [{:keys [w a c at]} rw
+            c' (ctx/advance c held db :main)
+            before (side w)]
+        (vreset! at db)
+        (reset! a (:tree c'))
+        (render/frame! w (ctx/moved held db nil))
+        (cond-> (assoc-in st [:root-walk :c] c')
+          true (update :dirty (fnil conj #{}) :root)
+          (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
+
+(defn- root-page
+  "Root's page: its walk's units (root-walk) in root's chrome, its input at the top; nil until main
+  is read."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [st]
+  (when-let [{:keys [w]} (:root-walk st)]
+    (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :input {:schema :seon.render/root-input :value {}}} :root)))
 
 (defn- page-value
   "View's page: the entity it names walked on main and, for an agent, its branch as this proc last
@@ -345,6 +384,7 @@
   (let [db (:main-db st)
         eid (when db (location db view))]
     (cond
+     (= :root view) (root-page st)
      (and eid (vector? view)) (debug-value st view)
      (and eid (agent-of db view)) (agent-view st view db eid)
      (and db (nil? eid))
@@ -512,7 +552,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (main-info st db)
+        (cond-> (root-walk (main-info st db) db held)
           (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
                           (invalidate (comps-touched st :main moved))))))))
 
@@ -644,10 +684,13 @@
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
           sys (system-value st t0 now-ms)
-          ;; root's context: the system as one value, printed once, also a unit of root's layout
-          ctx (let [r (print/print-value (system/system-data sys) {:budget (config/value :seon.config.render/root-context-budget)})]
-                (or (:text r) (:seon.error/message r)))
-          sys (assoc sys :context {:text ctx :tokens (select/estimate ctx)})
+          ;; what root reads: its page, the render of its ctx, each component's hiccup by its id (as an
+          ;; agent's screen is its page), printed once at root's context budget
+          ctx (when-let [w (:w (:root-walk st))]
+                (let [r (print/print-value (apply array-map (mapcat #(mapcat identity (render/placed-hiccup w %)) ["#c-side" "#p-head" "#c-rows" "#p-tiles"]))
+                                           {:budget (config/value :seon.config.render/root-context-budget)})]
+                  (or (:text r) (:seon.error/message r))))
+          sys (cond-> sys ctx (assoc :context {:text ctx :tokens (select/estimate ctx)}))
           st (assoc st :context (:context sys))
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
           st (assoc (ask-parts st o) :last-walked [])
