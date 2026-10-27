@@ -56,7 +56,17 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [{:keys [input]} (turn/input)]
-    (context/turn-state (agent/db) (current) input)
+    (let [t (current)
+          ;; each proof's result at its reach digest now, wherever it was recorded and whichever call
+          ;; measured it (a named prove, a bare one, a turn's, root's judge)
+          stored (agent/stored-statuses (:proofs (:seon.task/accumulated t)))
+          known (set (keys stored))]
+      (context/turn-state (agent/db) t
+                          (-> input
+                              (update :results merge stored)
+                              ;; the done rule's reasons about those proofs as the turn saw them, replaced by what they are now
+                              (update :reasons (fn [rs] (into (vec (remove #(and (#{:proof-unknown :proof-red} (:reason %)) (known (:symbol %))) rs))
+                                                              (for [[p s] (sort-by (comp str key) stored) :when (not= :pass s)] {:reason :proof-red :symbol p})))))))
     (contract/error :seon.turn/not-observed #'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
 
 (defn related
