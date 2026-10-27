@@ -220,19 +220,19 @@
                                  (qualified-symbol? x) (vswap! acc update :quoted conj x)
                                  ;; a quoted collection: its names (one quoted-names) and its keywords
                                  ;; (a request it sends, {:op k}, names its op: :ops)
-                                 (coll? x) (vswap! acc #(-> % (update :quoted into (quoted-names x))
-                                                            (update :ops into (keep (fn [m] (when (and (map? m) (keyword? (:op m))) (:op m)))) (tree-seq coll? seq x))
-                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))
+                                 (coll? x) (vswap! acc #(reduce (fn [a v] (cond (qualified-keyword? v) (update a :keywords conj v)
+                                                                                 (and (map? v) (keyword? (:op v))) (update a :ops conj (:op v))
+                                                                                 :else a))
+                                                                (update % :quoted into (quoted-names x)) (tree-seq coll? seq x)))
                                  ;; a string that opens a form is code sent to a REPL (an agent's eval, a
                                  ;; root's): read by the one reader, its delimiters repaired (a str of
                                  ;; fragments), its names are data as a quoted form's are
-                                 (and (string? x) (str/starts-with? (str/triml x) "("))
+                                 (and (string? x) (str/starts-with? x "("))
                                  (let [fs (reader/read-text (:text (reader/forgive x)) 'user)]
                                    (vswap! acc #(-> % (update :quoted into (quoted-names fs))
                                                     (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
          ;; a map built at run time names its op when its :op is a constant keyword ({:op :eval :code (str ...)})
-         ;; (the key read first: a pair's value is read only under :op)
-         :map (when-some [k (some (fn [[kn vn]] (when (= :op (datum kn)) (let [v (datum vn)] (when (keyword? v) v)))) (:pairs n))]
+         :map (when-some [k (some (fn [[kn vn]] (when (and (= :const (:op kn)) (= :op (:val kn))) (let [v (datum vn)] (when (keyword? v) v)))) (:pairs n))]
                 (vswap! acc update :ops conj k))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (let [f (invoked n)]

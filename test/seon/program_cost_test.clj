@@ -319,8 +319,7 @@
      ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4
      ;; calls before
      :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
-     ;; 8 calls: the defn's metadata map ({:arglists ...}) is one :map node, its key read once for an :op
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 8.0}
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
      :sizes [100 300 1000 10000]}))
 
 (defn- keyword-form
@@ -356,8 +355,7 @@
      ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
      ;; predicate was 989: one call an element)
      :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
-     ;; 8 calls: the defn's metadata map, as a-scalar-constant-costs-no-walk
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 8.0}
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
      :sizes [100 300 1000 10000]}))
 
 (defn account-of
