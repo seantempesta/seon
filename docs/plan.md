@@ -2,46 +2,47 @@
 
 What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents doing real work, measured as turns to green); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history (`notes/merge-log.md` names every merge and how it was verified).
 
-## Now (2026-10-27, morning)
+## Now (2026-10-27, evening)
 
-Pins (docs/forks.md): Chez fa6a4c73; Jolt 07d9655d; Datahike cc614f4e; LMDB 15420ce; http-client e866277d. Paid model runs: $30 approved by the owner, spent only after a free audit of each request's context finds none of its known problems; two audits ran and neither was clean, so nothing is spent. The sessions that did the night's work have ended; their state is in the task files, notes/root-handoff-2026-10-27.md and notes/session-state-2026-10-27/.
+Pins (docs/forks.md): Jolt 260a1667 on its way (forked children run none of the parent's hooks or fibers); Datahike 24e7ecda; konserve 3d7ff89. Paid model runs: none spent.
 
-**Where it stands.** Main is green under `bin/prove --merge` (MERGE OK at c2336a6a75: every test and check step, process tests included; nothing left out), with one known intermittent red, merge-cost's three-way proof (a 96-byte runtime variance; task held), which the flaky rule now marks :flaky. Main goes first through one lock. After a merge, restart root with `bin/update` (never `bin/root stop/start`) until jolt/the-source-tree-follows-main merges: the standing root imports main's program from .worktrees/merges, which only bin/update moves.
+**Where it stands.** Main takes batches continuously (docs/merging.md): a branch proves its own tip, the merge session merges every ready branch and runs one `bin/prove --merge` per batch, and nothing waits on a lock. Main is not yet green: each red has an owning session, named in the last merge-log reading. Test digests now cover only what a test reaches, so a one-function edit reruns tens of tests, not hundreds; the daily full run (cron, `bin/test --all`) is the net for what reach misses.
 
-**The direction.** In this order:
-1. **Use what's built, not only test it** (owner, 2026-10-27: "I want to actually use all the stuff we've been building so make sure it's all working and don't just report success because some tests passed"): main's program current on the standing root; root's and an agent's page and debug panel live in the browser (3b-root); an outside agent attached to a request and worked by hand, every wrong or confusing answer fixed.
-2. **Context for about 20 turns:** the third free audit once tests-reaching and 3b-root are on main; then paid runs.
-3. **One merge system, from what Seon already has** (owner: "don't throw out the baby with the bathwater"): Seon merges by definitions; root's repair playbook from its REPL; a work task merges itself through the one gate; Claude worktree branches come through the store only after the end-to-end experiment passes.
+**What the day found.** A forked child ran its parent's shutdown hooks and could run its fibers, which explains the day's hangs (replies swallowed, agents parked in `recv!`) and is the likely cause of a collector crash in test children; fixed in Jolt, verifying. The automatic run of main's tests on every program commit queued every `(prove)` behind it; it is off by default. The first work done entirely through the server (step 0.7) and a blind run of a task from its context alone both worked their tasks through `seon_eval` in 10-14 evals and were held only by the harness: proofs proved by name counting as unknown, a dead unrelated test making a run's proofs unknown, and cost proofs measuring an agent's own overhead.
+
+**The direction.** The harness findings first (they block 0.7's merge), then the task render the blind agent measured, then relevance in search and in the render's related part.
 
 ## In flight
 
-Every Claude session that worked last night has ended; these are their branches, each with its task entry naming the next step.
+Each Claude session owns an area and takes its next task itself (AGENTS §3); root's list of sessions and their current work is the app's linked sessions.
 
-| Branch | State | Next |
-|---|---|---|
-| jolt/the-source-tree-follows-main | approved, not built | e2e proof red first (task seon.fx/the-source-tree-follows-main) |
-| jolt/every-page-is-its-parts | 3b-root in progress | finish per task seon.render/every-page-is-its-parts; browser-check every page |
-| (task seon.root/root-repairs-a-failed-merge-from-its-repl) | merged as a task | stage the four failures on a worktree root and write the playbook into docs/merging.md |
-| jolt/the-request-is-the-page-and-its-diffs | build 4, proofs red | after 3b-root |
+| Area | Next |
+|---|---|
+| test service as an agent sees it | names-proved results count; a short prove answer |
+| agent-root asks; forks | every ask answered; children run only their own thunk |
+| Jolt and Chez | the timer-then-fork deadlock; the collector crash, under the heap verifier |
+| renders | Phase B (an eval's tests never block the loop), then `observe` removed, then the blind agent's render fixes |
+| the outside REPL | MCP answers are the agent's own turn messages (one producer) |
+| relevance | search's `:relevance`/`:min`; a cross-encoder benchmarked on the judged labels |
+| tests as facts | results on the standing root through its one writer; per-function cost from every run |
+| step 0.7 | the held print fix's `seon_done` retried once the harness fixes land |
 
 ## Waiting on the owner
 
-The rulings root holds for the owner.
-
-- Build 3's eval shape: root took "prose plus each eval's handle, the value drawn when opened" as the owner's meaning of "not show the same eval data"; confirm or correct.
+Nothing.
 
 ## THE PLAN
 
 The destination is **E: a request worked as one whole task by a Seon agent, end to end, measured as turns to green.** In order:
 
 0. **All work inside Seon; worktrees retired** (owner, 2026-10-27: "The goal is to stop using the worktrees and to do all work within seon itself"). Claude sessions work as outside agents (seon_attach, seon_eval at their branch's REPL, seon_done), merged by Seon's one gate and written back by root. The steps that move it forward, in order, each a task with its proofs:
-   1. **Main follows the checkout** (seon.fx/the-source-tree-follows-main, approved): the standing root's program is never stale again, and bin/update's step 2 goes.
-   2. **A merge's write-back is never lost** (seon.root/root-repairs-a-failed-merge-from-its-repl, gaps 1-2): a failed write-back is a root cause with a retry (my.root/write-back!), and a worktree root never writes the shared merges ref.
+   1. **Main follows the checkout** (merged).
+   2. (merged) **A merge's write-back is never lost** (seon.root/root-repairs-a-failed-merge-from-its-repl, gaps 1-2): a failed write-back is a root cause with a retry (my.root/write-back!), and a worktree root never writes the shared merges ref.
    3. **An outside agent is a first-class worker:** attach no longer leaves the task's model "outside" for good (gap 5); my.root/hold! takes a running run back (gap 6); a merge never stays :behind forever, and :behind reruns are bounded (gaps 3-4); a behind branch merges main before it is judged (gap 7).
-   4. **The gate is cheap:** results reused across bin/test and the root's judge (today 0 of 917, because :env digests the whole config in force; seon.merge/an-outside-branch-hands-back-through-the-store), so a merge reruns only what it moved.
+   4. (merged: digests by reach, no whole-tree inputs; the daily full run is the net) **The gate is cheap:** results reused across bin/test and the root's judge (today 0 of 917, because :env digests the whole config in force; seon.merge/an-outside-branch-hands-back-through-the-store), so a merge reruns only what it moved.
    5. **The tools an agent needs at the REPL are there:** tests-reaching merged, the root-repair playbook written into docs/merging.md with runnable forms, and help that names every form an outside agent uses.
-   6. **Watchable:** 3b-root finished, so root's page and an agent's page and debug panel show the work live.
-   7. **The first real piece of work done entirely through the server** on the standing root by a Claude session: one small src change from the task files, attached, worked at its branch's REPL, merged by Seon, written back. Every place it needed git, a worktree or a workaround becomes a task.
+   6. (merged) **Watchable:** 3b-root finished, so root's page and an agent's page and debug panel show the work live.
+   7. (in progress: worked twice through `seon_eval`, held by the harness) **The first real piece of work done entirely through the server** on the standing root by a Claude session: one small src change from the task files, attached, worked at its branch's REPL, merged by Seon, written back. Every place it needed git, a worktree or a workaround becomes a task.
    8. **From then on, new work starts as a Seon task worked through the server;** a worktree only for what the store doesn't hold yet (docs/, bin/, deps.edn, pins, native code), each such case a task to bring it inside: docs and task files are already data in the store, so their write-back comes first.
 
 1. **No hang goes unseen** (mostly done): every wait ends on its peer's exit or answer; a stall is a fact with its evidence and root's task; the fiber dump names any wait; flaky results are kept and shown. Left: one process mode, the fiber dump in a private wait.

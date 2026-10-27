@@ -94,12 +94,13 @@
   per store (two runs never share a checkout, AGENTS section 3). A store past
   :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
   before it is opened, and starts again from this tree. The branch's connection stays open for
-  the process (the db value reads the store); the store's main connection is released."
-  [root store]
+  the process (the db value reads the store); the store's main connection is released. tree: the
+  checkout's tree-id when the caller holds it (the plan computes it once)."
+  ([root store] (program-db root store (fx/tree-id root)))
+  ([root store tree]
   (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
     (sh/sh "rm" "-rf" store))
-  (let [tree (fx/tree-id root)
-        b (tree-branch tree)
+  (let [b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
     (when-not (contains? (set branches) b)
@@ -120,7 +121,7 @@
              (vreset! committed true)
              (finally (when-not @committed (d/delete-branch! conn b))))))
     (d/release conn)
-    @(d/connect (assoc cfg :branch b))))
+    @(d/connect (assoc cfg :branch b)))))
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
@@ -131,8 +132,9 @@
   it: never an empty selection that says OK)."
   [root names store]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
-        db (program-db root store)
-        in (fx/inputs root)
+        tree (fx/tree-id root)
+        db (program-db root store tree)
+        in (fx/inputs root config/config (config/checkout) tree)
         g (program/reach-graph db (:data-refs in))
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
     {:graph g :inputs in
@@ -289,8 +291,7 @@
   (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
-    (let [before (fx/tree-id (System/getProperty "user.dir"))
-          ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
+    (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           reports (volatile! [])
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
@@ -307,10 +308,11 @@
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks))
-          ;; the tree the tests read is the plan's from before the run to after it: an edit
-          ;; during the run (a test reading files reads it) is not what the digests name
-          same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
-          ;; one commit of the shard's results, their failures and each test's function costs
+          ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
+          ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
+          ;; tree-id per shard, not two)
+          same? (= tree (fx/tree-id (System/getProperty "user.dir")))
+          ;; one request of the shard's results, their failures and each test's function costs
           unstored (when same?
                      (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} ran (proofs/failures {:reports @reports})))
           _ (.mkdirs (io/file ms-dir))
@@ -324,41 +326,31 @@
 
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
-  tests of names (or all) and the bin/check steps with no green at their digest
-  (seon.proofs/plan; all? true every one), less, when nothing is named, the ones that reach a
-  process (seon.proofs/left-out). all? :merge is a merge's verification (bin/prove --merge): every key with
-  no green at its digest, the ones that reach a process too, so nothing is left out and none is
-  named by hand. Its program read from the kept store at store (program-db). Answers
-  {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
-  :missing :inputs}."
+  program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
+  (the policy a root's service shares). Answers its plan."
   [root what all? names store]
-  (let [{:keys [graph inputs digests process binary no-test]} (tests-of root names store)
-        tests? (not= what "checks") checks? (not= what "tests")
-        ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
-        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
-        ;; the health step's base: the tree this checkout's caused problems are read against
-        base (some->> (fx/base-commit root) (fx/tree-of root))
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
-        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
-        named? (or (true? all?) (seq names))
-        merge? (= :merge all?)
-        all-cand (merge (when tests? digests) steps)
-        cand (apply dissoc all-cand (proofs/left-out (vec (keys all-cand)) process (boolean (or named? merge?)) #{}))
-        ;; the results main holds at cand's digests, from the standing root (none reachable: none, said)
-        asked (ask-root {:op :results :digests (vec (distinct (vals cand)))})
-        ;; a green is reused and a flaky judged red; a red alone runs again, so a red is never
-        ;; reported as if it passed (bin/test's run ends on what it ran)
-        found (if (:results asked) (into {} (filter (fn [[_ r]] (or (proofs/green? r) (:flaky r)))) (:results asked))
-                  (do (println (str "prove: no results read from the standing root (port " (config/value :seon.config.proofs/results-port) "): "
-                                    (pr-str (or (:error asked) (:seon.error/message asked))) "; nothing is reused"))
-                      {}))
-        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
-        {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
-     ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
-     :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
-     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
-     :digests digests :steps steps :missing missing :inputs inputs}))
+  (proofs/plan-of (tests-of root names store) what all? names
+                  (some->> (fx/base-commit root) (fx/tree-of root))
+                  ;; the results main holds at the candidates' digests, from the standing root (none
+                  ;; reachable: none, said)
+                  (fn [digests]
+                    (let [asked (ask-root {:op :results :digests digests})]
+                      (or (:results asked)
+                          (do (println (str "prove: no results read from the standing root (port " (config/value :seon.config.proofs/results-port) "): "
+                                            (pr-str (or (:error asked) (:seon.error/message asked))) "; nothing is reused"))
+                              {}))))))
+
+(defn- prune-runs!
+  "Remove the oldest run directories beside out (target/prove/<timestamp>-<pid>: the names sort by
+  time) past :seon.config.proofs/runs-kept; out's own, the run starting, always stays. Answers nil."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [out]
+  (let [own (io/file out)
+        runs (some->> (.getParentFile own) .listFiles
+                      (filter #(and (.isDirectory ^java.io.File %) (re-matches #"\d{8}T\d{6}-\d+" (.getName ^java.io.File %))))
+                      (sort-by #(.getName ^java.io.File %)) reverse)]
+    (doseq [^java.io.File d (drop (config/value :seon.config.proofs/runs-kept) runs) :when (not= d own)]
+      (sh/sh "rm" "-rf" (.getPath d)))))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -376,7 +368,7 @@
         unsent (send-unsent!)
         _ (when (pos? unsent) (println (str "prove: " unsent " runs' results still unsent in " (config/value :seon.config.proofs/unsent-dir))))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
@@ -456,6 +448,7 @@
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
+                   (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))

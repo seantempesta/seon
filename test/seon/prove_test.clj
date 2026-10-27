@@ -49,7 +49,7 @@
   ;; task seon.proofs/main-is-proved-in-a-fork: the writer's commit notice records main's t and, with
   ;; :seon.config.proofs/prove-main-on-commit (off by default: the run of all of main's tests dies
   ;; in its child), a commit that moves the program starts a run of main (the process test below,
-  ;; main-is-proved-at-each-program-commit-...). Off, neither a data commit nor a program commit
+  ;; main-is-proved-at-boot-with-the-config-on-nobody-asking). Off, neither a data commit nor a program commit
   ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
@@ -62,6 +62,18 @@
       (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
       (is (= [7] (waiters-answered all)) "and is answered once, at its end")
       (is (= 1 (count (asks all :write))) "its results written once, as facts on main"))))
+
+(deftest an-answer-whose-child-died-is-never-remembered
+  ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
+  ;; of its key from memory, so the held task's next run (seon_done again, same branch, same
+  ;; program) got the same death and never ran its proof. A death is no verdict: the next ask runs
+  (let [died {:pass 0 :fail 0 :error 1 :reports [{:type :error :var "#'a.b-test/t" :exit {:exit 1} :message "test process died"}] :digests {} :ms 5}
+        [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5)])
+        [st all] (run-through st outs died)
+        _ (is (= [1] (waiters-answered all)) "its waiter is answered the death")
+        [_ o] (feed st [(req 2 :main 5)])]
+    (is (empty? (waiters-answered o)) "asked again: not answered from memory")
+    (is (= 1 (count (asks o :spawn))) "it runs again")))
 
 (deftest a-run-is-keyed-by-what-it-reads
   ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
@@ -365,3 +377,23 @@
       (testing "a message that changes nothing it holds reports nothing"
         (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
           (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
+
+(deftest two-runs-on-one-checkout-each-end-with-their-own-result
+  ;; two bin/prove runs at once on one checkout wrote the same target/prove (shard files, logs):
+  ;; one run's start removed the other's shards and a plain run destroyed a --merge run's logs.
+  ;; Each run writes under a directory of its own, named on its first line, and each ends with
+  ;; its own complete log and plan
+  (let [run (fn [] (clojure.java.shell/sh "bin/prove" "--tests" "seon.step-test"))
+        pa (promise) pb (promise)
+        _ (doto (Thread. #(deliver pa (run))) .start)
+        _ (doto (Thread. #(deliver pb (run))) .start)
+        rs [@pa @pb]
+        dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
+    (doseq [r rs]
+      (is (zero? (:exit r)) (str (:out r) (:err r)))
+      (is (some? (dir r)) "a run says where its logs are")
+      (is (clojure.string/includes? (:out r) "PROVE OK")))
+    (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
+    (doseq [r rs :let [d (dir r)]]
+      (is (clojure.string/includes? (slurp (str d "/prove.log")) "PROVE OK") (str "its own complete log: " d))
+      (is (.isFile (java.io.File. (str d "/tests.edn"))) (str "and its own plan: " d)))))

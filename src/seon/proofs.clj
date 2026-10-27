@@ -8,7 +8,7 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
             [clojure.edn :as edn] [datahike.api :as d] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -32,15 +32,21 @@
 
 (defn results
   "{test-symbol status} of a test run: :error or :fail when any assertion of the test was,
-  else :pass. A test with no assertion has no entry (a proof missing here is :none)."
+  else :pass. A test with no assertion has no entry (a proof missing here is :none), nor has a
+  test the run's child died in (a report with its :exit, seon.agent/test-run-answer): a death is
+  no verdict, so a proof it took is unknown and a test the change never reached is nothing to
+  the judge."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] :seon.proof/results]}
   [test-run]
-  (reduce (fn [acc {:keys [type var]}]
-            (if-let [t (test-symbol var)]
-              (let [rank {:pass 0 :fail 1 :error 2}]
-                (update acc t #(if (and % (>= (rank %) (rank type))) % type)))
-              acc))
-          {} (:reports test-run)))
+  (let [died (into #{} (keep #(when (:exit %) (test-symbol (:var %)))) (:reports test-run))]
+    (reduce (fn [acc {:keys [type var]}]
+              (if-let [t (test-symbol var)]
+                (if (died t)
+                  acc
+                  (let [rank {:pass 0 :fail 1 :error 2}]
+                    (update acc t #(if (and % (>= (rank %) (rank type))) % type))))
+                acc))
+            {} (:reports test-run))))
 
 (defn red-reports
   "The failing assertions of the test run for the tests in `tests`, as data for the context."
@@ -387,6 +393,40 @@
     {:selected selected
      :run (filterv #(not (found (cand %))) selected)
      :reused (into {} (for [[k dg] cand :let [r (found dg)] :when r] [k r]))}))
+
+(defn plan-of
+  "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
+  steps with no green at their digest (plan), less, when nothing is named, the ones that reach a
+  process (left-out). reach is the program's, {:graph :inputs :digests :process :binary :no-test}
+  (seon.program/reach-graph and graph-index over the checkout's program facts: the caller's, a
+  root's or the runner's own); what is tests, checks or both; all? true runs every key, :merge
+  is a merge's verification (every key with no green at its digest, the ones that reach a
+  process too, so nothing is left out and none named by hand); results-at, a function of the
+  candidates' digests answering the results held at them ({digest result}: the caller's read, from
+  the results root's main); base the tree this checkout's caused problems are read against (nil: none,
+  the health step is missing). Answers {:run-tests :run-steps :reused :cand :process :binary
+  :no-test :flaky :left :digests :steps :missing :inputs}."
+  {:malli/schema [:=> [:cat :map [:enum "tests" "checks" "both"] [:or :boolean [:= :merge]] [:maybe [:sequential :any]] [:maybe :string] :seon.host/fn] :map]}
+  [{:keys [graph inputs digests process binary no-test]} what all? names base results-at]
+  (let [tests? (not= what "checks") checks? (not= what "tests")
+        ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
+        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) check-steps)))
+        {steps :digests missing :missing} (when checks? (step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
+        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
+        named? (or (true? all?) (seq names))
+        merge? (= :merge all?)
+        all-cand (merge (when tests? digests) steps)
+        cand (apply dissoc all-cand (left-out (vec (keys all-cand)) process (boolean (or named? merge?)) #{}))
+        ;; a green is reused and a flaky judged red; a red alone runs again, so a red is never
+        ;; reported as if it passed (a run ends on what it ran)
+        found (into {} (filter (fn [[_ r]] (or (green? r) (:flaky r)))) (results-at (vec (distinct (vals cand)))))
+        {:keys [run reused]} (plan nil cand (if (true? all?) {} found) #{})
+        {run-steps true run-tests false} (group-by string? run)]
+    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
+     ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
+     :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
+     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
+     :digests digests :steps steps :missing missing :inputs inputs}))
 
 (def ^:private report
   "clojure.test's own report as this namespace loads (no binding in force), so a run nested in

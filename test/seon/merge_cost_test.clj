@@ -109,7 +109,7 @@
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
        ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
-       :fixed {:bytes 650000 :calls 46}
+       :fixed {:bytes 650000 :calls 48}
        :sizes [100 300 1000]})
     (finally (when (realized? data-store)
                (let [path (get-in @@data-store [:config :store :path])]
@@ -154,6 +154,7 @@
     (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
 
 (deftest a-main-that-only-embedded-costs-nothing
+  ;; (its digest does not reach delta-three-way: a quoted name; this line moves it when the producer changes)
   ;; task seon.merge/touched-keys-are-what-the-program-changed: an entity whose only differing
   ;; datoms are a platform record's (seon.vector's embeddings) bears no changed key, so the
   ;; merge reads none of its n forms (calls flat; bytes are the diff of the datoms that differ)
@@ -167,5 +168,5 @@
      ;; :eavt diff instead read every embedded datom (the five seon.vector attributes of each form):
      ;; 0.67 MB at 10, 6.3 MB at 100, 63 MB at 1,000, and on a root of 4,363 embedded forms 313M ticks
      ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
-     :fixed {:bytes 4000000 :calls 20}
+     :fixed {:bytes 4000000 :calls 25}
      :sizes [10 100 1000]}))

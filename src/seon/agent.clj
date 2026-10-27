@@ -24,6 +24,7 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
+;; :pages (seon.turn/context-block: {run {commit page}}, the newest page it drew, which the next read's diff takes its earlier page from: seon.context/world)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
@@ -778,7 +779,7 @@
   "Fork this agent to run tests in a child (run-tests-here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
-  :pid, :exit}, or the fork's refusal. forked is told the child's pid; each test as it starts goes
+  :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names)."
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn] [:or :map :seon.test/fork-refused]]}
   [plan ticks tests forked]

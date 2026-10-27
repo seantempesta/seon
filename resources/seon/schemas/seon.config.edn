@@ -57,6 +57,7 @@
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]
+  [:seon.config.merge/max-behind :seon.config.merge/max-behind]
   [:seon.config.merge/max-merge-turns :seon.config.merge/max-merge-turns]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
@@ -75,6 +76,7 @@
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/runs-kept :seon.config.proofs/runs-kept]
   [:seon.config.proofs/prove-main-on-commit :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]

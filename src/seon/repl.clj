@@ -51,6 +51,18 @@
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
+(defn- equip-ns!
+  "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
+  agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
+  each is free and clojure.repl holds it (an agent's process interns source and pst there, seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its own,
+  and left). Answers ns."
+  {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
+  [ns]
+  (let [held (ns-publics (find-ns 'clojure.repl))
+        free (vec (for [s '[source apropos dir pst doc find-doc] :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
+    (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
+    ns))
+
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
   under seon.intr/run, in the request's \"ns\", else the agent's own. Answers each form,
@@ -103,7 +115,7 @@
             (when (= tag :ret) (keep-source! v (:repl/src common)))
             (if (= tag :ret)
               (do (reply (merge common {:repl/value v :tag :ret}))
-                  (recur ns' end))
+                  (recur (equip-ns! ns') end))
               (do (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])}))
                   (swap! agent/state assoc :ns ns)

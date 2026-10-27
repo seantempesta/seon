@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
 
 (defn read-forms
@@ -388,6 +388,18 @@
                                      [p (or (texts p) (file-text db d))]))
                           [] read))))]
     (program-tx db read changed (set (filter schema-resource? (keys changed))))))
+
+(defn tx-of
+  "The facts that bring db's program up to date with files ({relative path text}): refresh-tx of them
+  when changed? (they are the files that changed), else replace-tx of them (they are the tree). A
+  file the running image cannot analyze (a form names a var the image holds as private or not at all)
+  answers :seon.source/unanalyzable, its message the analyzer's, never a throw: root's watcher goes on
+  and the next batch tries again (docs/failure-points.md)."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] :boolean] [:or :seon.db/tx-data :map]]}
+  [db files changed?]
+  (try ((if changed? refresh-tx replace-tx) db files)
+       (catch Throwable e
+         (contract/error :seon.source/unanalyzable #'seon.source/tx-of (step/error-msg e) {:files (vec (sort (keys files)))}))))
 
 ;; ---- a schema resource, entry by entry (v1 seon.cluster.source: same-value?, relaid,
 ;; schema-entry-edit, schema-file-text; rewrite-clj keeps every node it is not told to change)

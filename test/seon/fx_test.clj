@@ -161,4 +161,4 @@
         "a run whose plan never ran says nothing of any test")))
 
 (deftest a-merges-deferred-tests-command
-    (is (= ["nice" "-n" "15" "bin/prove" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test]))))
+    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o"))))

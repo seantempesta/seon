@@ -46,10 +46,13 @@
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
+  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
+           ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
+           ;; reasons below may be only that (a proof unknown, a regression); the fix comes first
+           (when (some-> behind pos?) [{:reason :behind :behind behind}])
            (when (empty? proofs) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
@@ -90,7 +93,7 @@
 (defn explain-text
   "One line naming each reason."
   {:malli/schema [:=> [:cat [:vector :seon.reconcile/not-done]] :string]}
-  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %)) (str " "))) rs)))
+  [rs] (str/join "; " (map #(str (name (:reason %)) (some->> (or (:symbol %) (:key %) (:behind %)) (str " "))) rs)))
 
 ;; ---- the incremental reconciler: an index watched through main's tx reports --------------
 ;; k8s's informer + W1's engine: list once (index), then each commit's resolved datoms name the
@@ -415,10 +418,11 @@
                    (= :dead (:seon.run/status a))
                    (failed aid id (str "its agent died" (some->> (:seon.run/reason a) (str ": "))))
                    :else
-                   (let [rs (done-explain (assoc (done-input idx id (:seon.run/results a {}) (:seon.run/uncontracted a #{})
-                                                                 (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
-                                                                 (set (:seon.run/deferred a)))
-                                                      :caused (:seon.run/caused a #{})))]
+                   (let [rs (done-explain (cond-> (assoc (done-input idx id (:seon.run/results a {}) (:seon.run/uncontracted a #{})
+                                                                     (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
+                                                                     (set (:seon.run/deferred a)))
+                                                          :caused (:seon.run/caused a #{}))
+                                            (:seon.run/behind a) (assoc :behind (:seon.run/behind a))))]
                      (cond
                        ;; the process tests the branch's change reaches run before its merge, on a
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
@@ -852,6 +856,7 @@
                                                        :changed (into #{} (map sedn/encode) (:ours diff))
                                                        :deferred (vec deferred)})
                                         (:reason end) (assoc :reason (:reason end))
+                                        (pos? (:theirs diff 0)) (assoc :behind (:theirs diff))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
                                                                              "the agent wrote no end")))
@@ -982,8 +987,11 @@
                      back? (and (:source st) (seq paths))]
                  (one (write (cond-> st back? (assoc-in [:flights aid :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
                              aid (if back? :write-back :done)
-                           (vec (mapcat (fn [{:keys [run]} r]
-                                          (let [problem (str "merge refused: " (:seon.error/message r))]
+                           (vec (mapcat (fn [{:keys [run task]} r]
+                                          (let [behinds (count (filter #(= :behind (get-in (:idx st) [:runs % :seon.run/status])) (get-in (:idx st) [:by-task task])))
+                                                problem (if (= :seon.merge/behind (:seon.error/type r))
+                                                          (str "merge behind main " (inc behinds) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
+                                                          (str "merge refused: " (:seon.error/message r)))]
                                             (cond
                                               (:merged? r) (cas-tx run :ended :merged
                                                                     (cond-> {:seon.run/merged-t (long (:tx r))}
@@ -991,8 +999,10 @@
                                                                       ;; names it (beside the sha of what one wrote, when it wrote some)
                                                                       (and (:source st) (seq (:unfiled r)))
                                                                       (assoc :seon.run/commit-error (unfiled-error r))))
-                                              (= :seon.merge/behind (:seon.error/type r)) (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r)
-                                                                                                                          :seon.run/error r})
+                                              ;; behind again and again: a merge that main moves under every time it runs is root's
+                                              ;; (:seon.config.merge/max-behind), never a rerun without end
+                                              (and (= :seon.merge/behind (:seon.error/type r)) (< behinds (cfg/value :seon.config.merge/max-behind)))
+                                              (cas-tx run :ended :behind {:seon.run/reason (:seon.error/message r) :seon.run/error r})
                                               :else (conj (hold-tx (task/run (:db st) run) problem)
                                                           {:seon.run/id run :seon.run/error r}))))
                                         (:members act) (:results r))))))

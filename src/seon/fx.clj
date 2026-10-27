@@ -115,9 +115,18 @@
     (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
       (str refs (subs ref (count "refs"))))))
 
+(defn- same-repository?
+  "Are the checkouts a and b of one git repository (the same common dir: a worktree and its main
+  tree are, a clone or a test's own repository is not)?"
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
+  [a b]
+  (let [common #(some-> (git-try % ["rev-parse" "--path-format=absolute" "--git-common-dir"]) java.io.File. .getCanonicalPath)]
+    (= (common a) (common b))))
+
 (defn- follow-main
   "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
-  branch of the main checkout co: fast-forwarded (git merge --ff-only in base) when its HEAD is an
+  branch of the main checkout co (of the same repository: another one's commits are none of its
+  history): fast-forwarded (git merge --ff-only in base) when its HEAD is an
   ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
   either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
   {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
@@ -125,7 +134,7 @@
   is refused (a dirty tree): read-source records either and imports the tree as it is."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [base co]
-  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base))
+  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base) (same-repository? base co))
                  (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
         main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
         source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
@@ -259,9 +268,9 @@
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
 (defn tree-id
-  "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
-  with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched), less the top-level paths excludes names (default
+  "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
+  changed and untracked unignored file added, in an index of its own (the repository's untouched), less
+  the top-level paths excludes names (default
   :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
   it moves nothing). bin/tree computes the same, which bin/build records for the tree it
   builds (target/seon.tree), so a root can tell whether its binary is built from its source."
@@ -272,7 +281,17 @@
          env {"GIT_INDEX_FILE" (.getPath idx)}
          top (map #(str ":(top)" %) excludes)]
      (try
-       (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
+       ;; that index starts as a copy of the checkout's own (with its mtime, which git's racy-clean check
+       ;; compares) when that is HEAD's tree with no skipped entry: its stat cache then spares reading every
+       ;; file that did not move. A staged change, an assume-unchanged or skip-worktree entry, or a forced
+       ;; ignored file would survive `add -A`, so those read HEAD's tree afresh
+       (let [real (java.io.File. ^String (git! {} root ["rev-parse" "--path-format=absolute" "--git-path" "index"] nil))
+             head? (some? (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))
+             plain? (and head? (.isFile real)
+                         (zero? (:exit (git-run {} root ["diff-index" "--cached" "--quiet" "HEAD"] nil)))
+                         (every? #(str/starts-with? % "H ") (str/split-lines (git! {} root ["ls-files" "-v"] nil))))]
+         (cond plain? (java.nio.file.Files/copy (.toPath real) (.toPath idx) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/COPY_ATTRIBUTES]))
+               head? (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
        (git! env root ["write-tree"] nil)
@@ -325,8 +344,10 @@
   the same, and builds it)."
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]
-  (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
-    (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
+  (let [status (str/split-lines (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil))
+        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))
+        _ (when (or (nil? head) (= "(initial)" head)) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
+    (if (every? #(str/starts-with? % "# ") status)
       head
       (str head "+" (tree-id dir [])))))
 
@@ -339,11 +360,13 @@
   :seon.config.agent/test-ticks) :config (the config in force, config-input, and a digest of each
   env-class of files and of each pin the config names (pin-class): each test's digest takes the keys and classes it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
-  {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
+  {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]
+                  [:=> [:cat :string :map :string :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
-  ([root cfg checkout]
-   (let [tree (tree-id root)
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+  ([root cfg checkout] (inputs root cfg checkout (tree-id root)))
+  ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
+  ([root cfg checkout tree]
+   (let [entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
@@ -515,9 +538,10 @@
 (defn test-command
   "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
   entry, each named namespace's tests with no green at their reach
-  digest run, the rest reused."
-  {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
-  [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
+  digest run, the rest reused, its run written under out (bin/prove --out: the effect reads the
+  plan there, never from a path the run did not name)."
+  {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
+  [nss out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str nss)))
 
 (defn test-results
   "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
@@ -573,8 +597,9 @@
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
         ;; the tree's shards record on the results root's main, named to them, so the results
         ;; read below are the ones its run recorded
-        (let [r (apply sh/sh (concat clean [(str "SEON_RESULTS_PORT=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
-              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
+        (let [out (str dir "/target/prove/run")
+              r (apply sh/sh (concat clean [(str "SEON_RESULTS_PORT=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests))) out) [:dir dir]))
+              plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
               _ (spit log (str (:out r) (:err r)))
               found (results-at results (vals (:digests plan)))]
           (if (contract/error? found)

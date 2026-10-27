@@ -742,7 +742,7 @@
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
-             "so the agent's :will-merge carries none of main's changes")
+             "so the agent's divergence carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried

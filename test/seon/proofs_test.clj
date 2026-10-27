@@ -444,3 +444,16 @@
          (is (= "red" (:message (second (:failures (r "d-twice"))))) "with the red's own failures after the flaky one")
          (is (not (proofs/green? (r "d-twice"))))
          (is (nil? (r "d-none"))))))))
+
+(deftest a-test-whose-child-died-has-no-verdict
+  ;; root, 2026-10-27 (THE PLAN 0.7, the blind agent's run): a test the run's child died in
+  ;; (seon.agent/test-run-answer's report with its :exit) was an :error result, so the judge held
+  ;; a task whose change never reached it as a stray red. A death is no verdict: the test has no
+  ;; result (a proof the child died in is unknown, an unrelated test is nothing to the judge),
+  ;; as its digest keeps none (seon.prove/result-tx)
+  (let [run {:reports [{:type :pass :var "#'a.b-test/ok"}
+                       {:type :fail :var "#'a.b-test/red"}
+                       {:type :pass :var "#'a.b-test/died"}
+                       {:type :error :var "#'a.b-test/died" :exit {:exit 1} :message "test process died: {:exit 1} while #'a.b-test/died ran"}]}]
+    (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
+
