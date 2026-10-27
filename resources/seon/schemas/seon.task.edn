@@ -130,7 +130,7 @@
                              ;; the derived problems the branch's work made true (seon.problems/caused)
                              [:caused {:optional true} [:set :string]]
                              ;; the keys main changed since the branch's merge base (the writer's :theirs)
-                             [:behind {:optional true} nat-int?]
+                             [:behind {:optional true} pos-int?]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its run began
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]

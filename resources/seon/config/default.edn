@@ -263,7 +263,7 @@
 ;; gap 4: a namespace main gained made every merge behind). Past this many behind runs of one merge task the next
 ;; behind answer holds the task for root with the writer's evidence. Provenance: worktree session
 ;; a-behind-merge-is-bounded-and-merges-main-first; three reruns are three chances for main to hold still.
-;; At the bound: the task is held (my.root/run! releases it).
+;; At the bound: the task is held (my.root/run! releases it, which grants one more try: the count is of all its behind runs).
 :seon.config.merge/max-behind 3
 
 
@@ -429,7 +429,7 @@
  ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
  :seon.config.proofs/cost-settled 16
  ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
- ;; (a function that never settles: another thread's collection landing in most calls). Provenance:
+ ;; (a function that never settles: another thread's collection falling in most calls). Provenance:
  ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14, so 30 calls settle it and this is twice that.
  ;; At the bound: the measure throws :seon.cost/unsettled (a proof on it is red, never judged on bytes that did not settle).
  :seon.config.proofs/cost-max-samples 60

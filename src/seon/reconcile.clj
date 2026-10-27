@@ -52,7 +52,7 @@
     (vec (concat
            ;; judged before it has merged main: its proofs ran on a program main has moved from, so the
            ;; reasons below may be only that (a proof unknown, a regression); the fix comes first
-           (when (pos? (or behind 0)) [{:reason :behind :behind behind}])
+           (when (some-> behind pos?) [{:reason :behind :behind behind}])
            (when (empty? proofs) [{:reason :no-proofs}])
            (when (and design? (or (nil? plan-before) (= plan plan-before))) [{:reason :no-design}])
            ;; a proof with no result never ran: unknown, not red (v1's reading); a design
@@ -417,10 +417,11 @@
                    (= :dead (:seon.run/status a))
                    (failed aid id (str "its agent died" (some->> (:seon.run/reason a) (str ": "))))
                    :else
-                   (let [rs (done-explain (assoc (done-input idx id (:seon.run/results a {}) (:seon.run/uncontracted a #{})
-                                                                 (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
-                                                                 (set (:seon.run/deferred a)))
-                                                      :caused (:seon.run/caused a #{}) :behind (:seon.run/behind a 0)))]
+                   (let [rs (done-explain (cond-> (assoc (done-input idx id (:seon.run/results a {}) (:seon.run/uncontracted a #{})
+                                                                     (:seon.run/unmerged a []) (:seon.run/basis-t a) (:seon.run/plan a)
+                                                                     (set (:seon.run/deferred a)))
+                                                          :caused (:seon.run/caused a #{}))
+                                            (:seon.run/behind a) (assoc :behind (:seon.run/behind a))))]
                      (cond
                        ;; the process tests the branch's change reaches run before its merge, on a
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
@@ -848,12 +849,13 @@
                     ;; spend is what the end measured: no end (died, killed, never reached
                     ;; seon.turn/end!) is outcome :no-end with its turns, calls and tokens absent
                     (merge (task/end-members (cond-> (merge (select-keys end [:turns :model-calls :tokens])
-                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff)) :caused (set (:caused diff)) :behind (:theirs diff 0)
+                                                      {:outcome (:outcome end :no-end) :results results :uncontracted (set (:uncontracted diff)) :caused (set (:caused diff))
                                                        :conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
                                                        :unmerged (mapv sedn/encode (:unmerged diff))
                                                        :changed (into #{} (map sedn/encode) (:ours diff))
                                                        :deferred (vec deferred)})
                                         (:reason end) (assoc :reason (:reason end))
+                                        (pos? (:theirs diff 0)) (assoc :behind (:theirs diff))
                                         (not (:outcome end)) (assoc :reason (if worked-error
                                                                              (str "seon.turn/work! threw: " (:seon.error/message worked-error))
                                                                              "the agent wrote no end")))

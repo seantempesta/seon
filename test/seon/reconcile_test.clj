@@ -315,6 +315,20 @@
       (is (= {:op :kill :id :a1 :ended true} (:req (first outs))) "its agent is stopped")
       (is (some #(= "demo/a#1" (:seon.run/id %)) (get-in (second outs) [:req :req :tx-data])) "and its end judged from that one answer"))))
 
+(deftest a-run-is-judged-with-how-far-behind-main-its-branch-was
+  ;; the wiring of gap 7: the writer's :theirs reaches the run as :seon.run/behind, and the done rule says so
+  (let [db (db-of [(decl "a")] :extra (run "a" 1 :running))
+        flight {:act {:run "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1}
+        st {:db db :boot "boot-1" :rid 0 :pending {} :flights {"demo/a#1" (assoc flight :step :diffed :results {})}}
+        diff (fn [theirs] {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs theirs :conflicts 0 :unmerged [] :uncontracted [] :caused [] :vars #{}})
+        end-of (fn [theirs] (let [[_ outs] (#'r/advance st "demo/a#1" :diffed (diff theirs))]
+                              (some #(when (= "demo/a#1" (:seon.run/id %)) %) (get-in (second outs) [:req :req :tx-data]))))]
+    (is (= 4 (:seon.run/behind (end-of 4))) "behind by 4 keys")
+    (is (not (contains? (end-of 0) :seon.run/behind)) "not behind, nothing recorded")
+    (let [ended (d/db-with db [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended] {:seon.run/id "demo/a#1" :seon.run/outcome :green :seon.run/behind 4}])
+          verdict (first (filter #(= :verdict (:op %)) (actions-for ended)))]
+      (is (= {:reason :behind :behind 4} (first (:reasons verdict))) "the verdict told to the session leads with how far behind it was"))))
+
 (deftest a-refused-diff-ends-the-run-with-its-cause
   ;; the writer refuses to diff the branch: the run is not judged on facts nobody
   ;; measured (no changed keys, no gaps); its agent is stopped and the run ends with the

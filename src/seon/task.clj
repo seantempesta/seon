@@ -297,7 +297,7 @@
     (seq changed) (assoc :seon.run/changed (vec changed))
     (seq deferred) (assoc :seon.run/deferred (vec deferred))
     (seq caused) (assoc :seon.run/caused (vec caused))
-    (pos? (or behind 0)) (assoc :seon.run/behind behind)
+    (some-> behind pos?) (assoc :seon.run/behind behind)
     reason (assoc :seon.run/reason reason)))
 
 (defn carry-tx

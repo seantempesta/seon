@@ -88,7 +88,7 @@
                                           (assoc :removed true))
                ;; a design made from a request carries none: it registers each it writes
                ;; judged before it merged main: merge it in, rerun the proofs, and done again
-               :behind {:reason reason :keys-changed-on-main behind :do '(my.branch/merge-main!)}
+               :behind {:reason reason :behind behind :do '(my.branch/merge-main!)}
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}

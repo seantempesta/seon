@@ -316,3 +316,26 @@
            (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
            (is (= {} (:ours (pm/delta-three-way head after main #{}))) "and nothing differs between the two programs any more"))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
+  ;; the branch and main each made app.z without an (ns) form, so they hold it under two entity ids: carrying the
+  ;; branch's would give :ns/name two entities; the merge keeps main's and points the carried form at it
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ns2"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
+                                                        :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                        :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))]
+       (try
+         (d/transact conn ((rec "m") @conn))
+         (d/transact bc ((rec "z") @bc))
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
+           (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
+           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it"))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
