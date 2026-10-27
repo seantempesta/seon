@@ -115,6 +115,26 @@
     (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
       (str refs (subs ref (count "refs"))))))
 
+(defn- follow-main
+  "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
+  branch of the main checkout co: fast-forwarded (git merge --ff-only in base) when its HEAD is an
+  ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
+  either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
+  {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
+  when base holds commits main lacks. git's failure throws its words (read-source answers it)."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
+  [base co]
+  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base))
+                 (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
+        main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
+        source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
+    (when (and branch (not= main source))
+      (if (zero? (:exit (git-run {} base ["merge-base" "--is-ancestor" "HEAD" main] nil)))
+        (do (git! {} base ["merge" "--ff-only" "-q" main] nil) nil)
+        {:main main :source source
+         :ahead (parse-long (git! {} base ["rev-list" "--count" (str main "..HEAD")] nil))
+         :behind (parse-long (git! {} base ["rev-list" "--count" (str "HEAD.." main)] nil))}))))
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
@@ -123,25 +143,37 @@
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
   inputs only for a binary built from this very tree.
+  With :follow (the main checkout), root's tree is first brought to that checkout's branch
+  (follow-main): fast-forwarded when it is behind. When it holds commits main lacks the answer
+  is a :seon.fx/io-error naming both shas and counts that still carries the read (:value and the
+  rest), so the import goes on and the gap is a recorded problem.
   Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree]} :req}]
+  [{{:keys [root dirs binary-tree follow]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
-          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))]
-      (cond-> {:value (into (sorted-map)
-                        (for [d dirs
-                              f (file-seq (java.io.File. (str base "/" d)))
-                              :let [p (.getCanonicalPath ^java.io.File f)]
-                              :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
-                          [(subs p (inc (count base))) (slurp f)]))}
-        head (assoc :commit head
-                                    :pins (into {}
-                                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
-                                                  [p sha])))
-        (and binary-tree head) (assoc :inputs (inputs base)
-                           :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
+          gap (when follow (follow-main base follow))
+          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          read (cond-> {:value (into (sorted-map)
+                                 (for [d dirs
+                                       f (file-seq (java.io.File. (str base "/" d)))
+                                       :let [p (.getCanonicalPath ^java.io.File f)]
+                                       :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
+                                   [(subs p (inc (count base))) (slurp f)]))}
+                 head (assoc :commit head
+                             :pins (into {}
+                                         (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                                                 (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
+                                           [p sha])))
+                 (and binary-tree head) (assoc :inputs (inputs base)
+                                               :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f))))))]
+      (if gap
+        (merge (error #'seon.fx/read-source :seon.fx/io-error
+                      (str "the source tree " root " holds " (:ahead gap) " commits main lacks (it is at " (:source gap)
+                           ", main at " (:main gap) ", which holds " (:behind gap) " it lacks): imported as it is")
+                      (assoc gap :path root))
+               read)
+        read))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?

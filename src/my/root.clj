@@ -202,12 +202,21 @@
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [loaded] (filterv contract/error? (vals loaded)))
 
+(defn- source-root
+  "Seon's own source tree the import reads (:seon.config.source/root), canonical, or nil when root
+  follows none."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  [] (some-> (get config/config :seon.config.source/root) java.io.File. .getCanonicalPath))
+
 (defn- loader-dirs
-  "Where each of main's loaders reads under checkout co: {kind [dir]}, absolute."
+  "Where each of main's loaders reads: {kind [dir]}, absolute. The wiki and the task files are the
+  checkout co's; the source is the source root's (Seon's own source tree, the write-back checkout
+  the import reads: seon.fx/read-source), or co's when root follows none."
   {:malli/schema [:=> [:cat :string] [:map-of [:enum :docs :tasks :source] [:vector :string]]]}
   [co]
-  {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
-   :source (mapv #(str co "/" %) (config/value :seon.config.source/dirs))})
+  (let [src (source-root)]
+    {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
+     :source (mapv #(str (or src co) "/" %) (config/value :seon.config.source/dirs))}))
 
 (defn- loader
   "Which of main's loaders reads path (absolute) under checkout co: :docs (a page, .md, under the
@@ -224,11 +233,11 @@
 (defn watch-loads
   "What a watcher's batch makes root load, each kind with the first record of the batch that made
   it ({kind [record-kind path]}: what root's watch fact keeps as :last-load, so a load says why): a changed path by its loader; the
-  checkout's own branch moving (own, its ref under refs: a commit or merge on it) the source, and
-  no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
+  checkout's own branch or the source root's moving (own, their refs under refs: a commit or
+  merge on either) the source, and no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
   coalesced or dropped what happened under it) the loaders reading under that path (a rescan of
   a loader's dir that loader), and of refs the source alone."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]]
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]]
                   [:map-of [:enum :docs :tasks :source] [:tuple :keyword :string]]]}
   [co refs own batch]
   (let [dirs (loader-dirs co)
@@ -237,7 +246,7 @@
               (let [under-refs? (and refs (or (= path refs) (str/starts-with? path (str refs "/"))))
                     ks (cond (and (#{:rescan :root} kind) under-refs?) [:source]
                              (#{:rescan :root} kind) (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
-                             under-refs? (when (= path own) [:source])
+                             under-refs? (when (own path) [:source])
                              :else (keep identity [(loader co path)]))]
                 ;; the first record that made each kind keeps it
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
@@ -271,7 +280,7 @@
   [sys]
   (let [co (config/checkout)
         refs (fx/git-refs co)
-        own (fx/head-ref co)
+        own (into #{} (keep #(some-> % fx/head-ref)) [co (source-root)])
         roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}

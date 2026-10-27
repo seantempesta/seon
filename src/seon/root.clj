@@ -737,7 +737,8 @@
 
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
-  :source effect (their files, the tree's HEAD commit and its reference-code pins, and the
+  :source effect (first brought to the main checkout's branch, seon.fx/read-source: fast-forwarded
+  when behind, a recorded gap when it holds commits main lacks; their files, the tree's HEAD commit and its reference-code pins, and the
   tree's inputs with no program facts, seon.fx/inputs). When what they read differs from
   what main last imported (the digest on root's :seon.root/source fact, or none recorded),
   main's program becomes theirs in one transaction (seon.source/replace-tx: each form
@@ -751,7 +752,7 @@
   {:malli/schema [:=> [:cat :map :map] :map]}
   [sys {:keys [root dirs]}]
   (let [t0 (profile/now-ns)
-        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
+        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :follow (cfg/checkout) :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
         files (:value r)
         digest (when files (err/digest (sedn/encode [files (:pins r)])))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))

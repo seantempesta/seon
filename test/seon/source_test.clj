@@ -9,7 +9,7 @@
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
             [seon.db :as pdb] [seon.cost :as cost]
-            [seon.fx :as fx]
+            [seon.fx :as fx] [seon.contract :as contract]
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
@@ -709,3 +709,35 @@
                :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [10 100 1000]}))
+
+(deftest the-source-tree-follows-main
+  ;; task seon.fx/the-source-tree-follows-main: the write-back tree (a worktree on its own branch)
+  ;; is brought to the main checkout's branch by the :source read itself. Behind main: fast-forwarded,
+  ;; and the read holds main's new file. Holding a commit main lacks: read as it is, and the answer
+  ;; is a :seon.fx/io-error naming both shas and both counts that still carries the read.
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-" (random-uuid))) (.mkdirs)))
+        co (str tmp "/main") wb (str tmp "/merges")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
+        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
+    (try
+      (.mkdirs (java.io.File. (str co "/src")))
+      (git co "init" "-q" "-b" "main")
+      (commit! co "a.clj" "(ns a)")
+      (git co "worktree" "add" "-q" "-b" "merges" wb)
+      (testing "at main: nothing to follow"
+        (is (= ["src/a.clj"] (keys (:value (read)))))
+        (is (not (contract/error? (read)))))
+      (testing "behind main: fast-forwarded, main's file is read"
+        (let [main (commit! co "b.clj" "(ns b)") r (read)]
+          (is (not (contract/error? r)) (pr-str r))
+          (is (= ["src/a.clj" "src/b.clj"] (keys (:value r))))
+          (is (= main (git wb "rev-parse" "HEAD")) "the write-back branch stands at main")))
+      (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
+        (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
+          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+          (is (= ["src/a.clj" "src/b.clj" "src/c.clj"] (keys (:value r))) "the read goes on")
+          (is (= [theirs main 1 1] ((juxt :source :main :ahead :behind) r)))
+          (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
+      (finally (sh/sh "rm" "-rf" tmp)))))
