@@ -17,8 +17,8 @@
   agent that holds the branch runs its tests (`:tests`); main, which no agent holds, is run by a
   prove agent forked from the fork server's main (its program, the tests among them:
   :seon.config.source/dirs) and killed after. Its results are recorded on main as facts, one
-  per test digest (`result-tx`), before its waiters are answered, so every agent forked after
-  finds main's results at their digests (seon.proofs/stored-results) and runs none of them again.
+  per test digest that ran (`result-tx`), before its waiters are answered, so every agent forked
+  after finds main's results at their digests (seon.proofs/stored-results) and runs none of them again.
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head): it keeps the latest main t for a request that names
   none, and with :seon.config.proofs/prove-main-on-commit a commit that moves main's program
@@ -40,33 +40,32 @@
 ;; ---- the facts of a run ------------------------------------------------------------------
 
 (defn result-tx
-  "The facts a finished run leaves on main: one :seon.proof/ result per test that ran or was
-  reused (a green the results directory held becomes a fact too) at its digest, greens and reds, and the run's fact.
-  A test whose child died while it ran (a report with its :exit, seon.agent/test-run-answer) has
-  no verdict at its digest, only main's newest result: a death is unknown, and a result at a
-  digest is reused (seon.proofs/stored-results), so it would never run again.
-  run: the run request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports
-  :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
-  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
-  [run answer]
+  "The facts a finished run leaves on main, one transaction, beside the results its agent recorded
+  (seon.agent/run-tests-forked's :record: every agent test run's, whoever asked): the run's entity with
+  its counts; for main's run, each test's newest result on main (:seon.proof/latest, what :test-red
+  reads) and the functions whose cost per call moved (seon.proofs/fn-tx over the answer's detail,
+  against db, main as the last commit notice brought it; none yet: no function's). run: the run
+  request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports :digests :fns :pass
+  :fail :error :ms}). The change names who asked."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :map] [:vector :map]]}
+  [db run answer]
   (let [died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
-        ;; a died test has no result (proofs/results), but main's newest of it is an :error
+        ;; a died test has no result at its digest (answer-ran), but main's newest of it is an :error
         statuses (merge (proofs/results {:reports (:reports answer)}) (zipmap died (repeat :error)))
         fails (proofs/failures {:reports (:reports answer)})
-        change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))]
-    (into [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
-            :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
-            :seon.proof.run/ms (long (:ms answer 0))}
-             (seq (:deferred answer)) (assoc :seon.proof.run/skipped-process (vec (:deferred answer))))]
-          (mapcat (fn [[t s]]
-                    (when-let [dg (get-in answer [:digests t])]
-                      (let [fact (cond-> {:seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
-                                          :seon.proof/t (:t run) :seon.proof/change change}
-                                   (fails t) (assoc :seon.proof/failures (fails t)))]
-                        (cond-> (if (died t) [] [(assoc fact :seon.proof/digest dg :seon.proof/test t)])
-                          ;; main's newest result of the test, read by :test-red
-                          (= :main (:branch run)) (conj (assoc fact :seon.proof/latest (str t)))))))
-                  statuses))))
+        change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))
+        main? (= :main (:branch run))
+        dt (proofs/detail (:ran (proofs/answer-ran answer)))]
+    (-> [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
+                  :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
+                  :seon.proof.run/ms (long (:ms answer 0))}
+           (seq (:deferred answer)) (assoc :seon.proof.run/skipped-process (vec (:deferred answer))))]
+        (into (when (and main? db (seq dt)) (proofs/fn-tx db (:key run) dt)))
+        (into (when main?
+                (for [[t s] statuses :when (get-in answer [:digests t])]
+                  (cond-> {:seon.proof/latest (str t) :seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
+                           :seon.proof/t (:t run) :seon.proof/change change}
+                    (fails t) (assoc :seon.proof/failures (fails t)))))))))
 
 ;; ---- admission ---------------------------------------------------------------------------
 
@@ -159,6 +158,15 @@
   [st run]
   (if-let [a (:runner run)] (step/ask st [:prove :answers] [:killed (:key run)] {:op :kill :id a}) [st nil]))
 
+(defn- step-done
+  "The run's answer, whole (its reports are what the done rule reads), once its facts are written,
+  or the error a write answered. Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map :map :string :any] [:tuple :map [:vector :map]]]}
+  [st run key r]
+  (finish st (if (contract/error? r)
+               r
+               (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))
+
 (defn- answered
   "The api's answer r to the request of chain step; the next step, or the end. An answer to a run
   that is no longer the running one is counted (:stale). Answers [st outputs]."
@@ -180,13 +188,9 @@
                      [st kill] (kill-runner st run)]
                  (if (contract/error? r)
                    (let [[st fin] (finish st r)] [st (cond-> fin kill (conj kill))])
-                   (let [[st w] (step/ask st [:prove :answers] [:recorded key] {:op :write :req {:op :tx :branch :db :tx-data (result-tx run r)}})]
+                   (let [[st w] (step/ask st [:prove :answers] [:recorded key] {:op :write :req {:op :tx :branch :db :tx-data (result-tx (:main-db st) run r)}})]
                      [(assoc-in st [:running :stage] :recording) (cond-> [w] kill (conj kill))])))
-        ;; the run's answer, whole (its reports are what the done rule reads), once its facts are written
-        :recorded (finish st
-                          (if (contract/error? r)
-                            r
-                            (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
+        :recorded (step-done st run key r)))))
 
 (defn- state-view
   "What the service holds, as data: the running run's key, stage and runner, how many wait on it,
@@ -220,7 +224,8 @@
          [st outs] (case in
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
-                     :main (let [st (assoc st :main-t (:t m))]
+                     ;; main's db is kept for the functions' facts a run of main compares against (result-tx)
+                     :main (let [st (assoc st :main-t (:t m) :main-db (:db m))]
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
                                (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
                                [st []])))]

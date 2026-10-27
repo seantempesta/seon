@@ -117,6 +117,26 @@
           (into [] (comp (filter agent/judges?) (map (fn [t] {:test t :status (proofs/latest-status db t)})))
                 (program/tests-reaching g x))))))
 
+(defn cost
+  "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
+  ticks, bytes and calls per call as main's runs last recorded them (in all and its own: self-ticks,
+  self-bytes; seon.proofs/fns), and :tests, the tests at this branch's digests that called it, each
+  with its calls, ticks and bytes, most ticks first, read from the runs that recorded their results
+  (seon.proofs/exercising). :unmeasured counts the tests reaching x with no measure yet (their
+  digest moved since they last ran, or none ran). A symbol that names no var answers so
+  (:my.agent/no-var)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or :map :my.agent/no-var]]}
+  [x]
+  (let [db (agent/db) x (if (var? x) (named x) (asked x))]
+    (or (no-var db x)
+        (let [main (or (agent/heard-main) db)
+              plan (agent/test-plan db (:base @agent/state) #{} main)
+              rows (proofs/exercising main x (vec (vals (:digests plan))))
+              reaching (set (filter (:digests plan) (program/tests-reaching (:graph plan) x)))
+              measured (some #(when (= x (:var %)) %) (proofs/fns main))]
+          (cond-> {:var x :tests rows :unmeasured (count (remove (set (map :test rows)) reaching))}
+            measured (assoc :per-call (dissoc measured :var)))))))
+
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
   library and clojure.core alike), sorted; sym itself left out. sym is a qualified symbol or

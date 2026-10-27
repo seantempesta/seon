@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.reconcile :as r] [seon.proofs :as proofs] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
@@ -222,6 +222,23 @@
                          (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
                            (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
                            (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))}
+   :record {:doc "Record a test run's results on main, by root's one writer: one request per bin/test shard or bin/prove step run, its tests' results at their digests (only what ran), the run with what each test's contracted functions cost (one value), and, for a run of main's tree, the functions whose cost per call moved (seon.proofs/record!). Answers {:recorded n :t} (the datoms written, main's t), or why not."
+            :args {:run {:type "object" :description "{:id, :tree}"} :ran {:type "object" :description "{key result}: {:test or :step, :digest, :pass :fail :error, :ms :ticks :bytes :fns}"}
+                   :failures {:type "object"} :main? {:type "boolean" :description "a run of main's tree"}}
+            :required ["run" "ran"]
+            :answer (fn [sys _ req]
+                      (let [write! #(deref (c/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}}))
+                            r (proofs/record! write! @(:conn sys) (select-keys req [:run :ran :failures :main?]))]
+                        (if (contract/error? r)
+                          ;; refused: an :effect row on main, open until a later record of the run's id writes it
+                          (let [w (write! (err/asked-tx @(:conn sys) (assoc r :seon.fx/at-ms (System/currentTimeMillis)) :seon.proof.run/id
+                                                        [{:seon.proof.run/id (str (get-in req [:run :id]))}]))]
+                            ;; the row refused too: the answer says so, never as if written
+                            (cond-> r (contract/error? w) (assoc :unrecorded-row (:seon.error/message w))))
+                          {:recorded (:datoms r) :t (:t r)})))}
+   :results {:doc "The results main holds at digests (seon.proofs/stored-results): {:results {digest {:pass :fail :error :failures :flaky}}}, a digest with none left out: what a run reuses instead of running."
+             :args {:digests {:type "array" :items {:type "string"}}} :required ["digests"]
+             :answer (fn [sys _ req] {:results (proofs/stored-results @(:conn sys) (vec (:digests req)))})}
    :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]

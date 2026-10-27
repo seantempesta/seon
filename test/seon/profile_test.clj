@@ -1,5 +1,5 @@
 (ns seon.profile-test
-  "seon.profile: every contracted call counted exactly, one in 64 timed, read per epoch."
+  "seon.profile: every contracted call counted exactly, with its ticks and bytes, in all and its own, read per epoch."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :as contract :refer [defn defn-]]
             [seon.profile :as profile] [seon.cost] [seon.lib] [seon.repl :as repl] [seon.agent :as agent] [jolt.ffi :as ffi]))
@@ -26,21 +26,32 @@
     (branch 200)
     (is (= 201 (profile/calls)))))
 
-(deftest every-touched-function-has-an-estimated-time
+(deftest a-functions-own-work-is-its-work-less-its-callees
   (when contract/on?
-    (testing "the first call of an epoch is always timed, so a function called once has a time"
-      (profile/begin!)
-      (branch 50)
-      (let [by (into {} (map (juxt :var :ms)) (profile/touched))]
-        (is (pos? (by 'seon.profile-test/branch)))
-        (is (every? #(>= % 0.0) (vals by)) "a call shorter than a clock read reads as 0, never negative")))))
-;; (the sampled estimate held within 2x of the wall clock over a loop went: it was red under load,
-;; an 11.7 ms estimate against 2.5 ms measured, and a time is shown, never a verdict:
-;; seon.cost/exact, pure-tests 2026-10-23)
+    (profile/begin!)
+    (branch 50)
+    (let [by (into {} (map (juxt :var identity)) (profile/touched))
+          b (by 'seon.profile-test/branch) l (by 'seon.profile-test/leaf)]
+      (testing "every touched function did work, counted in ticks and bytes"
+        (is (every? #(pos? (:ticks %)) [b l]) (pr-str by)))
+      (testing "a leaf's own work is all of it"
+        (is (= (:ticks l) (:self-ticks l)))
+        (is (= (:bytes l) (:self-bytes l))))
+      (testing "a caller's work is its own and its callees', exactly"
+        (is (= (:ticks b) (+ (:self-ticks b) (:ticks l))) (pr-str b l))
+        (is (= (:bytes b) (+ (:self-bytes b) (:bytes l))) (pr-str b l))
+        (is (< (:self-ticks b) (:ticks b)))))))
 
-(deftest top-orders-by-time-then-calls
-  (is (= '[c a b] (mapv :var (profile/top [{:var 'a :calls 9 :ms 1.0} {:var 'b :calls 1 :ms 1.0} {:var 'c :calls 1 :ms 2.0}] 3))))
-  (is (= 1 (count (profile/top [{:var 'a :calls 9 :ms 1.0} {:var 'b :calls 1 :ms 1.0}] 1)))))
+(defn- bare-leaf [x] (* x x))
+
+(deftest counting-a-call-allocates-nothing-and-costs-a-few-ticks
+  ;; measured 2026-10-27: a call of bare-leaf 10 ticks; counted (calls, ticks, bytes) 15
+  (let [counted (profile/counted 'seon.profile-test/bare-leaf bare-leaf)
+        n 10000
+        cost (fn [f] (let [r (volatile! nil)] (profile/measure! #(dotimes [i n] (f i)) #(vreset! r %)) @r))
+        plain (cost bare-leaf) wrapped (cost counted)]
+    (is (<= (- (:bytes wrapped) (:bytes plain)) 1024) (str n " counted calls allocated " (:bytes wrapped) " bytes, plain " (:bytes plain)))
+    (is (<= (- (:ticks wrapped) (:ticks plain)) (* 8 n)) (str n " counted calls " (:ticks wrapped) " ticks, plain " (:ticks plain)))))
 
 (deftest an-evals-record-carries-its-costliest-functions
   (when contract/on?
