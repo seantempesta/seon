@@ -143,17 +143,7 @@
    'seon.reader/fence "a Markdown code fence, CommonMark's word"
    'seon.fixtures/fenced "a reply in a Markdown code fence"})
 
-(defn- old-words
-  "The old house words of AGENTS.md section 7a's table, hyphenated (\"merge train\" ->
-  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\": none now)."
-  [agents]
-  (let [table (->> (str/split-lines agents)
-                   (drop-while #(not (str/starts-with? % "| Old house word")))
-                   (drop 2)
-                   (take-while #(str/starts-with? % "|")))]
-    (set (for [row table :when (not (str/includes? row "stored as"))
-               w (str/split (second (str/split row #"\|")) #",")]
-           (str/replace (str/trim w) " " "-")))))
+(def ^:private old-words seon.problems/old-words)
 
 (defn- uses?
   "Does name n hold old word w as whole words (a plural too)?"
@@ -298,73 +288,29 @@
 
 ;; ---- text uses Clojure's words too (task seon.docs/names-are-clojures-words) ---------------
 
-(def ^:private text-kept
-  "Files where an old word of section 7a's table is the subject or another sense, each with its reason.
-  The quoted span of an owner's sentence is kept too (the quote is what he said), and the Jolt message
-  and image name that hold the old word."
-  {"AGENTS.md" "the table names the old words"
-   "docs/vocabulary.md" "its rows say `(was X)`"
-   "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
-   "resources/seon/tasks/seon.docs.edn" "the rename's plan names the old words"
-   "resources/seon/tasks/seon.db.edn" "the stored-names plan names the old words"
-   "test/seon/docs_test.clj" "this test names the old words"
-   "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
-   "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
-   "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
-   "test/seon/reader_test.clj" "a Markdown code fence"
-   "test/seon/ref_test.clj" "a Markdown code fence"
-   "test/seon/agent_test.clj" "the named reader test is about a Markdown code fence"
-   "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
-   "test/seon/fixtures.clj" "a reply in a Markdown code fence"
-   "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
-   "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
-   "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
-
-(defn- old-word-spellings
-  "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
-  and \"land\" are also plain English and Seon's admission, so only names are read for them."
-  [agents]
-  (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
-    [w (if (= w "merge-train") ["merge train" "merge-train"] [w])]))
-
-(defn- word-char? [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
-
-(defn- whole-word?
-  "Does lower-case text low hold spelling s as a whole word, a plural too? What the pattern
-  (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here, so the tree's 59,000
-  lines against 17 patterns took 141 s; this reads the whole tree in ~150 ms)."
-  [^String low ^String s]
-  (let [n (.length low) k (.length s)]
-    (loop [i (.indexOf low s 0)]
-      (when (<= 0 i)
-        (let [e (+ i k)]
-          (if (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
-                   (or (>= e n) (not (word-char? (.charAt low e)))
-                       (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))
-            true
-            (recur (.indexOf low s (inc i)))))))))
-
 (deftest no-text-uses-an-old-word
+  ;; what the store holds is judged as a derived class (`seon.problems/old-words-in`, seon.problems-test/an-old-word-is-a-problem,
+  ;; and by the health step on every branch); this reads what it does not hold: bin/, the root pages, the
+  ;; native and web files, resources other than the task files (their plans are in the store) and the comment
+  ;; lines of source
   ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
   ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
   ;; kept at the digest the green tree has, seon.proofs/flaky)
   (let [root (config/checkout)
-        words (old-word-spellings (slurp (str root "/AGENTS.md")))
-        kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
+        words (seon.problems/old-word-spellings (slurp (str root "/AGENTS.md")))
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))
-        used (fn [^String line] (let [low (str/lower-case line)] (filter (fn [[_ ss]] (some #(whole-word? low %) ss)) words)))
-        paths (for [dir ["bin" "docs" "resources" "src" "test" "web" "config" "native"]
+        in-store? (fn [^String p] (or (str/starts-with? p "docs/") (str/starts-with? p "resources/seon/tasks/")))
+        comment-only? (fn [^String p] (and (str/ends-with? p ".clj") (not (str/starts-with? p "bin/"))))
+        paths (for [dir ["bin" "resources" "src" "test" "web" "config" "native"]
                     f (file-seq (java.io.File. (str root "/" dir))) :when (.isFile ^java.io.File f)
-                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (text? p)]
+                    :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (and (text? p) (not (in-store? p)))]
                 p)
-        hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
-                   [i line0] (map-indexed vector (str/split-lines (slurp (str root "/" p))))
-                   ;; the kept spans only remove text: a line that uses no word before they go uses none after
-                   :when (seq (used line0))
-                   [w _] (used (str/replace line0 kept-span ""))]
+        hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (seon.problems/old-word-kept p))
+                   :let [lines (vec (str/split-lines (slurp (str root "/" p))))]
+                   [i w] (seon.problems/old-word-hits (for [[i l] (map-indexed vector lines) :when (or (not (comment-only? p)) (str/starts-with? (str/triml l) ";"))] [i l]) words)]
                [p (inc i) w])]
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
-    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word] (AGENTS 7a; a file whose use is the subject goes in text-kept with its reason)")))
+    (is (empty? hits) "no text outside the store uses an old word outside old-word-kept: each is [file line word]")))
 
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."

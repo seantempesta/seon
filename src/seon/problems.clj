@@ -38,7 +38,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task] [seon.config :as config]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -375,9 +375,10 @@
   (let [group (fn [attr] (reduce (fn [m {:keys [e v]}] (update m e (fnil conj #{}) v)) {} (d/datoms db :aevt attr)))
         one (fn [attr] (into {} (map (juxt :e :v)) (d/datoms db :aevt attr)))
         names (group :seon.section/names) dead (group :seon.section/dead-links)
-        reads (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)]
+        reads (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)
+        text (one :seon.section/text)]
     (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.section/address)]
-               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (reads e) :reviewed (reviewed e) :baseline (baseline e)}]))))
+               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (reads e) :reviewed (reviewed e) :baseline (baseline e) :text (text e)}]))))
 
 (defn- existing-names
   "The names db's vars and tasks hold (a task id as a symbol): what a citation may name."
@@ -395,9 +396,114 @@
         ids (attr :form/id) srcs (attr :form/src)]
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
 
+(def old-word-kept
+  "Files whose text keeps an old word of AGENTS.md section 7a's table (it is the subject, a quoted word of the
+  owner's, or another sense), each with its reason: a place no :old-word row is made for. The quoted
+  span of an owner's sentence is kept too (`old-word-span`)."
+  {"AGENTS.md" "the table names the old words"
+   "docs/vocabulary.md" "its rows say `(was X)`"
+   "docs/decisions.md" "the owner's rulings quote his words, and their titles stay as stated"
+   "resources/seon/tasks/seon.docs.edn" "the rename's plan names the old words"
+   "resources/seon/tasks/seon.db.edn" "the stored-names plan names the old words"
+   "test/seon/docs_test.clj" "this test names the old words"
+   "src/seon/problems.clj" "this class names the old words"
+   "test/seon/problems_test.clj" "this class's tests name the old words"
+   "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
+   "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
+   "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
+   "test/seon/reader_test.clj" "a Markdown code fence"
+   "test/seon/ref_test.clj" "a Markdown code fence"
+   "test/seon/agent_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/program_test.clj" "the named reader test is about a Markdown code fence"
+   "test/seon/fixtures.clj" "a reply in a Markdown code fence"
+   "src/seon/server.clj" "cites v1's namespace proto.agents.entrance"
+   "BAGGAGE.md" "cites a decision by its title, \"No locks, no lane cap, no waiting\""
+   "resources/seon/tasks/seon.context.edn" "t5.refusal/* is the name of a past agent's test namespace"})
+
+(def old-word-span
+  "The spans of a line that keep an old word: an owner's quoted sentence, Jolt's message and a past image name."
+  #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)|collection landing")
+
+(defn old-words
+  "The old house words of AGENTS.md section 7a's table (text agents), hyphenated (\"merge train\" ->
+  \"merge-train\"), leaving out a row still stored under its old name (\"stored as\")."
+  {:malli/schema [:=> [:cat :string] [:set :string]]}
+  [agents]
+  (let [table (->> (str/split-lines agents)
+                   (drop-while #(not (str/starts-with? % "| Old house word")))
+                   (drop 2)
+                   (take-while #(str/starts-with? % "|")))]
+    (set (for [row table :when (not (str/includes? row "stored as"))
+               w (str/split (second (str/split row #"\|")) #",")]
+           (str/replace (str/trim w) " " "-")))))
+
+(defn old-word-spellings
+  "The table's old words as the text spells them, [word [spelling ...]] (\"merge train\" either way); \"admit\"
+  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  {:malli/schema [:=> [:cat :string] [:sequential [:tuple :string [:vector :string]]]]}
+  [agents]
+  (vec (for [w (sort (old-words agents)) :when (not (#{"admit" "land"} w))]
+         [w (if (= w "merge-train") ["merge train" "merge-train"] [w])])))
+
+(defn old-word-hits
+  "The old words (of words, `old-word-spellings`) each text uses: [[key word] ...], key being the text's
+  own, line by line without the spans `old-word-span` keeps. One contracted call however many texts: a
+  whole-word match is what (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here)."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :any :string]] [:sequential [:tuple :string [:vector :string]]]] [:vector [:tuple :any :string]]]}
+  [texts words]
+  (let [word-char? (fn [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
+        whole-word? (fn [^String low ^String s]
+                      (let [n (.length low) k (.length s)]
+                        (loop [i (.indexOf low s 0)]
+                          (when (<= 0 i)
+                            (let [e (+ i k)]
+                              (or (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
+                                       (or (>= e n) (not (word-char? (.charAt low e)))
+                                           (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))
+                                  (recur (.indexOf low s (inc i)))))))))]
+    (vec (distinct (for [[k text] texts
+                         line (str/split-lines text)
+                         :let [low (str/lower-case line)]
+                         :when (some (fn [[_ ss]] (some #(whole-word? low %) ss)) words)
+                         :let [kept (str/lower-case (str/replace line old-word-span ""))]
+                         [w ss] words
+                         :when (some #(whole-word? kept %) ss)]
+                     [k w])))))
+
+(defn old-words-in
+  "Each old word the places named use, as an :old-word row naming the place and the word: a var's
+  form (its source and docstring), a wiki section's text and a task's plan, each in the file it
+  is stored from (`old-word-kept` files are not read). places: {:vars #{var symbols} :sections
+  #{addresses} :tasks #{task ids}}. The words are AGENTS.md section 7a's table, read from the checkout
+  (what seon.docs-test reads). Open while true. Cost: the named places' texts, a line at a time, in
+  one `old-word-hits` call."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]]]] [:vector :seon.problems/row]]}
+  [db ans {:keys [vars sections tasks]}]
+  (let [words (old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
+        texts (vec (concat
+                     (for [v (sort vars)
+                           :let [e (:e (first (d/datoms db :avet :var/name v))) form (some-> e (as-> e (:var/form (d/entity db e))))
+                                 path (when form (or (:ns/file (:form/ns form)) (str "src/" (namespace v))))]
+                           :when (and form (not (old-word-kept path)))]
+                       [[:var (str v) path] (:form/src form)])
+                     (for [a (sort sections)
+                           :let [e (:e (first (d/datoms db :avet :seon.section/address a)))
+                                 path (first (str/split a #"#" 2))]
+                           :when (and e (not (old-word-kept path)))]
+                       [[:section a path] (:seon.section/text (d/pull db [:seon.section/text] e))])
+                     (for [t (sort tasks)
+                           :let [e (:e (first (d/datoms db :avet :seon.task/id t))) tk (when e (d/pull db [:seon.task/ns :seon.task/plan] e))
+                                 path (str "resources/seon/tasks/" (:seon.task/ns tk) ".edn")]
+                           :when (and tk (not (old-word-kept path)))]
+                       [[:task t path] (:seon.task/plan tk)])))]
+    (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
+               :let [s (str "old-word " path " " (name kind) " " id " " w)]]
+           (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": AGENTS.md section 7a says what to say instead")
+                        {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id})))))
+
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:dead-citation :unnamed-site :stale-section})
+  #{:dead-citation :unnamed-site :stale-section :old-word})
 
 (defn- split-rows
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
@@ -406,9 +512,10 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
   [base head ans ch]
   (let [bs (section-state base) hs (section-state head)
-        removed (set/difference (existing-names base) (existing-names head))
+        bn (existing-names base) hn (existing-names head)
+        removed (set/difference bn hn)
         changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
-        added (set/difference (existing-names head) (existing-names base))
+        added (set/difference hn bn)
         new-sections (set/difference (set (keys hs)) (set (keys bs)))
         ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
         secs (-> changed
@@ -426,10 +533,16 @@
                                             (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
         moved (pm/changed-vars ch)
+        ;; the places whose text changed: sections whose text differs, tasks whose plan differs
+        plans (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/plan)))
+        text-secs (set (for [[a st] hs :when (not= (:text st) (:text (bs a)))] a))
+        bp (plans base) hp (plans head)
+        task-ids (set (for [[e plan] hp :when (not= plan (bp e))] (:v (first (d/datoms head :eavt e :seon.task/id)))))
         rows (fn [db state forms-of]
                (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
-                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved :sections (eids state)}))))
+                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved :sections (eids state)}))
+                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved :sections text-secs :tasks task-ids}))))
         had (vec (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))
         has (vec (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
         sigs (fn [rs] (into #{} (map :signature) rs))]
@@ -696,7 +809,10 @@
   ([db fold]
    (let [ans (answers db)]
      (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans) :dead-citation (dead-citations db ans)
-                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
+                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans)
+                                     :old-word (old-words-in db ans {:vars (into #{} (map :v) (d/datoms db :aevt :var/name))
+                                                                     :sections (into #{} (map :v) (d/datoms db :aevt :seon.section/address))
+                                                                     :tasks (into #{} (map :v) (d/datoms db :aevt :seon.task/id))}))))))
 
 (defn- touched-runs
   "The run entities of head the move touched (moved: the datoms that differ between the dbs, as
@@ -715,8 +831,11 @@
   base had not (`split-rows`, read where the two differ, each row's answers current), and a run
   class holds prev's rows of the runs the move left alone and the rows of those it touched
   (`touched-runs`), so a move of main costs what it changed, not its closed history; the errors
-  and the few cheap derived classes are read anew. Equal to `health` of head
-  (seon.problems-test/health-moved-is-health)."
+  and the few cheap derived classes are read anew. Measured on main's own db (514 tasks, 3,472 vars)
+  for a one-run change: 8.2 M ticks, 43.6 MB and 77 contracted calls, against 168 M, 462 MB and 3,674 for
+  `health` of the head. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
+  the same per-class readers over every place, so there is one reader of each class and two selections of
+  its candidates, not two implementations."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
@@ -733,7 +852,8 @@
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
     (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
-                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
+                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)
+                                          :old-word (carried :old-word)))))
 
 (defn own
   "The open problems of one run, by class and shaped as `report` (so the one render draws it, an

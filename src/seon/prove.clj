@@ -115,11 +115,11 @@
                  (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
     [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
 
-;; ---- the daily full run: a lane of its own ------------------------------------------------
+;; ---- the daily full run: a run of its own ------------------------------------------------
 
 (defn- full-request
   "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
-  main, an OS child (the :tests effect), in a lane of its own, so it never holds the run slot an
+  main, an OS child (the :tests effect), as a run of its own, so it never holds the run slot an
   agent's turn waits on (a full run takes most of an hour, and can stall: measured 2026-10-27, its
   first one stalled in a process test). The same day's request again joins it or is answered by
   it; another day's while one runs is a :platform problem naming the one that has not ended.
@@ -137,8 +137,8 @@
               [(assoc st :full req) [m]]))))
 
 (defn- full-answered
-  "The full lane's chain: the effect's answer, its statuses written on main (full-run-tx: a red test
-  becomes a :test-red row), the lane free. A failed effect or write is a :platform problem."
+  "The full run's chain: the effect's answer, its statuses written on main (full-run-tx: a red test
+  becomes a :test-red row), its slot free. A failed effect or write is a :platform problem."
   {:malli/schema [:=> [:cat :map :keyword :any] [:tuple :map [:vector :map]]]}
   [st step r]
   (let [run (:full st)]
@@ -197,7 +197,7 @@
         k (slot req)
         done (get-in st [:done k])]
     (cond
-      ;; the daily full run, in its own lane
+      ;; the daily full run, a run of its own
       (= :full mode) (full-request st req)
       (same? (:running st) req) [(update-in st [:running :waiters] into rids) []]
       (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] into rids) []]

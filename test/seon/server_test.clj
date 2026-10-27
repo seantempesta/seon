@@ -306,7 +306,7 @@
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
 
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
-  ;; THE PLAN 0.7's first attempt (root, 2026-10-27): a deftest an agent defined at its REPL that
+  ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
   ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
   ;; seon_prove answered only counts and red names. A process test is deferred to the judge (named, with
   ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
@@ -369,7 +369,7 @@
   ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live
   ;; agent :a7", an agent the caller never attached. A context read of a task no agent works attaches
   ;; one (the :context op); the caller's attach after it is the same outside run: it answers that
-  ;; agent, never a refusal. A task another task's agent holds the branch of is refused, naming the
+  ;; agent, never a refused request. A task another task's agent holds the branch of is refused, naming the
   ;; agent and the task it works
   (let [[ctx attached again other]
         (at/in-agent (fn [{:keys [ns]}]
