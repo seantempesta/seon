@@ -171,7 +171,7 @@
         (is (every? #(= "main" (:seon.proof/branch %)) (filter :seon.proof/status facts)))
         (is (= #{"a.b-test/t" "a.c-test/u"} (set (keep :seon.proof/latest facts))) "main's newest result of each test: what :test-red reads")
         (let [[st4 o4] (feed st3 [(answer-of w {:ok true :t 6})])]
-          (is (nil? (:full st4)) "the lane is free")
+          (is (nil? (:full st4)) "the full run is free")
           (is (empty? (filter :req o4)))
           (is (empty? (filter #(= :problem (:op %)) o4)) "a red test is not a platform defect: it is a :test-red row")
           (testing "the day again: answered by its run, nothing runs"
@@ -183,7 +183,7 @@
               (is (= [{:type :fail :message "boom" :expected "1" :actual "2"}]
                      (:seon.proof/failures (first (filter #(= "a.c-test/u" (:seon.proof/latest %)) facts))))
                   "with why it is red: the failures its run recorded"))))))
-    (testing "an effect that failed is a platform problem, and the lane is free for the next day"
+    (testing "an effect that failed is a platform problem, and the full run is free for the next day"
       (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/full-run-tx "bin/worktree --at exited 1" {})
             [st5 o5] (feed st [(answer-of fx err)])]
         (is (nil? (:full st5)))
