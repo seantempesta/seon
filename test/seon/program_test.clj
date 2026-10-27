@@ -343,7 +343,7 @@
 (deftest a-digest-is-the-content-reached-whatever-recorded-it
   ;; task seon.program/reach-index-reads-each-attribute-once: a form's own digest is its :form/id
   ;; (its content's hash), no longer a hash of the text read back
-  (let [in {:env "e" :tree "t"}
+  (let [in {:env "e" :tree "t" :config {}}
         digests #(select-keys (program/reach-digests % in) calc-tests)
         db (calc-db)
         moved (record db 'app.pt-calc "(defn add [a b] (+ b a))")]
