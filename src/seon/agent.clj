@@ -683,17 +683,23 @@
   registry bound to seon.program/schema-registry, as the agent's REPL binds it), each test
   within ticks engine ticks of work of its own (the runner's bound): answers report data. Each
   test var is written to w as it starts ({:seon.test/started v}), so the agent can name the test
-  a death interrupted; a test past its ticks is an :error report of the typed
+  a death interrupted, and its reports as it ends ({:seon.test/ended v :reports [...]}), so a
+  death loses the test it interrupted and no other (run-tests-forked runs the rest in a new
+  child); a test past its ticks is an :error report of the typed
   :seon.test/ticks-spent naming it; a test its namespace's throw kept from reporting is an
   :error report carrying that throw (the runner reports it)."
   {:malli/schema [:=> [:cat :int nat-int? [:sequential :qualified-symbol]] :seon.test/result]}
   [w ticks tests]
-  (let [reports (atom [])
+  (let [reports (atom []) current (atom [])
         started (atom nil)
         note! (fn [x]
                 (cond (:seon.test/started x) (do (reset! started (str "#'" (:seon.test/started x)))
                                                  (sock/write-line! w (sedn/encode {:seon.test/started @started})))
-                      (:seon.test/report x) (swap! reports conj (test-report (:seon.test/report x) (str "#'" (:test x))))
+                      (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
+                      ;; a test's end: its result, after its reports
+                      (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current}))
+                                    (swap! reports into @current)
+                                    (reset! current []))
                       :else nil))
         _ (binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
             (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
@@ -771,6 +777,53 @@
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
+(defn- test-child
+  "Fork this agent to run tests in a child (run-tests-here) and read it to its end: {:answer
+  (test-run-answer: the child's final line, or the one :error report of the test it died in),
+  :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
+  :pid, :exit}, or the fork's refusal. forked is told the child's pid; each test as it starts goes
+  to root (what this agent waits on, which a stall names)."
+  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn] [:or :map :seon.test/fork-refused]]}
+  [plan ticks tests forked]
+  (let [[r w] (sock/socketpair)
+        streamed (atom []) ended (atom #{})]
+    (lib/fork!
+     {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+                 (contract/error :seon.test/fork-refused #'seon.agent/test-child
+                                 (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
+      :child (fn []
+               (lib/c-close r)
+               ;; nothing this child forks (a test's own child, a root it starts) holds the
+               ;; write end, so its exit is the pipe's end of file
+               (sock/clofork! w)
+               ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
+               ;; pair closing raises SIGIO here and ends the child, whatever the test is
+               ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
+               ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
+               (when-let [unwatched (sock/signal-at-input! w)]
+                 (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
+                 (lib/c-exit 0))
+               (intr/exit-at-eof! #(sock/peer-gone? w))
+               (lib/set-trip! (* 16 1048576))
+               (swap! state assoc :mode :test :evaluating false)
+               (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks tests)
+                              (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
+                 ;; the reports went as their tests ended: this line is the run's end and its counts
+                 (sock/write-line! w (sedn/encode (assoc res :reports [])))))
+      :parent (fn [pid]
+                (lib/c-close w)
+                (forked pid)
+                (let [read (read-to-exit r pid #(let [x (sedn/decode %)]
+                                                  (when-let [t (:seon.test/started x)] (send! {:op :testing :test t}))
+                                                  (when-let [t (:seon.test/ended x)]
+                                                    (swap! streamed into (:reports x))
+                                                    (swap! ended conj t))))
+                      st (lib/wait-status pid)]
+                  (lib/c-close r)
+                  (if (contract/error? read)
+                    read
+                    {:answer (test-run-answer (:line read) st (:held? read)) :streamed @streamed :ended @ended :pid pid :exit st})))})))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -825,39 +878,23 @@
         ;; nothing to run, so no child is forked
         res (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              (let [[r w] (sock/socketpair)]
-                (lib/fork!
-                {:refused (fn [n] (lib/c-close r) (lib/c-close w)
-                            (contract/error :seon.test/fork-refused #'seon.agent/run-tests-forked
-                                            (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
-                 :child (fn []
-                          (lib/c-close r)
-                          ;; nothing this child forks (a test's own child, a root it starts) holds the
-                          ;; write end, so its exit is the pipe's end of file
-                          (sock/clofork! w)
-                          ;; the run ends with its agent (a test ends by its own budget): the agent's end of this socket
-                          ;; pair closing raises SIGIO here and ends the child, whatever the test is
-                          ;; doing (task seon.agent/a-proof-run-ends-with-its-agent; the agent's own
-                          ;; socket to root is FD_CLOFORK: not held here, so its handler is replaced)
-                          (when-let [unwatched (sock/signal-at-input! w)]
-                            (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
-                            (lib/c-exit 0))
-                          (intr/exit-at-eof! #(sock/peer-gone? w))
-                          (lib/set-trip! (* 16 1048576))
-                          (swap! state assoc :mode :test :evaluating false)
-                          (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks run)
-                                         (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                            (sock/write-line! w (sedn/encode res))))
-                 :parent (fn [pid]
-                           (lib/c-close w)
-                           (forked pid)
-                           ;; each test as it starts goes to root: what this agent waits on, which a stall names
-                           (let [read (read-to-exit r pid #(when-let [t (:seon.test/started (sedn/decode %))] (send! {:op :testing :test t})))
-                                 st (lib/wait-status pid)]
-                             (lib/c-close r)
-                             (if (contract/error? read)
-                               read
-                               (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))})))
+              ;; a child that dies loses the test it was running (its :error stays) and the rest
+              ;; run in a new child: the death of one test never costs the run its other results
+              (loop [todo run reports []]
+                (let [c (test-child plan ticks todo forked)]
+                  (if (contract/error? c)
+                    c
+                    (let [died (filter :exit (:reports (:answer c)))
+                          reports (-> reports (into (:streamed c)) (into (:reports (:answer c))))
+                          done (into (:ended c) (keep :var) died)
+                          rest-todo (filterv #(not (done (str "#'" %))) todo)
+                          counts (frequencies (map :type reports))]
+                      ;; a death with something to show for it (a test ended, or the one it died in is
+                      ;; named) leaves the rest to a new child; none, and the run ends on it
+                      (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
+                        (recur rest-todo reports)
+                        {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
+                         :reports reports :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)}))))))
         unstored (when (and dir (not (contract/error? res)))
                    ;; greens and reds; a test whose child died while it ran has no verdict
                    (let [fails (proofs/failures res)
