@@ -100,8 +100,8 @@
        ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
-       ;; 8,126 calls
-       :fixed {:bytes 650000 :calls 43}
+       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
+       :fixed {:bytes 650000 :calls 46}
        :sizes [100 300 1000]})
     (finally (when (realized? data-store)
                (let [path (get-in @@data-store [:config :store :path])]
