@@ -747,13 +747,22 @@
   written by bin/build) and why not otherwise (:unshared), so agents never key results by a
   previous root's inputs or by code the binary does not run. A failed read is recorded with
   the fact, its :effect row naming :seon.root/source (seon.error/asked-tx). Answers the fact in
-  force."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [sys {:keys [root dirs]}]
+  force.
+  With changed (the relative paths a watcher saw change, or none), only those files are read and
+  main's program is brought up to date with them (seon.source/refresh-tx, the cost of what
+  changed, not of the tree), and the fact's digest is still the tree's: the git tree id
+  (seon.fx/read-source's :tree) with the pins, the same whether the tree was read whole or by
+  its changes, so a result keyed by the inputs stays shared. A repository git does not hold has no
+  tree id and is read whole."
+  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map :map [:maybe [:set :string]]] :map]]}
+  ([sys source] (import-source! sys source nil))
+  ([sys {:keys [root dirs]} changed]
   (let [t0 (profile/now-ns)
-        r @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
+        ask (fn [paths] @(call! sys {:op :fx :kind :source :req {:root root :dirs dirs :paths paths :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
+        r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
+        changed (when (:tree r) changed)
         files (:value r)
-        digest (when files (err/digest (sedn/encode [files (:pins r)])))
+        digest (when files (err/digest (sedn/encode [(or (:tree r) files) (:pins r)])))
         held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
         this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
@@ -762,9 +771,9 @@
                                                                                        ", the source is tree " (:tree (:inputs r))))))
         fact (if (and digest (= digest (:digest held)))
                (this-boot held)
-               (let [tx (when files (source/replace-tx @(:conn sys) files))
+               (let [tx (when files ((if changed source/refresh-tx source/replace-tx) @(:conn sys) files))
                      w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
-                 (this-boot (cond-> {:root root :files (count files) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
+                 (this-boot (cond-> {:root root :files (if changed (:files held) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
@@ -772,7 +781,7 @@
                               (contract/error? w) (assoc :error (:seon.error/message w))))))]
     ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
     @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})
-    fact))
+    fact)))
 
 (defn platform-tx
   "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch), as the
