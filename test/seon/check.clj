@@ -576,7 +576,8 @@
 (defn- declared-threads
   "The threads root runs, as {:roster {name-stem n} :gc-sweepers n} (stems as thread-roster
   folds them). Without a system, the process's own: main, Jolt's shutdown watcher, timer, io
-  poller and fiber carriers, and the GC sweepers fixed at boot. The timer starts at the
+  poller, all-asleep detector (started with the carriers when boot's main carrier returns) and
+  fiber carriers, and the GC sweepers fixed at boot. The timer starts at the
   first timeout and the io poller at the first socket wait (an agent's), so a root has both
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
@@ -584,7 +585,7 @@
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
   pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
   roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
-  ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-carrier" (fiber-carriers)}
+  ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
   ([sys]
    (let [pm (:procs @(get-in sys [:bindings :system]))
