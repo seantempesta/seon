@@ -204,16 +204,21 @@
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs: the keys borne,
   on base or on that db, by each entity a datom of which one holds and the other does not
-  (datahike.api/datoms-diff, which skips the subtrees they share). Cost: the datoms that
+  (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
+  attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
+  data (data-attr?), never a platform record such as an embedding. Cost: the datoms that
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
-  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr? db data-attrs)])
+  (let [read (fn [db] (let [das (data-attr? db data-attrs)]
+                        [db (get-in db [:rschema :db.cardinality/many] #{}) das
+                         (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
-                          d (read db)]
-                    e (into #{} (map :e) (concat gone added))
+                          d (read db)
+                          content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
+                    e (into #{} (comp (filter content?) (map :e)) (concat gone added))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))

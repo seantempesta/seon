@@ -583,25 +583,14 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w "#p-task")))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
          (finally (render/dispose-walk! w)))))
-
-(defn- told?
-  "Is ctx path p told to the model elsewhere: by its transcript (an eval's record, its turns and
-  messages) or by a part of its page (a run and its task, a key the agent added), or is it the
-  agent's own bookkeeping (its :seon.agent/* attributes)? What is not, an outside fact on one of
-  its records such as a person opening an eval (:seon.eval/opened), is the world message's [ctx]."
-  {:malli/schema [:=> [:cat [:vector :any]] :boolean]}
-  [[k e a :as p]]
-  (boolean (or (= :runs k)
-               (and (= :evals k) (or (< (count p) 3) (#{:seon.eval/record :seon.eval/id :seon.eval/by :seon.eval/agent} a)))
-               (and (qualified-keyword? k) (not= :evals k)))))
 
 (defn world
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
-  that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them at the paths
-  nothing else tells (`told?`)}, the empty ones left out; with no c0, the page whole, {:page page}.
+  that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
+  changed}, the empty ones left out; with no c0, the page whole, {:page page}.
   Printed whole as one user message: the page and each change told once."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
@@ -615,7 +604,7 @@
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
                   p0 (page db0 r0) p1 (page db1 r1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
-                  dc (into (sorted-map-by #(compare (str %1) (str %2))) (remove (comp told? key)) (ctx/diff r0 r1))]
+                  dc (into (sorted-map-by #(compare (str %1) (str %2))) (ctx/diff r0 r1))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 

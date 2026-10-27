@@ -537,14 +537,14 @@
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
-  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\"} and
+  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and
   system.edn's declared refs)."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :map] :seon.program/inputs]]}
   [db]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))]
-    [shared (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
+    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
 
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
