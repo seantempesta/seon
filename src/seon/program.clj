@@ -1087,7 +1087,7 @@
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
   :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
   is not read again), :ns, :defines and :refs, and none of the other facts, which no edge, digest
-  or flag reads. Each attribute is read once for all of es: one pass over its index when scan?
+  or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
@@ -1098,11 +1098,11 @@
         id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
-        key-of (merge
-                 (update-vals (at :var/name ds) (fn [[v]] [:var v]))
-                 (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
+        key-of (merge ;; definition-key's order: the earlier kind wins
+                 (update-vals (at :ns/name ds) (fn [[v]] [:ns v]))
                  (update-vals (at :impl/key ds) (fn [[v]] (into [:impl] (sedn/decode v))))
-                 (update-vals (at :ns/name ds) (fn [[v]] [:ns v])))]
+                 (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
+                 (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
     (vec (for [e es :let [[i] (id e)]]
            {:id i :own (str/replace i #"#\d+$" "") :ns (first (nn (first (nsv e)))) :refs (set (rv e))
             :defines (into #{} (keep key-of) (dv e))}))))
@@ -1125,7 +1125,7 @@
         (reached-by rev (get defs v))))
 
 (defn- reach-step
-  "Graph g after the forms removed (ids) and the rows added (reach-row's, live on db): each
+  "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
   referring to, or defining the methods, extensions or contract of, a var a changed form
   defines), and the components of the changed forms and of every form reaching them re-folded
