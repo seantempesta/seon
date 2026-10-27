@@ -130,7 +130,7 @@
                        " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
                        " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
                        " (some? (resolve 'user/scratch-x))"
-                       " (some? ((seon.program/reach-digests (seon.agent/db) {:env \"\" :tree \"\"}) 'app.newns-test/triple-test))]")
+                       " (some? ((seon.program/reach-digests (seon.agent/db) {:env \"\" :tree \"\" :config {}}) 'app.newns-test/triple-test))]")
            :expect ["[9 (inc 1) [a b] true 1 [1 1 0 0] false true]"]
            ;; the plan asks for triple and a passing test that refers it
            :model {:check (str "(let [r (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test))]"

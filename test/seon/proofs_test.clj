@@ -26,7 +26,7 @@
 
 (defn- schema [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
 
-(defn- digests [db env] (select-keys (program/reach-digests db {:env env :tree "t"}) ts))
+(defn- digests [db env] (select-keys (program/reach-digests db {:env env :tree "t" :config {}}) ts))
 
 (defn- scratch-dir []
   (let [d (str (System/getProperty "user.dir") "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
@@ -73,13 +73,13 @@
     (is (= '[app.pv-neg-test/half-test] (run-of (schema db :app.pv-calc/n "pos-int?") "e"))
         "a schema entry changed: the test reaching the contract naming it runs")
     (is (= (sort-by str ts) (run-of db "e2"))
-        "config, deps or a pin changed (:env, the inputs with no program facts): every test runs")))
+        "deps or a pin changed (:env, the inputs with no program facts): every test runs")))
 
 (deftest a-check-step-is-keyed-by-what-its-function-reaches
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
                    'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
         roots {"smoke" '[app.pv-check/smoke] "idle" '[app.pv-check/idle]}
-        dg (fn [db] (program/reach-digests db {:env "e" :tree "t"} roots))
+        dg (fn [db] (program/reach-digests db {:env "e" :tree "t" :config {}} roots))
         before (dg db)
         after (dg (record db 'app.pv-calc "(defn add [a b] (+ b a))"))]
     (is (= #{"smoke" "idle"} (set (keys before))) "each step its own digest")
@@ -87,20 +87,20 @@
     (is (= (before "idle") (after "idle")) "the step not reaching add keeps its digest, so its green is reused")
     (testing "a step reading the whole tree is keyed by the tree; the others by their functions"
       (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
-            sd (proofs/step-digests all {:env "e" :tree "t1" :base "b1"})]
+            sd (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b1"})]
         (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
         (is (= [] (:missing sd)))
-        (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2" :base "b1"})) "laws")))
+        (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2" :config {} :base "b1"})) "laws")))
         (testing "health reads what the tree caused since its base: another base is another key, and no base no key"
-          (is (not= ((:digests sd) "health") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :base "b2"})) "health")))
-          (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :base "b2"})) "laws")) "laws reads the tree alone")
-          (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1"})))))))
+          (is (not= ((:digests sd) "health") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "health")))
+          (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "laws")) "laws reads the tree alone")
+          (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1" :config {}})))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
       (is (= #{"laws" "lmdb-kill" "lmdb-sem"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
-      (is (= {} (program/reach-digests db {:env "e" :tree "t"} {"gone" '[app.pv-check/renamed]})))
-      (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :base "b"})))))))
+      (is (= {} (program/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
+      (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
 
 (deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
@@ -111,11 +111,11 @@
   (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
                    'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
                    'app.pv-boot "(defn calc [] (c/add 1 2))")
-        idx (program/reach-index db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+        idx (program/reach-index db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
         process (set (keep (fn [[k v]] (when (:process? v) k)) idx))
         cand {"smoke" (:digest (idx "smoke")) "calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"}]
     (is (= #{"smoke"} process) "the step that forks reaches a process; the one that adds does not")
-    (is (= (program/reach-digests db {:env "e" :tree "t"} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+    (is (= (program/reach-digests db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
            (update-vals idx :digest))
         "the walk's digests are reach-digests'")
     (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (runner/automatic cand process))

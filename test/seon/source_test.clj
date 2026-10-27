@@ -486,7 +486,7 @@
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
                                                                "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
                                                                "test/app/proc_test.clj" text}))
-        idx (program/reach-index db {:env "" :tree ""})
+        idx (program/reach-index db {:env "" :tree "" :config {}})
         mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
     (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork true 'app.proc-test/via-binary true
             'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}

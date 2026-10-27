@@ -328,8 +328,11 @@
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
  ;; test starts the binary: seon.test-store/binary-sh.
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
- ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
- :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
+ ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
+ ;; bin/env names a worktree's own, jolt/seon-merges-<worktree>, in SEON_SOURCE_BRANCH (task
+ ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1).
+ :seon.config.source/branch #or [#env SEON_SOURCE_BRANCH "jolt/seon-merges"]
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
  ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
  ;; 2026-10-23). At the bound: n/a.
