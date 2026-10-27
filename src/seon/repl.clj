@@ -184,7 +184,7 @@
                              (if-let [{:keys [fns] :as c} (when (or (contains? m :repl/value) (contains? m :repl/ex)) @last)]
                                (do (vreset! last nil)
                                    (cond-> (merge m (dissoc c :fns))
-                                     (seq fns) (assoc :fns (mapv (fn [c] (update c :ms #(/ (Math/round (* % 1000.0)) 1000.0))) fns))))
+                                     (seq fns) (assoc :fns fns)))
                                m))))))))
 
 (defn- ns-form?

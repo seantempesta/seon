@@ -575,10 +575,10 @@
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
-  those digests (files in results-dir, and the test service's result facts in db, greens and reds: seon.proofs/stored-results) and proofs. The digests' inputs with no program facts are this boot's
+  those digests (the results store's facts, greens and reds, whoever ran them: seon.proofs/stored-results) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
-  results directory every checkout shares (:seon.config.source/test-results-dir;
+  results store every checkout shares (:seon.config.proofs/results-store;
   DECISIONS, Agents share greens: a test green at its digest never runs again, \"especially
   when freshly branched\"; every eval is a recorded form, so the digest covers what ran); a
   root with no such fact this boot shares nothing and reuses nothing (the
@@ -590,14 +590,14 @@
   one with a var but no program facts (loaded, never recorded) has no digest: it always runs.
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
-  :digests {test digest}, :dir (the results directory when shared), :graph (the reach graph it
+  :digests {test digest}, :dir (the results store's path when shared), :graph (the reach graph it
   walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
   are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
   (:removed {test src}): main's tests judge a branch whether or not it still holds them (owner:
-  \"deleting the old test doesn't stop the old test from running\"). Given main (its db), the
-  results the test service recorded there are found too: results land on main."
+  \"deleting the old test doesn't stop the old test from running\"). main (its db) is no longer
+  read for results: every run records into the results store."
   {:malli/schema [:function
                   [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
                    [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
@@ -610,7 +610,7 @@
   ([db base proofs] (test-plan db base proofs nil))
   ([db base proofs main]
   (let [[shared in] (test-inputs db)
-        dir (when shared (cfg/value :seon.config.source/test-results-dir))
+        dir (when shared (cfg/value :seon.config.proofs/results-store))
         b (when base (base-graph base in))
         g (branch-graph db base in)
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
@@ -630,10 +630,8 @@
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     (-> (proofs/plan (some-> b :index (update-vals :digest)) cd
-                     (proofs/found (if dir (proofs/verdicts dir (vec (vals cd))) {})
-                                   ;; the test service records results on main (seon.prove/result-tx): main's, over
-                                   ;; what the branch holds of them since it last merged main
-                                   (merge (proofs/stored-results db (vec (vals cd))) (some-> main (proofs/stored-results (vec (vals cd))))))
+                     ;; the results recorded at the digests: the results store, the one home every run records into
+                     (if dir (proofs/stored-results (proofs/results-db dir) (vec (vals cd))) {})
                      proofs)
         (update :selected into (concat unrecorded (keys removed)))
         (update :run into (concat unrecorded (keys removed)))
@@ -696,7 +694,7 @@
                                                  (sock/write-line! w (sedn/encode {:seon.test/started @started})))
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
                       ;; a test's end: its result, after its reports
-                      (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current}))
+                      (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)}))
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
@@ -785,7 +783,7 @@
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn] [:or :map :seon.test/fork-refused]]}
   [plan ticks tests forked]
   (let [[r w] (sock/socketpair)
-        streamed (atom []) ended (atom #{})]
+        streamed (atom []) ended (atom #{}) fns (atom {})]
     (lib/fork!
      {:refused (fn [n] (lib/c-close r) (lib/c-close w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
@@ -816,12 +814,13 @@
                                                   (when-let [t (:seon.test/started x)] (send! {:op :testing :test t}))
                                                   (when-let [t (:seon.test/ended x)]
                                                     (swap! streamed into (:reports x))
+                                                    (when (seq (:fns x)) (swap! fns assoc (proofs/test-symbol t) (:fns x)))
                                                     (swap! ended conj t))))
                       st (lib/wait-status pid)]
                   (lib/c-close r)
                   (if (contract/error? read)
                     read
-                    {:answer (test-run-answer (:line read) st (:held? read)) :streamed @streamed :ended @ended :pid pid :exit st})))})))
+                    {:answer (test-run-answer (:line read) st (:held? read)) :streamed @streamed :ended @ended :fns @fns :pid pid :exit st})))})))
 
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
@@ -834,8 +833,9 @@
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
-  Each test that ran green is stored at its digest in test-plan's :dir through root's :file
-  owner (seon.proofs/store-verdicts!, greens and reds); a write refused is named under :unstored, and that test
+  Each test that ran is recorded at its digest in the results store, greens and reds, with what
+  each of its contracted functions cost (the child streams them as each test ends), through root's
+  :record owner (seon.fx/record-results, one commit); a write refused is named under :unstored, and that test
   runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
@@ -879,7 +879,7 @@
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
               ;; a child that dies loses the test it was running (its :error stays) and the rest
               ;; run in a new child: the death of one test never costs the run its other results
-              (loop [todo run reports []]
+              (loop [todo run reports [] fns {}]
                 (let [c (test-child plan ticks todo forked)]
                   (if (contract/error? c)
                     c
@@ -891,21 +891,24 @@
                       ;; a death with something to show for it (a test ended, or the one it died in is
                       ;; named) leaves the rest to a new child; none, and the run ends on it
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
-                        (recur rest-todo reports)
+                        (recur rest-todo reports (merge fns (:fns c)))
                         {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)}))))))
+                         :reports reports :fns (merge fns (:fns c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)}))))))
         unstored (when (and dir (not (contract/error? res)))
                    ;; greens and reds; a test whose child died while it ran has no verdict
                    (let [fails (proofs/failures res)
                          died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports res)))]
-                     (proofs/store-verdicts! #(fx! :file % {}) dir
-                                             (into {} (for [[t status] (proofs/results res) :when (and (digests t) (not (died t)))]
-                                                        [t (cond-> {:test t :digest (digests t) :pass (if (= :pass status) 1 0)
-                                                                    :fail (if (= :fail status) 1 0) :error (if (= :error status) 1 0)}
-                                                             (fails t) (assoc :failures (fails t)))])))))]
+                     (let [w (fx! :record {:tx-data (proofs/results-tx {:id (str "agent " (name (:id @state :agent)) " " (random-uuid)) :branch (:branch @state :agent)}
+                                                                       (into {} (for [[t status] (proofs/results res) :when (and (digests t) (not (died t)))]
+                                                                                  [t {:test t :digest (digests t) :pass (if (= :pass status) 1 0)
+                                                                                      :fail (if (= :fail status) 1 0) :error (if (= :error status) 1 0)
+                                                                                      :fns (get-in res [:fns t])}]))
+                                                                       fails)}
+                                     {})]
+                       (when (contract/error? w) [{:key :all :message (:seon.error/message w)}]))))]
     (if (contract/error? res)
       res
-      (-> res
+      (-> (dissoc res :fns)
         (cond-> (seq unstored) (assoc :unstored unstored))
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))

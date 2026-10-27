@@ -472,8 +472,10 @@
         [:span (get asked-by by "its own turn")]
         (when (seq (:fns r))
           [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) (if (= 1 (count (:fns r))) " function" " functions"))]
-           [:table [:tbody (for [{:keys [var calls ms]} (:fns r)]
-                             [:tr [:td [:code (str var)]] [:td {:class "tabular-nums"} (str (group3 calls) " calls")] [:td {:class "tabular-nums"} (ms-str ms)]])]]])]])))
+           [:table [:tbody (for [{:keys [var calls ticks self-ticks bytes]} (:fns r)]
+                             [:tr [:td [:code (str var)]] [:td {:class "tabular-nums"} (str (group3 calls) " calls")]
+                              [:td {:class "tabular-nums"} (str (group3 ticks) " ticks")] [:td {:class "tabular-nums"} (str (group3 self-ticks) " own")]
+                              [:td {:class "tabular-nums"} (str (group3 bytes) " B")]])]]])]])))
 
 (defn turn
   "A model turn's header (the declared html render of :seon.turn/turn-fact), above the evaluations

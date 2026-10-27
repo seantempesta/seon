@@ -7,7 +7,7 @@
 # shards, each run at once in a process of its own (logs and shard files in target/prove/);
 # each result is stored at its digest, after target/seon is built from this tree when anything
 # runs. Ends on TEST OK / TEST FAILED and its exit status.
-# bin/test --plan|--shard|--store-steps ... are test/test_runner.clj's parts (bin/prove's).
+# bin/test --plan|--shard|--store-steps|--import-results ... are test/test_runner.clj's parts (bin/prove's).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 "$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
@@ -30,7 +30,7 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 # and draws every randomized property test's seeds (:seon.config.proofs/seeds)
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 case ${1:-} in
-  --plan|--shard|--store-steps) runner "$@"; exit $? ;;
+  --plan|--shard|--store-steps|--import-results) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
   *) WHAT=tests OUT=$ROOT/target/prove/tests ;;
 esac

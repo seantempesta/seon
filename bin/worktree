@@ -77,7 +77,7 @@ setup() {
   if [[ -d $MAIN/target ]]; then
     mkdir -p "$WT/target/home/.jolt"
     for e in "$MAIN"/target/*(N); do
-      [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
+      [[ ${e:t} == (runs|check|tmp|cache|home|results-store) ]] || cp -cR "$e" "$WT/target/"
     done
     for e in "$MAIN"/target/home/*(ND); do
       [[ ${e:t} == .jolt ]] || cp -cR "$e" "$WT/target/home/"

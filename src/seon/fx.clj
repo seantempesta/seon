@@ -48,6 +48,15 @@
             (do (.delete (java.io.File. tmp))
                 (error #'seon.fx/write-file :seon.fx/io-error (str "rename " tmp " -> " path ": " (ffi/errno-message errno)) {:path path :tmp tmp :errno errno})))))))
 
+(defn record-results
+  "Results recorded: the request's :tx-data (seon.proofs/results-tx's) committed to the results
+  store (:seon.config.proofs/results-store) by its one writer, seon.proofs/record!. Answers
+  {:value {:datoms n}}, or its :seon.proofs/unrecorded."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [tx-data]} :req}]
+  (let [r (proofs/record! (cfg/value :seon.config.proofs/results-store) (vec tx-data))]
+    (if (contract/error? r) r {:value {:datoms (count tx-data)}})))
+
 ;; Seon's own source: the program read from the tree a generation was built from, and
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
@@ -520,17 +529,18 @@
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
 
 (defn test-results
-  "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
-  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), dir the
-  results directory its shards store into (seon.proofs/store-verdicts!). :pass when a green is
-  stored there (it ran green, or was green at its digest), :fail when a red is (flaky, or a red
-  alone), :error with none: a run that never reached it (its plan or its build failed, it died)
-  says nothing of it passing. The record read, never prove's printed output."
-  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :string [:sequential :qualified-symbol]]
+  "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
+  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), db the
+  results store its shards record into (seon.proofs/record!). :pass when a green is recorded
+  there (it ran green, or was green at its digest), :fail when a red is (flaky, or a red),
+  :error with none: a run that never reached it (its plan or its build failed, it died) says
+  nothing of it passing. The record read, never prove's printed output."
+  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :seon.host/db [:sequential :qualified-symbol]]
                   [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
-  [plan dir tests]
-  (into {} (for [t tests :let [dg (get-in plan [:digests t])]]
-             [t (or (when dg (proofs/status-at dir dg)) :error)])))
+  [plan db tests]
+  (let [found (proofs/stored-results db (vec (keep #(get-in plan [:digests %]) tests)))]
+    (into {} (for [t tests :let [r (some-> (get-in plan [:digests t]) found)]]
+               [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)]))))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -548,7 +558,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        results (cfg/value :seon.config.source/test-results-dir)
+        results (cfg/value :seon.config.proofs/results-store)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
@@ -557,12 +567,12 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        ;; the tree's shards store into this root's results directory, named to them, so the
-        ;; verdicts read below are the ones its run wrote
-        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+        ;; the tree's shards record into this root's results store, named to them, so the
+        ;; results read below are the ones its run recorded
+        (let [r (apply sh/sh (concat clean [(str "SEON_RESULTS_STORE=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
               plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
           (spit log (str (:out r) (:err r)))
-          {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
+          {:value {:results (test-results plan (proofs/results-db results) tests) :ms (profile/ms-since t0) :log log}})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))

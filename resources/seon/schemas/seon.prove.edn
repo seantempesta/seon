@@ -6,6 +6,29 @@
  ;; the failing assertions of a red result (seon.proofs/failures), as data
  :seon.proof/failures [:vector :map]
  :seon.proof/ms :int
+ ;; the work the test did (seon.profile/measure!): engine ticks and this thread's bytes
+ :seon.proof/ticks :int
+ :seon.proof/bytes :int
+ ;; a bin/check step's result (seon.proofs/check-steps names it), where a test's names its var
+ :seon.proof/step :string
+ ;; the git tree a bin/test or bin/prove run planned (seon.fx/tree-id), where a root's run names its branch and t
+ :seon.proof/tree :string
+ ;; what each contracted function a test called cost in that run (seon.profile/touched), one entity
+ ;; per test digest and var: its key is "<digest> <var>", so a test that runs again at its digest
+ ;; replaces its rows (and its history keeps the old ones)
+ :seon.proof.fn/key [:and {:seon.db/identity true} :string]
+ :seon.proof.fn/digest [:and {:seon.db/index true} :string]
+ :seon.proof.fn/var [:and {:seon.db/index true} :qualified-symbol]
+ :seon.proof.fn/test :qualified-symbol
+ :seon.proof.fn/calls :int
+ :seon.proof.fn/ticks :int
+ :seon.proof.fn/self-ticks :int
+ :seon.proof.fn/bytes :int
+ :seon.proof.fn/self-bytes :int
+ :seon.proof.fn/fn-fact [:map {:seon.db/attributes true}
+                         [:seon.proof.fn/key :seon.proof.fn/key] [:seon.proof.fn/digest :seon.proof.fn/digest] [:seon.proof.fn/var :seon.proof.fn/var]
+                         [:seon.proof.fn/test :seon.proof.fn/test] [:seon.proof.fn/calls :seon.proof.fn/calls] [:seon.proof.fn/ticks :seon.proof.fn/ticks]
+                         [:seon.proof.fn/self-ticks :seon.proof.fn/self-ticks] [:seon.proof.fn/bytes :seon.proof.fn/bytes] [:seon.proof.fn/self-bytes :seon.proof.fn/self-bytes]]
  ;; the run (its id) that made it, the branch and its tx it ran at, and who asked (the change)
  :seon.proof/run :string
  :seon.proof/branch :string
@@ -16,10 +39,11 @@
  ;; Only main's runs write it: a red on an agent's branch is that agent's, never a problem of main
  :seon.proof/latest [:and {:seon.db/identity true} :string]
  :seon.proof/result-fact [:map {:seon.db/attributes true}
-                          [:seon.proof/digest :seon.proof/digest] [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]
-                          [:seon.proof/run :seon.proof/run] [:seon.proof/branch :seon.proof/branch] [:seon.proof/t :seon.proof/t]
-                          [:seon.proof/ms {:optional true} :seon.proof/ms] [:seon.proof/failures {:optional true} :seon.proof/failures]
-                          [:seon.proof/change {:optional true} :seon.proof/change]]
+                          [:seon.proof/digest :seon.proof/digest] [:seon.proof/test {:optional true} :seon.proof/test] [:seon.proof/step {:optional true} :seon.proof/step]
+                          [:seon.proof/status :seon.proof/status] [:seon.proof/run :seon.proof/run]
+                          [:seon.proof/branch {:optional true} :seon.proof/branch] [:seon.proof/t {:optional true} :seon.proof/t] [:seon.proof/tree {:optional true} :seon.proof/tree]
+                          [:seon.proof/ms {:optional true} :seon.proof/ms] [:seon.proof/ticks {:optional true} :seon.proof/ticks] [:seon.proof/bytes {:optional true} :seon.proof/bytes]
+                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.proof/change {:optional true} :seon.proof/change]]
  ;; one fact per run: its key is (branch, tx), so one request per digest is one run
  :seon.proof/latest-fact [:map {:seon.db/attributes true}
                           [:seon.proof/latest :seon.proof/latest] [:seon.proof/status :seon.proof/status] [:seon.proof/run :seon.proof/run]
@@ -39,6 +63,8 @@
                            [:seon.proof.run/pass :seon.proof.run/pass] [:seon.proof.run/fail :seon.proof.run/fail]
                            [:seon.proof.run/error :seon.proof.run/error] [:seon.proof.run/ms {:optional true} :seon.proof.run/ms]
                            [:seon.proof.run/skipped-process {:optional true} :seon.proof.run/skipped-process]]
+ ;; the results store refused a run's commit (seon.proofs/record!): its results are not kept
+ :seon.proofs/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unrecorded]] [:path :string]]]
  ;; the request a session or an agent's turn makes of the service, and its answer
  :seon.prove/request [:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]
  :seon.prove/answer [:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]}

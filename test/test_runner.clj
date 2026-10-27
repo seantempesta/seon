@@ -11,7 +11,7 @@
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
-            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
+            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
   "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
@@ -216,7 +216,8 @@
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
   red one printed (RED); then
-  its results, greens and reds, stored at their digests (seon.proofs/store-verdicts!), unless the tree is not the
+  its results, greens and reds, recorded at their digests in the results store in one commit (seon.proofs/record!:
+  their failures and each test's contracted functions' cost with them), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
   Then SHARD n green m red. Answers the exit status."
@@ -226,10 +227,17 @@
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [before (fx/tree-id (System/getProperty "user.dir"))
           ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
+          reports (volatile! [])
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
-                                               (:seon.test/report x) nil
+                                               (:seon.test/report x) (let [m (:seon.test/report x)]
+                                                                        ;; a failing assertion, as the results keep it (seon.proofs/failures): by the one printer
+                                                                        (when (#{:fail :error} (:type m))
+                                                                          (vswap! reports conj (cond-> {:type (:type m) :var (str "#'" (:test x))}
+                                                                                                 (:message m) (assoc :message (str (:message m)))
+                                                                                                 (contains? m :expected) (assoc :expected (print/text (:expected m) (:part print/budgets)))
+                                                                                                 (contains? m :actual) (assoc :actual (print/text (:actual m) (:part print/budgets)))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                :else (do (println "ended" (:test x))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
@@ -238,12 +246,17 @@
           ;; the tree the tests read is the plan's from before the run to after it: an edit
           ;; during the run (a test reading files reads it) is not what the digests name
           same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
-          unstored (when same? (proofs/store-verdicts! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
+          ;; one commit of the shard's results, their failures and each test's function costs
+          unstored (when same?
+                     (let [r (proofs/record! (config/value :seon.config.proofs/results-store)
+                                             (proofs/results-tx {:id (str "bin/test " tree " " (.getName (io/file file))) :tree tree}
+                                                                ran (proofs/failures {:reports @reports})))]
+                       (when (:seon.error/type r) [{:key :all :message (:seon.error/message r)}])))
           _ (.mkdirs (io/file ms-dir))
           _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
           red (count (remove proofs/green? (vals ran)))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
-      (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
+      (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
       (println (str "SHARD " (count ran) " tests, " (- (count ran) red) " green, " red " red, in "
                     (quot (- (profile/now-ns) t0) 1000000) " ms"))
       (if (and (zero? red) (empty? unstored)) 0 1))))
@@ -259,7 +272,6 @@
   :missing :inputs}."
   [root what all? names store]
   (let [{:keys [graph inputs digests process binary no-test]} (tests-of root names store)
-        dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
         step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
@@ -271,7 +283,8 @@
         merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
         cand (apply dissoc all-cand (proofs/left-out (keys all-cand) process (boolean (or named? merge?)) #{}))
-        found (proofs/verdicts dir (vec (vals cand)))
+        ;; the results at cand's digests, by one seek each in the results store
+        found (proofs/stored-results (proofs/results-db) (vec (vals cand)))
         {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
@@ -292,7 +305,7 @@
   (if-let [bad (refused-names names)]
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
-        dir (config/value :seon.config.source/test-results-dir)
+        dir (config/value :seon.config.proofs/results-store)
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
@@ -346,13 +359,12 @@
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
-  (check-<step>, space separated) stored green at its digest (seon.proofs/store-verdicts!),
+  (check-<step>, space separated) recorded green at its digest in the results store (seon.proofs/record!, one commit),
   unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
   than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
   stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
   [out]
-  (let [dir (config/value :seon.config.source/test-results-dir)
-        {:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
+  (let [{:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
         red (sort (remove green (keys digests)))
@@ -362,11 +374,39 @@
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
-                     (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}]))))]
-    (doseq [u unstored] (println "UNSTORED" (:key u) (:message u)))
+                     (let [r (proofs/record! (config/value :seon.config.proofs/results-store)
+                                             (proofs/results-tx {:id (str "bin/prove steps " tree) :tree tree}
+                                                                (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
+                       (when (:seon.error/type r) [{:key :all :message (:seon.error/message r)}])))]
+    (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
     (if (and (empty? red) (empty? unstored)) 0 1)))
+
+(defn- import-results!
+  "The results directory dir's results (the files bin/test wrote before the results store: <digest>.edn
+  greens, <digest>.red.edn reds) recorded in the results store, a commit per
+  :seon.config.proofs/import-batch files: every green, and a red whose digest also holds a green
+  (recorded after it, so the digest's history holds both: flaky). A red alone was no result (it
+  ran again), so it is left out. Once, when the store replaced the directory; the directory is
+  then the owner's to remove. Answers the exit status."
+  [dir]
+  (let [store (config/value :seon.config.proofs/results-store)
+        names (vec (sort (.list (io/file dir))))
+        greens (filterv #(re-matches #"[0-9a-f]+\.edn" %) names)
+        green-dg (set (map #(subs % 0 (- (count %) 4)) greens))
+        reds (filterv #(when-let [[_ dg] (re-matches #"([0-9a-f]+)\.red\.edn" %)] (green-dg dg)) names)
+        read #(edn/read-string (slurp (io/file dir %)))
+        t0 (profile/now-ns)
+        refused (volatile! 0)]
+    (doseq [part (partition-all (config/value :seon.config.proofs/import-batch) (concat greens reds))]
+      (let [ran (into {} (for [f part :let [r (read f)] :when (:digest r)] [(or (:test r) (:step r)) (dissoc r :failures)]))
+            fails (into {} (for [f part :let [r (read f)] :when (seq (:failures r))] [(or (:test r) (:step r)) (:failures r)]))
+            r (proofs/record! store (proofs/results-tx {:id (str "import " dir)} ran fails))]
+        (when (:seon.error/type r) (vswap! refused inc) (println "UNRECORDED" (:seon.error/message r)))))
+    (println (str "import: " (count greens) " greens, " (count reds) " reds of digests also green, from " dir " into " store
+                  " in " (quot (- (profile/now-ns) t0) 1000000) " ms, " @refused " commits refused"))
+    (if (zero? @refused) 0 1)))
 
 (defn -main [& args]
   (let [[flag & more] args]
@@ -376,4 +416,5 @@
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
-        "--store-steps" (store-steps! (first more))))))
+        "--store-steps" (store-steps! (first more))
+        "--import-results" (import-results! (first more))))))

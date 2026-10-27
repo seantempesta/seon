@@ -55,6 +55,8 @@
  :fx
  {:echo {:perform seon.fx/echo :workers 1}
   :file {:perform seon.fx/write-file :workers 1}
+  ;; results into the one results store (seon.proofs/record!): an agent's test run's, the test service's
+  :record {:perform seon.fx/record-results :workers 1}
   :source {:perform seon.fx/read-source :workers 1}
   :git {:perform seon.fx/git-commit :workers 1}
   :deps {:perform seon.fx/resolve-deps :workers 1}

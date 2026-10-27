@@ -3,25 +3,27 @@
   bracket and its :seon.fn.cost facts, ported for Jolt; E15 measured the port).
 
   Every armed function (seon.contract/checked, arm!) is wrapped once more by `counted`: a
-  Chez procedure over the function's cell. A cell counts the function's calls exactly and
-  times one call in 64 (its first call in an epoch always), so each function's time is an
-  estimate from its samples and its count is exact. Counts are kept per epoch: `begin!`
-  opens one (an eval form, a cost measurement) and `touched` answers the functions called
-  since, so reading an epoch costs what it touched, never the program's size.
+  Chez procedure over the function's cell. A cell counts, exactly, the function's calls and
+  the engine ticks (jolt-ticks: the work done, a fiber's own on a fiber) and thread bytes
+  (seon-profile-alloc) they did, in all and of its own: a call saves and zeroes what its
+  callees have done so far (two process-wide counters), so its self is its own work less
+  theirs, and it adds its whole to its caller's on the way out. Counts are kept per epoch:
+  `begin!` opens one (an eval form, a cost measurement, a test) and `touched` answers the
+  functions called since, so reading an epoch costs what it touched, never the program's size.
+  Cost is work done (docs/cost.md), so no clock is read per call: this replaced timing one call
+  in 64 by the wall clock, an estimate, inclusive only.
 
   Jolt-specific, and why (estimates before the probe, measured in the probe beside them):
-  - The wrapper is Scheme, not Clojure: one fixnum compare and increment on a vector slot
-    per call, no Clojure dispatch. Estimate 1-2 ns per call; probe 0.9 ns (9.5 vs 8.6 ns
-    for a bare inc).
-  - The clock is the machine's CLOCK_UPTIME_RAW (clock_gettime_nsec_np), a foreign
-    procedure called from Scheme: 9.5 ns a read, nothing allocated, 41 ns resolution,
-    where Chez's `current-time` was 28 ns, 48 bytes and 1 us, counted from
-    this process's start. It is Seon's one clock (`now-ns`, docs/machine.md#the-clock):
-    every process reads the same timeline, so one process's stamp is another's t0.
-  - The sample rate is a power of two, so the test is one fxand. Amortized clock cost: two
-    reads per 64 calls, about 0.8 ns.
-  - No ThreadLocal and no self-time frame (E15: the bracket's 3 ThreadLocal ops and frame
-    were 0.7 of its 0.9 us). Times are inclusive: a caller's time includes its callees'.
+  - The wrapper is Scheme, not Clojure: no Clojure dispatch. Measured 2026-10-27 (load 30-50)
+    over 1M calls of a two-key predicate: the call alone 10 ticks; counting calls alone (the
+    wrapper before) 11; calls, ticks and bytes 15 ticks, about 60 ns more a call in wall time
+    (a jolt-ticks read about 26 ns, a bytes read 3 ns); the same predicate contracted, its
+    schema checked, 48 ticks and 120 ns.
+  - Nothing is allocated per call: every count is a fixnum in the cell's slots.
+  - Self is approximate where a call does not return: a throw skips its frame's update, so
+    the frame that catches it counts the thrower's callees as its own; and a call that parks
+    on a fiber counts the bytes others allocated on its thread meanwhile (its ticks are its
+    fiber's own).
 
   The meter is not metered: seon.contract/wrap counts every armed function except this
   namespace's own (armed at boot with seon.contract), so reading a count adds no call.
@@ -39,32 +41,37 @@
      ;; CLOCK_UPTIME_RAW is 8 on macOS
      (define seon-profile-now
        (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 8))))
-     ;; a cell: #(calls epoch sampled-ns samples symbol)
-     (define (seon-profile-cell sym) (vector 0 -1 0 0 sym))
-     ;; count one call; #t when this call is to be timed
+     ;; the calling thread's own allocation, never another thread's or the collector's copying
+     ;; (Chez jolt/thread-bytes: S_thread_bytes_allocated)
+     (define seon-profile-alloc (foreign-procedure \"(cs)thread_bytes_allocated\" () uptr))
+     ;; a cell: #(calls epoch ticks self-ticks bytes self-bytes symbol)
+     (define (seon-profile-cell sym) (vector 0 -1 0 0 0 0 sym))
+     ;; the ticks and bytes the calls running inside the current one have done so far: saved
+     ;; and zeroed as a call starts, so its self is what it did less what they did
+     (define seon-profile-kid-ticks 0)
+     (define seon-profile-kid-bytes 0)
+     ;; count one call (a cell first touched in this epoch starts from zero)
      (define (seon-profile-hit! c)
        (if (fx= (vector-ref c 1) seon-profile-epoch)
-           (let ([n (fx+ 1 (vector-ref c 0))])
-             (vector-set! c 0 n)
-             (fx= 1 (fxand n 63)))
+           (vector-set! c 0 (fx+ 1 (vector-ref c 0)))
            (begin (vector-set! c 0 1) (vector-set! c 1 seon-profile-epoch)
-                  (vector-set! c 2 0) (vector-set! c 3 0)
-                  (set! seon-profile-touched (cons c seon-profile-touched))
-                  #t)))
-     ;; what one clock read costs (the least of 1000 back-to-back pairs): each sample
-     ;; includes one read, which is not the function's time
-     (define seon-profile-clock-ns
-       (let loop ([i 0] [best 1000000])
-         (if (fx= i 1000) best
-             (let* ([a (seon-profile-now)] [b (seon-profile-now)]) (loop (fx+ i 1) (min best (- b a)))))))
-     (define (seon-profile-took! c t0)
-       (vector-set! c 2 (+ (vector-ref c 2) (max 0 (- (seon-profile-now) t0 seon-profile-clock-ns))))
-       (vector-set! c 3 (fx+ 1 (vector-ref c 3))))
+                  (vector-set! c 2 0) (vector-set! c 3 0) (vector-set! c 4 0) (vector-set! c 5 0)
+                  (set! seon-profile-touched (cons c seon-profile-touched)))))
+     (define (seon-profile-took! c dt db kt kb)
+       (vector-set! c 2 (+ dt (vector-ref c 2)))
+       (vector-set! c 3 (+ (- dt seon-profile-kid-ticks) (vector-ref c 3)))
+       (vector-set! c 4 (+ db (vector-ref c 4)))
+       (vector-set! c 5 (+ (- db seon-profile-kid-bytes) (vector-ref c 5)))
+       (set! seon-profile-kid-ticks (+ kt dt))
+       (set! seon-profile-kid-bytes (+ kb db)))
      (define-syntax seon-profile-call
        (syntax-rules ()
-         [(_ c e) (if (seon-profile-hit! c)
-                      (let* ([t0 (seon-profile-now)] [r e]) (seon-profile-took! c t0) r)
-                      e)]))
+         [(_ c e) (let ([kt seon-profile-kid-ticks] [kb seon-profile-kid-bytes])
+                    (seon-profile-hit! c)
+                    (set! seon-profile-kid-ticks 0) (set! seon-profile-kid-bytes 0)
+                    (let* ([t0 (jolt-ticks)] [b0 (seon-profile-alloc)] [r e])
+                      (seon-profile-took! c (- (jolt-ticks) t0) (- (seon-profile-alloc) b0) kt kb)
+                      r))]))
      (define (seon-profile-counted c f)
        (case-lambda
          [() (seon-profile-call c (f))]
@@ -77,15 +84,12 @@
        (set! seon-profile-epoch (fx+ 1 seon-profile-epoch))
        (set! seon-profile-touched '())
        seon-profile-epoch)
-     ;; fold f over the touched cells: (f acc symbol calls sampled-ns samples), one crossing
+     ;; fold f over the touched cells: (f acc symbol calls ticks self-ticks bytes self-bytes), one crossing
      (define (seon-profile-fold f init)
        (let loop ([cs seon-profile-touched] [acc init])
          (if (null? cs) acc
              (let ([c (car cs)])
-               (loop (cdr cs) (f acc (vector-ref c 4) (vector-ref c 0) (vector-ref c 2) (vector-ref c 3)))))))
-     ;; the calling thread's own allocation, never another thread's or the collector's copying
-     ;; (Chez jolt/thread-bytes: S_thread_bytes_allocated)
-     (define seon-profile-alloc (foreign-procedure \"(cs)thread_bytes_allocated\" () uptr))
+               (loop (cdr cs) (f acc (vector-ref c 6) (vector-ref c 0) (vector-ref c 2) (vector-ref c 3) (vector-ref c 4) (vector-ref c 5)))))))
      ;; CLOCK_THREAD_CPUTIME_ID is 16 on macOS: the calling thread's CPU time
      (define seon-profile-cpu
        (let ([clock (foreign-procedure \"clock_gettime_nsec_np\" (int) unsigned-64)]) (lambda () (clock 16))))
@@ -126,7 +130,7 @@
   [] ((:alloc procs)))
 
 (defn counted
-  "f, counted under fn-sym: every call counted, one in 64 timed."
+  "f, counted under fn-sym: every call counted, with the ticks and bytes it did, in all and of its own."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.host/fn] :seon.host/fn]}
   [fn-sym f] ((:counted procs) ((:cell procs) fn-sym) f))
 
@@ -141,14 +145,14 @@
   [] ((:calls procs)))
 
 (defn touched
-  "The functions called since the epoch began, each with its exact :calls and its :ms,
-  estimated from its timed calls (sampled ns ÷ samples × calls). Costs what was touched."
+  "The functions called since the epoch began, each with its exact :calls, the engine :ticks and
+  thread :bytes its calls did in all (callees included), and :self-ticks and :self-bytes, what
+  they did less what the contracted calls inside them did. Costs what was touched."
   {:malli/schema [:=> [:cat] [:vector :seon.profile/fn-cost]]}
   []
   (persistent!
-    ((:fold procs) (fn [acc sym calls ns samples]
-                     (conj! acc {:var sym :calls calls
-                                 :ms (if (pos? samples) (/ (* (/ (double ns) samples) calls) 1e6) 0.0)}))
+    ((:fold procs) (fn [acc sym calls ticks self-ticks bytes self-bytes]
+                     (conj! acc {:var sym :calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}))
                    (transient []))))
 
 (defn measure!
@@ -171,7 +175,7 @@
                     (done {:ticks @k :bytes (- a1 a0) :wall-ns (- w1 w0) :cpu-ns (- c1 c0) :calls n}))))))
 
 (defn top
-  "The k costliest of fns (by estimated ms, then calls), costliest first."
+  "The k costliest of fns (by ticks, then calls), costliest first."
   {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost] nat-int?] [:vector :seon.profile/fn-cost]]}
   [fns k]
-  (vec (take k (sort-by (juxt (comp - :ms) (comp - :calls) (comp str :var)) fns))))
+  (vec (take k (sort-by (juxt (comp - :ticks) (comp - :calls) (comp str :var)) fns))))

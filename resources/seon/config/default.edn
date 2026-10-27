@@ -394,6 +394,20 @@
  ;; the store cannot hold them. bin/env sets SEON_TEST_RESULTS to the main tree's test-results/
  ;; (found from git's common dir, as the compile caches are); unset, the checkout's own.
  :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "test-results"]
+ ;; Unit: path. The one home of results (owner 2026-10-27: "please tell me it's in the database
+ ;; and not a separate system"): every test's and check step's result at its reach digest, the
+ ;; runs, and each test's contracted functions' cost, as :seon.proof facts (seon.proofs/record!
+ ;; writes, results-db reads). One LMDB store every checkout and worktree shares, the one-store
+ ;; rule's last resort: a result at a digest is valid in every checkout, and a checkout's store
+ ;; (runs/store) is its own. bin/env sets SEON_RESULTS_STORE to the main tree's (beside
+ ;; test-results/, as the compile caches are); unset, the checkout's own. Its schema is installed
+ ;; as it grows (seon.db/open!), never keyed by it: results are reused across schema changes.
+ :seon.config.proofs/results-store #or [#env SEON_RESULTS_STORE #seon/checkout "target/results-store"]
+ ;; Unit: result files. How many of the old results directory's files one commit of the import
+ ;; records (test-runner/import-results!). Provenance: estimate, 2026-10-27: ~5 datoms a result,
+ ;; so a commit of 5,000 is ~25k datoms, well inside one transaction. At the bound: the next
+ ;; files go in the next commit.
+ :seon.config.proofs/import-batch 5000
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
