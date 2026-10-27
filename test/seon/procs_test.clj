@@ -679,7 +679,16 @@
                 instant (fn [d] (:db/txInstant (d/entity d t)))]
             (is (inst? (instant @conn)) "main's transaction has its instant (history is kept)")
             (is (= (instant @conn) (instant (:db st2))))
-            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))))))))
+            (is (= "the commit's own fact" (:note/text (d/entity (:db st2) t))) "and its tx-meta")))
+        (testing "main's reconciler index is held for the db it is of, and a fork observes it forward to main now"
+          (let [m3 (stored (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "forked" :seon.task/plan "Make forked true."}])))
+                [st3 _] (step #'server/server-step st :cmd m3)
+                held (:index (server/index-at-fork st3))]
+            (let [s0 (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})] (is (identical? (:db s0) (get-in s0 [:index :db])) "made for the db it holds"))
+            (is (not (contains? (get-in st3 [:index :index :tasks]) "demo/forked")) "a commit leaves it: a fork brings it forward")
+            (is (= (:db st3) (:db held)))
+            (is (contains? (get-in held [:index :tasks]) "demo/forked"))
+            (is (= (reconcile/index (:db st3)) (:index held)) "the index listed at that db")))))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
