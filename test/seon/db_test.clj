@@ -714,16 +714,17 @@
   ;; task datahike.transaction/an-index-insert-allocates-nothing-extra: a card-many value's
   ;; comparisons all reach the value, so its floor is a plain datom's (two inserts, no card-one
   ;; descent). Before Jolt's 2-arity == and Datahike's compare-value without a try, 38 KB a
-  ;; datom at 1,000 and growing with n (46 KB at 10,000); the overrun below is what stays (a
-  ;; deftype method call's dispatch, task jolt.backend/a-deftype-method-call-takes-a-site-cache)
+  ;; datom at 1,000 and growing with n (46 KB at 10,000), 17 KB after; the overrun below is what
+  ;; stays (a deftype method call's dispatch, task jolt.backend/a-deftype-method-call-takes-a-site-cache)
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/form-refs
      :n "values of one form's cardinality-many :form/refs"
      :work "per value: its insert into :eavt and :aevt, each descent comparing up to the value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :overrun {:task "datahike.transaction/an-index-insert-allocates-nothing-extra" :measured {:ticks 12969032.0 :bytes 17008064.0}}
-     ;; the overrun's measure is at 1,000, the largest size in every run (--all too)
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :measured {:ticks 12969032.0 :bytes 17008064.0}}
+     ;; the overrun's measure is at 1,000, the largest size in every run (--all too); measured
+     ;; at 10,000 too, 17.7 KB a datom against 17.0 at 1,000: near-flat, the log n of a descent
      :sizes [100 300 1000]}))
 
 (deftest an-identity-costs-its-seek
