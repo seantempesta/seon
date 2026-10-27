@@ -201,33 +201,31 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(defn touched-keys
-  "Every program key whose content may differ between base and any of dbs: the keys borne,
-  on base or on that db, by each entity a datom of which one holds and the other does not
-  (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
-  attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
-  data (data-attr?), never a platform record such as an embedding. For data-attrs a set, one
-  :aevt range per such attribute: a whole :eavt diff walked every datom that differs, the
-  22,000 embedding datoms of a main that embedded after an agent forked, 313M ticks and 640 MB
-  for no key. For :all (the data is every attribute the store declares) the one :eavt diff,
-  filtered. Cost: a set, one descent per content attribute and the datoms of those that
-  differ, not the program and not what else main wrote; :all, the datoms that differ."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
-  [base dbs data-attrs]
+(defn touched-by
+  "The program keys whose content may differ between base and db, given moved, the datoms that differ
+  between them (what datahike.api/datoms-diff answers, joined; a caller that holds them reads
+  nothing again): the keys borne, on base or on db, by each entity of a moved datom whose attribute is one a
+  key's content reads (the program's, program/attr-namespaces, or declared data, data-attr?), never a platform
+  record such as an embedding."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] [:set :seon.merge/program-key]]}
+  [base db data-attrs moved]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
                          (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
-        b (read base)]
-    (into #{} (for [db dbs
-                    :let [side-d (read db)
-                          content? (fn [a] (or ((nth b 3) a) ((nth side-d 3) a)))]
-                    e (if (= :all data-attrs)
-                        (into #{} (comp (filter #(content? (:a %))) (map :e)) (apply concat (d/datoms-diff base db :eavt [])))
-                        (into #{} (comp (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a])))) (map :e))
-                              (filter #(and (keyword? %) (content? %)) (set (concat (keys (:schema base)) (keys (:schema db)))))))
-                    [side many das] [b side-d]
+        b (read base) d (read db)
+        content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
+    (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
+                    [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))
+
+(defn touched-keys
+  "Every program key whose content may differ between base and any of dbs (`touched-by`, over
+  datahike.api/datoms-diff, which skips the subtrees they share). Cost: the datoms that
+  differ, not the program."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
+  [base dbs data-attrs]
+  (into #{} (mapcat (fn [db] (touched-by base db data-attrs (apply concat (d/datoms-diff base db :eavt []))))) dbs))
 
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
@@ -249,11 +247,14 @@
     {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
 
 (defn delta-changes
-  "`changes` from db from to db to, read only where they differ (touched-keys)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]}
-  [from to data-attrs]
-  (let [ks (vec (touched-keys from [to] data-attrs))]
-    (changes (program-of from ks data-attrs) (program-of to ks data-attrs))))
+  "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
+  differ (which a caller already read), nothing is diffed again."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] :seon.merge/changes]]}
+  ([from to data-attrs] (delta-changes from to data-attrs (apply concat (d/datoms-diff from to :eavt []))))
+  ([from to data-attrs moved]
+   (let [ks (vec (touched-by from to data-attrs moved))]
+     (changes (program-of from ks data-attrs) (program-of to ks data-attrs)))))
 
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
