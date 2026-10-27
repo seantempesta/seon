@@ -148,12 +148,15 @@
                   "one index path per changed entity), the keys they bear and those keys' content on both sides; "
                   "nothing reads the forms they share")
        :growth :constant
-       ;; measured 2026-10-27 on LMDB: 436k ticks / 1.26 MB at 100 forms, 467k / 1.39 MB at 300,
-       ;; 576k / 1.69 MB at 1,000 (549k / 1.61 MB and 629k / 1.83 MB at 1,000 and 10,000 in an earlier
-       ;; layout); 56 contracted calls each. The rise from 100 to 1,000 is the stored index gaining a
-       ;; level (64 datoms a node), which three sizes cannot fit as a log: it is bounded, a program scan
-       ;; (1 MB per 1,000 forms) would not be. What it replaced per turn: this, plus divergence three
-       ;; or four times (453-678 KB each), so a turn's diff reads went from ~2.5-3.3 MB to one of these
+       ;; measured 2026-10-27 on LMDB, after touched-keys walked one :aevt range per program attribute
+       ;; (task seon.merge/touched-keys-skips-platform-records): 437k ticks / 1.26 MB at 100 forms,
+       ;; 462k / 1.37 MB at 300, 547k / 1.61 MB at 1,000 (629k / 1.83 MB at 10,000 in an earlier layout);
+       ;; 56 contracted calls each. The rise from 100 to 1,000 is the stored index gaining a level (64
+       ;; datoms a node), which three sizes cannot fit as a log: it is bounded, a program scan (1 MB
+       ;; per 1,000 forms) would not be. A branch that wrote besides the program (evals, turns,
+       ;; messages) and main's embeddings since the fork are never read: the ranges skip them. What it
+       ;; replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
+       ;; diff reads went from ~2.5-3.3 MB to one of these
        :per-n {}
        :fixed {:ticks 700000.0 :bytes 2000000.0 :calls 56}
        :sizes divergence-sizes})
