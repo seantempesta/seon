@@ -720,7 +720,7 @@
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
-        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{}))
+        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved))
         gone (into #{} (map :signature) closed)
         current (fn [row] (assoc row :answered-by (get-in ans (if (:run row) [:from (:run row)] [:signature (:signature row)]) [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))

@@ -552,10 +552,10 @@
   ;; touched, not the history (health-moved; report read every run's cost verdict and waste)
   (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
                :n "finished tasks, each with a merged run carrying a cost verdict and waste"
-               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the fixed part is the program's own diff (seon.merge/delta-changes, 40 contracted calls) and the per-task part is the cold index nodes that diff and the task scans touch"
+               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
-               :per-n {:ticks 9500 :bytes 26000 :calls 0}
-               :fixed {:ticks 2400000 :bytes 6100000 :calls 46}
+               :per-n {:ticks 1400 :bytes 7000 :calls 0}
+               :fixed {:ticks 390000 :bytes 1900000 :calls 46}
                :sizes [10 100 1000]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
