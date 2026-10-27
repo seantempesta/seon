@@ -55,6 +55,7 @@ if (( MERGE )) && [[ -z ${SEON_MAIN_FIRST_HELD:-} ]] && ( . "$ROOT/bin/env"; is_
   ( . "$ROOT/bin/env"; main_hold "pid $$, $(git -C "$ROOT" rev-parse --short HEAD) in $ROOT, since $(date '+%H:%M:%S')" "$0" --merge "$@" )
   exit $?
 fi
+( . "$ROOT/bin/env"; heavy_held ) || { ( . "$ROOT/bin/env"; heavy_hold "$0" "$@" ); exit $? }   # one heavy-run slot for the whole run (bin/env)
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
 (( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }

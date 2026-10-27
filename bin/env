@@ -49,6 +49,27 @@ MAIN_LOCK_PL='
   $ENV{SEON_MAIN_FIRST_HELD} = $$;
   my $st = system(@cmd);
   exit($st == -1 ? 127 : ($st & 127) ? 128 + ($st & 127) : $st >> 8);'
+# heavy_hold CMD ARGS: CMD run holding one of :seon.config.machine/heavy-runs slots, flocks on
+# target/heavy-N.lock in the main checkout shared by every worktree (owner, 2026-10-27: "It should
+# never be this taxing just to get basic work done"). A free slot is taken at once; with none free
+# it waits on one, said once on stderr; the kernel answers when its holder ends or dies. Its steps
+# run under it (SEON_HEAVY_HELD) and take none; main's verification (SEON_MAIN_FIRST_HELD) goes
+# first and takes none.
+HEAVY_RUNS=$(sed -nE 's#^ :seon\.config\.machine/heavy-runs ([0-9]+)$#\1#p' "$ROOT/resources/seon/config/default.edn")
+HEAVY_PL='
+  my ($dir, $n, @cmd) = @ARGV; my $f;
+  for my $i (1 .. $n) { open(my $h, ">>", "$dir/heavy-$i.lock") or die "heavy slot: $!\n";
+                        if (flock($h, LOCK_EX | LOCK_NB)) { $f = $h; last } }
+  unless ($f) { my $i = 1 + ($$ % $n); print STDERR "waiting for a heavy-run slot ($n in use)\n";
+                open($f, ">>", "$dir/heavy-$i.lock") or die "heavy slot: $!\n"; flock($f, LOCK_EX) or die "heavy slot: flock: $!\n" }
+  $ENV{SEON_HEAVY_HELD} = $$;
+  my $st = system(@cmd);
+  exit($st == -1 ? 127 : ($st & 127) ? 128 + ($st & 127) : $st >> 8);'
+heavy_hold() {
+  mkdir -p "$MAIN_TREE/target"
+  perl -MFcntl=:flock -e "$HEAVY_PL" "$MAIN_TREE/target" "${HEAVY_RUNS:?no :seon.config.machine/heavy-runs in default.edn}" "$@"
+}
+heavy_held() { [ -n "${SEON_HEAVY_HELD:-}" ] || [ -n "${SEON_MAIN_FIRST_HELD:-}" ]; }
 main_first() {
   [ -n "${SEON_MAIN_FIRST_HELD:-}" ] && return 0
   mkdir -p "$(dirname "$MAIN_LOCK")"
