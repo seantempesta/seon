@@ -92,7 +92,9 @@
   (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
   a reset, the task's branch a new one cut from main and its conversation empty (the run on the
   old branch is killed as its env changed; that branch and its runs stay, the record). A task
-  whose run is live answers that run's agent.
+  whose run is live answers that run's agent, :shared true: the caller has the branch, with
+  whoever attached it, and that one's seon_done ends it for both. A branch another live agent holds
+  is spawn!'s refusal, answered as a value, naming the agent, the task it works and its run.
   Answers {:agent :task :run}."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/id] :map]
                   [:=> [:cat :seon.root/sys :seon.task/id [:map [:fresh? {:optional true} :boolean]]] :map]]}
@@ -104,7 +106,7 @@
     (cond
       (not t) (refused (str "no task " id))
       ;; its run is live: its agent is the one to work it (a second spawn on its branch is refused)
-      live {:agent (:seon.run/agent live) :task id :run (:seon.run/id live)}
+      live {:agent (:seon.run/agent live) :task id :run (:seon.run/id live) :shared true}
       :else
       (let [n (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db)))))
             env (cond-> (assoc (r/desired-env t) :model "outside")
@@ -112,12 +114,17 @@
             aid (task/run-id id n)
             ;; the session's agent continues (design agent-loop section 1)
             k (when-not fresh? (task/session-key db id))
-            ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
-        @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                            (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
-                                            (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                                   (:plan (:seon.task/accumulated t)) k))))
-        {:agent ag :task id :run aid})))))
+            r @(c/call! sys (c/request 'spawn! nil (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)) nil))
+            ag (:id r)]
+        ;; spawn!'s request, its answer a value: a refusal (a branch another agent holds, named with
+        ;; its task and run) is the attach's answer, never a server defect
+        (if-not ag
+          r
+          (do @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
+                                              (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
+                                              (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                                                     (:plan (:seon.task/accumulated t)) k))))
+              {:agent ag :task id :run aid})))))))
 
 (defn- fork!
   "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind),
