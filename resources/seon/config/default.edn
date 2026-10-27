@@ -91,6 +91,14 @@
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, AGENTS.md "How work is handed out").
  :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
+ ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
+ ;; README.md). The pages root loads into main as wiki sections at boot (seon.root/wiki-tx), so one search
+ ;; and one view reach them (owner, 2026-10-27: "everything of consequence that is for seon agents use
+ ;; should be indexed into the db"). docs/ is also watched and reloaded on change (my.root/loader-dirs);
+ ;; the top level is read at boot only (watching it would watch the whole checkout, which kept
+ ;; fseventsd saturated). Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
+ ;; bound: n/a; a dir with no .md files loads nothing.
+ :seon.config.root/wiki-dirs ["docs" "."]
 
  ;; ==== the store ==============================================================================
 
