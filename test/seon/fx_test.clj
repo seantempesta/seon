@@ -162,3 +162,23 @@
 
 (deftest a-merges-deferred-tests-command
     (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o"))))
+
+(deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
+  ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
+  ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
+  ;; for the branch itself. branch-head is the one rule
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/fx-branch-head-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
+    (try
+      (git "init" "-q")
+      (spit (str dir "/a") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [head (git "rev-parse" "HEAD")]
+        (is (= head (fx/branch-head dir "jolt/seon-merges-new")) "a branch not there yet: HEAD")
+        (spit (str dir "/a") "2") (git "add" "-A") (git "commit" "-q" "-m" "two" )
+        (git "branch" "jolt/merges" head)
+        (is (= head (fx/branch-head dir "jolt/merges")) "a branch there: its own head, not HEAD")
+        (is (not= head (fx/branch-head dir "jolt/seon-merges-new")) "and HEAD has moved on"))
+      (let [empty-dir (.getCanonicalPath (doto (java.io.File. (str dir "-empty")) (.mkdirs)))]
+        (clojure.java.shell/sh "git" "-C" empty-dir "init" "-q")
+        (is (nil? (fx/branch-head empty-dir "x")) "a repository with no commit: nil"))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir (str dir "-empty"))))))
