@@ -758,17 +758,6 @@
  ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
  ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
  :seon.config.render/search-token-z 2.0
- ;; Unit: [z precision] pairs, z ascending. How a hit's score in standard deviations above its query's mean
- ;; becomes its :relevance in my.agent/search, linearly between the pairs (below the first: 0, past the
- ;; last: its precision). Provenance: the observed precision at each z over the 20 queries of the embeddings
- ;; lab (z 3.0 .13, 3.5 .24, 4.0 .34, 4.5 .50, 5.0 .73; a lower bound, the truth lists 2-8 items a query);
- ;; the lab replaces it by a fit on the search log.
- :seon.config.render/search-relevance [[2.0 0.05] [3.0 0.13] [3.5 0.24] [4.0 0.34] [4.5 0.5] [5.0 0.73]]
- ;; Unit: relevance, 0 to 1. The :min of my.agent/search when its options give none: a hit whose
- ;; :relevance is known and below it is left out (and counted in the :more entry). A hit found by meaning
- ;; alone has no relevance yet and is kept. Provenance: root's spec, 2026-10-27. At the bound: a hit at
- ;; exactly it is kept.
- :seon.config.render/search-min 0.25
  ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
  ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
  ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the

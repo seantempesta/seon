@@ -131,8 +131,6 @@
   [:seon.config.render/search :seon.config.render/search]
   [:seon.config.render/search-weights :seon.config.render/search-weights]
   [:seon.config.render/search-token-z :seon.config.render/search-token-z]
-  [:seon.config.render/search-relevance :seon.config.render/search-relevance]
-  [:seon.config.render/search-min :seon.config.render/search-min]
   [:seon.config.render/related-near :seon.config.render/related-near]
   [:seon.config.render/related-seeds-near :seon.config.render/related-seeds-near]
   [:seon.config.vector/coarse-dims :seon.config.vector/coarse-dims]

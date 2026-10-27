@@ -352,7 +352,8 @@
   needs it, by kind (docs/vector.md#relevance). The context: :qv the query's vector (a plan's, a
   search's), :text its words, :seeds the entities it already holds (the forms of the vars it cites
   or changed, the sections it cites, the schema entries it names), :touched those of them it
-  worked on (changed or read). For each kind of kinds (relevance-kinds) the pool is the
+  worked on (changed or read), :candidates (optional) entities a caller found by other means
+  (a search's text hits), scored beside the pool. For each kind of kinds (relevance-kinds) the pool is the
   :seon.config.render/relevance-pool nearest by meaning (seon.vector/near) and the seeds'
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
@@ -364,10 +365,11 @@
   tasks' plans held out: functions 0.427 at 5 against the rank fusion's 0.367, sections 0.798
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:qv [:maybe [:vector number?]]] [:text :string] [:seeds [:set :int]] [:touched [:set :int]]]
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:qv [:maybe [:vector number?]]] [:text :string] [:seeds [:set :int]] [:touched [:set :int]]
+                                           [:candidates {:optional true} [:set :int]]]
                        [:set :keyword] :seon.host/fn]
                   [:map-of :keyword [:vector [:tuple :int number?]]]]}
-  [db {:keys [qv text seeds touched]} kinds keep?]
+  [db {:keys [qv text seeds touched candidates]} kinds keep?]
   (let [names (section-names db)
         {rank :rank counted :degree} (if (seq seeds) (pushed db names seeds (cfg/value :seon.config.render/relevance-eps)) {:rank {} :degree {}})
         ;; a link to a seed weighs by the item's rarity, (1 + cap)/(1 + its degree to cap), so what every form
@@ -390,7 +392,7 @@
                    :let [attr (relevance-kinds kind)
                          of-kind? #(seq (d/datoms db :eavt % attr))
                          pool (into [] (comp (distinct) (remove touched) (filter #(and (of-kind? %) (keep? kind %))))
-                                    (concat (near attr) seeds (keys links) (keys rank)))]]
+                                    (concat (near attr) seeds candidates (keys links) (keys rank)))]]
                [kind (if (empty? pool)
                        []
                        (let [w (weights kind)
@@ -529,17 +531,20 @@
   :kind one of search-kinds, :name the var, section address, task id or schema key, :e its entity,
   :score the weighted reciprocal-rank score of seon.vector/rrf-scores over the rankings below
   (:seon.config.render/search-weights), :by the set of them it is in (:text :meaning :refs),
-  :relevance (a text hit only, for now) its BM25 z-score through :seon.config.render/search-relevance,
+  :relevance the chance it is worth reading (seon.context/relevance, over q's vector, words and the
+  names it holds, the first k x :seon.config.render/related-near hits by the fused score joined to its
+  pool; a function, section or schema key, not yet a test or task),
   :line the line of its text holding a word of q and :at its number. The rankings: the text (seon.docs/tokens:
   BM25 over q's identifier-split words, kept at z >= :seon.config.render/search-token-z), meaning
   (seon.vector/near from qv, the query's vector or an entity with one; none when qv is nil) and the
   references (the callers, callees and naming sections of the names in q: its var, its key, the
-  qualified names and keywords of a text; never of the text hits). Equal scores order by name. A hit
-  with a known relevance below :min is left out. When hits are left out by :k or :min, a last entry
+  qualified names and keywords of a text; never of the text hits). Best first: by relevance where a hit
+  has one, then by the fused score, equal ones by name. A hit with a relevance below :min is left out. When hits are left out by :k or :min, a last entry
   {:kind :more :left n :counts {kind n} :more \"...\"} says how many per kind and the call that returns
   them. opts, all optional: :kinds (a set of search-kinds; #{:var :section} by default: tests, tasks and
   schema keys on request), :by (a set of :text :meaning :refs, all), :ns (a prefix: only vars and tests
-  whose namespace starts with it), :k (:seon.config.render/search), :min (:seon.config.render/search-min).
+  whose namespace starts with it), :k (:seon.config.render/search), :min (:seon.config.render/relevance-summary,
+  the page's cut).
   Plain data, so a caller filters it by Clojure."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol :qualified-keyword]
                        [:map [:kinds {:optional true} [:set :keyword]] [:by {:optional true} [:set :keyword]]
@@ -550,9 +555,8 @@
   (let [kinds (or kinds #{:var :section})
         by (or by #{:text :meaning :refs})
         k (or k (cfg/value :seon.config.render/search))
-        minimum (or minimum (cfg/value :seon.config.render/search-min))
+        minimum (or minimum (cfg/value :seon.config.render/relevance-summary))
         weights (cfg/value :seon.config.render/search-weights)
-        table (cfg/value :seon.config.render/search-relevance)
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
         toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (docs/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
@@ -582,9 +586,30 @@
                                     :section (or (some-> (d/entity db [:seon.section/address n]) :seon.section/lead) "")
                                     :task (or (some-> (d/entity db [:seon.task/id n]) :seon.task/plan (str/split #"\n") first) "")
                                     ""))
-        ranked (sort-by (juxt (comp - val) (comp str key)) scores)
-        ;; a text hit's z read as a chance by the one interpolation (`percent`); kept hits are at z >= the table's first
-        rel (fn [h] (some->> (get-in known [h :z]) (percent table)))
+        ;; each hit of a kind relevance weighs is scored by it, the hits joined to its pool: a function by
+        ;; its form, a section, a schema entry (seon.context/relevance; a test or a task has no chance yet)
+        rkind {:var :function :section :section :schema :schema}
+        form-of (fn [[kind n]] (case kind
+                                 ;; a var's form: its :var/form, or the form whose :form/defines holds it
+                                 :var (let [v (d/entity db [:var/name n])] (or (some-> v :var/form :db/id) (some-> v :form/_defines first :db/id)))
+                                 (entity-of db [kind n])))
+        ;; the hits search can show: the first k x related-near by the fused score, a bound whatever
+        ;; the corpus (a common word's text hits grow with it); the rest keep their fused order after
+        hits (into [] (comp (map key) (take n)) (sort-by (juxt (comp - val) (comp str key)) scores))
+        chance (let [ks (into #{} (keep (comp rkind first)) hits)]
+                 (if (empty? ks)
+                   {}
+                   (let [qvec (if (int? qv) (vector/vector-of db qv) qv)
+                         sd (into #{} (keep #(if (keyword? %) (pdb/eid db :schema/key %) (some-> (d/entity db [:var/name %]) :var/form :db/id))) seeds)
+                         r (relevance db {:qv qvec :text text :seeds sd :touched #{}
+                                          :candidates (into #{} (comp (filter (comp rkind first)) (keep form-of)) hits)}
+                                      ks (constantly true))]
+                     (into {} (for [[_ es] r [e p] es] [e p])))))
+        ;; each scored hit's chance, read once (a sort's key is read at every comparison)
+        rels (into {} (for [h hits :let [r (when (rkind (first h)) (some-> (form-of h) chance))] :when r] [h r]))
+        rel rels
+        ;; best first: by relevance where a hit has one, then the rest by the fused score
+        ranked (mapv peek (sort (map (fn [[h s :as e]] (let [r (rel h)] [(if r 0 1) (- (or r 0.0)) (- s) (str h) e])) scores)))
         kept (remove (fn [[h _]] (let [r (rel h)] (and r (< r minimum)))) ranked)
         shown (take k kept)
         left (concat (drop k kept) (filter (fn [[h _]] (let [r (rel h)] (and r (< r minimum)))) ranked))]

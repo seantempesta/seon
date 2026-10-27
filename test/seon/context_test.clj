@@ -1188,7 +1188,9 @@
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
   (let [db (d/db-with (seon.docs-test/corpus-db)
                       [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
-        s (fn ([q] (context/search db q {} nil)) ([q o] (context/search db q o nil)))
+        ;; :min 0 unless a test asks its own: on a corpus of a few texts every chance is low, and the
+        ;; page's cut (seon.config.render/relevance-summary) would hide them
+        s (fn ([q] (context/search db q {:min 0.0} nil)) ([q o] (context/search db q (merge {:min 0.0} o) nil)))
         shown (fn [hits] (remove #(= :more (:kind %)) hits))
         kind (fn [hits k] (filter #(= k (:kind %)) hits))]
     (is (= #{:var :section} (set (map :kind (shown (s "fusing"))))) "functions and sections by default")
@@ -1196,9 +1198,13 @@
     (is (every? #(and (number? (:score %)) (set? (:by %)) (:e %)) (shown (s "fusing"))) "plain data: kind, name, entity, score, by")
     (is (= [:section :section] (map :kind (s "fusing" {:kinds #{:section} :min 0.0}))) "kinds focus it")
     (is (every? #(= #{:text} (:by %)) (shown (s "fusing" {:by #{:text}}))))
-    (is (every? #(<= 0.0 (:relevance %) 1.0) (filter :relevance (s "fusing" {:min 0.0}))) "a text hit's relevance")
+    (is (seq (filter :relevance (s "fusing"))) "a function's or a section's relevance")
+    (is (every? #(<= 0.0 (:relevance %) 1.0) (filter :relevance (s "fusing"))) "each a chance")
     (is (= (s "fusing") (s "fusing")) "deterministic")
-    (is (apply >= (map :score (shown (s "fusing")))) "best first")
+    (let [hs (shown (s "fusing")) [known unknown] ((juxt filter remove) :relevance hs)]
+      (is (= hs (concat known unknown)) "best first: the hits with a relevance first")
+      (is (every? (fn [[a b]] (>= a b)) (partition 2 1 (map :relevance known))) "by it")
+      (is (every? (fn [[a b]] (>= a b)) (partition 2 1 (map :score unknown))) "then the rest by the fused score"))
     (let [two (s "fusing" {:k 1 :min 0.0})]
       (is (= 2 (count two)) "k bounds it, and a last entry counts what it left")
       (is (= :more (:kind (last two))))
@@ -1229,12 +1235,12 @@
                        (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
                        {:db/id "v" :var/name 'm/f :var/form "f"}
                        (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)])
-        hits (context/search db "zzz" {:by #{:meaning} :k 10} (unit-vec 0))]
-    (is (= "m.md#a" (:name (first hits))) "the nearest of all kinds first, whichever kind it is")
+        hits (context/search db "zzz" {:by #{:meaning} :k 10 :min 0.0} (unit-vec 0))]
+    (is (= ["m.md#a" "m.md#b"] (map :name (filter #(= :section (:kind %)) hits))) "the nearer section first")
     (is (= #{:section :var} (set (map :kind hits))))
     (is (every? #(= #{:meaning} (:by %)) hits))
-    (is (apply >= (map :score hits)) "ranked by one list, best first")
-    (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section}} (unit-vec 0))))))))
+    (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
+    (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))
 
 (deftest rrf-scores-weigh-each-ranking
   (let [plain (vector/rrf-scores [[:a] [:b]])
