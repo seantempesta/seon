@@ -165,7 +165,7 @@
   definitions at any time). Nothing missing writes nothing."
   {:malli/schema [:=> [:cat :seon.host/conn] [:set :keyword]]}
   [conn]
-  (let [have (d/schema @conn)
+  (let [have (:schema @conn)
         differ (into {} (for [{k :db/ident t :db/valueType} schema
                               :let [stored (get-in have [k :db/valueType])]
                               :when (and stored (not= stored t))]
