@@ -605,7 +605,7 @@
         ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
         ;; a test of the root's working tree that main does not hold, and its shard died at once)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_SOURCE_BRANCH"]
+               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha

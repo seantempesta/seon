@@ -401,9 +401,10 @@
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
- ;; bin/env names a worktree's own, jolt/seon-merges-<worktree>, in SEON_SOURCE_BRANCH (task
- ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1).
- :seon.config.source/branch #or [#env SEON_SOURCE_BRANCH "jolt/seon-merges"]
+ ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task
+ ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
+ ;; an env var bin/env set, outside the config).
+ :seon.config.source/branch #seon/own-branch "jolt/seon-merges"
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
  ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
  ;; 2026-10-23). At the bound: n/a.

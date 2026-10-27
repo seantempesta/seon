@@ -1041,13 +1041,22 @@
   tests took the tree, so any edit anywhere reran them."
   (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms))
 
-(def config-key-readers
-  "The vars that read a config key named in data rather than in their own code: a form defining
-  one reads every config key a schema entry's form names (schema-config-keys), so a test reaching
-  it takes those keys' values (config-reads names the rest). seon.render/pattern reads a join's
-  :limit (config/value lim), a key a schema entry's :seon.ctx/pattern names (seon.facts.edn's
-  :limit :seon.config.ctx/window). A reader not named here is missed: its key moves no digest."
-  '#{seon.render/pattern})
+(def config-resolvers
+  "seon.config's resolvers, which read the key they are passed (seon.config/value, resolve and
+  resolve-in): a form outside seon.config that calls one and names no config key of its own reads a
+  key it computes, from data (computed-config-reader?)."
+  '#{seon.config/value seon.config/resolve seon.config/resolve-in})
+
+(defn- computed-config-reader?
+  "Does row f read a config key named in data rather than in its own code, by its facts: it
+  references a resolver (config-resolvers), is not seon.config's own, and its keywords name no
+  seon.config.* key (seon.render/pattern reads a join's :limit, a key a schema entry's
+  :seon.ctx/pattern names). Such a form takes every config key a schema entry names
+  (schema-config-keys). A form that names one key and computes another is the daily full run's."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f]
+  (boolean (and (some config-resolvers (:refs f)) (not= 'seon.config (:ns f))
+                (not-any? #(some-> (namespace %) (str/starts-with? "seon.config.")) (:keywords f)))))
 
 (defn- schema-config-keys
   "The config keys schema entries' forms (schemas: {key text}) name as data, the entries
@@ -1110,7 +1119,7 @@
   catch (owner, 2026-10-27: \"no test digests the whole tree\"; every config key a root's boot
   took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
   (value, resolve) name no key of their own; every one of their callers names its key, but for
-  config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
+  computed-config-reader?'s. A form baking the schemas (referencing seon.config/baked-schema-forms:
   seon.config/schema-forms, its one form, which holds nothing else) names every key as its
   declaration, data its class holds, and reads none. Beside the keys, the file classes it reads
   (env-class-readers): the :seon.env/* entries of :config. A test's digest takes the values of
@@ -1187,8 +1196,8 @@
         step (fn [m k ids] (update m k #(into (into [] (remove drop-ids) %) ids)))
         by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
                                 (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
-        ;; a config-key-reader reads the config keys schema entries name (config-key-readers)
-        added (for [f added] (cond-> f (and (set? (:config f)) (some (fn [[k s]] (and (= :var k) (config-key-readers s))) (:defines f)))
+        ;; a form reading a key it computes reads the config keys schema entries name
+        added (for [f added] (cond-> f (and (set? (:config f)) (computed-config-reader? f))
                                    (update :config into (:schema-config g))))
         ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
         ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.

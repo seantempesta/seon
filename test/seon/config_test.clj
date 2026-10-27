@@ -4,7 +4,7 @@
   invalid or missing key, the config written as facts on main and read back from the db, and
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [aero.core] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
@@ -352,11 +352,19 @@
 
 (deftest a-worktree-commits-its-merges-on-a-branch-of-its-own
   ;; worktrees share refs: a root in one that wrote jolt/seon-merges would move the main tree's merges branch
-  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). bin/env names the branch of what it starts
+  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). The config names it from the
+  ;; checkout (#seon/own-branch), not an env var (audit cut 11)
   (let [root (config/checkout)
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" root args))))
         worktree? (not= (git "rev-parse" "--git-dir") (git "rev-parse" "--git-common-dir"))
-        branch (fn [env] (str/trim (:out (clojure.java.shell/sh "zsh" "-c" (str "env -u SEON_SOURCE_BRANCH ROOT=" root " " env " zsh -c '. " root "/bin/env; print -r -- ${SEON_SOURCE_BRANCH:-unset}'")))))]
-    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "unset") (branch ""))
-        "a worktree's own, the main tree's none: its config's default stands"))
-)
+        own (fn [dir] (let [f (java.io.File/createTempFile "own-branch" ".edn")]
+                        (spit f "{:b #seon/own-branch \"jolt/seon-merges\"}")
+                        (:b (aero.core/read-config (str f) {:seon.config/checkout dir}))))
+        main-tree (str/replace (git "rev-parse" "--path-format=absolute" "--git-common-dir") #"/\.git$" "")]
+    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "jolt/seon-merges")
+           (:seon.config.source/branch config/config))
+        "this checkout's: a worktree's own")
+    (is (= "jolt/seon-merges" (own main-tree)) "the main tree's is the shipped name")
+    (let [wt (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/own-branch-" (System/nanoTime) "/x")) .mkdirs)]
+      (spit (java.io.File. wt ".git") (str "gitdir: " main-tree "/.git/worktrees/x\n"))
+      (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file"))))
