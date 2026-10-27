@@ -690,11 +690,13 @@
   commit): its task's list (the layout :seon.render/render-ctx declares, drawn once by the walk,
   seon.render/draw), each component's hiccup exactly as its render returned it, by its element id,
   in order: the same hiccup the person's page shows (seon.repl/render-ctx-hiccup draws it through this
-  process's walk)."
+  process's walk), less a component that drew nothing."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
+    ;; a component that drew nothing (own-problems with none open: [:div attrs nil]) is no part of it
+    (try (apply array-map (mapcat identity (remove (fn [[_ h]] (and (vector? h) (map? (second h)) (every? nil? (drop 2 h))))
+                                                   (render/placed-hiccup w ["#p-task"]))))
          (finally (render/dispose-walk! w)))))
 
 (defn world

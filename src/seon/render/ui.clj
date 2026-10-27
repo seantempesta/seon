@@ -745,8 +745,9 @@
     [:section
      [:h2 "task"]
      [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
-     ;; its instructions (how its kind is worked: the template's text, whole under the value budget)
-     ;; and its plan as prose here, then each section it cites, its text as prose (ctx's :sections), and
+     ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
+     ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
+     ;; prose here, then each section it cites, its text as prose (ctx's :sections), and
      ;; the rest of its data by the printer (each cited var is its own component); each proof how to
      ;; run it and, written, its source (its last result is the status's)
      (let [data (cond-> (context/task-data db (task/task db id) false)
@@ -755,7 +756,7 @@
        (remove nil?
          (list (when-let [ins (get-in data [:task :seon.task/instructions])]
                [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})])
-             (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (part) {:whole '(:seon.task/plan (:task (my.task/data)))})])
+             (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})])
              (seq (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
                     (list [:h3 heading " " [:code address]]
                           [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})])))
