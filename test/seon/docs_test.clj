@@ -364,7 +364,7 @@
                    [w _] (used (str/replace line0 kept-span ""))]
                [p (inc i) w])]
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
-    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
+    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word] (AGENTS 7a; a file whose use is the subject goes in text-kept with its reason)")))
 
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
