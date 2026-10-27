@@ -780,7 +780,7 @@
   "Fork this agent to run tests in a child (run-tests-here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
-  :pid, :exit}, or the fork's refusal. forked is told the child's pid; each test as it starts goes
+  :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names)."
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn] [:or :map :seon.test/fork-refused]]}
   [plan ticks tests forked]
