@@ -232,6 +232,16 @@
   (let [ks (vec (touched-keys base [ours theirs] data-attrs))]
     (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs))))
 
+(defn readiness
+  "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
+  only: what main changed since base, their merge base (:main-moved, its program keys), and which
+  of those the branch changed too (:conflicts, the keys a merge of main would leave unmerged).
+  The three-way a merge runs (delta-three-way), so it costs what changed on each side since base."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]}
+  [base ours theirs]
+  (let [r (delta-three-way base ours theirs #{})]
+    {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
+
 (defn delta-changes
   "`changes` from db from to db to, read only where they differ (touched-keys)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]}

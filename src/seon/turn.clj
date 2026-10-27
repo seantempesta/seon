@@ -18,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
-            [seon.proofs :as proofs] [seon.context :as context] [seon.program :as program] [seon.merge :as pm] [seon.problems :as problems]
+            [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
             [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
             [seon.error :as err] [datahike.api :as d]))
 
@@ -76,7 +76,10 @@
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
   judge and the merge gate ask it), its unmerged entries, the problems its work made true
   (seon.problems/caused, as root's judge asks it), the done rule over them, and
-  the task as the branch holds it (its plan may have improved)."
+  the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing
+  else. What else a reader wants of the branch (whether it can merge, what its merge carries,
+  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/merge-view,
+  divergence-view, caused-view, tests-view), drawn when what it reads moves, never per turn."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
@@ -137,17 +140,14 @@
 
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every reason of the
-  done rule, the failing assertions of each test it names, the test run's own errors, and what the
-  branch's merge will carry to main, and, for a task that merges itself, its merge readiness."
+  done rule, the failing assertions of each test it names and the test run's own errors."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [test-run reasons task results will-merge tests attention merge]}]
+  [{:keys [test-run reasons task results]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
-    (cond-> {:results results :reasons reasons
-             :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
-             :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
-             :will-merge will-merge :tests tests :attention attention}
-      merge (assoc :merge merge))))
+    {:results results :reasons reasons
+     :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
+     :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))}))
 
 (defn- take!
   "The entries since the last turn (a person's message, root's at a stage boundary, a refused
