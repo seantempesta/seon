@@ -471,7 +471,10 @@
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       ;; and a test that reads files or runs a process takes every class
       (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
-    (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps] [:schemas (moved :seon.env/schemas)]]]
+    ;; the schema registry (seon.config/baked-schema-forms) is behind every contract: nearly every test
+    ;; reads it until a test reaches only the entries it uses (the floor of this class)
+    (is (< (* 3 (count all-tests)) (* 4 (count (moved :seon.env/schemas)))) "most tests take the schemas class")
+    (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (< 0 (count m) (count all-tests)) (str (count m) " of " (count all-tests) " tests take the " c " class: some, not every test"))
       (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
     (is (< (count web) (count bin)) "fewer tests read the web handler than may run a script")))
