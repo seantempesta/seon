@@ -656,9 +656,18 @@
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
                   tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
-                  found (results-at results (vals (:digests plan)))]
-              (if (contract/error? found)
+                  found (when plan (results-at results (vec (vals (:digests plan)))))]
+              (cond
+                ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
+                ;; answer, with the end of what it said, never a run whose tests all read :error with no reason
+                (nil? plan)
+                (error #'seon.fx/run-tests :seon.fx/io-error
+                       (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
+                            " ends: " (str/join " | " (take-last 3 (remove str/blank? (str/split-lines (str (:err r) "\n" (:out r)))))))
+                       {:path dir})
+                (contract/error? found)
                 found
+                :else
                 (let [rs (test-results plan found tests)]
                   {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
                             all? (assoc :digests (select-keys (:digests plan) tests)
