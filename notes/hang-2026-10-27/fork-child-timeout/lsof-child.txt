@@ -1,0 +1,18 @@
+COMMAND   PID USER   FD   TYPE             DEVICE  SIZE/OFF                NODE NAME
+seon    84859 sean  cwd    DIR               1,13      2496          1167397673 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target
+seon    84859 sean  txt    REG               1,13 242097205          1167753434 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target/seon
+seon    84859 sean  txt    REG               1,13   4129840 1152921500312609216 /usr/lib/dyld
+seon    84859 sean  txt    REG               1,13    177504          1167400153 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target/lib/liblz4.dylib
+seon    84859 sean  txt    REG               1,13     34656          1167400107 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target/lib/libprobe.dylib
+seon    84859 sean  txt    REG               1,13    130880          1167400113 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target/lib/liblmdb.dylib
+seon    84859 sean  txt    REG               1,13    633920          1167400156 /Users/sean/src/seon-next/.worktrees/every-ask-is-answered/target/lib/libzstd.dylib
+seon    84859 sean  txt    REG               1,13    884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+seon    84859 sean  txt    REG               1,13   4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+seon    84859 sean    0u  unix 0x5c59c9ff78544e3b       0t0                     ->0xaf5d13b191046da4
+seon    84859 sean    1   PIPE 0x8e100c9d34cd1d25     16384                     ->0xc3864b3c1601122e
+seon    84859 sean    2   PIPE 0x8e100c9d34cd1d25     16384                     ->0xc3864b3c1601122e
+seon    84859 sean    3r   CHR               17,1     0t176                 612 /dev/urandom
+seon    84859 sean    4u  unix 0x7555fc1b2104d0ec       0t0                     ->0x1af3c5b1a7c8f2f7
+seon    84859 sean    5u  unix 0x1af3c5b1a7c8f2f7       0t0                     ->0x7555fc1b2104d0ec
+seon    84859 sean    6   PIPE 0x2af5351fb2d57adc     16384                     ->0x708cd7a03822b05f
+seon    84859 sean    7   PIPE 0x708cd7a03822b05f     16384                     ->0x2af5351fb2d57adc

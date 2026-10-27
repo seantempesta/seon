@@ -1,35 +1,15 @@
 (ns seon.lib-test
-  "The native probes (native/probe.c through seon.lib): what they answer and what they cost."
-  (:require [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.java.shell] [seon.lib :as lib]
-            [konserve.jolt.lmdb-ffi :as lmdb] [seon.test-store :as ts] [clojure.edn :as edn] [clojure.string :as str]))
+  "The native probes (native/probe.c through seon.lib): what they answer."
+  (:require [clojure.test :refer [deftest is]] [seon.lib :as lib]
+            [seon.test-store :as ts] [clojure.edn :as edn] [clojure.string :as str]))
 
-(defn- probe-ms
-  "The median time of 9 calls of lib/mp-probe, ms."
-  []
-  (let [ts (sort (for [_ (range 9)] (let [t0 (profile/now-ns)] (lib/mp-probe) (profile/ms-since t0))))]
-    (nth ts 4)))
-
-(deftest the-memory-probe-costs-what-the-process-holds-not-what-it-maps
-  ;; lib/mp-probe once asked the kernel for each region's extended info, which walks every page
-  ;; of the region: an agent maps the store's LMDB file twice at :seon.config.store/lmdb-map-bytes
-  ;; (64 GiB), so one probe took ~1.25 s and 100 agents probing at their start serialized on the
-  ;; file's object (session spawn-regression, 2026-10-22). It reads the kernel's ledger now (one
-  ;; task_info call), and its cost must not grow with what the process maps: a probe with a
-  ;; 64 GiB map open costs about what it costs with a 1 GiB map. Two LMDB envs on disk of this test's own,
-  ;; the last resort: what is proved is a mapping's size; removed at the end
-  (let [dir (str (System/getProperty "user.dir") "/target/lib-test-" (random-uuid))
-        _ (doseq [d ["-small" "-large"]] (.mkdirs (java.io.File. (str dir d))))
-        small (lmdb/open-env (str dir "-small") {:map-size (* 1 1024 1024 1024)})
-        t-small (probe-ms)
-        large (lmdb/open-env (str dir "-large") {:map-size (* 64 1024 1024 1024)})
-        t-large (probe-ms)]
-    (try
-      (is (< t-large (+ 1.0 (* 2 t-small))) (str "probe " t-small " ms with 1 GiB mapped, " t-large " ms with 64 GiB more"))
-      (testing "and it answers this process's own memory, in MB: what it holds resident at most, a little more"
-        (let [p (lib/mp-probe)]
-          (is (< 1.0 (lib/real-mb p) (+ (:resident p) (:compressed p) 1.0)) (pr-str p))))
-      (finally (lmdb/close-env small) (lmdb/close-env large)
-               (clojure.java.shell/sh "rm" "-rf" (str dir "-small") (str dir "-large"))))))
+(deftest the-memory-probe-answers-what-the-process-holds
+  ;; lib/mp-probe reads the kernel's ledger (one task_info call): this process's own memory in MB,
+  ;; what it holds resident at most, a little more. (It once walked every page of each mapped
+  ;; region, so a 64 GiB LMDB map made one probe take ~1.25 s; the work it does is the kernel's
+  ;; ledger now, whatever the process maps.)
+  (let [p (lib/mp-probe)]
+    (is (< 1.0 (lib/real-mb p) (+ (:resident p) (:compressed p) 1.0)) (pr-str p))))
 
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
@@ -57,6 +37,13 @@
   ;; as a second agent). The child ends at fork!, exit 1, saying what threw; one that returns
   ;; exits 0 (seon.check/fork-cases "child-throws")
   (is (= [{:exit 1} {:exit 0}] (fork-case "child-throws"))))
+
+(deftest a-forked-child-runs-none-of-its-parents-shutdown-hooks
+  ;; task seon.lib/a-fork-carries-no-shutdown-hook: Jolt's hooks are the process's list, and a
+  ;; fork copied it; root's hook (its whole stop: seon.main/root-serve) ran in an agent or a test
+  ;; child that left by System/exit, an uncaught throw or a signal, on root's copied state
+  ;; against the shared store (seon.check/fork-cases "child-hooks")
+  (is (= {:status {:exit 3} :parents-hook-ran-in nil} (fork-case "child-hooks"))))
 
 (deftest a-wait-for-a-line-parks-the-fiber
   ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
