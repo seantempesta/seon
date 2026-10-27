@@ -150,18 +150,21 @@
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
-  (let [[miss no-ns not-a-name a-class switched sourced] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
+  (let [[miss no-ns not-a-name a-class switched sourced state] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
                                                                       "(source 'no.such.ns/missing-var)"
                                                                       "(source :kw)"
                                                                       "(source 'java.lang.String)"
                                                                       "(in-ns 'my.task)"
-                                                                      "(source my.agent/help)"])]
+                                                                      "(source my.agent/help)"
+                                                                      "(swap! seon.agent/state assoc :zz 1)"])]
     (is (< (count (:text miss)) 1500) "a missed help address names what it did not find, not the help page")
     (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))))
     (doseq [[what r] [["no such namespace" no-ns] ["not a name" not-a-name] ["a class" a-class]]]
       (is (nil? (:ex r)) (str "source of " what " answers, it does not fail: " (pr-str (:ex r)))))
     (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
     (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
+    (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
+    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") "each host object by its type, with the form that reads it")
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
