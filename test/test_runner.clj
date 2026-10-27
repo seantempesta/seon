@@ -343,7 +343,9 @@
                                                                           (vswap! reports conj (cond-> {:type (:type m) :var (str "#'" (:test x))}
                                                                                                  (:message m) (assoc :message (str (:message m)))
                                                                                                  (contains? m :expected) (assoc :expected (print/text (:expected m) (:part print/budgets)))
-                                                                                                 (contains? m :actual) (assoc :actual (print/text (:actual m) (:part print/budgets)))))))
+                                                                                                 (contains? m :actual) (assoc :actual (print/text (:actual m) (:part print/budgets)))
+                                                                                                 ;; a cost proof's verdict, as data, so its reused red reports it (seon.proofs/costs)
+                                                                                                 (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                :else (do (println "ended" (:test x))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
@@ -355,7 +357,10 @@
           same? (= tree (fx/tree-id (System/getProperty "user.dir")))
           ;; one request of the shard's results, their failures and each test's function costs
           unstored (when same?
-                     (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} ran (proofs/failures {:reports @reports})))
+                     (let [cost-of (proofs/costs {:reports @reports})]
+                       (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
+                                    (into {} (for [[t r] ran] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
+                                    (proofs/failures {:reports @reports}))))
           red (count (remove proofs/green? (vals ran)))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))

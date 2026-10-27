@@ -101,3 +101,24 @@
 (deftest a-run-that-could-not-read-its-results-says-why
   (let [[run] (proofs/results-tx {:id "unread 1" :unread "no results read from the root at port 1: :refused"} {} {})]
     (is (= "no results read from the root at port 1: :refused" (:seon.proof.run/unread run)) (pr-str run))))
+
+(def ^:private red-cost
+  "A red cost proof's report, as seon.cost/proof's :actual carries it."
+  {:rows [{:n 10 :measured {:ticks 900.0 :bytes 100.0} :expected {:ticks 100.0 :bytes 100.0}}]
+   :verdict {:ok? false :over [{:dim :ticks :n 10 :ratio 9.0}] :steeper [] :under [] :unmeasured []}})
+
+(deftest a-reused-red-cost-proof-keeps-its-verdict
+  ;; root via one-wait, 2026-10-27: a reused red cost proof lost its {:rows :verdict}, so the problems
+  ;; cost class stayed empty and bin/check problems waited forever. The verdict is kept with the red
+  ;; and comes back as its fresh run reported it
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [answer {:digests '{a.c-test/cost "dc"}
+                   :reports [{:type :fail :var "#'a.c-test/cost" :message "over" :cost red-cost}]}
+           {:keys [ran failures]} (proofs/answer-ran answer)
+           fresh (proofs/costs {:reports (:reports answer)})]
+       (proofs/record! (write-on conn) @conn {:run {:id "r"} :ran ran :failures failures})
+       (let [r (get (proofs/stored-results @conn ["dc"]) "dc")]
+         (is (= (get fresh 'a.c-test/cost) (:cost r)) (pr-str r))
+         (is (= fresh (proofs/costs {:reports [(assoc (first (:failures r)) :var "#'a.c-test/cost" :cost (:cost r))]}))
+             "the reused report (seon.agent/run-tests-forked's) answers proofs/costs as the fresh one did"))))))

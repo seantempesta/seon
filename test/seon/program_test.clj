@@ -489,7 +489,7 @@
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
-  ;; every class when it reads files or runs a process
+  ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (System/getProperty "user.dir")
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
@@ -565,8 +565,8 @@
 (deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
-  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on)
-  ;; and by every test that reads files or runs a process; the runtime's pins stay every test's
+  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
+  ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
@@ -576,22 +576,30 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
-    ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
-    ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
-    ;; runs on, which 937 of 977 tests reach (and by every test that reads files or runs a process)
-    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
-        "the runtime's pins are classes too")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd :seon.pin/jolt]]
+    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
+    ;; class it moved 451 tests on every bump. Jolt is keyed by source group (its analyzer and IR,
+    ;; deps, nREPL, core.async), each taken by the tests reaching it; its runtime core and Chez, which
+    ;; every form runs on, by none: the forks' suites and the full run after a pin bump catch a change there
+    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt
+                                             :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async])
+        "every submodule and every source group is a class")
+    (is (= #{} (moved :seon.pin/jolt) (moved :seon.pin/chez)) "the runtime core takes no pin, a process test's digest included")
+    (is (not= (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj) (moved :seon.pin/jolt.stdlib.clojure.core.async))
+        "each group moves the tests that reach it")
+    (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
+    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd
+               :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
+    (is (< (count (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj)) (* 0.5 (count all-tests))) "a change to Jolt's analyzer moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
   ;; the test runtime loads its files as they are: a dependency edit not yet committed left
-  ;; every digest as it was, so a green proven on the old files was reused on the new
+  ;; every digest as it was, so a green proven on the old files was reused on the new. A submodule
+  ;; is a class (seon.config/pin-class), taken by the tests whose reach runs on it
   (let [p (checkout! "with-sub" {"deps.edn" "{}"})
         s (str p "/reference-code/lib")
         core (str s "/core.clj")]
@@ -600,11 +608,43 @@
     (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
       (apply sh/sh "git" "-C" s args))
     (sh/sh "git" "-C" p "add" "reference-code/lib")
-    (let [before (:env (fx/inputs p))]
+    (let [lib #(get-in (fx/inputs p) [:config :seon.pin/lib])
+          before (lib)]
+      (is (string? before) "the submodule is a class of the inputs")
       (spit core "(ns lib.core) (def edited 1)")
-      (is (not= before (:env (fx/inputs p))) "an edit in the submodule's files moves every test's :env")
+      (is (not= before (lib)) "an edit in the submodule's files moves its class")
       (spit core "(ns lib.core)")
-      (is (= before (:env (fx/inputs p))) "its files back as committed: the same input as before"))))
+      (is (= before (lib)) "its files back as committed: the same input as before"))))
+
+(deftest a-source-group-moves-with-its-own-files-only
+  ;; root's ruling D (2026-10-27): Jolt is keyed by source group. A group is the git entry of its path
+  ;; in the tree of the submodule's files as they are: an edit, or an untracked file, in it moves its
+  ;; class and no other group's; a group path the tree does not hold refuses the inputs
+  (let [p (checkout! "with-groups" {"deps.edn" "{}"})
+        s (str p "/reference-code/lib")
+        core (str s "/core.clj")]
+    (.mkdirs (java.io.File. (str s "/x")))
+    (spit core "(ns lib.core)")
+    (spit (str s "/x/a.clj") "(ns lib.x.a)")
+    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
+      (apply sh/sh "git" "-C" s args))
+    (sh/sh "git" "-C" p "add" "reference-code/lib")
+    (let [c (assoc cfg/config :seon.config.source/pin-namespaces '{lib.core #{"reference-code/lib/core.clj"} lib.x #{"reference-code/lib/x"}})
+          classes #(select-keys (:config (fx/inputs p c (cfg/checkout))) [:seon.pin/lib.core.clj :seon.pin/lib.x])
+          before (classes)]
+      (is (= 2 (count (filter string? (vals before)))) "each group is a class of the inputs")
+      (spit core "(ns lib.core) (def edited 1)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "an edit moves its group's class")
+        (is (= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "and no other group's"))
+      (spit core "(ns lib.core)")
+      (spit (str s "/x/b.clj") "(ns lib.x.b)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "an untracked file in a group moves its class")
+        (is (= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "its files back as committed: the same as before"))
+      (is (thrown-with-msg? Exception #"reference-code/lib/nope.clj"
+                            (fx/inputs p (assoc c :seon.config.source/pin-namespaces '{lib.nope #{"reference-code/lib/nope.clj"}}) (cfg/checkout)))
+          "a group path the tree does not hold refuses the inputs, naming it"))))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 
@@ -740,7 +780,7 @@
         a (digests in)
         moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
         ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
-        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
+        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/computed-config-reader?, by its facts);
         ;; without it all 69 tests reaching pattern kept their digest when the window moved
         window (moved :seon.config.ctx/window "7")
         readers (program/tests-reaching g 'seon.render/pattern)]
@@ -750,14 +790,12 @@
     ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
     (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
     (is (seq readers) "tests reach the reader of a computed key")
-    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
-    ;; the reader list is complete: a form outside seon.config that calls the config's one reader
-    ;; (value, resolve) naming no config key of its own reads a computed one, and is named
-    (is (= [] (sort-by str (for [[_ r] (:rows g)
-                          :when (and (not= 'seon.config (:ns r)) (set? (:config r)) (empty? (:config r))
-                                     (some (:refs r) '[seon.config/value seon.config/resolve]))]
-                      (:defines r))))
-        "every form reading a computed config key is a config-key-reader")))
+    (is (true? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:limit}}))
+        "a resolver call naming no key of its own reads a computed one")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:seon.config.ctx/window}}))
+        "one naming its key reads that key")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
+    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
 (deftest no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
@@ -873,3 +911,13 @@
       (is (= (moved i) (set (program/tests-reaching g (symbol "app.pc" (str "f" i))))) (str "f" i ": the tests its change selects")))
     (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
     (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))
+
+(deftest a-program-with-no-schema-change-declares-nothing-new
+  ;; THE PLAN 0.7's first merge through Seon (2026-10-27): (my.branch/merge-main!) on a branch whose
+  ;; merge carried no schema change failed with seon.schema.datahike/declarations invalid-input {}:
+  ;; schema-registry answered {} for "nothing changed", and seon.merge handed that to
+  ;; schema-declarations. Nothing changed is the built registry itself
+  (let [db (ts/test-db)]
+    (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
+    (is (identical? seon.contract/registry (program/schema-registry {})))))
+
