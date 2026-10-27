@@ -920,8 +920,11 @@
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
         provider (or provider (cfg/provider cfg/config))
-        ;; the config in force, written on main's root entity with the boot fact
-        config (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
+        ;; the config in force, written on main's root entity with the boot fact; the merge gate's
+        ;; checkout, when none is declared, is this root's own source root
+        config (cond-> (-> (cfg/with-provider cfg/config provider) (assoc :seon.config.agent/max-running max-running))
+                 (and (nil? (cfg/value :seon.config.source/gate-checkout)) (:root source))
+                 (assoc :seon.config.source/gate-checkout (:root source)))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
         events-in (a/chan (a/sliding-buffer 8192))
@@ -1179,44 +1182,35 @@
               (when (or (nil? nsname) (= nsname (some-> (:seon.error/operation x) namespace))) x)))
          (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class)))))
 
-(defn run-tests!
-  "The agent forks itself and runs its deftests in the child; a promise of
-  {:pass :fail :error :reports [...]} (each test is bounded by its work: :seon.config.agent/test-ticks)."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise] [:=> [:cat :seon.root/sys :seon.agent/id pos-int?] :seon.host/promise]]}
-  ([sys agent-id] (request! sys 'run-tests! agent-id nil))
-  ([sys agent-id ticks] (request! sys 'run-tests! agent-id {:ticks ticks})))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove a branch at its head, the tests of namespaces names
   (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
-  proves it), or main (agent nil) in mode :judge. The run is keyed by the digest of what it reads
-  (seon.prove/read-digest): an agent's, its branch's program, as its turn's seon.agent/prove!
-  takes it, so a session's request and the turn's are one run; main's, the checkout's
-  seon.fx/inputs (its tests come from there; read through the :source effect with no dirs, which
-  this waits for) and main's program. A checkout with no inputs (no git HEAD) cannot key main's
-  run: :seon.test/prepare. A promise of the run's answer ({:key :ran :pass :fail :error :red
-  :reports ...}), the same run for every asker of that key."
+  proves it; mode :judge, as root's judge does), or main (agent nil) in mode :main (every test
+  with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
+  its branch's program (seon.program/program-digest), as its turn's seon.agent/prove! takes it,
+  so a session's request and the turn's are one run, and a request for main and the run main's
+  own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
+  :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]]}
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]]}
   ([sys agent-id] (prove! sys agent-id #{}))
-  ([sys agent-id names]
+  ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
+  ([sys agent-id names mode]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (let [db (pdb/head (:conn sys) b)
-          src (when-not agent-id @(call! sys {:op :fx :kind :source :req {:root (cfg/checkout) :dirs [] :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
-          dg (cond agent-id (seon.prove/read-digest nil (program/program-digest db))
-                   (contract/error? src) src
-                   (:inputs src) (seon.prove/read-digest (:inputs src) (program/program-digest db))
-                   :else (contract/error :seon.test/prepare #'seon.root/prove!
-                                         (str "main's run is keyed by the checkout's inputs, and " (cfg/checkout) " has none (no git HEAD)") {}))]
-      (if (contract/error? dg)
-        ;; a failed read of the checkout is recorded here, as import-source! records its own: the
-        ;; next good import closes it (seon.error/asked-tx)
-        (do (when (contract/error? src)
-              @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx db src :seon.root/source [])}}))
-            (doto (promise) (deliver dg)))
-        (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode (if agent-id :turn :judge) :digest dg}
-                     agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))))
+    (let [db (pdb/head (:conn sys) b)]
+      (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode mode
+                          :digest (program/program-digest db)}
+                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
+
+(defn run-tests!
+  "The agent's branch proved by the test service as root's judge proves it (prove! in mode
+  :judge: the run is recorded on main and is one run with any other asker's of its head); a
+  promise of the run's answer {:pass :fail :error :reports [...]} (each test bounded by its
+  work: :seon.config.agent/test-ticks)."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
+  [sys agent-id] (prove! sys agent-id #{} :judge))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))

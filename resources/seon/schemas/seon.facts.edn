@@ -196,8 +196,8 @@
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
                       ;; why the run failed: its reasons or its death, as the reconciler stated it
                       [:problem {:optional true} :string]]
- ;; root's go (my.root/gate!): the process tests this task's change reaches run on the gate
- ;; checkout before it merges; without it they are never run automatically (owner, 2026-10-23)
+ ;; set by my.root/gate!, no longer read: a merge's gate runs the process tests its change
+ ;; reaches nobody asking (seon.reconcile's :gate); kept until THE PLAN step 0.7 exercises the gate
  :seon.task/gate? :boolean
  ;; the task held for root with a failure: a run the reconciler refused, whose agent died or
  ;; whose merge was refused (seon.reconcile/hold-tx: why, the run), or marked failed

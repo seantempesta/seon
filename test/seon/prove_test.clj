@@ -4,7 +4,7 @@
   (greens and reds by digest) and the :test-red class they make true and a later green closes.
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.problems :as problems] [seon.proofs :as proofs]))
+            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.problems :as problems] [seon.proofs :as proofs] [seon.program]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -28,7 +28,7 @@
     (let [pending (drop seen all)]
       (if-let [m (first (filter :req pending))]
         (let [op (get-in m [:req :op])
-              r (case op :spawn {:id :p1} :eval {:handle 'result/e1 :text "{:handle result/e1, :value 1}"} :tests answer :write {:ok true :t 6} :kill {:killed :p1})
+              r (case op :spawn {:id :p1} :tests answer :write {:ok true :t 6} :kill {:killed :p1})
               [st o] (feed st [(answer-of m r)])]
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
@@ -45,13 +45,25 @@
           (is (= [4] (waiters-answered o)))
           (is (empty? (filter :req o))))))))
 
-(deftest the-read-digest-moves-with-what-the-run-reads
-  (let [in {:tree "t1" :env "e1"} dg (prove/read-digest in "p1")]
-    (is (not= dg (prove/read-digest (assoc in :tree "t2") "p1")) "a file of the checkout changed (a test, a doc)")
-    (is (not= dg (prove/read-digest (assoc in :env "e2") "p1")) "the config or a pin changed")
-    (is (not= dg (prove/read-digest in "p2")) "main's program changed")
-    (is (= dg (prove/read-digest (assoc in :data-refs {}) "p1")) "the same reads: the same digest")
-    (is (= "p1" (prove/read-digest nil "p1")) "an agent's run: its branch's program")))
+(deftest a-commit-that-moves-mains-program-proves-main
+  ;; task seon.proofs/main-is-proved-in-a-fork: a run of main started only when someone asked (a
+  ;; session's seon_prove, root's gate), so an agent forked from main found none of main's results.
+  ;; The writer's commit notice is a request: one that moves the program runs main, keyed by its
+  ;; program's digest, with no waiter; a data commit runs nothing; a session asking for the same
+  ;; key joins that run
+  (let [db (ts/test-db)
+        dg (seon.program/program-digest db)
+        [st o] (feed (prove/prove-proc {}) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]])
+        _ (is (empty? o) "a data commit runs nothing")
+        [st o] (feed st [[:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
+    (is (= 1 (count (asks o :spawn))) "a program commit: one run of main, by a prove agent forked from main")
+    (is (= (prove/run-key :main dg nil :main) (:key (:running st))) "keyed by main's program digest")
+    (is (empty? (waiters-answered o)) "nobody waits on it")
+    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :t 6 :digest dg :mode :main}]])
+          [_ all] (run-through st (into o o2) test-run-answer)]
+      (is (empty? (asks o2 :spawn)) "a session asking for the same key joins it")
+      (is (= [7] (waiters-answered all)) "and is answered once, at its end")
+      (is (= 1 (count (asks all :write))) "its results written once, as facts on main"))))
 
 (deftest a-run-is-keyed-by-what-it-reads
   ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
@@ -99,7 +111,7 @@
                    (if-let [m (first (filter :req (drop seen all)))]
                      (let [op (get-in m [:req :op])
                            _ (when (= :tests op) (swap! order conj (get-in m [:req :id])))
-                           r (case op :spawn {:id :p1} :eval {:handle 'result/e1 :text "{:handle result/e1, :value nil}"} :tests test-run-answer :write {:ok true} :kill {:killed 1})
+                           r (case op :spawn {:id :p1} :tests test-run-answer :write {:ok true} :kill {:killed 1})
                            [st o] (feed st [(answer-of m r)])]
                        (recur st (into all o) (inc (.indexOf all m))))
                      [st all]))]
@@ -171,30 +183,36 @@
     (is (re-find (re-pattern (java.util.regex.Pattern/quote (:key (:session v)))) (:agent v)) "the agent's turn got the same run")
     (is (= [(:key (:session v))] (:runs v)) "ONE run fact for the three askers")))
 
-(deftest a-session-prove-of-main-runs-in-a-prove-agent-and-leaves-facts
-  ;; main has no agent: the service spawns one on the tests branch, loads the checkout's tests there,
-  ;; runs the namespace asked for, kills the agent, and records a fact per test digest on main.
-  ;; The facts are read by a form of their own: a form reads the db as it began.
-  (let [ask (str "(let [runs0 (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
-                 "      r @(c/prove! sys nil '#{seon.patterns-test})"
-                 "      again @(c/prove! sys nil '#{seon.patterns-test})]"
-                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r) :runs0 (vec runs0) :refused (when (seon.contract/error? r) r)}))")
-        read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
-                  "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
-                  "      green (filter seon.proofs/green? (vals (seon.proofs/stored-results @(:conn sys) (map last facts))))]"
-                  "  (pr-str {:facts (vec (sort (map (juxt first second) facts))) :runs (vec runs) :green (count green)"
-                  "           :latest (vec (sort (map first (d/q '[:find ?l :where [?e :seon.proof/latest ?l]] @(:conn sys)))))}))")
-        [r1 r2] (at/in-agent [{:op :eval :agent "root" :code ask} {:op :eval :agent "root" :code read}])
-        v (merge (clojure.edn/read-string (:value r1)) (clojure.edn/read-string (:value r2)))]
-    (is (and (every? :value [r1 r2]) (nil? (:refused v))) (pr-str r1 r2))
-    (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
-    (is (pos? (:pass v)))
-    (is (= (:key v) (:again v)) "asked again: the same run's answer, nothing runs")
-    (is (= [(:key v)] (remove (set (:runs0 v)) (:runs v))) "one run fact")
-    (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]] (:facts v))
-        "a result fact per test, by digest")
-    (is (= '["seon.patterns-test/a-backlog-is-the-unread-queue" "seon.patterns-test/workers-compete-for-one-shared-in-port"] (:latest v)) "and main's newest result per test")
-    (is (= 2 (:green v)) "and each digest now holds a green: test-plan finds it in the store")))
+(deftest main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it
+  ;; task seon.proofs/main-is-proved-in-a-fork: a root whose program holds seon.patterns-test proves
+  ;; main at its boot with no one asking (a prove agent forked from the fork server's main, no
+  ;; tests loaded from the checkout), leaving a result fact per test digest; a commit that moves
+  ;; main's program and not what the tests reach runs main again, which reuses both; an agent
+  ;; forked after finds them at their digests and runs neither. Each read is a form of its own: a
+  ;; form reads the db as it began
+  (let [tests '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]
+        booted (str "(let [k #(seon.prove/run-key :main (seon.program/program-digest %) nil :main)"
+                    "      db (seon.root/await-db sys nil #(d/entity % [:seon.proof.run/id (k %)]))]"
+                    "  (pr-str {:key (k db) :facts (vec (sort (d/q '[:find ?t ?s :in $ ?k :where [?e :seon.proof/run ?k] [?e :seon.proof/digest]"
+                    "                                                [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] db (k db))))}))")
+        gained (str "(let [_ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'demo.gained \"(ns demo.gained)\\n\\n(defn g [] 7)\\n\" nil))"
+                    "      r @(c/prove! sys nil)]"
+                    "  (pr-str (assoc (select-keys r [:key :ran :reused :pass :fail :error]) :refused (when (seon.contract/error? r) r))))")
+        forked (str "(let [id (seon.root/spawn! sys {:branch (keyword (str \"probe-\" (random-uuid)))})"
+                    "      r @(c/submit! sys id \"(let [p (seon.agent/test-plan (seon.agent/db) nil #{})] (mapv #(boolean ((:reused p) %)) '" (pr-str tests) "))\" {:origin :outside})"
+                    "      r (if (vector? r) (first r) r)]"
+                    "  (c/kill! sys id)"
+                    "  (:text r))")
+        [a b c] (at/in-agent [{:op :eval :agent "root" :code booted} {:op :eval :agent "root" :code gained} {:op :eval :agent "root" :code forked}]
+                             {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true})
+        a' (some-> (:value a) clojure.edn/read-string)
+        b' (some-> (:value b) clojure.edn/read-string)
+        c' (some-> (:value c) clojure.edn/read-string :value)]
+    (is (= (mapv #(vector % :pass) tests) (:facts a')) (str "main proved at its boot, nobody asking: " (pr-str a)))
+    (is (= {:ran 0 :reused 2 :pass 2 :fail 0 :error 0} (select-keys b' [:ran :reused :pass :fail :error]))
+        (str "a program commit the tests do not reach: main run again, both reused: " (pr-str b)))
+    (is (not= (:key a') (:key b')) "a run per program commit")
+    (is (= [true true] c') (str "an agent forked after finds both at their digests: " (pr-str c)))))
 
 (deftest a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
   (let [plan {:selected '[a.b-test/plain a.p-test/proc a.p-test/other] :run '[a.b-test/plain a.p-test/proc a.p-test/other]
@@ -290,8 +308,7 @@
     (is (some #(= :problem (:op %)) o))
     (is (nil? (:running st))))
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
-        [st o] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
-        [st o2] (feed st [(answer-of (first (asks o :eval)) {:handle 'result/e1 :text "{:handle result/e1, :value nil}"})])
+        [st o2] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
         died (seon.contract/error :seon.agent/died 'seon.root/api-proc "agent p1 died" {:agent :p1})
         [st o3] (feed st [(answer-of (first (asks o2 :tests)) died)])]
     (is (= [1] (waiters-answered o3)) "the prove agent died mid-run: its waiter is answered the error")
