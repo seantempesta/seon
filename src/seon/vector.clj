@@ -102,16 +102,24 @@
                (->> (map (fn [e s] [(- s) e]) es (ffi/read-array fs :float m 0))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
+(defmacro fused
+  "{item score} of rankings fused by reciprocal rank, each ranking's share weighed, as an expression
+  in the caller: a macro, not a function (a def'd fn escapes the contracts every function carries,
+  a contracted one is a second call), so rrf (called per line of the page's related part) costs the
+  one contracted call it did (seon.context-cost-test/related-ranks-each-kind-by-one-search)."
+  [rankings weights]
+  `(let [k# (cfg/value :seon.config.vector/rrf-k)]
+     (apply merge-with + {} (for [[r# w#] (map vector ~rankings ~weights)]
+                              (into {} (map-indexed (fn [i# x#] [x# (/ w# (+ k# i# 1))])) r#)))))
+
 (defn rrf-scores
   "Rankings fused by reciprocal rank (Cormack et al. 2009): {item score}, each item's score the sum
   of w/(k + rank) over the rankings it is in, k :seon.config.vector/rrf-k, w the ranking's weight (1.0
   unless weights, one per ranking, are given)."
   {:malli/schema [:function [:=> [:cat [:sequential [:sequential :any]]] [:map-of :any number?]]
                   [:=> [:cat [:sequential [:sequential :any]] [:sequential number?]] [:map-of :any number?]]]}
-  ([rankings] (rrf-scores rankings (repeat 1.0)))
-  ([rankings weights]
-   (let [k (cfg/value :seon.config.vector/rrf-k)]
-     (apply merge-with + {} (for [[r w] (map vector rankings weights)] (into {} (map-indexed (fn [i x] [x (/ w (+ k i 1))])) r))))))
+  ([rankings] (fused rankings (repeat 1.0)))
+  ([rankings weights] (fused rankings weights)))
 
 (defn rrf
   "The items of rankings fused by reciprocal rank (rrf-scores), best first, the name breaking a tie.
@@ -120,7 +128,7 @@
   my.agent/search fuses exact text, meaning and references."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
-  (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) (rrf-scores rankings)))))
+  (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) (fused rankings (repeat 1.0))))))
 
 ;; ---- what is embedded --------------------------------------------------------------------
 ;; EmbeddingGemma's prompts (its model card; v1's script/embed/gemma_text.py): a document is

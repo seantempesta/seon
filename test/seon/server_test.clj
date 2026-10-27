@@ -1,7 +1,26 @@
 (ns seon.server-test
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]))
+  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
+
+(deftest seon-agents-answers-what-is-live
+  ;; seon_agents answered every task on main (580 on the standing root, most :held or
+  ;; :cancelled with no run), so an outside agent never saw what runs
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [before (:others (seon.server/live-tasks @conn))
+           decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
+           _ (d/transact conn (task/create-tx @conn (vec decls)))
+           env {:branch :demo :model nil :max-turns 4}
+           _ (d/transact conn (concat (task/execution-tx ["demo/b" "demo/d"] :running) (task/execution-tx ["demo/e"] :cancelled)
+                                      (task/run-start-tx "demo/b#1" "demo/b" "boot-1" :a1 env 1000 "Work.")
+                                      (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a2 env 2000 "Work.")))
+           {:keys [tasks others all]} (seon.server/live-tasks @conn)]
+       (is (= ["demo/d" "demo/b"] (filterv #(= "demo" (namespace (symbol %))) (keys tasks))) "the running tasks, newest run first, and no held one")
+       (is (= [["demo/d#1" :running nil nil nil]] (get-in tasks ["demo/d" :runs])) "each with its runs")
+       (is (= (merge-with + before {:held 2 :cancelled 1}) others) "the others counted by execution: demo/a and demo/c held, demo/e cancelled")
+       (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")))))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
@@ -93,6 +112,45 @@
         [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx r (val (first (:runs t)))] [(count (:runs t)) (:seon.run/id r) (get-in r [:task :seon.task/id])])"]))]
     (is (= [1 (:run @names) (:task @names)] (:value held)) "its run, with its task, in its record")))
 
+(deftest an-agent-reads-its-task-running
+  ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
+  ;; before main writes the task's release, so (my.task/current) and its page read :held
+  (let [[current page] (at/in-agent ["(:seon.task/execution (my.task/current))"
+                                     "(pr-str (seon.repl/render-ctx-hiccup))"])]
+    (is (= :running (:value current)) "the agent reads its task running, as main does")
+    (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
+
+(defn- in-run
+  "Root-REPL code that evaluates form in the agent run rid works, answering its value (read back
+  from the response's text, as the server's reader does)."
+  [rid form]
+  (str "(let [a (some #(when (= " (pr-str rid) " (:seon.run/id %)) (:seon.run/agent %)) (seon.task/running @(:conn sys)))]"
+       " (:value (clojure.edn/read-string {:default tagged-literal} (:text @(c/submit! sys a " (pr-str form) ")))))"))
+
+(deftest a-reset-starts-the-task-again-from-main
+  ;; the owner (2026-10-27): reset an agent easily. seon_attach {:fresh true}: a new branch cut from
+  ;; main and an empty conversation; the old branch and its runs stay, the record
+  (let [[_ reset branch seen] (at/in-agent (fn [{:keys [ns task]}]
+                                             [(str "(ns " ns ") (def x 41)")
+                                              {:op :attach :task task :fresh true}
+                                              {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
+                                              {:op :eval :agent "root" :code (in-run (str task "#2") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}]))]
+    (is (clojure.string/ends-with? (:run reset) "#2") (pr-str reset))
+    (is (clojure.string/ends-with? (name (:value branch)) "-r2") "the task's branch is a new one")
+    (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
+
+(deftest a-fork-goes-on-from-an-agents-head
+  ;; the owner (2026-10-27): fork an agent easily. seon_attach {:from a}: a clone of the agent on a
+  ;; branch of its head, working a sibling task, so it tries an alternative from where it stood
+  (let [[_ fork plan seen] (at/in-agent (fn [{:keys [ns agent]}]
+                                          [(str "(ns " ns ") (def x 41)")
+                                           {:op :attach :from agent}
+                                           {:op :eval :agent "root" :code (str "(:seon.task/plan (seon.task/task @(:conn sys) \"" ns "/t-fork-1\"))")}
+                                           {:op :eval :agent "root" :code (in-run (str ns "/t-fork-1#1") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x) deref) (some? (datahike.api/entity (seon.agent/db) [:var/name '" ns "/x]))]"))}]))]
+    (is (clojure.string/ends-with? (str (:task fork)) "/t-fork-1") (pr-str fork))
+    (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
+    (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message
@@ -146,22 +204,25 @@
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
 (deftest an-outside-agents-repl-answers-plainly
-  ;; THE PLAN 0.7's first attempt (2026-10-27) found four things in an outside agent's REPL: a
+  ;; THE PLAN 0.7's first run (2026-10-27) found four things in an outside agent's REPL: a
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
-  (let [[miss no-ns not-a-name a-class switched sourced] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
+  (let [[miss no-ns not-a-name a-class switched sourced state] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
                                                                       "(source 'no.such.ns/missing-var)"
                                                                       "(source :kw)"
                                                                       "(source 'java.lang.String)"
                                                                       "(in-ns 'my.task)"
-                                                                      "(source my.agent/help)"])]
+                                                                      "(source my.agent/help)"
+                                                                      "(swap! seon.agent/state assoc :zz 1)"])]
     (is (< (count (:text miss)) 1500) "a missed help address names what it did not find, not the help page")
     (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))))
     (doseq [[what r] [["no such namespace" no-ns] ["not a name" not-a-name] ["a class" a-class]]]
       (is (nil? (:ex r)) (str "source of " what " answers, it does not fail: " (pr-str (:ex r)))))
     (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
     (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
+    (is (< (count (:text state)) 6000) "a bare swap! of the agent's state answers its summary, not 42,000 characters")
+    (is (clojure.string/includes? (:text state) "(get (deref seon.agent/state) :db)") "each host object by its type, with the form that reads it")
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 

@@ -4,7 +4,8 @@
                    [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?]
                    [:outputs {:optional true} [:set [:enum :text :hiccup]]]
                    ;; a nested value's own render: (fn [v] {:text :html}) for a value whose schema
-                   ;; declares one, else nil; the printer shows it in that value's place
+                   ;; declares one, or (fn [v] {:value x}) for one whose schema declares a summary
+                   ;; (x printed here, as any value), else nil; the printer shows it in that value's place
                    [:render {:optional true} [:maybe :seon.host/fn]]
                    ;; values already shown in earlier responses, each with the form that reads it
                    ;; again ((:value result/e4)): strings by text, collections by identity (their

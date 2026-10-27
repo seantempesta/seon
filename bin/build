@@ -42,6 +42,10 @@ done
 
 mkdir -p "$T/src" "$T/home"
 
+# what a build reads is the pins this checkout's HEAD records: a submodule left at another commit (a
+# merge of main that moved a pin, no sync after) is moved there first, by the one sync path, and named
+"$ROOT/bin/worktree" --sync "$ROOT" || die "a submodule is not at its pin and has uncommitted changes (above)"
+
 # copy_tree SRC DEST: a fresh copy of a checked-out submodule, without its .git link.
 copy_tree() {
   rm -rf "$2"

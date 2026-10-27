@@ -394,13 +394,14 @@
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/clone! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
-                 :else (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
+                 :else (let [opts (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent})
+                       [st aid fd] (start-agent st opts)
                        branch (get-in st [:agents aid :branch])
                        [st rid] (pend st p :clone parent)]
                    ;; the clone's socket goes to its parent with the request
                    (to-agent st o parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
-                              :msg {:op :clone :agent aid :branch branch}}))))
+                              :msg (cond-> {:op :clone :agent aid :branch branch} (:task opts) (assoc :task (:task opts)))}))))
       (:eval :tests :judge :stats :merge-main :render)
       (if (nil? (get-in st [:agents id]))
         (reply! st o p (absent (get-in st [:view :agents id]) id))

@@ -226,7 +226,7 @@
         "shown, then the rest the form reads, is the whole line")))
 
 (deftest members-fill-breadth-before-depth
-  ;; notes/design-agent-view-2026-10-24.md §4 (a): a sequence shows every member at its least
+  ;; notes/archive/design-agent-view-2026-10-24.md §4 (a): a sequence shows every member at its least
   ;; before any one grows, as a map does (it filled in order, and the first member that did not
   ;; fit took the rest); what is left grows them in layout order
   (let [v [(apply str (repeat 300 "a")) (apply str (repeat 300 "b")) :c]
@@ -236,7 +236,7 @@
     (is (> (count (re-find #"a+" text)) (count (re-find #"b+" text))) "the first member grows first")))
 
 (deftest an-earlier-value-prints-as-its-handle
-  ;; notes/design-agent-view-2026-10-24.md §1: a value an earlier response showed prints as the
+  ;; notes/archive/design-agent-view-2026-10-24.md §1: a value an earlier response showed prints as the
   ;; form that reads it again, never twice
   (let [big (vec (range 200))
         {:keys [text]} (seon/print-value {:handle 'result/e2 :value {:xs big :n 1}} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})]

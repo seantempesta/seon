@@ -342,7 +342,9 @@
   "Root's main on the durable store at path. A store that does not exist is made, whole or not
   at all (make!), seeded with about n datoms on :db; main (a branch name) is made from :db's
   head when the store has no such branch, or recovered when it has. Answers {:cfg (naming
-  main) :conn :recovered? (main existed) :seeded? (this call made the store)}."
+  main) :conn :recovered? (main existed) :seeded? (this call made the store)}. A value of
+  :conn is read before the connection's last release (d/release): that release closes the
+  store's LMDB env, and a read after it answers :lmdb-env-closed (docs/storage.md)."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
   [backend path n main]
   (let [made? (and (not (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))) (make! backend path n))
