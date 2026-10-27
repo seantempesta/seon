@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.docs :as docs] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -110,7 +110,7 @@
 
 (deftest every-section-of-the-wiki-has-a-lead
   ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
-  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  ;; real wiki as main holds it (notes/archive/dogfood/docs-audit.md found 54 of 364 without)
   (let [db0 (empty-db)
         db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
     (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
@@ -345,6 +345,9 @@
             (recur (.indexOf low s (inc i)))))))))
 
 (deftest no-text-uses-an-old-word
+  ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
+  ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
+  ;; kept at the digest the green tree has, seon.proofs/flaky)
   (let [root (config/checkout)
         words (old-word-spellings (slurp (str root "/AGENTS.md")))
         kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
@@ -361,7 +364,7 @@
                    [w _] (used (str/replace line0 kept-span ""))]
                [p (inc i) w])]
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
-    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
+    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word] (AGENTS 7a; a file whose use is the subject goes in text-kept with its reason)")))
 
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."
@@ -433,3 +436,18 @@
     (is (= ["datoms" "diff" "seon" "run" "outcome" "a" "b"] (seon.docs/words "datoms-diff seon.run/outcome aB")) "an identifier is its parts, camelCase too")
     (testing "the first line holding a word, and its number"
       (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
+
+(deftest the-wiki-holds-the-top-level-pages-beside-docs
+  ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and
+  ;; one view reach them (:seon.config.root/wiki-dirs)
+  (let [co (seon.config/checkout)
+        db0 (ts/test-db)
+        tx (seon.root/wiki-tx db0 co)
+        db (d/db-with db0 tx)
+        paths (set (seon.docs/page-paths db))]
+    (is (every? paths ["AGENTS.md" "BAGGAGE.md" "docs/agent.md"]) "the top-level pages and docs/'s")
+    (is (seq (seon.docs/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
+    (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
+    (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
+    (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
+    (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))

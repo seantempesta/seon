@@ -166,7 +166,7 @@ u-lmdb-kill() {
 }
 # lmdb-sem, below Datahike too, on envs of its own under one directory, deleted when green
 u-lmdb-sem() {
-  echo "== lmdb-sem (two envs whose lock files share a key, a set gone under a holder, 16 processes opening one env: each env's semaphore set is its own)"
+  echo "== lmdb-sem (another env's set at an env's key, a set gone under a holder, 16 processes opening one env, 50 envs in one process, a killed opener's set: each env's semaphore set is its own, and costs no undo entry for its life)"
   step lmdb-sem "" "$ROOT/target/lmdb-sem" "$OUT/lmdb-sem"
   is-green lmdb-sem && rm -rf "$OUT/lmdb-sem"
 }

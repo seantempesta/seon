@@ -134,6 +134,61 @@
     (is (= [1 2] (waiters-answered all)))
     (is (every? seon.contract/error? (map :r (filter #(= :prove-answer (:op %)) all))))))
 
+;; ---- the daily full run (the cron proc's request, :full mode) -----------------------------------
+
+(def ^:private full-answer
+  {:value {:results '{a.b-test/t :pass a.c-test/u :fail} :digests '{a.b-test/t "dg-t" a.c-test/u "dg-u"} :ms 9 :log "/x.log"
+           :failures '{a.c-test/u [{:type :fail :message "boom" :expected "1" :actual "2"}]}}})
+
+(deftest the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
+  ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
+  ;; cron proc's request (no asker) runs in a lane of its own (a full run takes most of an hour and
+  ;; can stall: an agent's turn never waits on it); its executor is the :tests effect (bin/test --all
+  ;; in a worktree of main, an OS child), its answer recorded as the facts every run leaves, on main,
+  ;; so a red test is a :test-red row
+  (let [request [:req {:branch :main :digest "full-2026-10-28" :mode :full}]
+        [st outs] (feed (prove/prove-proc {}) [request])
+        fx (first (filter #(= :fx (get-in % [:req :op])) outs))]
+    (is (= "main@full-2026-10-28!full" (prove/run-key :main "full-2026-10-28" nil :full)))
+    (is (empty? (asks outs :spawn)) "no prove agent is spawned")
+    (is (= {:op :fx :kind :tests :req {:all? true}} (:req fx)) "the effect runs every test")
+    (testing "an agent's run while the full run runs starts at once: the run slot is not held"
+      (let [[_ o] (feed st [(req 1 :agent-1 5 :a1)])]
+        (is (= 1 (count (asks o :tests))))))
+    (testing "another day's request while it runs is a :platform problem naming the run that has not ended"
+      (let [[_ o] (feed st [[:req {:branch :main :digest "full-2026-10-29" :mode :full}]])]
+        (is (empty? (filter :req o)))
+        (is (= [:seon.prove/full-run-running] (map #(get-in % [:error :seon.error/type]) (filter #(= :problem (:op %)) o))))))
+    (testing "the same day's request while it runs joins it; the effect answered, its statuses are written on main"
+      (let [[st2 o2] (feed st [request])
+            [st3 o3] (feed st2 [(answer-of fx full-answer)])
+            w (first (filter #(= :write (get-in % [:req :op])) o3))
+            facts (get-in w [:req :req :tx-data])]
+        (is (empty? (filter :req o2)) "no second run")
+        (is (= {"a.b-test/t" :pass "a.c-test/u" :fail} (into {} (keep #(when (:seon.proof/latest %) [(:seon.proof/latest %) (:seon.proof/status %)]) facts)))
+            "each test's newest result on main (the results by digest are the run's shards' own)")
+        (is (= 1 (count (filter :seon.proof.run/id facts))) "and the run's entity")
+        (is (every? #(= "main" (:seon.proof/branch %)) (filter :seon.proof/status facts)))
+        (is (= #{"a.b-test/t" "a.c-test/u"} (set (keep :seon.proof/latest facts))) "main's newest result of each test: what :test-red reads")
+        (let [[st4 o4] (feed st3 [(answer-of w {:ok true :t 6})])]
+          (is (nil? (:full st4)) "the lane is free")
+          (is (empty? (filter :req o4)))
+          (is (empty? (filter #(= :problem (:op %)) o4)) "a red test is not a platform defect: it is a :test-red row")
+          (testing "the day again: answered by its run, nothing runs"
+            (is (empty? (filter :req (second (feed st4 [request]))))))
+          (testing "and the facts make the red test a :test-red row"
+            (let [db (d/db-with (ts/test-db) facts)
+                  rows (get-in (problems/report db) [:classes :test-red :rows])]
+              (is (= ['a.c-test/u] (mapv :test rows)))
+              (is (= [{:type :fail :message "boom" :expected "1" :actual "2"}]
+                     (:seon.proof/failures (first (filter #(= "a.c-test/u" (:seon.proof/latest %)) facts))))
+                  "with why it is red: the failures its run recorded"))))))
+    (testing "an effect that failed is a platform problem, and the lane is free for the next day"
+      (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/full-run-tx "bin/worktree --at exited 1" {})
+            [st5 o5] (feed st [(answer-of fx err)])]
+        (is (nil? (:full st5)))
+        (is (= 1 (count (filter #(= :problem (:op %)) o5))))))))
+
 ;; ---- the facts a run leaves, and the class they make true ------------------------------------
 
 (deftest a-run-leaves-a-fact-per-digest-and-a-red-closes-with-a-later-green
@@ -377,3 +432,23 @@
       (testing "a message that changes nothing it holds reports nothing"
         (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
           (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
+
+(deftest two-runs-on-one-checkout-each-end-with-their-own-result
+  ;; two bin/prove runs at once on one checkout wrote the same target/prove (shard files, logs):
+  ;; one run's start removed the other's shards and a plain run destroyed a --merge run's logs.
+  ;; Each run writes under a directory of its own, named on its first line, and each ends with
+  ;; its own complete log and plan
+  (let [run (fn [] (clojure.java.shell/sh "bin/prove" "--tests" "seon.step-test"))
+        pa (promise) pb (promise)
+        _ (doto (Thread. #(deliver pa (run))) .start)
+        _ (doto (Thread. #(deliver pb (run))) .start)
+        rs [@pa @pb]
+        dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
+    (doseq [r rs]
+      (is (zero? (:exit r)) (str (:out r) (:err r)))
+      (is (some? (dir r)) "a run says where its logs are")
+      (is (clojure.string/includes? (:out r) "PROVE OK")))
+    (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
+    (doseq [r rs :let [d (dir r)]]
+      (is (clojure.string/includes? (slurp (str d "/prove.log")) "PROVE OK") (str "its own complete log: " d))
+      (is (.isFile (java.io.File. (str d "/tests.edn"))) (str "and its own plan: " d)))))

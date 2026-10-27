@@ -18,7 +18,7 @@ An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.a
 
 Deliberately unused (researched in the notes' `jolt-debug-features` paper), so nobody proposes them again:
 - `JOLT_DIAG`: read only by the CLI's top-level uncaught handler, which our eval's catch never reaches; the same data is already in the exception's ex-data.
-- `JOLT_CHECK`: warnings go to the process's stderr (read only on death), and the variable is a Scheme global with no Clojure setter. `jolt.passes.types/check-form` over the node the REPL's tap holds would need no variable; measured silent on all of `src` (3397 forms, 0 findings, `notes/check-form-measure-2026-10-23.md`) but a new item key waits for an owner ruling: task `seon.repl/type-findings-are-an-evals-warnings`.
+- `JOLT_CHECK`: warnings go to the process's stderr (read only on death), and the variable is a Scheme global with no Clojure setter. `jolt.passes.types/check-form` over the node the REPL's tap holds would need no variable; measured silent on all of `src` (3397 forms, 0 findings, `notes/archive/check-form-measure-2026-10-23.md`) but a new item key waits for an owner ruling: task `seon.repl/type-findings-are-an-evals-warnings`.
 - `JOLT_DEBUG`: stderr traces of the builder (AOT cache misses, dependency fetches); not an eval's concern.
 - `jolt.nrepl` as a server: a second request path beside `seon.server`'s `:eval`, bypassing recording, ticks and the middleware, on a second port. Its `err->msg` is used as a library.
 - `clj-kondo`: it only knows Jolt's `jolt.ffi` macros, our `seon.contract/defn` would flood it with unresolved symbols, and the compiler already reports those with suggestions.

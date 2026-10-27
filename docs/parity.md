@@ -27,7 +27,7 @@ Each v1 MCP tool and where it stands here.
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
 | reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
+The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` answers the live agents and the tasks running or with runs, and counts the rest (```seon.server/live-tasks```).
 
 ## The agent's REPL (`my.*`)
 
@@ -63,10 +63,10 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |
 | one done rule shared with merge | `seon.reconcile/done-explain` (a proof that never ran is `:proof-unknown`, not red; a process test left out of a run is neither; a problem the branch made true is `:open-problem`; [tasks](tasks.md#the-done-rule)) | present |
-| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in the results directory every checkout shares (`:seon.config.source/test-results-dir`; check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), also finding a green by its digest among main's result facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
+| tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse results recorded on the standing root's main, where every checkout's runs send them (check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), from the same facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per run (stored as ``:seon.run/waste``) | partial |
-| scheduled work (``seon.schedule``) | none (AGENTS names a cron proc; `resources/seon/system.edn` has none) | missing |
+| scheduled work (``seon.schedule``) | the cron proc (``seon.cron``): one daily message, the full run of main (`:seon.config.proofs/full-run-at`); no general schedules | partial |
 
 ## Context, printing, the page
 

@@ -24,6 +24,7 @@ way in [failure points](failure-points.md).
 The sites where time decides because the owner allowed it, the provider's delayed retry among them.
 
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by one core.async `timeout`.
+- `seon.cron/arm!`, with `seon.cron/cron-proc`, `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule (AGENTS section 4). At the time of day `:seon.config.proofs/full-run-at` names (UTC), one core.async `timeout` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
 
 ## Time decides (a check's measurement, and a check's ping)
 
@@ -63,7 +64,7 @@ Names that look like clock reads but are quoted as data, so no time decides at t
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
-- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (`target/prove/ms`), so they end together; a test never measured counts as the mean.
+- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (its newest result's, ```seon.proofs/last-ms```), so they end together; a test never measured counts as the mean.
 - bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
 
 ## Time measured (recorded, never compared to decide)
@@ -71,7 +72,7 @@ A measured time chooses which work goes first, never whether a result is green (
 Clock reads whose value is recorded or shown and never compared to decide anything.
 
 - `seon.profile/now-ns`, `seon.profile/ms-since`: the one clock read ([machine](machine.md#the-clock)); their callers are judged here one by one.
-- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/stall-task`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
+- `seon.step/event`, `seon.agent-proc/agent-in`, `seon.root/end-agent`, `seon.root/record-death`, `seon.root/set-agent`, `seon.root/stall-task`, `seon.root/previous-end`, `seon.reconcile/judge-tx`, `seon.reconcile/start`, `seon.reconcile/dead-tx`, `seon.server/attach!`, `seon.server/ops` (the stamp on a refused `:record`'s error row), `seon.writer/main-commit`, `seon.writer/stored!`, `seon.writer/writer-proc` (the `:since` on its dirty notice), `seon.repl/wrap-caught`, `seon.web/render-in`: a wall-clock stamp on an event, a run, a death, a root's end, a problem, an error, a commit or a dashboard chunk.
 - `seon.profile/measure!`: the one measurement of a call ([cost](cost.md)): its wall ns are what the REPL records as a form's ms, its CPU ns what a cost proof times; shown, never compared.
 - `seon.repl/record!`: a record's id made unique by the clock read.
 - `seon.render.proc/web-answered`: a UI call's answer, its record's id made unique by the clock read and its stream event stamped.

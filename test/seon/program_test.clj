@@ -384,6 +384,31 @@
             (str "the walk's rows are the whole rows' id, namespace, definitions and references (scan " scan? ")")))
       (is (every? #(= (:id %) (:own %)) (vals (rows true))) "a form's own digest is its id"))))
 
+(deftest a-stored-reach-gives-the-digests-a-rebuild-gives
+  ;; task seon.program/reach-graph-is-stored: a plan reads the graph the last one stored (jfasl in the
+  ;; program store) and folds what moved (reach-update); its digests are a rebuild's, and a store
+  ;; written under other code or other data-refs is built over
+  (let [dir (scratch-dir "stored-reach")
+        in {:env "e" :tree "t" :config {}}
+        db (calc-db)
+        db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
+        file (java.io.File. dir "reach-graph.fasl")
+        digests (fn [g] (update-vals (program/graph-index g in nil) :digest))
+        first-run (runner/reach-graph-of db nil dir)]
+    (is (.isFile file) "the first plan stores the graph")
+    (is (= (digests (program/reach-graph db nil)) (digests first-run)) "built: a rebuild's digests")
+    (let [stamp (.lastModified file)
+          second-run (runner/reach-graph-of db' nil dir)]
+      (is (= (digests (program/reach-graph db' nil)) (digests second-run)) "stored and updated: a rebuild's digests of the changed program")
+      (is (< (:affected second-run) (count (:rows second-run))) "and only what the change reaches was re-folded")
+      (is (not= (digests first-run) (digests second-run)) "the change moved some digest")
+      (is (= (digests (program/reach-graph db nil)) (digests (runner/reach-graph-of db nil dir)))
+          "and back to the first program: its digests again")
+      (is (<= stamp (.lastModified file)) "the store moved with the program"))
+    (testing "other data-refs: built over"
+      (let [refs {'seon.system/read-decl #{'app.pt-calc/add}}]
+        (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
+
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}
@@ -400,22 +425,27 @@
     (is (= (program/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
         "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
+(defn- run-plan "bin/test's plan of digests against the results the store on conn holds." [digests conn]
+  (proofs/plan nil digests (proofs/stored-results @conn (vec (vals digests))) #{}))
+
+(defn- record-ran!
+  "Record ran ({test result}) on conn as bin/test does, one commit."
+  [conn ran] (proofs/record! (fn [tx] (d/transact conn {:tx-data tx})) @conn {:run {:id "program-test"} :ran ran}))
+
 (deftest a-second-run-with-nothing-changed-runs-nothing
+  (ts/test-branch!
+   (fn [_ conn]
   (let [db (calc-db)
-        dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
-        plan #(proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{})
+        plan #(run-plan digests conn)
         first-plan (plan)
-        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-verdicts! #(fx/write-file {:req %}) dir)))
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (record-ran! conn)))
         second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
     (is (= [] (:run second-plan)) "the second run runs nothing")
     (is (= calc-tests (set (keys (:reused second-plan)))) "and reports every result reused")
-    (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
-
-(defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
-  (proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{}))
+    (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -427,16 +457,16 @@
     d))
 
 (deftest a-result-recorded-in-one-checkout-is-reused-in-another
+  (ts/test-branch! (fn [_ conn]
   (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
         a (checkout! "a" files)
         b (checkout! "b" files)
-        dir (scratch-dir "shared")
         db (calc-db)
         in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
     (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
-    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
-    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
+    (record-ran! conn (proofs/run-tests! (:run (run-plan da conn)) da (fn [_])))
+    (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) conn)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
     (is (= (:env in-a) (:env (fx/inputs b))) "prose is no input of a test that reads no files")
@@ -453,7 +483,7 @@
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
-    (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))
+    (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
 
 (deftest a-test-takes-only-the-file-classes-its-reach-reads
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
@@ -546,10 +576,16 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's are not: they are in :env")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto]]
+    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
+    ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
+    ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
+    ;; runs on, which 937 of 977 tests reach (and by every test that reads files or runs a process)
+    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
+        "the runtime's pins are classes too")
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd :seon.pin/jolt]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
+    (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
@@ -683,14 +719,15 @@
         {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
         r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
                (program/reach-digests @conn in)
-               (finally (d/release conn true)))
-        dir (scratch-dir "same-tree")]
+               (finally (d/release conn true)))]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
-    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
-    (is (= [] (:run (run-plan a dir))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))
+    (ts/test-branch!
+     (fn [_ rconn]
+       (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+       (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
 (deftest a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
@@ -706,13 +743,12 @@
         ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
         ;; without it all 69 tests reaching pattern kept their digest when the window moved
         window (moved :seon.config.ctx/window "7")
-        readers (program/tests-reaching g 'seon.render/pattern)
-        ;; the tests that take a whole config map (root's boot, from-db): every key is theirs
-        whole (set (for [t (keys a) :when (= :all (get-in g [:flags (get-in g [:comp-of (peek (get (:defs g) t))]) :config]))] t))]
+        readers (program/tests-reaching g 'seon.render/pattern)]
     (is (< 0 (count window) (quot (count a) 2)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, fewer than half"))
     (is (not (window 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
-    (is (seq whole) "a test booting a root reads every key")
-    (is (= whole (moved :seon.config.no/such-key "1")) "a key no form names moves only the tests reading every key")
+    ;; root, 2026-10-27: a form taking the whole config map (root's boot, from-db) took every key,
+    ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
+    (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
     (is (seq readers) "tests reach the reader of a computed key")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
     ;; the reader list is complete: a form outside seon.config that calls the config's one reader
@@ -780,8 +816,8 @@
     ;; runs (its :seon.config/place keys) is no input; how a test behaves still is
     (is (= (config cfg) (config (assoc cfg :seon.config.web/port 9999 :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
                                        :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
-                                       :seon.config.source/test-results-dir "/x/results")))
-        "a checkout's own ports, main, store, source and results directory are no input")
+                                      )))
+        "a checkout's own ports, main, store and source are no input")
     (is (= (config cfg) (:config (fx/inputs here (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")
     (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))

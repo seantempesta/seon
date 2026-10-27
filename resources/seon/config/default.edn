@@ -85,12 +85,20 @@
  ;; 2026-10-22: "why are we not resuming one main by default"); a store without it makes it
  ;; from the seed (:db). A run's record is main's commit history. bin/check names each step's
  ;; own main (SEON_MAIN=check-<step>, deleted when the step is green); SEON_MAIN=db is :db itself.
- ;; Provenance: notes/PLAN-branches.md point 1. At the bound: n/a.
+ ;; Provenance: the branches plan, not kept point 1. At the bound: n/a.
  :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
  ;; The task files (resources/seon/tasks/<owning-ns>.edn, AGENTS.md "How work is handed out").
  :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
+ ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
+ ;; README.md). The pages root loads into main as wiki sections at boot (seon.root/wiki-tx), so one search
+ ;; and one view reach them (owner, 2026-10-27: "everything of consequence that is for seon agents use
+ ;; should be indexed into the db"). docs/ is also watched and reloaded on change (my.root/loader-dirs);
+ ;; the top level is read at boot only (watching it would watch the whole checkout, which kept
+ ;; fseventsd saturated). Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
+ ;; bound: n/a; a dir with no .md files loads nothing.
+ :seon.config.root/wiki-dirs ["docs" "."]
 
  ;; ==== the store ==============================================================================
 
@@ -146,7 +154,7 @@
  ;; (seon.db/collect!; docs/storage.md#collection): Datahike's collection sees only its own
  ;; process's in-flight commits (datahike.gc/gc-storage!), so a commit of another process can
  ;; reuse a value the sweep is deleting. False: root never collects, and the store keeps its
- ;; garbage. Provenance, 2026-10-23 (notes/store-gc-bug-2026-10-23.md): the :scripted profile is
+ ;; garbage. Provenance, 2026-10-23 (the store-gc finding, 2026-10-23, not kept): the :scripted profile is
  ;; bin/test's and bin/check's, whose roots (a shard's, a step's) share one store; production
  ;; runs one root per store (task seon.db/two-processes-branch-one-store-at-once).
  :seon.config.store/sole-writer? #profile {:default true :scripted false}
@@ -259,7 +267,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 ;; Unit: behind runs. A merge run the writer refuses as behind main (main moved under it) is green, so
-;; max-merge-turns never counts it and its task ran again without end (notes/root-repair-findings-2026-10-27.md
+;; max-merge-turns never counts it and its task ran again without end (notes/archive/root-repair-findings-2026-10-27.md
 ;; gap 4: a namespace main gained made every merge behind). Past this many behind runs of one merge task the next
 ;; behind answer holds the task for root with the writer's evidence. Provenance: worktree session
 ;; a-behind-merge-is-bounded-and-merges-main-first; three reruns are three chances for main to hold still.
@@ -348,15 +356,36 @@
  :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
  ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
- ;; reach datahike.*, not every test. The runtime and the binary (jolt, chez, lmdb, zstd, llama.cpp,
- ;; awesome-jolt) are in no set: every test takes them. Provenance: root's task (2026-10-27): pins moved
- ;; every digest in 3 of the last 12 --merge batches (datahike 3, konserve 2, jolt 2); the libraries'
- ;; own suites run on a bump (bin/check forks, 4cdd5625f5).
+ ;; reach datahike.*, not every test. Every submodule is in a set: Jolt and Chez (the runtime and its
+ ;; compiler) are taken by a test reaching one of Jolt's library namespaces (its analyzer, IR, deps,
+ ;; nREPL, HTTP client, async remote), not its host layer (jolt.host, jolt.scheme, jolt.ffi,
+ ;; jolt.io-poller), which every form runs on as it runs on clojure.core (a class by jolt.* or
+ ;; jolt.scheme narrows nothing: 937 and 913 of 977 tests reach them, through seon.lib and seon.db);
+ ;; lmdb and zstd by a test reaching konserve.jolt.lmdb and konserve.jolt.zstd (359 and 348 of 977
+ ;; tests), llama.cpp by one reaching seon.vector, awesome-jolt (prose and examples) by none. A test
+ ;; that reads files or runs a process takes every pin. What a test runs on without naming it (every
+ ;; test runs clojure.core on Jolt) is the forks' own suites' and the daily full run's to catch
+ ;; (owner, 2026-10-27: "no test digests the whole tree"). Measured 2026-10-27: a Jolt bump moves 444
+ ;; of 977 tests (all before). Provenance: root's task (2026-10-27): pins moved every digest in 3 of
+ ;; the last 12 --merge batches (datahike 3, konserve 2, jolt 2), and the Jolt pin, in every test's
+ ;; :env, moved 15 times in 3 days: worktrees on one Jolt pin shared 84% of digests, on two pins 0%;
+ ;; the libraries' own suites run on a bump (bin/check forks, 4cdd5625f5).
  :seon.config.source/pin-namespaces
- {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
+ {jolt.analyzer #{"reference-code/jolt" "reference-code/chez"}
+  jolt.ir #{"reference-code/jolt" "reference-code/chez"}
+  jolt.deps #{"reference-code/jolt" "reference-code/chez"}
+  jolt.nrepl #{"reference-code/jolt" "reference-code/chez"}
+  jolt.http #{"reference-code/jolt" "reference-code/chez"}
+  jolt.async #{"reference-code/jolt" "reference-code/chez"}
+  datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
              "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
   konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
+  seon.vector #{"reference-code/llama.cpp"}
+  awesome-jolt #{"reference-code/awesome-jolt"}
   malli #{"reference-code/malli"}
+  konserve.jolt.lmdb #{"reference-code/lmdb"}
+  konserve.jolt.lmdb-ffi #{"reference-code/lmdb"}
+  konserve.jolt.zstd #{"reference-code/zstd"}
   jolt.crypto #{"reference-code/crypto"}
   org.replikativ.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
   me.tonsky.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
@@ -393,14 +422,23 @@
  ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
  ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
  :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
- ;; Unit: path. Test results by reach digest (task seon.program/tests-run-by-reach; owner
- ;; 2026-10-21: "incremental tests even across worktrees based on test digest"): one directory
- ;; in the main tree, shared by every checkout and worktree, one <digest>.edn per result,
- ;; written temp-then-rename. A digest covers everything its result depends on, so a result
- ;; from any checkout is valid in every other. A checkout's store (runs/store) is its own, so
- ;; the store cannot hold them. bin/env sets SEON_TEST_RESULTS to the main tree's test-results/
- ;; (found from git's common dir, as the compile caches are); unset, the checkout's own.
- :seon.config.source/test-results-dir #or [#env SEON_TEST_RESULTS #seon/checkout "test-results"]
+ ;; Unit: port. The standing root whose main holds every test and check result (owner via root,
+ ;; 2026-10-27: results are facts on the standing root's main, written by its one writer): bin/test's
+ ;; shards and bin/prove's steps send theirs to its server (:record) and read results by digest from it
+ ;; (:results). bin/env sets SEON_RESULTS_PORT to the main tree's server port; 0 (unset): none, so a
+ ;; run reuses nothing and keeps what it ran in :seon.config.proofs/unsent-dir. A root records its own
+ ;; test service's results on its own main whatever this says.
+ :seon.config.proofs/results-port #long #or [#env SEON_RESULTS_PORT 0]
+ ;; Unit: path. Where a run whose results no root took (the standing root down) keeps each request,
+ ;; one file each (<uuid>.edn), until bin/test sends them at its next run; root names them as a problem
+ ;; meanwhile (:unsent-results). bin/env sets SEON_UNSENT_DIR to the main tree's, one for every checkout.
+ :seon.config.proofs/unsent-dir #or [#env SEON_UNSENT_DIR #seon/checkout "target/prove/unsent"]
+ ;; Unit: ratio. How far a function's self ticks or self bytes per call must move from what main
+ ;; holds before a run of main's tree writes it again, and before seon.proofs/slower calls it slower.
+ ;; Provenance: estimate, 2026-10-27: a test's ticks at one digest are exact, but a function's per-call
+ ;; cost is over whichever tests called it; 10% keeps a one-test change from rewriting every function.
+ ;; At the bound: the function's fact is not rewritten, nor named slower.
+ :seon.config.proofs/fn-noise 0.1
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
@@ -409,6 +447,12 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: run directories. A bin/prove or bin/test run writes its shard files and logs under
+ ;; target/prove/<timestamp>-<pid> (test-runner/prune-runs!); the newest this many stay. Provenance:
+ ;; worktree session one-run-one-directory 2026-10-27: a run's directory holds a few MB of logs, and
+ ;; a session reads the last run or two; 20 reach back over a day of a busy checkout's runs. At the
+ ;; bound: the oldest run directories beside the one starting are removed (target/prove/ms stays).
+ :seon.config.proofs/runs-kept 20
  ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
  ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
  ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
@@ -416,6 +460,14 @@
  ;; every result, about 200 s of CPU per commit for nothing; named runs (seon_prove, a turn's)
  ;; are unaffected. On again when task seon.agent/a-test-run-streams-its-reports and the child's
  ;; death are fixed. At the bound: a program commit starts no run.
+ ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
+ ;; process tests included, green or not): the net under the narrow digests (a test takes only what
+ ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
+ ;; never. Off here because every root with this config would run it, a worktree's too, at once and
+ ;; on one machine: the standing root of the main tree sets it (config/local.edn or
+ ;; --set :seon.config.proofs/full-run-at="03:00"). A malformed time refuses the config. Provenance:
+ ;; root's task (2026-10-27): nothing ran the full run, the narrow digests' only net.
+ :seon.config.proofs/full-run-at ""
  :seon.config.proofs/prove-main-on-commit false
  ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
@@ -431,7 +483,7 @@
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
- ;; Provenance: owner via root, 2026-10-23 (option B of notes/test-fork-main-2026-10-23.md).
+ ;; Provenance: owner via root, 2026-10-23 (option B of notes/archive/test-fork-main-2026-10-23.md).
  ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
  ;; (two runs never share a checkout, AGENTS section 3). Derived data: deleting it costs one
  ;; import. At the bound: see program-store-max-bytes.
@@ -450,7 +502,7 @@
  :seon.config.proofs/seed-salt 0
  ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
  ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
- ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; (root's test-time measurement, 2026-10-23, not kept: building inputs at 10k took 10-19 s per proof in every run).
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
@@ -482,7 +534,7 @@
  :seon.config.proofs/tick-quantum #long 1050
  ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
  ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
- ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the
+ ;; 2026-10-23 (root's test-time measurement, 2026-10-23, not kept: r3.inc-test's 5 seeds x 150 steps took 47 s, the
  ;; automatic run's critical path). bin/test --all sets SEON_SEEDS=5, so the full run draws as
  ;; many as before. At the bound: the test draws this many and no more.
  :seon.config.proofs/seeds #long #or [#env SEON_SEEDS 1]
@@ -513,7 +565,7 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
- ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
+ ;; 2,048. 2026-10-22, step E (root's research, notes/archive/agent-context-research-2026-10-22.md §3.3):
  ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
  ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
@@ -614,7 +666,7 @@
  ;; tool message, the agent's page). Provenance: v1's 6144 (owner 2026-10-12: print more, so
  ;; help and the current-state block show whole), raised to 16000 (owner 2026-10-25: "a
  ;; generous context budget"; main's problems through their render measured 14,218 tokens
- ;; whole, cut at 6144; notes/printer-audit-2026-10-25.md). Past it the value is cut, every
+ ;; whole, cut at 6144; notes/archive/printer-audit-2026-10-25.md). Past it the value is cut, every
  ;; cut carrying the form that reads its rest.
  :seon.config.render.agent/token-budget 16000
  ;; Unit: nested levels shown (v1's :seon.config.render.agent/max-depth).
@@ -685,7 +737,7 @@
  ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
  ;; concepts that we can refine over the session"); 5 each found 0.51 of what 31 merged tasks
  ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
- ;; turn (notes/related-search-2026-10-25.md).
+ ;; turn (docs/vector.md#what-was-compared-and-what-it-left-out).
  :seon.config.render/related 5
  ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
  ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
@@ -724,7 +776,7 @@
  ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
  ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
  ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the
- ;; fused related was measured with (b9920ecf5b, notes/related-search-2026-10-25.md); no other value
+ ;; fused related was measured with (b9920ecf5b, docs/vector.md#what-was-compared-and-what-it-left-out); no other value
  ;; was measured. At the bound: a candidate past it is never ranked by meaning.
  :seon.config.render/related-near 4
  ;; Unit: forms. When the plan cites no defined var (a user's request in prose), the call graph's half

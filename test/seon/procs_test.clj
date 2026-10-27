@@ -765,7 +765,7 @@
       (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
 
 (deftest the-fork-servers-stop-ends-every-child-before-it-answers
-  ;; bin/check lifecycle's :left (notes/pure-tests/lifecycle.md): root SIGKILLed the fork
+  ;; bin/check lifecycle's :left (docs/processes.md#a-stop-reaps-every-child): root SIGKILLed the fork
   ;; server while an agent that had closed its socket was still exiting, and launchd
   ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
   ;; before it answers, so root's wait for the server is the end of every one of them.

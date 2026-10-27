@@ -23,7 +23,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
-            [seon.writer :as writer] [seon.prove] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
+            [seon.writer :as writer] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
@@ -374,8 +374,11 @@
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
-                 holder (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder)
-                                              {:branch (:branch opts) :agent holder}))
+                 holder (let [{:keys [task run]} (get-in st [:view :agents holder])]
+                          (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
+                                                                       (when task (str " working " task)) (when run (str " (run " run ")"))
+                                                                       ": its seon_done or an end frees it")
+                                                  (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task) run (assoc :run run)))))
                  ;; no server to fork it: refused before an agent proc and its socket are made (a
                  ;; socket the lost server closes would end that agent first, as a death)
                  (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))
@@ -391,13 +394,14 @@
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/clone! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
-                 :else (let [[st aid fd] (start-agent st (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent}))
+                 :else (let [opts (merge {:task (get-in st [:view :agents parent :task])} (:opts m) {:cloned-from parent})
+                       [st aid fd] (start-agent st opts)
                        branch (get-in st [:agents aid :branch])
                        [st rid] (pend st p :clone parent)]
                    ;; the clone's socket goes to its parent with the request
                    (to-agent st o parent
                              {:op :req :rid rid :kind :clone :new aid :branch branch :pass-fd fd
-                              :msg {:op :clone :agent aid :branch branch}}))))
+                              :msg (cond-> {:op :clone :agent aid :branch branch} (:task opts) (assoc :task (:task opts)))}))))
       (:eval :tests :judge :stats :merge-main :render)
       (if (nil? (get-in st [:agents id]))
         (reply! st o p (absent (get-in st [:view :agents id]) id))
@@ -842,7 +846,7 @@
           (docs/baseline-reads db plan (:value r)))))))
 
 (defn wiki-tx
-  "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
+  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the system prompt every agent reads first is one of its pages
   (seon.context/system-text), and the help page another (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
   its section and shows as a dead citation (seon.problems/health), never refuses the load.
@@ -850,7 +854,11 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
   ([db checkout] (wiki-tx db checkout {}))
-  ([db checkout baseline] (docs/load-dir-tx db checkout "docs" baseline)))
+  ([db checkout baseline]
+   ;; each of the checkout's wiki dirs in turn, on the db the ones before it made (a page links to the
+   ;; sections of the others, which are stored by then)
+   (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
+           [] (cfg/value :seon.config.root/wiki-dirs))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -965,6 +973,7 @@
                          :conn conn :store-cfg store-cfg :durable? (= :lmdb (get-in store-cfg [:store :backend]))
                          :fork-server-pid pid :fork-server-fd fd :boot boot :provider provider :source source
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
+                         :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1)
                          :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)

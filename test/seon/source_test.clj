@@ -266,11 +266,11 @@
         tree (str dir "/tree")
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
-        ;; and its own results directory: a proof that resolves its var at run time
+        ;; and its own results (no results root: its gate's results land on its own main): a proof that resolves its var at run time
         ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
         ;; stored there closed its task with no turn and merged nothing
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_TEST_RESULTS" (str dir "/test-results")}}
+               :env {"SEON_RESULTS_PORT" "0"}}
         ;; any failure or error in this test keeps its boot logs: each report passes through
         red (volatile! false)
         report clojure.test/report
@@ -710,6 +710,47 @@
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [10 100 1000]}))
 
+(deftest a-checkout-whose-submodule-moved-is-synced-to-its-pin
+  ;; root, 2026-10-27: a worktree that merged main kept its old Jolt checked out (no one ran
+  ;; bin/worktree --sync), and bin/build built that Jolt, not the pin: the forks step hung on a
+  ;; Jolt three fixes old. The one sync path moves a submodule checkout to the commit its HEAD pins
+  ;; (bin/build calls it first); one with uncommitted work it would lose is an error naming it
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-sync-" (random-uuid))) (.mkdirs)))
+        here (.getCanonicalPath (java.io.File. "."))
+        sub (str tmp "/sub") co (str tmp "/co") x (str co "/reference-code/x")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" "-c" "protocol.file.allow=always" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        sync! #(sh/sh (str here "/bin/worktree") "--sync" co)]
+    (try
+      (.mkdirs (java.io.File. sub)) (.mkdirs (java.io.File. co))
+      (git sub "init" "-q" "-b" "main")
+      (spit (str sub "/f") "a") (git sub "add" ".") (git sub "commit" "-q" "-m" "a")
+      (let [a (git sub "rev-parse" "HEAD")
+            _ (do (spit (str sub "/f") "b") (git sub "commit" "-q" "-am" "b"))
+            b (git sub "rev-parse" "HEAD")]
+        (git co "init" "-q" "-b" "main")
+        (git co "submodule" "add" "-q" sub "reference-code/x")
+        (git x "checkout" "-q" "--detach" a)
+        (git co "add" ".") (git co "commit" "-q" "-m" "pin a")
+        (testing "a checkout left at another commit is moved to the pin, and says so"
+          (git x "checkout" "-q" "--detach" b)
+          (let [r (sync!)]
+            (is (zero? (:exit r)) (:err r))
+            (is (str/includes? (:out r) (str "reference-code/x: " (subs b 0 8) " -> " (subs a 0 8))) (:out r))
+            (is (= a (git x "rev-parse" "HEAD")))))
+        (testing "one with uncommitted work it would lose is an error naming it, and left as it is"
+          (git x "checkout" "-q" "--detach" b)
+          (spit (str x "/f") "work")
+          (let [r (sync!)]
+            (is (not (zero? (:exit r))))
+            (is (str/includes? (str (:out r) (:err r)) "reference-code/x") (pr-str r))
+            (is (= b (git x "rev-parse" "HEAD")))
+            (is (= "work" (slurp (str x "/f"))))))
+        (testing "at its pin, nothing moves"
+          (git x "checkout" "-q" "--" ".") (git x "checkout" "-q" "--detach" a)
+          (is (= "" (str/trim (:out (sync!)))))))
+      (finally (sh/sh "rm" "-rf" tmp)))))
+
 (deftest the-source-tree-follows-main
   ;; task seon.fx/the-source-tree-follows-main: the write-back tree (a worktree on its own branch)
   ;; is brought to the main checkout's branch by the :source read itself. Behind main: fast-forwarded,
@@ -777,7 +818,7 @@
                            (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
                            (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_RUN_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
+               :env {"SEON_RUN_CHECKOUT" main "SEON_RESULTS_PORT" "0"}}
         args ["--set" (str ":seon.config.source/root=" (pr-str wb))
               "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
         root (atom nil)

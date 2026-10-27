@@ -33,6 +33,8 @@
   ;; commit notice, a sliding buffer of one beside the reconciler's (a reader catches up from main's head)
 ;; :req and :answers are lossless and bounded by the reconciler's size (a full one parks the api); a run's
   ;; waiters are answered one message each through the api's own from-writer buffer
+  :cron {:proc seon.cron/cron-proc
+         :args {:tick :bind/cron-tick :at :bind/full-run-at}}
   :prove {:proc seon.prove/prove-proc
           :chan-opts {:req {:buf-or-n :bind/reconciler-buf} :answers {:buf-or-n :bind/reconciler-buf}
                       :main {:buf-or-n :bind/prove-main-buf}}}
@@ -82,6 +84,7 @@
   [[:writer :main] [:render :main]]
   [[:vectors :to-api] [:api :from-writer]]
   [[:prove :to-api] [:api :from-writer]]
+  [[:cron :to-prove] [:prove :req]]
   [[:fork-server :to-api] [:api :from-fs]]
   [[:api :to-fs] [:fork-server :ext]]
   [[:writer :to-flusher] [:flusher :in]]
