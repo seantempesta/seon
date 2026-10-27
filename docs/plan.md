@@ -22,8 +22,7 @@ Every Claude session that worked last night has ended; these are their branches,
 | jolt/the-source-tree-follows-main | approved, not built | e2e proof red first (task seon.fx/the-source-tree-follows-main) |
 | jolt/every-page-is-its-parts | 3b-root in progress | finish per task seon.render/every-page-is-its-parts; browser-check every page |
 | jolt/a-cited-vars-tests-are-its-own-query | tests-reaching, verifying when its session ended | bin/prove --merge, then merge; then swap the clause in :work/:whole |
-| jolt/merge-state | task entries and notes only (tip 3878f78dea) | merge |
-| jolt/root-repair-playbook | task entries only | merge; then stage the four failures and write the playbook |
+| (task seon.root/root-repairs-a-failed-merge-from-its-repl) | merged as a task | stage the four failures on a worktree root and write the playbook into docs/merging.md |
 | jolt/the-request-is-the-page-and-its-diffs | build 4, proofs red | after 3b-root |
 
 ## Waiting on the owner
