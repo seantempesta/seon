@@ -233,6 +233,30 @@
         (is (seq (:ours full)))))
     (is (= (pm/changes (pm/program b :all) (pm/program o :all)) (pm/delta-changes b o :all)))))
 
+(deftest divergence-names-each-change-a-merge-carries
+  ;; owner D4 (2026-10-22): the agent sees, every turn, every change its branch's merge will
+  ;; carry back to main: what it added, redefined and removed, and the schemas it registered,
+  ;; projected from the one diff a turn reads (seon.agent/branch-changes); a schema registered
+  ;; with no file is a scratch one, never merged, so it is none of them
+  (let [b (with (base) [{:schema/key :app/k :schema/form ":int" :schema/file "app.edn"}])
+        branch (with b (var-tx "f" "(inc x)") (unmap "g") (var-tx "c" "x")
+                     [{:schema/key :app/k :schema/form ":string" :schema/file "app.edn"} {:schema/key :app/n :schema/form ":int" :schema/file "app.edn"}
+                      {:schema/key :app/scratch :schema/form ":int"}])
+        ch (pm/delta-changes b branch #{})]
+    (is (= {:added ['app/c] :changed ['app/f] :removed ['app/g] :schemas [:app/k :app/n]} (pm/divergence ch)))
+    (is (= #{'app/c 'app/f 'app/g} (pm/changed-vars ch)) "the changed vars are its vars")
+    (is (= {} (pm/divergence (pm/delta-changes b b #{}))) "an unchanged branch carries nothing")))
+
+(deftest a-branch-that-merged-main-carries-only-its-own-changes
+  ;; root, 2026-10-22: entity ids are a branch's own, and a merge applies main's forms by
+  ;; content under the branch's ids; against its merge base (main's head once merged), the
+  ;; branch carries only what it changed itself, never main's changes
+  (let [main (with (base) (var-tx "f" "(inc x)") (var-tx "m" "x"))
+        ;; the branch writes entities of its own, adds k, then merges main: main's forms by content
+        merged (with (base) [{:db/id "x0" :form/id "(comment 0)" :form/src "x"}] (var-tx "k" "x") (var-tx "f" "(inc x)") (var-tx "m" "x"))]
+    (is (= {:added ['app/k]} (pm/divergence (pm/delta-changes main merged #{}))) "only k, the branch's own")
+    (is (= #{'app/k} (pm/changed-vars (pm/delta-changes main merged #{}))) "and the tests it reaches are k's")))
+
 (deftest a-merge-carries-the-branchs-own-datoms
   ;; a verbatim merge (seon.merge/merge-tx): main gains exactly the datoms the branch wrote
   ;; for the keys that merge, with their own entity ids and tx ids, and nothing else of its

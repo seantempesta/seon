@@ -1003,41 +1003,6 @@
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
-(defn divergence
-  "What branch db-to changed since db-from (its merge base), the changes its merge carries to
-  main: the vars it added, redefined and removed, and the schema keys it registered or
-  changed; each sorted, an empty kind left out ({}: nothing). Compared by content: a var's
-  form by its :form/id (its text), a schema by its form's text, because entity ids are a
-  branch's own and a merge applies main's forms by content under the branch's ids. Cost:
-  the :var/form and :schema/form datoms that differ between the two (d/datoms-diff, which
-  skips the index subtrees they share), and two seeks per entry among them: what the branch
-  changed, not the program (before, both dbs' every :var/form and :schema/form datom, each
-  turn)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db]
-                  [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
-  [db-from db-to]
-  (let [;; the entries whose ids differ, by name, then compared by content
-        differ (fn [attr name-attr content]
-                 (let [[gone added] (d/datoms-diff db-from db-to :aevt [attr])
-                       to (into #{} (map :e) added)]
-                   (into #{} (for [e (into to (map :e) gone)
-                                   :let [n (name-attr (d/entity (if (to e) db-to db-from) e))
-                                         x (content db-from n) y (content db-to n)]
-                                   :when (not= x y)]
-                               [(cond (nil? x) :added (nil? y) :removed :else :changed) n]))))
-        form-id (fn [db v] (some->> (pdb/eid db :var/name v) (d/entity db) :var/form :form/id))
-        schema (fn [db k] (some->> (pdb/eid db :schema/key k) (d/entity db) :schema/form))
-        vars (differ :var/form :var/name form-id)
-        schemas (for [[_ k] (differ :schema/form :schema/key schema)] [:schemas k])]
-    (into {} (for [[k xs] (group-by first (concat vars schemas))] [k (vec (sort-by str (map second xs)))]))))
-
-(defn changed-vars
-  "The vars db-to points to another form than db-from does (new, redefined or removed), by
-  content: what a branch changed since its base (divergence's vars)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [db-from db-to]
-  (into #{} cat (vals (dissoc (divergence db-from db-to) :schemas))))
-
 (def tree-readers
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it

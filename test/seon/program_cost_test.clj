@@ -5,7 +5,7 @@
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [clojure.java.shell :as sh]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.merge] [seon.agent] [clojure.java.shell :as sh]))
 
 (defn- acct
   {:malli/schema [:=> [:cat :int :string] :map]}
@@ -104,7 +104,7 @@
   [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" process-token "-" n))
 
 (defn on-disk-diverged-of
-  "divergence's arguments on a store on disk of its own (the last resort: Datahike's
+  "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's
   datoms-diff skips the index subtrees two branches share once they are stored, and the test
   store's in-memory branches hold none, so there both answers grow with the program): main
   holding n forms (branch-of's), and a branch of it that redefines one. The store is made
@@ -121,30 +121,40 @@
     (d/transact bc {:tx-data (program/record-tx @bc (acct (quot n 2) "(inc x)"))})
     [base @bc]))
 
-(deftest divergence-reads-what-the-branch-changed
+(defn on-disk-changes-of
+  "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its
+  branch redefining one, no declared data."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword]]]}
+  [n] (conj (on-disk-diverged-of n) #{}))
+
+(deftest a-turns-diff-reads-what-the-branch-changed
+  ;; one diff a turn (root's audit, 2026-10-27: a turn read its base-to-head diff 4-6 times,
+  ;; divergence three or four times beside delta-changes, ~2 MB of repeats): the turn reads
+  ;; delta-changes once (seon.agent/branch-changes) and every reader projects it
   (try
     (cost/proof
-      {:of 'seon.program/divergence :input 'seon.program-cost-test/on-disk-diverged-of
+      {:of 'seon.merge/delta-changes :input 'seon.program-cost-test/on-disk-changes-of
        :n "forms main and the branch hold (the branch redefines one)"
-       :work (str "the :var/form and :schema/form datoms that differ (d/datoms-diff over :aevt, skipping the "
-                  "stored subtrees both share: one index path per changed entry, log n), and per entry among "
-                  "them its name and two content seeks; nothing reads the forms they share")
+       :work (str "the datoms that differ (d/datoms-diff over :eavt, skipping the stored subtrees both share: "
+                  "one index path per changed entity, log n), the keys they bear and those keys' content on both sides; "
+                  "nothing reads the forms they share")
        :growth :log
-       ;; measured 2026-10-23 on LMDB, three fresh stores per size, identical bytes each time (+-96 B
-       ;; at 1,000): 103.5k ticks / 453 KB at 100 forms, 136k / 612 KB at 1,000, 154k / 678 KB at
-       ;; 10,000 (the aevt scans before: 428 KB, 3.1 MB, 33 MB); contracted calls: divergence and
-       ;; the two eid seeks of the one changed var's content.
-       ;; The bytes depend on where the stored index's node boundaries fall around the changed
-       ;; entry, which datoms unrelated to it move: the same code on the same program, with 0 to 64
-       ;; unrelated datoms written first, read 411-597 KB at 100 forms and 548-594 KB at 1,000
-       ;; (2026-10-23, 12 layouts each). Three schema attributes added at the health merge
-       ;; (ac7d3fb2) moved this input from 410 KB to 592 KB with divergence unchanged. The fixed
-       ;; bytes are the bound over those layouts, not one layout's. The seven vector attributes
-       ;; (jolt/similar-finds-helpers-by-embedding) moved it to 416 KB / 594 KB / 732 KB at 100 / 1,000 /
-       ;; 10,000, a fixed part of 375 KB then reading as steeper growth (task
-       ;; seon.cost/a-speedup-never-reads-as-steeper): the fixed bytes re-derived below the smallest layout
-       :per-n {:ticks 7700.0 :bytes 34000.0}
-       :fixed {:ticks 53000.0 :bytes 300000.0 :calls 3}
+       ;; measured 2026-10-27 on LMDB: 439k ticks / 1.26 MB at 100 forms, 549k / 1.61 MB at 1,000,
+       ;; 629k / 1.83 MB at 10,000; 56 contracted calls each. The bytes move with where the stored
+       ;; index's node boundaries fall (divergence's proof measured +-30% over layouts): the bound is
+       ;; over layouts, not one. What it replaced per turn: this, plus divergence three or four times
+       ;; (453-678 KB each), so a turn's diff reads went from ~2.5-3.3 MB to one of these
+       :per-n {:ticks 34000.0 :bytes 100000.0}
+       :fixed {:ticks 300000.0 :bytes 900000.0 :calls 56}
+       :sizes divergence-sizes})
+    (cost/proof
+      {:of 'seon.agent/branch-changes :input 'seon.program-cost-test/on-disk-diverged-of
+       :n "forms main and the branch hold"
+       :work "after a turn's first read, a lookup of the pair it holds: one call, nothing read again"
+       :growth :constant
+       ;; measured 2026-10-27: 401 ticks, 1,968 bytes, 1 call at every size
+       :per-n {}
+       :fixed {:ticks 1000.0 :bytes 4000.0 :calls 1}
        :sizes divergence-sizes})
     (finally
       ;; each store made, released whatever holds it (release-all) and removed

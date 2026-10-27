@@ -58,13 +58,6 @@
   [outcome reason]
   (:turn (swap! agent/state assoc-in [:turn :stop] (cond-> {:outcome outcome} reason (assoc :reason reason)))))
 
-(defn- added-gaps
-  "The functions branch db defines without a contract since its merge base base (the
-  branch's own changes, seon.merge/uncontracted over seon.merge/delta-changes): what root's judge and
-  the merge gate ask."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :qualified-symbol]]}
-  [base db] (set (pm/uncontracted (pm/delta-changes base db #{}))))
-
 (defn- index!
   "The reconciler's index of db, observed from the one this process held for its db at the
   turn before (seon.reconcile/index over what differs), at the first turn from main's as the
@@ -88,20 +81,25 @@
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
         _ (agent/embed-written!)
+        ;; the branch's one diff from its merge base this turn, read before the test child forks
+        ;; so the child inherits it (seon.agent/branch-changes)
+        _ (agent/branch-changes (:base @agent/state) (agent/db))
         t0 (profile/now-ns)
         test-run (agent/prove!)
         tests-ms (long (profile/ms-since t0))
         results (if (contract/error? test-run) {} (proofs/results test-run))
         db (agent/db)
-        unc (added-gaps (:base @agent/state) db)
+        ch (agent/branch-changes (:base @agent/state) db)
+        ;; the functions the branch defines without a contract (seon.merge/uncontracted): what root's judge and the merge gate ask
+        unc (set (pm/uncontracted ch))
         unmerged (branch/unmerged)
-        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)
+        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db ch)
         t (task/task db id)]
     {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task t
      ;; a task that merges itself sees, every turn, whether main moved under it and whether
      ;; merging main would conflict (seon.agent/merge-readiness), so it ends when it can merge
      :merge (when (task/merges? (:seon.task/kind t)) (agent/merge-readiness))
-     :will-merge (program/divergence (:base @agent/state) db)
+     :will-merge (pm/divergence ch)
      ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
      :tests (when-not (contract/error? test-run)
               (let [results (proofs/results test-run)
