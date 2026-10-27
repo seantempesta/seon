@@ -26,13 +26,15 @@
 (defn- run
   "A run fact of task nm: status, plus members (results as {test status}; conflicts
   as :seon.merge/conflict values; unmerged as printed keys)."
-  [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan deferred deferred-results] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
+  [nm n status & {:keys [boot model results outcome conflicts unmerged changed caused plan deferred deferred-results error gate-unread] :or {boot "boot-1" plan (str "Make " nm " true.")}}]
   (let [id (str "demo/" nm) aid (str id "#" n)]
     (into (task/run-start-tx aid id boot (keyword (str "a-" nm n))
                                  {:branch (task/default-branch id) :model model :max-turns (cfg/value :seon.config.agent/max-turns)} 1000 plan)
           [(cond-> {:seon.run/id aid :seon.run/status status}
              results (assoc :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s})))
              outcome (assoc :seon.run/outcome outcome)
+             error (assoc :seon.run/error error)
+             gate-unread (assoc :seon.run/gate-unread gate-unread)
              conflicts (assoc :seon.run/conflicts (mapv pm/conflict-tx conflicts))
              unmerged (assoc :seon.run/unmerged unmerged)
              changed (assoc :seon.run/changed changed)
@@ -635,6 +637,12 @@
     (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail}))))
     (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
     (is (str/includes? (:problem (first (judged gate nil :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (testing "a gate that could not run them says why: the effect's error and the namespaces it could not put over the checkout"
+      (let [held (judged gate nil :deferred-results {'seon.root-test/boots :error}
+                         :error {:seon.error/type :seon.fx/io-error :seon.error/message "bin/worktree --at exited 1: no such branch"}
+                         :gate-unread [{:ns 'seon.generation :reason "no :ns/file on the branch"}])]
+        (is (str/includes? (:problem (first held)) "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
+            (:problem (first held)))))
     (testing "the test whose process started this root is left out: a test cannot be its own gate (gate-self)"
       (let [self (assoc gate :seon.config.source/gate-self "seon.root-test/boots")]
         (is (= octopus (judged self nil)) "the only deferred test is the root's own: merged, nothing run")

@@ -444,7 +444,12 @@
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}
                                :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
-                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))))))
+                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))
+                                                           ;; why they could not run, when the gate itself failed: the effect's error, or a changed
+                                                           ;; namespace with no file on the branch (each test then reads :error)
+                                                           (let [why (concat (some-> (:seon.run/error a) :seon.error/message vector)
+                                                                             (for [u (:seon.run/gate-unread a)] (str (:ns u) ": " (:reason u))))]
+                                                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))))))
                        (empty? rs) {:op :accept :run aid :task id}
                        ;; it parked (waiting, out of turns, no progress, a provider's error): never a
                        ;; hold, the session waits for its next message (design agent-loop section 1)
