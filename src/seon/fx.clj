@@ -199,12 +199,36 @@
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code) and prose (.md)?"
+  root loads, no test's code), prose (.md), the shipped config (resources/seon/config/: its
+  values are :config's, which a test's digest takes by the keys it reads) and the schema
+  resources (their entries are program facts: a test's digest takes the entries its reach names)?
+  (notes/ is already out of the tree, tree-id's excludes.)"
   {:malli/schema [:=> [:cat :string] :boolean]}
   [p]
   (not (or (str/ends-with? p ".md")
            (str/starts-with? p "resources/seon/tasks/")
+           (str/starts-with? p "resources/seon/config/")
+           (str/starts-with? p "resources/seon/schemas/")
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
+
+(defn- env-class
+  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps or /bin, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
+  or nil (every test's: native/, the pins, the fixtures, everything else)."
+  {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
+  [p]
+  (cond (= p "resources/seon/system.edn") :seon.env/system
+        (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
+        (= p "deps.edn") :seon.env/deps
+        (str/starts-with? p "bin/") :seon.env/bin))
+
+(defn- pin-class
+  "The class of the submodule at relative path p: :seon.pin/NAME when cfg's
+  :seon.config.source/pin-namespaces names it (a test takes it by the namespaces its reach
+  references), else nil (the runtime and the binary: every test's)."
+  {:malli/schema [:=> [:cat :map :string] [:maybe :keyword]]}
+  [cfg p]
+  (when (some #(contains? % p) (vals (get cfg :seon.config.source/pin-namespaces)))
+    (keyword "seon.pin" (last (str/split p #"/")))))
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
@@ -310,10 +334,10 @@
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
-  Jolt's included, and the per-test tick bound every verdict is a function of,
-  :seon.config.agent/test-ticks) :config (the config in force, config-input: each test's digest
-  takes the keys it reads) :data-refs (declared-refs of its system.edn)}, by
+  (every test's: the tree's env-input? entries of no env-class, every submodule's pin (its files
+  as they are) that is not a test's by the namespaces it references, Jolt's included, and the per-test tick bound every verdict is a function of,
+  :seon.config.agent/test-ticks) :config (the config in force, config-input, and a digest of each
+  env-class of files and of each pin the config names (pin-class): each test's digest takes the keys and classes it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
@@ -324,10 +348,15 @@
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
-                     (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
+                     [(or (env-class p) (when (str/starts-with? m "160000") (pin-class cfg p)))
+                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
+         by-class (group-by first entries)]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat entries [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
-      :config (config-input cfg checkout)
+      :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
+      ;; the config in force, and each class of files a test may read (env-class): named inputs
+      ;; a test's digest takes by what its reach reads
+      :config (into (config-input cfg checkout)
+                    (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
