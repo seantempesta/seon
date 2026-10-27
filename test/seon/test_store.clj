@@ -150,8 +150,8 @@
   had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
   never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
-  root arguments. Answers the options with :port, nil when the root died before listening (its
-  log says why). runs is one root's, named per main by its caller: a root still running there
+  root arguments. Answers the options with :port, nil when the root died before listening, and
+  then its :log, which says why (ask answers it as the test's error). runs is one root's, named per main by its caller: a root still running there
   is refused, never answered (bin/root start in it would only report that root, and the test
   would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refused start
   backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
@@ -168,7 +168,10 @@
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
   (root-sh root "start" (into ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))] args))
-  (assoc root :port (bound-port runs)))
+  (let [port (bound-port runs) log (java.io.File. (str runs "/root.log"))]
+    (cond-> (assoc root :port port)
+      ;; it died before listening: its log says why, kept with it for the test's error (ask)
+      (nil? port) (assoc :log (if (.exists log) (slurp log) "")))))
 
 (defn next-root!
   "bin/root next on root: the running root's next generation started on the same store and main.
@@ -199,13 +202,16 @@
   ending on the reply or when the root closes the connection or dies): the reply as data
   (tagged literals kept), or one recorded error value, {:error :eof} (closed with no reply),
   {:error :reset} or {:error :refused} (docs/failure-points.md), never a hang on nc's timeout,
-  which macOS never fires. A caller asserts on :error."
-  {:malli/schema [:=> [:cat [:map [:port :int]] :map] :map]}
-  [{:keys [port]} m]
-  (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
-    (if (clojure.string/blank? out)
-      {:error :no-answer}
-      (clojure.edn/read-string {:default tagged-literal} out))))
+  which macOS never fires. A root that died before listening (start-root!'s :port nil) answers
+  {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error."
+  {:malli/schema [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]}
+  [{:keys [port log]} m]
+  (if (nil? port)
+    {:error :root-did-not-listen :log log}
+    (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
+      (if (clojure.string/blank? out)
+        {:error :no-answer}
+        (clojure.edn/read-string {:default tagged-literal} out)))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/root stop: its stdin closes, it stops cleanly, and the
