@@ -144,21 +144,21 @@
                (catch Throwable e (ex-data e)))]
     (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
 
-(deftest a-merges-deferred-tests-read-from-their-verdicts
+(deftest a-merges-deferred-tests-read-from-their-results
   ;; the merge gate (root's ruling, 2026-10-22) runs them through prove's one entry, and reads
-  ;; each one's verdict at the digest prove's plan gave it (out/tests.edn) in the results
-  ;; directory its shards store into, never its printed output (seon.prove is the one runner,
+  ;; each one's result at the digest prove's plan gave it (out/tests.edn) on the results root's main
+  ;; its shards record into, never its printed output (seon.prove is the one runner,
   ;; 2026-10-27: the regex over RED and SHARD lines went): a green there passed (it ran green, or
-  ;; was green at its digest), a red is red, and a test with no verdict, or no digest (the plan
+  ;; was green at its digest), a red is red, and a test with no result, or no digest (the plan
   ;; or the build failed before it), is :error, never a pass (review, 2026-10-23)
-  (let [dir (scratch-dir)
-        tests ['seon.root-test/boots 'seon.root-test/threads 'seon.check-test/clean 'seon.check-test/never]
-        plan {:digests {'seon.root-test/boots "dg-boots" 'seon.root-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}]
-    (spit (proofs/result-path dir "dg-boots" true) (pr-str {:pass 1 :fail 0 :error 0}))
-    (spit (proofs/result-path dir "dg-threads" false) (pr-str {:pass 3 :fail 1 :error 0}))
+  (let [tests ['seon.root-test/boots 'seon.root-test/threads 'seon.check-test/clean 'seon.check-test/never]
+        plan {:digests {'seon.root-test/boots "dg-boots" 'seon.root-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}
+        found {"dg-boots" {:digest "dg-boots" :pass 1 :fail 0 :error 0} "dg-threads" {:digest "dg-threads" :pass 0 :fail 1 :error 0}}]
     (is (= {'seon.root-test/boots :pass 'seon.root-test/threads :fail 'seon.check-test/clean :error 'seon.check-test/never :error}
-           (fx/test-results plan dir tests))
-        "green at its digest passed; a red is red; a digest with no verdict, or a test the plan never named, is no pass")
-    (is (= {'seon.root-test/boots :error} (fx/test-results nil dir ['seon.root-test/boots]))
-        "a run whose plan never ran says nothing of any test")
-    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o")))))
+           (fx/test-results plan found tests))
+        "green at its digest passed; a red is red; a digest with no result, or a test the plan never named, is no pass")
+    (is (= {'seon.root-test/boots :error} (fx/test-results nil found ['seon.root-test/boots]))
+        "a run whose plan never ran says nothing of any test")))
+
+(deftest a-merges-deferred-tests-command
+    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o"))))

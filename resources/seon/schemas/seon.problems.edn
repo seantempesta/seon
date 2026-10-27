@@ -52,6 +52,9 @@
  ;; or of files main holds no text for: nothing to write
  :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]
  :seon.root/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-root]] [:runs [:vector :string]]]]
+ ;; the daily full run asked while the one before it has not ended (seon.prove's full lane): a hung
+ ;; full run is seen the next day, never a day skipped in silence
+ :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
  :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
  ;; my.root/hold! of a task that is not running (held, cancelled, unknown): nothing to take back
  :seon.root/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-running]] [:task :string]

@@ -296,3 +296,51 @@
     (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
+
+(deftest an-attach-gives-the-caller-the-branch-or-names-who-holds-it
+  ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live
+  ;; agent :a7", an agent the caller never attached. A context read of a task no agent works attaches
+  ;; one (the :context op); the caller's attach after it is the same outside run: it answers that
+  ;; agent, never a refusal. A task another task's agent holds the branch of is refused, naming the
+  ;; agent and the task it works
+  (let [[ctx attached again other]
+        (at/in-agent (fn [{:keys [ns]}]
+                       [{:op :context :task (str ns "/u")}
+                        {:op :attach :task (str ns "/u")}
+                        {:op :attach :task (str ns "/u")}
+                        {:op :attach :task (str ns "/v")}])
+                     {:decls (fn [{:keys [ns]}]
+                               [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work :seon.task/proofs #{'demo-test/u}}
+                                {:seon.task/name "v" :seon.task/plan "Work three." :seon.task/kind :work
+                                 :seon.task/proofs #{'demo-test/v} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
+    (is (string? (:context ctx)) "the context read attached an agent to u")
+    (is (keyword? (:agent attached)) (pr-str attached))
+    (is (true? (:shared attached)) "the context read's agent, shared: its seon_done ends it for both")
+    (is (= [(:agent attached) (:task attached)] [(:agent again) (:task again)]) "attaching again answers the same agent and task")
+    (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
+    (is (= :seon.root/refused (:seon.error/type other)) (pr-str other))
+    (is (re-find #"held by live agent :a\d+ working t[0-9a-f]+/t \(run t[0-9a-f]+/t#1\)" (str (:seon.error/message other))) (pr-str other))))
+
+(deftest a-prove-never-ends-the-agent-it-proves
+  ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
+  ;; ended"), so my.task/fail! and seon_done recorded nothing ("a7 works no task"). An outside agent
+  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run
+  (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
+        [ctx proved after live1 main-proved after2 live2 failed]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [{:op :context :agent agent}
+                        {:op :prove :agent agent}
+                        "(+ 1 2)"
+                        (alive agent)
+                        {:op :prove}
+                        "(+ 1 2)"
+                        (alive agent)
+                        "(my.task/fail! \"cannot\")"]))]
+    (is (string? (:context ctx)) (pr-str ctx))
+    (is (not (contract/error? proved)) (pr-str proved))
+    (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
+    (is (true? (:value live1)) "and root holds it live")
+    (is (not (contract/error? main-proved)) (pr-str main-proved))
+    (is (= 3 (:value after2)) (str "and after a prove of main: " (pr-str after2)))
+    (is (true? (:value live2)))
+    (is (not (contract/error? (:value failed))) (str "its fail! records on its run: " (pr-str failed)))))

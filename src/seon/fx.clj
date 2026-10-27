@@ -543,18 +543,37 @@
   {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
   [nss out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str nss)))
 
+(defn full-run-command
+  "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
+  plan ignores the results already recorded, runs the process tests, and measures each cost proof
+  at the sizes it states), its run written under out (its plan at out/tests.edn)."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [out] ["nice" "-n" "15" "bin/test" "--prove" "tests" out "--all"])
+
 (defn test-results
-  "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
-  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), dir the
-  results directory its shards store into (seon.proofs/store-verdicts!). :pass when a green is
-  stored there (it ran green, or was green at its digest), :fail when a red is (flaky, or a red
-  alone), :error with none: a run that never reached it (its plan or its build failed, it died)
-  says nothing of it passing. The record read, never prove's printed output."
-  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :string [:sequential :qualified-symbol]]
+  "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
+  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), found the
+  results main holds at those digests ({digest result}, the standing root's :results answer, which
+  the run's shards recorded). :pass when a green is recorded (it ran green, or was green at its
+  digest), :fail when a red is (flaky, or a red), :error with none: a run that never reached it
+  (its plan or its build failed, it died) says nothing of it passing. The record read, never
+  prove's printed output."
+  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] [:map-of :string :map] [:sequential :qualified-symbol]]
                   [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
-  [plan dir tests]
-  (into {} (for [t tests :let [dg (get-in plan [:digests t])]]
-             [t (or (when dg (proofs/status-at dir dg)) :error)])))
+  [plan found tests]
+  (into {} (for [t tests :let [r (some-> (get-in plan [:digests t]) found)]]
+             [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)])))
+
+(defn- results-at
+  "The results the results root's main holds at digests (its server's :results op on port, through
+  bin/ask): {digest result}, or the io-error saying why none came."
+  {:malli/schema [:=> [:cat :int [:sequential :string]] :map]}
+  [port digests]
+  (let [{:keys [out]} (sh/sh (str (cfg/checkout) "/bin/ask") (str port) :in (str (sedn/encode {:op :results :digests (vec digests)}) "\n"))
+        r (when-not (str/blank? out) (edn/read-string {:default tagged-literal} out))]
+    (if (map? (:results r))
+      (:results r)
+      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (pr-str r)) {:path (str port)}))))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -562,18 +581,31 @@
   ({relative path text}, the candidate's changed files) written over it, then the runner
   (test-command) over the tests' namespaces there, niced, in that tree's own environment;
   the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
-  :seon.fx/io-error naming the step and its log."
+  :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
+  :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
+  also holds :digests {test digest} and :failures {test [failure ...]} of its reds (the
+  failures their results recorded, which the run's shard logs, removed with the worktree, also
+  held); repo defaults to this checkout and branch to git's main (:seon.config.source/main)."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch files tests]} :req}]
+  [{{:keys [repo branch files tests all?]} :req}]
   (let [t0 (profile/now-ns)
+        repo (or repo (when all? (str (cfg/checkout))))
+        branch (or branch (when all? (cfg/value :seon.config.source/main)))
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
         sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
                      (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        results (cfg/value :seon.config.source/test-results-dir)
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        ;; the results root, or this root itself when none is named (a test's root): where the run's
+        ;; shards record and where its results are read back
+        results (let [p (cfg/value :seon.config.proofs/results-port)] (if (pos? p) p (cfg/value :seon.config.root/server-port)))
+        ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
+        ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
+        ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
+        ;; a test of the root's working tree that main does not hold, and its shard died at once)
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
+               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_SOURCE_BRANCH"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
@@ -581,13 +613,33 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        ;; the tree's shards store into this root's results directory, named to them, so the
-        ;; verdicts read below are the ones its run wrote
-        (let [out (str dir "/target/prove/run")
-              r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests))) out) [:dir dir]))
-              plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
-          (spit log (str (:out r) (:err r)))
-          {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
+        ;; the full run runs every process test, so the binary is built from this tree first: the
+        ;; worktree's target/ is a clone of another tree's, and its binary that tree's (measured
+        ;; 2026-10-27: the first daily run's process tests ran on a stale one, red for that alone)
+        (let [b (when all? (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])))]
+          (if (and b (not (zero? (:exit b))))
+            (do (spit log (str (:out b) (:err b)))
+                (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
+            ;; the tree's shards record on the results root's main, named to them, so the results
+            ;; read below are the ones its run recorded
+            (let [out (str dir "/target/prove/run")
+                  r (apply sh/sh (concat clean [(str "SEON_RESULTS_PORT=" results)]
+                                         (if all? (full-run-command out) (test-command (sort (distinct (map (comp symbol namespace) tests))) out))
+                                         [:dir dir]))
+                  plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
+                  _ (spit log (str (:out r) (:err r)))
+                  tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
+                  found (results-at results (vals (:digests plan)))]
+              (if (contract/error? found)
+                found
+                (let [rs (test-results plan found tests)]
+                  {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
+                            all? (assoc :digests (select-keys (:digests plan) tests)
+                                        ;; why each red is red: the failures its result recorded
+                                        :failures (into {} (for [[t s] rs :when (not= :pass s)
+                                                                 :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
+                                                                 :when fs]
+                                                             [t fs]))))})))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
