@@ -118,6 +118,24 @@ The same method as §4, in this worktree after merging main, with `stages.clj` (
 | 33 other merges, c6b36bac67..ddcfa0be02 | each ≤ +43, most ±15 | mostly named | — |
 | **range total c6b36bac67..ddcfa0be02 (46 merges)** | **+1548 −678 = +870 src, 32 files; context.clj +578/−?, server.clj ±260, program.clj ±230** | relevance-lab is 44% of the growth | see the baseline below |
 
+### An agent's start heap (root 2026-10-28: "add start heap to the perf watch")
+
+Start heap is the agent's heap when it is forked. The agent's heap cap is the start heap plus `:seon.config.agent/heap-extra-bytes` (1 GiB); seon.agent calls lib/heap-cap! at agent.clj:1154. It is read in a fresh agent as `(System/getenv "JOLT_MAX_HEAP")` minus 1 GiB. Each measurement below is one build, on a fresh store or the standing one, with one agent attached on task seon.proofs/prove-runs-what-a-change-reaches.
+
+| Build | Store | Root heap / datoms | Agent start heap |
+|---|---|---|---|
+| c6b36bac67 | fresh | not read | 0.953 GB (cap 2 027 225 136) |
+| 02236e4295 | fresh | not read | 0.969 GB (cap 2 042 937 488) |
+| d96168afb1 | fresh | 1.04 GB / 159k before the attach; 1.13 GB / 171k after | 0.970 GB (cap 2 043 487 104) |
+| d96168afb1 (root 24927, process-tests' reading) | standing runs/store | **1.44 GB / 353k** | **1.32 GB** (cap 2 390 927 728) |
+
+**No merge grew it.** The build adds 16 MB between c6b36 and main, about 1.7%. The +350 MB comes from what the fork server holds, which is main's db, at about 1.8 KB of agent heap per datom. The standing store holds 182k more datoms than a fresh one:
+- `seon.proof*`, +106k, 55%: the result facts of every test run root records (tests-are-facts);
+- `seon.tx` and `db`, +48k, 25%: one transaction's metadata per write, 16k transactions;
+- `seon.vector` +14k, `seon.task` +6.8k, `seon.run` +1.5k.
+
+So an agent's start heap grows with every test run root records, and with every write, with no bound, while its cap's room stays 1 GiB. Its cost proof is missing: an agent's start heap should cost what the agent reads, not main's whole history of results.
+
 ### Common ops, re-measured at main ddcfa0be02 (2026-10-27 22:50, load 4–14, the worktree's own root on a fresh store)
 
 | Op | At c6b36bac67 | At ddcfa0be02 |
