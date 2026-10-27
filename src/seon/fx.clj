@@ -156,17 +156,18 @@
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
-  --config layers its command line names, the #env values, the profile), as text: the
-  checkout's own path
-  written as <checkout>, and the keys that say where a process runs left out (their schemas'
-  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
-  checkout's and each root's own by design, while :tree covers the source's content). What a
-  result depends on that git does not see, so an agent's root and a checkout on one tree key
-  their results alike (docs/merging.md)."
-  {:malli/schema [:=> [:cat :map :string] :string]}
+  --config layers its command line names, the #env values, the profile), as {key text}: each
+  value with the checkout's own path written as <checkout>, and the keys that say where a
+  process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
+  source tree and results directory: each checkout's and each root's own by design, while
+  :tree covers the source's content). What a result depends on that git does not see: a
+  test's digest takes the keys its reach reads (seon.program/config-reads), so an agent's
+  root and a checkout on one tree key their results alike, and a key no test reads moves
+  none (docs/merging.md)."
+  {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
-               checkout "<checkout>"))
+  (into (sorted-map) (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+                       [k (str/replace (sedn/encode v) checkout "<checkout>")])))
 
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration at p names
@@ -252,8 +253,9 @@
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
   (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
-  Jolt's included, and
-  the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
+  Jolt's included, and the per-test tick bound every verdict is a function of,
+  :seon.config.agent/test-ticks) :config (the config in force, config-input: each test's digest
+  takes the keys it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
@@ -266,7 +268,8 @@
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
+      :env (err/digest (str/join "\n" (concat entries [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
+      :config (config-input cfg checkout)
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit

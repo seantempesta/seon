@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
+            [seon.fx :as fx] [seon.config :as cfg] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -388,7 +388,8 @@
         unstored (proofs/store-verdicts! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
         stored (proofs/verdicts dir [(digests p1)])
         [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
-                      {:dirs ["src" "test"] :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
+                      ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
+                      {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
         checkout (proofs/plan nil (select-keys digests [p2]) (proofs/verdicts dir [(digests p2)]) #{})]
     (sh/sh "rm" "-rf" dir)
     (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")

@@ -17,7 +17,7 @@
             [seon.merge :as pm]
             [seon.source :as source]
             [clojure.java.shell :as sh]
-            [test-runner :as runner]
+            [test-runner :as runner] [clojure.string :as str] [seon.config :as cfg]
             [jolt.analyzer]))
 
 (defn- empty-db [] (ts/test-db))
@@ -550,25 +550,55 @@
   ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
   ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
-  ;; gives the same digest for every test: a second run reruns nothing, two worktrees share
+  ;; gives the same digest for every test: a second run reruns nothing, two worktrees share.
+  ;; And root's import of it (seon.source/import-tx of :seon.config.source/dirs, as
+  ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
+  ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
+  ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
   (let [here (System/getProperty "user.dir")
         copy (scratch-dir "copy")
         ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
         ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
         ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
         ;; (a tracked file deleted on disk is no file of the tree: left out)
-        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard src test)\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
-        in {:env "e" :tree "t"}
+        dirs (cfg/value :seon.config.source/dirs)
+        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard " (str/join " " dirs) ")\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
+        in (fx/inputs here)
         a (program/reach-digests (runner/program-db here (ts/program-store)) in)
         b (program/reach-digests (runner/program-db here (ts/program-store)) in)
-        c (program/reach-digests (runner/program-db copy (ts/program-store)) in)]
+        c (program/reach-digests (runner/program-db copy (ts/program-store)) in)
+        db (ts/test-db)
+        r (program/reach-digests (d/db-with db (source/import-tx db (:value (fx/read-source {:req {:root here :dirs dirs}})))) in)
+        dir (scratch-dir "same-tree")]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
-    (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
-                                  (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
-                                  dir))))
-        "with each green stored, a second run on the unchanged tree runs nothing")))
+    (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+    (is (= [] (:run (run-plan a dir))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))
+
+(deftest a-test-digest-takes-only-the-config-keys-it-reads
+  ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
+  ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
+  ;; digest takes the values of the keys its reach names (seon.program/config-reads)
+  (let [here (System/getProperty "user.dir")
+        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        in (fx/inputs here)
+        digests #(update-vals (program/graph-index g % nil) :digest)
+        a (digests in)
+        moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
+        width (moved :seon.config.render/width "999")
+        ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
+        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
+        ;; without it all 69 tests reaching pattern kept their digest when the window moved
+        window (moved :seon.config.ctx/window "7")
+        readers (program/tests-reaching g 'seon.render/pattern)]
+    (is (seq width) "a key tests read moves theirs")
+    (is (< (count width) (quot (count a) 2)) (str (count width) " of " (count a) " tests read :seon.config.render/width: fewer than half"))
+    (is (not (width 'seon.program-test/only-a-test-reading-the-tree-takes-its-digest)) "a test that reaches no reader of the key keeps its digest")
+    (is (= #{} (moved :seon.config.no/such-key "1")) "a key no form names moves none")
+    (is (seq readers) "tests reach the reader of a computed key")
+    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")))
 
 (deftest only-a-test-reading-the-tree-takes-its-digest
   ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
@@ -632,20 +662,24 @@
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
   ;; checkout's config was reused in another's
   (let [here (System/getProperty "user.dir")
-        cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451}
-        env #(:env (fx/inputs here % here))]
-    (is (not= (env cfg) (env (assoc cfg :seon.config.ai/model "b"))) "another value in force: another :env, every test reruns")
-    (is (= (env cfg) (env (assoc cfg :seon.config.web/port 9999))) "a checkout's own TCP port is no input")
+        cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451
+             :seon.config.native/probe-lib (str here "/target/lib/libprobe.dylib")}
+        config #(:config (fx/inputs here % here))]
+    (is (= "\"a\"" (:seon.config.ai/model (config cfg))) "a value in force is an input, for the tests that read its key")
     ;; owner, 2026-10-23: agents' greens and a checkout's are one store, so where a process
     ;; runs (its :seon.config/place keys) is no input; how a test behaves still is
-    (is (= (env cfg) (env (assoc cfg :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
-                                     :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
-                                     :seon.config.source/test-results-dir "/x/results")))
-        "a root's own main, store, source and results directory are no input")
-    (is (not= (env cfg) (env (assoc cfg :seon.config.store/branching-factor 32))) "a bound a test runs under is one")
-    (is (= (:env (fx/inputs here cfg here))
-           (:env (fx/inputs here (assoc cfg :seon.config.root/runs-dir "/elsewhere/runs") "/elsewhere")))
-        "a path under the checkout is the same input in any checkout")))
+    (is (= (config cfg) (config (assoc cfg :seon.config.web/port 9999 :seon.config.root/main "in-agent-1" :seon.config.root/store-path "/x/store"
+                                       :seon.config.source/root here :seon.config.source/dirs ["src" "test"]
+                                       :seon.config.source/test-results-dir "/x/results")))
+        "a checkout's own ports, main, store, source and results directory are no input")
+    (is (= (config cfg) (:config (fx/inputs here (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib") "/elsewhere")))
+        "a path under the checkout is the same input in any checkout")
+    (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))
+        "a path outside it is another input")
+    (is (not= (:env (fx/inputs here cfg here)) (:env (fx/inputs here (assoc cfg :seon.config.agent/test-ticks 7) here)))
+        "the tick bound every verdict is a function of is every test's input")
+    (is (= (:env (fx/inputs here cfg here)) (:env (fx/inputs here (assoc cfg :seon.config.ai/model "b") here)))
+        "any other key is only the input of the tests that read it (a-test-digest-takes-only-the-config-keys-it-reads)")))
 
 (deftest an-eval-that-changes-a-contract-or-docstring-says-so
   ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): what an

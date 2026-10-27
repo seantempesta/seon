@@ -1,6 +1,6 @@
 (ns test-runner
   "bin/test's and bin/prove's runner (task seon.proofs/prove-runs-what-a-change-reaches):
-  src and test imported as program facts (program-db), each test keyed by its reach digest
+  :seon.config.source/dirs imported as program facts (program-db), as root imports them, each test keyed by its reach digest
   (seon.program/reach-digests) and each bin/check step by its functions' (seon.proofs/
   check-steps); seon.proofs/plan selects what has no green result at its digest.
     --plan WHAT OUT [--all] [NS ...]  the selection: tests dealt into OUT/shard-<i>.edn, steps
@@ -37,14 +37,22 @@
 ;; notes/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
-(defn- tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str "tree-" tree)))
+(defn- tree-prefix
+  "The prefix of the branches keeping a tree's program as :seon.config.source/dirs import it:
+  a store's branches made under other dirs (another import) are none of this one's."
+  [] (str "tree-" (error/digest (pr-str (config/value :seon.config.source/dirs))) "-"))
 
-(defn- branch-tree "The tree id branch b keeps, or nil (b keeps no tree)." [b]
-  (let [n (name b)] (when (str/starts-with? n "tree-") (subs n 5))))
+(defn- tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
+
+(defn- branch-tree "The tree id branch b keeps, or nil (b keeps no tree of this import)." [b]
+  (let [n (name b) p (tree-prefix)] (when (str/starts-with? n p) (subs n (count p)))))
 
 (defn- program-file?
-  "Is relative path p one of the program's files: a .clj under src or test (what the import reads)?"
-  [p] (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))
+  "Is relative path p one of the program's files: what root's import reads of
+  :seon.config.source/dirs (a .clj, or a schema resource: seon.source/schema-resource?), so the
+  program a plan reads here is root's, and a test's digest is the same on both sides?"
+  [p] (and (some #(str/starts-with? p (str % "/")) (config/value :seon.config.source/dirs))
+           (or (str/ends-with? p ".clj") (source/schema-resource? p))))
 
 (defn- changed-paths
   "The program files that differ between git trees a and b of root's repository (git diff
@@ -55,25 +63,25 @@
 (defn- tree-files
   "{path text} of the program files of git tree t in root's repository, read from git's objects,
   never the working tree (an edit after t was taken cannot be kept under t): paths' (nil for one
-  t does not hold), or every program file under src and test. Through git archive into a
+  t does not hold), or every program file under :seon.config.source/dirs. Through git archive into a
   directory of its own, removed after."
   [root t paths]
   (let [dir (str (System/getProperty "java.io.tmpdir") "/seon-tree-" (random-uuid))
         tar (str dir ".tar")
         ;; what t holds of what is asked (git archive refuses a path it does not hold)
-        held (filterv seq (str/split-lines (:out (apply sh/sh "git" "-C" root "ls-tree" (concat (when paths ["-r"]) ["--name-only" t "--"] (or paths ["src" "test"]))))))]
+        held (filterv seq (str/split-lines (:out (apply sh/sh "git" "-C" root "ls-tree" (concat (when paths ["-r"]) ["--name-only" t "--"] (or paths (config/value :seon.config.source/dirs)))))))]
     (.mkdirs (io/file dir))
     (when (seq held)
       (apply sh/sh "git" "-C" root "archive" "--format=tar" "-o" tar t "--" held)
       (sh/sh "tar" "-x" "-f" tar "-C" dir))
     (let [files (if paths
                   (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
-                  (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs ["src" "test"]}}))))]
+                  (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs (config/value :seon.config.source/dirs)}}))))]
       (sh/sh "rm" "-rf" dir tar)
       files)))
 
 (defn program-db
-  "The db holding src and test of the checkout at root as program facts (seon.source: analyzed,
+  "The db holding :seon.config.source/dirs of the checkout at root as program facts (seon.source: analyzed,
   not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
   tree-id): the same tree reads its branch; a tree never seen is branched from the kept tree of
   the fewest changed program files (one in root's repository) and brought current by
