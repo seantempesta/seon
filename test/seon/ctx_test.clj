@@ -205,6 +205,23 @@
       (is (= (:tree (ctx/build db (aid db) :b)) @ctx/ctx) "a move with no transaction is patched by the difference")
       (finally (reset! seon.agent/state nil)))))
 
+(deftest the-record-holds-what-the-agent-heard-of-main
+  ;; main's head as the agent last read it and its branch's merge base, from the agent's state
+  ;; (:main, :base): each a commit id and a t beside the environment, written by nothing, and
+  ;; diffed as data, so a render reading them follows main (the merge, tests and divergence views)
+  (let [db (seeded 10) m (ts/test-db)]
+    (try
+      (reset! seon.agent/state {:db db :key k :branch :b})
+      (let [c0 @ctx/ctx]
+        (is (not-any? #(contains? c0 %) [:main-commit :main-t :base-commit :base-t]) "nothing heard yet")
+        (swap! seon.agent/state assoc :main m :base m)
+        (let [c1 @ctx/ctx]
+          (is (= [(d/commit-id m) (:max-tx m) (d/commit-id m) (:max-tx m)] ((juxt :main-commit :main-t :base-commit :base-t) c1)))
+          (is (= #{[:main-commit] [:main-t] [:base-commit] [:base-t]} (set (keys (ctx/diff c0 c1)))) "each a path that changed, alone")
+          (swap! seon.agent/state assoc :db (:db-after (d/with db (eval-tx 11))))
+          (is (= (d/commit-id m) (:main-commit @ctx/ctx)) "kept as the record is patched")))
+      (finally (reset! seon.agent/state nil)))))
+
 (defn new-eval
   "The input of size n: the record of a session of n evals, built, and one more eval's
   transaction applied to its db: [c db-after tx-data branch]."
@@ -728,6 +745,7 @@
       (doseq [[f t] [[#(swap! ctx/ctx assoc :notes "x") :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :lab.ctx/steps [1 2]) :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :t 1) :seon.ctx/basis]
+                     [#(swap! ctx/ctx assoc :main-commit (random-uuid)) :seon.ctx/basis]
                      [#(reset! ctx/ctx nil) :seon.ctx/basis]]]
         (let [[[r same] db'] (step db f)]
           (is (= t (:seon.error/type r)) (pr-str r))
