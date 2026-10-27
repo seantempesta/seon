@@ -63,3 +63,21 @@ Worked through my root as an outside agent (a2) on `seon.ref/an-alias-is-resolve
 - **After two turns** (sources of `seon.ref/references`, `candidate`, `names`, `span-candidate`, `names-on-db?`), the focus followed the work: the best now were `seon.render.ui/cited-of` 55%, `seon.ref/names-on-db?` 54%, `seon.ref/alias-form?` 51%, `seon.ref/candidate` 48%. That is what the task needs; the blind agent found these by hand. None reached 60%, so the page added nothing.
 - **Cause:** the chance's calibration was fitted on plan-shaped queries (the judge's pages). A focus made of code-heavy evals scores lower on that scale, so a fixed 60% is too strict once the agent works, and too loose for the plan's cold guess.
 - **Next:** calibrate the chance under the trajectory focus itself, with the judge labelling each kind's first five at replayed turns, and fit it per kind as the plan-focused table was. Then re-test on this REPL agent, then live agents.
+
+## Instructed intents, situations and printed names, as features (2026-10-27, late)
+
+The owner's idea, tried on the replay: four instructed intent queries made from the latest eval, each embedded with its own task line (`notes/relevance-lab/intents.json`: the code causing an error, functions similar to what changes, tests that cover it, docs that explain it); situations read from each record (the eval threw 9 times in 99 turns, defined a var 15, proved 24, red 17; the first turn), alone and multiplied with the intents; and, from v1's next-turn research, the names the last evals printed. Tests were candidates too. A logistic per kind (functions, sections, schema keys, tests), trained leaving one run out; recall of the next three turns' reads within 800 tokens; a bootstrap interval over the 50 labelled turns (129 labels).
+
+| features | recall in 800 tokens | vs the five (95%) |
+|---|---|---|
+| the shipped five, refit (C 1.0) | 0.545 | |
+| + intents | 0.472 | -0.073 (-0.145 to -0.017) |
+| + intents + situations | 0.415 | -0.130 (-0.223 to -0.047) |
+| the five, refit (C 0.05) | 0.583 | |
+| + intents | 0.529 | -0.054 (-0.114 to -0.006) |
+| + intents + situations | 0.543 | -0.040 (-0.092 to -0.004) |
+| the five, printed names in the pool (C 0.05) | 0.498 | |
+| + printed by the last evals | 0.493 | -0.005 (-0.015 to 0.000) |
+| + intents | 0.527 | +0.028 (0.000 to +0.076) |
+
+On 50 labelled turns from 7 tasks none of them helps reliably: each added set overfits or lands inside the interval, and the order flips when the pool changes. v1's CLM work found the same (`notes/relevance-lab/clm-digest.md`, from ~/src/seon/docs/research/agent-platform/2026-10-16/clm/ and rank-signals/): zero-shot decision heads at chance, a small trained head on frozen embeddings working only with more labels than this, untrained fusion within 0.02 of trained, exact syntax and history facts (in-ns, a form seen before) as rules rather than embedding questions, and at least 50 tasks wanted. Taken from it: leave-one-attempt-out (here, one run out), intervals on small sets, budgets rather than R@10, recency kept out of the score's fusion. The scorer stays the five features; situations return as exact rules or features once the search log's opens give labels at scale.

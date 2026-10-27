@@ -73,6 +73,6 @@
                  ;; what the page shows (seon.context/selected), or, given a cut, every item at or above it
                  (if cut
                    (context/related db te {:cut cut})
-                   (context/selected db te (pdb/eid db :seon.agent/id (:id @agent/state)))))]
+                   (context/selected db te (pdb/eid db :seon.agent/key (:key @agent/state)))))]
       (or (context/related-view db r) {:nothing "nothing nearer the plan than what it cites"})
       {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"}))))
