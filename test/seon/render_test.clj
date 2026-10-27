@@ -1088,6 +1088,25 @@
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
+(deftest a-debug-page-of-an-agent-with-no-branch-answers
+  ;; the browser pass (3b-root): /agent/user/debug never answered: the user has no branch on main, so
+  ;; none was read, and the page waited for one. With no branch (or one that could not be read) its
+  ;; debug page has no turn to show and says so at once
+  (let [db (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx "b1" :user {:status :idle})])
+        st {:main-db db :branches {}}]
+    (is (nil? (:seon.agent/branch (d/entity db (#'p/location db :user)))) "the fixture: no branch")
+    (is (some? (:seon.render/html (#'p/debug-value st [:debug :user]))) "its page, with no turn")
+    (is (some? (:seon.render/html (#'p/debug-value (assoc-in st [:branches [:debug :user] :error] {:seon.error/message "x"}) [:debug :user])))
+        "a branch that could not be read: its page too")))
+
+(deftest an-outside-read-is-no-model-call
+  ;; the browser pass (3b-root): an outside read's turn (seon_context) said "the call is in flight"
+  ;; on the debug page, though it calls no model
+  (let [row (fn [origin] (h/html (ui/sent-request {:unit "d-1"} {:turn 0 :run "t/x#1" :view "a1" :refs 1 :added [] :seon.turn/origin origin})))]
+    (is (str/includes? (row :outside) "an outside read: no model call"))
+    (is (not (str/includes? (row :outside) "in flight")))
+    (is (str/includes? (row :model) "the call is in flight") "a model turn with no usage yet is in flight")))
+
 (deftest a-cut-with-its-whole-form-holds-no-copy
   ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
   ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the

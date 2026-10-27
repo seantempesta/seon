@@ -273,10 +273,11 @@
               (some-> (get-in st [:index (:agent c) :pid]) (lib/c-kill lib/SIGUSR1)))
             ;; answered to the render proc, which shows each in the stream by its tag; root's
             ;; function is root's evaluation, its form in the tag: the render proc records it on
-            ;; main (origin :ui) with what root answered, as root's REPL records one
+            ;; main (origin :ui) with what root answered, as root's REPL records one; an eval opened
+            ;; on a page (opened!) is a reader's view of it, never root's work, so it is no eval of root's
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
-                          form (when (= "seon.root" (namespace f))
+                          form (when (and (= "seon.root" (namespace f)) (not= 'seon.root/opened! f))
                                  (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (let [tag (cond-> [:web f target] form (conj form))]
                 (if (contract/error? req)

@@ -722,7 +722,7 @@
   or error; view, its page's feed param."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
   [db eid open? view]
-  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/basis :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
+  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/basis :seon.turn/origin :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
                       {:seon.turn/run [:seon.run/id]}] eid)
         n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
         refs (:seon.turn/sent t)
@@ -731,7 +731,7 @@
         ;; its whole request read back from the records its refs name, once: the row is a component,
         ;; drawn when its turn is first shown and cached after (a finished turn never changes)
         whole (context/parts-of db refs)]
-    (cond-> (merge (select-keys t [:seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
+    (cond-> (merge (select-keys t [:seon.turn/origin :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
                    {:turn n :run r :view view :refs (count refs)
                     :added (filterv (comp (set added) first) whole)
                     ;; where its tokens went, sized from those parts
@@ -1365,10 +1365,11 @@
   turn before it in its run did (:same), and its whole request in a <details> that is rendered
   only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
   tokens went (:split, seon.context/sent-split of its parts: system, conversation, page). input {:turn
-  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split} and the turn's usage
-  (:seon.turn/tokens, cache-hit and cache-miss tokens) or its call's error (:seon.turn/error)."
+  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split}, the turn's origin
+  (:seon.turn/origin: an :outside read calls no model) and its usage (:seon.turn/tokens, cache-hit and
+  cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens error]}]
+  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [origin tokens cache-hit-tokens cache-miss-tokens error]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         unit (:unit opts)]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
@@ -1377,7 +1378,9 @@
       (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
       (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "text-text-500"} (str refs " records sent")]
-      (when-not (or tokens error) [:span {:class "text-text-500"} "the call is in flight"])]
+      ;; an outside read (seon_context, an outside agent) is sent to no model: it has no call to wait on
+      (cond (= :outside origin) [:span {:class "text-text-500"} "an outside read: no model call"]
+            (not (or tokens error)) [:span {:class "text-text-500"} "the call is in flight"])]
      ;; where its tokens went, as the printer sizes what it sent
      (when split
        [:p {:class "tabular-nums text-text-400"}

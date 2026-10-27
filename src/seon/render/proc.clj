@@ -230,14 +230,21 @@
   into view). Each row is a component (seon.render.ui/component, as [:debug open? view]): it
   reads its turn and the one before it, shows what its turn added, and its whole request while
   its tab has it open (:open, seon.web's /open); a finished turn is never touched again, so its
-  row renders once. nil until the branch is read."
+  row renders once. nil until the branch is read; an agent with no branch on main (the user's) or
+  whose branch could not be read has no turn to show, and its page says so, never a wait."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
-  (if (= :root (second view))
+  (cond
+    (= :root (second view))
     ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
     (when-let [ctx (:context st)]
       (ui/debug :root [] 0 {:id "d-context" :input ctx :schema :seon.render/root-context}))
-  (when-let [bdb (get-in st [:branches view :db])]
+    (nil? (get-in st [:branches view :db]))
+    (let [db (:main-db st) eid (when db (location db view))]
+      (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
+        (ui/debug (second view) [] 0 nil)))
+    :else
+  (let [bdb (get-in st [:branches view :db])]
     (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
           ;; newest first: entity ids are issued in the order turns were written
