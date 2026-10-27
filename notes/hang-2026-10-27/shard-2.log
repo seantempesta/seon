@@ -1,0 +1,418 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.judge-test/a-pass-stops-at-its-bound
+ended seon.judge-test/a-pass-stops-at-its-bound
+RED seon.judge-test/a-pass-stops-at-its-bound {:pass 0, :fail 1, :error 0}
+started seon.judge-test/a-pass-scores-each-request-once
+ended seon.judge-test/a-pass-scores-each-request-once
+RED seon.judge-test/a-pass-scores-each-request-once {:pass 0, :fail 1, :error 0}
+started seon.judge-test/a-first-move-is-read-by-the-compiler
+ended seon.judge-test/a-first-move-is-read-by-the-compiler
+started seon.judge-test/the-score-says-what-the-first-move-did
+ended seon.judge-test/the-score-says-what-the-first-move-did
+started seon.judge-test/a-request-is-keyed-by-what-it-sends
+ended seon.judge-test/a-request-is-keyed-by-what-it-sends
+
+FAIL in (a-pass-stops-at-its-bound) (judge_test.clj:82)
+{:error :root-did-not-listen, :log "Unhandled exception: :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)\n  ex-data: {:seon.error/type :seon.config/refused, :seon.error/operation seon.config/resolve-in, :seon.error/message :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)}\n  trace:\n    seon.config/refuse! (seon/config.clj:118)\n    resolve-in\n    seon.config/resolve (seon/config.clj:269)\n    jfn$malli.core/-=>-schema$44\n    jfn$malli.core/-=>-schema$42\n    value\n    jfn$malli.core/-=>-schema$41\n    seon.root/start!/start!\n    jfn$malli.core/-=>-schema$41\n    seon.main/root-serve/root-serve\n    jfn$malli.core/-=>-schema$40\n    jfn$malli.core/-=>-schema$39\n"}
+expected: (= [[] {:usd 0.0, :bound 0.0, :left [(:task (clojure.core/deref names))]} 1] (:value r))
+  actual: (not (= [[] {:usd 0.0, :bound 0.0, :left [nil]} 1] nil))
+
+FAIL in (a-pass-scores-each-request-once) (judge_test.clj:71)
+{:error :root-did-not-listen, :log "Unhandled exception: :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)\n  ex-data: {:seon.error/type :seon.config/refused, :seon.error/operation seon.config/resolve-in, :seon.error/message :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)}\n  trace:\n    seon.config/refuse! (seon/config.clj:118)\n    resolve-in\n    seon.config/resolve (seon/config.clj:269)\n    jfn$malli.core/-=>-schema$44\n    jfn$malli.core/-=>-schema$42\n    value\n    jfn$malli.core/-=>-schema$41\n    seon.root/start!/start!\n    jfn$malli.core/-=>-schema$41\n    seon.main/root-serve/root-serve\n    jfn$malli.core/-=>-schema$40\n    jfn$malli.core/-=>-schema$39\n"}
+expected: (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r))
+  actual: (not (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] nil))
+started seon.template-test/the-measured-requests-are-a-users-with-their-reproduction
+ended seon.template-test/the-measured-requests-are-a-users-with-their-reproduction
+started seon.template-test/a-requests-stages-are-one-sessions-agent
+ended seon.template-test/a-requests-stages-are-one-sessions-agent
+started seon.template-test/a-request-is-one-transaction-and-forks-after-it
+ended seon.template-test/a-request-is-one-transaction-and-forks-after-it
+started seon.template-test/a-design-build-request-is-its-design-build-task-and-its-merge
+ended seon.template-test/a-design-build-request-is-its-design-build-task-and-its-merge
+started seon.template-test/a-request-is-one-whole-task-one-agent-works-through
+ended seon.template-test/a-request-is-one-whole-task-one-agent-works-through
+started seon.template-test/each-steps-instructions-are-its-task-briefly-prose-first
+ended seon.template-test/each-steps-instructions-are-its-task-briefly-prose-first
+started seon.template-test/the-stages-are-design-implement-merge-on-one-branch
+ended seon.template-test/the-stages-are-design-implement-merge-on-one-branch
+started seon.merge-test/three-way-cases
+ended seon.merge-test/three-way-cases
+started seon.merge-test/the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+ended seon.merge-test/the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+started seon.merge-test/a-schema-entry-merges-per-key
+ended seon.merge-test/a-schema-entry-merges-per-key
+started seon.merge-test/platform-records-never-put-a-branch-behind
+ended seon.merge-test/platform-records-never-put-a-branch-behind
+started seon.merge-test/unmap-merges-as-delete
+ended seon.merge-test/unmap-merges-as-delete
+started seon.merge-test/latest-redefinition-wins
+ended seon.merge-test/latest-redefinition-wins
+started seon.merge-test/behind-means-main-program-moved
+ended seon.merge-test/behind-means-main-program-moved
+started seon.merge-test/declared-data-merges-by-key
+ended seon.merge-test/declared-data-merges-by-key
+started seon.merge-test/scratch-and-observations-never-merge
+ended seon.merge-test/scratch-and-observations-never-merge
+started seon.merge-test/a-form-s-place-does-not-make-it-another
+ended seon.merge-test/a-form-s-place-does-not-make-it-another
+started seon.merge-test/a-conflict-value-reads-a-pulled-entry
+ended seon.merge-test/a-conflict-value-reads-a-pulled-entry
+started seon.merge-test/uncontracted-is-what-the-branch-changed
+ended seon.merge-test/uncontracted-is-what-the-branch-changed
+started seon.merge-test/identical-defs-on-two-branches-merge-clean
+ended seon.merge-test/identical-defs-on-two-branches-merge-clean
+started seon.merge-test/unmerged-entry-derivation
+ended seon.merge-test/unmerged-entry-derivation
+started seon.merge-test/a-merge-carries-the-branchs-own-datoms
+ended seon.merge-test/a-merge-carries-the-branchs-own-datoms
+started seon.fx-test/a-merges-deferred-tests-read-from-their-verdicts
+ended seon.fx-test/a-merges-deferred-tests-read-from-their-verdicts
+started seon.fx-test/owner-stops-reading-at-its-bound
+ended seon.fx-test/owner-stops-reading-at-its-bound
+started seon.fx-test/a-write-back-answers-the-bytes-on-disk
+ended seon.fx-test/a-write-back-answers-the-bytes-on-disk
+started seon.fx-test/a-dependency-is-resolved-through-its-owner
+ended seon.fx-test/a-dependency-is-resolved-through-its-owner
+started seon.fx-test/a-failed-rename-is-an-io-error-and-leaves-no-tmp
+ended seon.fx-test/a-failed-rename-is-an-io-error-and-leaves-no-tmp
+started seon.fx-test/a-batch-kind-takes-what-is-queued
+ended seon.fx-test/a-batch-kind-takes-what-is-queued
+started seon.fx-test/a-failure-is-roots-problem-only-when-an-agent-asked
+ended seon.fx-test/a-failure-is-roots-problem-only-when-an-agent-asked
+started seon.fx-test/a-missing-local-root-fails-in-jolts-resolver
+ended seon.fx-test/a-missing-local-root-fails-in-jolts-resolver
+started seon.fx-test/a-worker-answers-a-defect-as-data
+ended seon.fx-test/a-worker-answers-a-defect-as-data
+started seon.fx-test/a-worker-performs-a-batch-in-one-call-and-opens-once
+ended seon.fx-test/a-worker-performs-a-batch-in-one-call-and-opens-once
+started seon.fx-test/an-open-that-fails-answers-every-request-and-opens-again
+ended seon.fx-test/an-open-that-fails-answers-every-request-and-opens-again
+started seon.fx-test/owner-admits-by-workers-and-priority
+ended seon.fx-test/owner-admits-by-workers-and-priority
+started seon.fx-test/owner-refuses-a-spent-budget
+ended seon.fx-test/owner-refuses-a-spent-budget
+started seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+ended seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+started seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+ended seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+started seon.server-test/a-refused-attach-writes-nothing
+ended seon.server-test/a-refused-attach-writes-nothing
+RED seon.server-test/a-refused-attach-writes-nothing {:pass 0, :fail 2, :error 0}
+started seon.server-test/a-server-defect-answers-that-request-alone
+ended seon.server-test/a-server-defect-answers-that-request-alone
+RED seon.server-test/a-server-defect-answers-that-request-alone {:pass 0, :fail 3, :error 0}
+started seon.server-test/the-context-op-answers-what-a-model-is-sent
+ended seon.server-test/the-context-op-answers-what-a-model-is-sent
+RED seon.server-test/the-context-op-answers-what-a-model-is-sent {:pass 1, :fail 2, :error 3}
+started seon.server-test/done-answers-the-judges-reasons
+ended seon.server-test/done-answers-the-judges-reasons
+RED seon.server-test/done-answers-the-judges-reasons {:pass 0, :fail 3, :error 0}
+started seon.server-test/an-attached-agent-holds-its-run
+ended seon.server-test/an-attached-agent-holds-its-run
+RED seon.server-test/an-attached-agent-holds-its-run {:pass 0, :fail 1, :error 0}
+started seon.server-test/a-server-refused-answer-is-the-one-error-map
+ended seon.server-test/a-server-refused-answer-is-the-one-error-map
+RED seon.server-test/a-server-refused-answer-is-the-one-error-map {:pass 0, :fail 3, :error 0}
+started seon.server-test/a-message-reaches-the-agent
+ended seon.server-test/a-message-reaches-the-agent
+RED seon.server-test/a-message-reaches-the-agent {:pass 0, :fail 2, :error 4}
+started seon.server-test/an-outside-agent-changes-its-task-by-swap
+ended seon.server-test/an-outside-agent-changes-its-task-by-swap
+RED seon.server-test/an-outside-agent-changes-its-task-by-swap {:pass 0, :fail 4, :error 2}
+started seon.server-test/a-root-eval-replies-like-an-agent-eval
+ended seon.server-test/a-root-eval-replies-like-an-agent-eval
+RED seon.server-test/a-root-eval-replies-like-an-agent-eval {:pass 1, :fail 3, :error 0}
+started seon.server-test/a-line-opening-a-string-key-is-mcps
+ended seon.server-test/a-line-opening-a-string-key-is-mcps
+started seon.server-test/the-server-speaks-mcp
+ended seon.server-test/the-server-speaks-mcp
+
+FAIL in (a-refused-attach-writes-nothing) (server_test.clj:84)
+the attach is refused: the t task's agent holds the branch
+expected: (clojure.string/includes? (pr-str refused) "is held by live agent")
+  actual: false
+
+FAIL in (a-refused-attach-writes-nothing) (server_test.clj:85)
+and wrote nothing: the u task is still held, with no env and no run
+expected: (= [:held nil 0] (:value seen))
+  actual: (not (= [:held nil 0] nil))
+
+FAIL in (a-server-defect-answers-that-request-alone) (server_test.clj:35)
+expected: (= :seon.server/defect (:seon.error/type defect))
+  actual: (not (= :seon.server/defect nil))
+
+FAIL in (a-server-defect-answers-that-request-alone) (server_test.clj:36)
+expected: (= (pr-str {:op :attach, :task 5}) (:line defect))
+  actual: (not (= "{:op :attach, :task 5}" nil))
+
+FAIL in (a-server-defect-answers-that-request-alone) (server_test.clj:37)
+the server goes on
+expected: (= 3 (:value ok))
+  actual: (not (= 3 nil))
+
+ERROR in (the-context-op-answers-what-a-model-is-sent) (server_test.clj:125)
+the system prompt, first
+expected: (clojure.string/starts-with? text "# You are a Seon agent")
+  actual: java.lang.NullPointerException: s
+
+ERROR in (the-context-op-answers-what-a-model-is-sent) (server_test.clj:126)
+the form that shows the render of ctx now
+expected: (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)")
+  actual: java.lang.NullPointerException: s
+
+ERROR in (the-context-op-answers-what-a-model-is-sent) (server_test.clj:127)
+the render of ctx by component key
+expected: (re-find #"task-data-\d+" text)
+  actual: java.lang.NullPointerException: nil where a java.lang.CharSequence is required
+
+FAIL in (the-context-op-answers-what-a-model-is-sent) (server_test.clj:129)
+status answers as the turn measured it
+expected: (contains? (:value status) :proofs)
+  actual: (not (contains? nil :proofs))
+
+FAIL in (the-context-op-answers-what-a-model-is-sent) (server_test.clj:130)
+and the read records what it sent, as a model turn does (the debug page shows it)
+expected: (seq (:value sent))
+  actual: nil
+
+FAIL in (done-answers-the-judges-reasons) (server_test.clj:137)
+{:error :root-did-not-listen, :log "Unhandled exception: :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)\n  ex-data: {:seon.error/type :seon.config/refused, :seon.error/operation seon.config/resolve-in, :seon.error/message :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)}\n  trace:\n    seon.config/refuse! (seon/config.clj:118)\n    resolve-in\n    seon.config/resolve (seon/config.clj:269)\n    jfn$malli.core/-=>-schema$44\n    jfn$malli.core/-=>-schema$42\n    value\n    jfn$malli.core/-=>-schema$41\n    seon.root/start!/start!\n    jfn$malli.core/-=>-schema$41\n    seon.main/root-serve/root-serve\n    jfn$malli.core/-=>-schema$40\n    jfn$malli.core/-=>-schema$39\n"}
+expected: (= :closed (:status done))
+  actual: (not (= :closed nil))
+
+FAIL in (done-answers-the-judges-reasons) (server_test.clj:138)
+expected: (= :red (:outcome done))
+  actual: (not (= :red nil))
+
+FAIL in (done-answers-the-judges-reasons) (server_test.clj:139)
+the done rule's reasons, as the judge wrote them on the held task
+expected: (clojure.string/includes? (str (get-in done [:held :seon.task/failure :reason])) "proof-unknown demo-test/t")
+  actual: false
+
+FAIL in (an-attached-agent-holds-its-run) (server_test.clj:94)
+its run, with its task, in its record
+expected: (= [1 (:run (clojure.core/deref names)) (:task (clojure.core/deref names))] (:value held))
+  actual: (not (= [1 nil nil] nil))
+
+FAIL in (a-server-refused-answer-is-the-one-error-map) (server_test.clj:25)
+expected: (= 4 (count answers))
+  actual: (not (= 4 1))
+
+FAIL in (a-server-refused-answer-is-the-one-error-map) (server_test.clj:27)
+{:error :root-did-not-listen, :log "Unhandled exception: :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)\n  ex-data: {:seon.error/type :seon.config/refused, :seon.error/operation seon.config/resolve-in, :seon.error/message :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)}\n  trace:\n    seon.config/refuse! (seon/config.clj:118)\n    resolve-in\n    seon.config/resolve (seon/config.clj:269)\n    jfn$malli.core/-=>-schema$44\n    jfn$malli.core/-=>-schema$42\n    value\n    jfn$malli.core/-=>-schema$41\n    seon.root/start!/start!\n    jfn$malli.core/-=>-schema$41\n    seon.main/root-serve/root-serve\n    jfn$malli.core/-=>-schema$40\n    jfn$malli.core/-=>-schema$39\n"}
+expected: (contract/error? a)
+  actual: false
+
+FAIL in (a-server-refused-answer-is-the-one-error-map) (server_test.clj:28)
+{:error :root-did-not-listen, :log "Unhandled exception: :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)\n  ex-data: {:seon.error/type :seon.config/refused, :seon.error/operation seon.config/resolve-in, :seon.error/message :seon.config.source/gate-checkout is set nowhere: not by the task, the model deepseek-flash, its provider deepseek or the config (declared keys: seon.config/keys-declared)}\n  trace:\n    seon.config/refuse! (seon/config.clj:118)\n    resolve-in\n    seon.config/resolve (seon/config.clj:269)\n    jfn$malli.core/-=>-schema$44\n    jfn$malli.core/-=>-schema$42\n    value\n    jfn$malli.core/-=>-schema$41\n    seon.root/start!/start!\n    jfn$malli.core/-=>-schema$41\n    seon.main/root-serve/root-serve\n    jfn$malli.core/-=>-schema$40\n    jfn$malli.core/-=>-schema$39\n"}
+expected: (nil? (:error a))
+  actual: (not (nil? :root-did-not-listen))
+
+FAIL in (a-message-reaches-the-agent) (server_test.clj:107)
+answered when its fact is on main
+expected: (true? (:ok sent))
+  actual: false
+
+ERROR in (a-message-reaches-the-agent) (server_test.clj:108)
+expected: (re-find #":from \"owner\"" (:text taken))
+  actual: java.lang.NullPointerException: nil where a java.lang.CharSequence is required
+
+ERROR in (a-message-reaches-the-agent) (server_test.clj:109)
+expected: (re-find #":body \"use demo/g\"" (:text taken))
+  actual: java.lang.NullPointerException: nil where a java.lang.CharSequence is required
+
+ERROR in (a-message-reaches-the-agent) (server_test.clj:110)
+to the run the agent works
+expected: (clojure.string/includes? (:text taken) (str ":to " (pr-str (:run (clojure.core/deref names)))))
+  actual: java.lang.NullPointerException: s
+
+ERROR in (a-message-reaches-the-agent) (server_test.clj:111)
+the fact's id, which the agent writes on its branch
+expected: (re-find #":id \"m-" (:text taken))
+  actual: java.lang.NullPointerException: nil where a java.lang.CharSequence is required
+
+FAIL in (a-message-reaches-the-agent) (server_test.clj:112)
+no live agent a0: refused, as root refuses
+expected: (contract/error? none)
+  actual: false
+
+ERROR in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:166)
+the first turn shows the plan as it was
+expected: (clojure.string/includes? (:context first-turn) "\"Work.\"")
+  actual: java.lang.NullPointerException: s
+
+FAIL in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:167)
+the next @ctx holds what the swap! wrote
+expected: (= plan (:value swapped))
+  actual: (not (= "Work: f0 returns its input." nil))
+
+ERROR in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:168)
+the render of ctx draws it
+expected: (clojure.string/includes? (:value page) plan)
+  actual: java.lang.NullPointerException: s
+
+FAIL in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:169)
+read from another namespace as @seon.ctx/ctx
+expected: (true? (:value elsewhere))
+  actual: false
+
+FAIL in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:170)
+written on the agent's branch, one transaction
+expected: (= plan (:value on-branch))
+  actual: (not (= "Work: f0 returns its input." nil))
+
+FAIL in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:171)
+the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value
+expected: (= [true true true] (:value told))
+  actual: (not (= [true true true] nil))
+
+FAIL in (a-root-eval-replies-like-an-agent-eval) (server_test.clj:15)
+a value replies alike
+expected: (= {:a 1} (:value a-ret) (:value r-ret))
+  actual: (not (= {:a 1} nil nil))
+
+FAIL in (a-root-eval-replies-like-an-agent-eval) (server_test.clj:16)
+root's value has its result handle, as an agent's does
+expected: (qualified-symbol? (:handle r-ret))
+  actual: false
+
+FAIL in (a-root-eval-replies-like-an-agent-eval) (server_test.clj:19)
+`sys` is this root: the agent it holds is the one answering
+expected: (and (int? (:value own)) (= (:value own) (:value r-star)))
+  actual: false
+started seon.fork-server-cost-test/a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+ended seon.fork-server-cost-test/a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+started seon.fork-server-cost-test/a-program-commit-moves-the-graph-to-the-new-program
+ended seon.fork-server-cost-test/a-program-commit-moves-the-graph-to-the-new-program
+started seon.fork-server-cost-test/a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+ended seon.fork-server-cost-test/a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+started seon.context-cost-test/related-ranks-each-kind-by-one-search
+ended seon.context-cost-test/related-ranks-each-kind-by-one-search
+started seon.context-cost-test/a-sessions-records-cost-one-read-per-record
+ended seon.context-cost-test/a-sessions-records-cost-one-read-per-record
+started seon.context-cost-test/task-data-costs-what-the-plan-names
+ended seon.context-cost-test/task-data-costs-what-the-plan-names
+started seon.context-cost-test/a-turn-prints-its-new-records-flat-in-the-history
+ended seon.context-cost-test/a-turn-prints-its-new-records-flat-in-the-history
+started seon.context-cost-test/the-history-cut-is-one-walk-of-the-parts
+ended seon.context-cost-test/the-history-cut-is-one-walk-of-the-parts
+started seon.vector-test/the-pyramid-ranks-as-an-exact-search
+ended seon.vector-test/the-pyramid-ranks-as-an-exact-search
+started seon.vector-test/the-proc-asks-for-what-is-due-and-writes-it
+ended seon.vector-test/the-proc-asks-for-what-is-due-and-writes-it
+started seon.vector-test/a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+ended seon.vector-test/a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+started seon.vector-test/a-failed-embedding-waits-for-the-next-notice
+ended seon.vector-test/a-failed-embedding-waits-for-the-next-notice
+started seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there
+ended seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there
+started seon.vector-test/more-due-than-one-request-takes-waits-for-the-next
+ended seon.vector-test/more-due-than-one-request-takes-waits-for-the-next
+started seon.vector-test/a-turn-with-nothing-due-asks-nothing
+ended seon.vector-test/a-turn-with-nothing-due-asks-nothing
+started seon.vector-test/near-is-a-relation-in-a-query
+ended seon.vector-test/near-is-a-relation-in-a-query
+started seon.vector-test/a-text-is-embedded-once
+ended seon.vector-test/a-text-is-embedded-once
+started seon.vector-test/a-stored-vector-keeps-what-it-was-made-from
+ended seon.vector-test/a-stored-vector-keeps-what-it-was-made-from
+started seon.vector-test/rrf-fuses-rankings-by-reciprocal-rank
+ended seon.vector-test/rrf-fuses-rankings-by-reciprocal-rank
+started seon.patterns-test/a-backlog-is-the-unread-queue
+ended seon.patterns-test/a-backlog-is-the-unread-queue
+started seon.patterns-test/workers-compete-for-one-shared-in-port
+ended seon.patterns-test/workers-compete-for-one-shared-in-port
+started seon.profile-test/a-threads-allocation-is-its-own
+ended seon.profile-test/a-threads-allocation-is-its-own
+started seon.profile-test/a-new-stack-is-not-the-calls-bytes
+ended seon.profile-test/a-new-stack-is-not-the-calls-bytes
+started seon.profile-test/a-collection-in-a-measured-call-is-not-its-bytes
+ended seon.profile-test/a-collection-in-a-measured-call-is-not-its-bytes
+started seon.profile-test/a-measures-time-is-what-its-thread-does
+ended seon.profile-test/a-measures-time-is-what-its-thread-does
+started seon.profile-test/a-measure-is-the-same-beside-another-thread
+ended seon.profile-test/a-measure-is-the-same-beside-another-thread
+started seon.profile-test/a-call-is-measured-one-way
+ended seon.profile-test/a-call-is-measured-one-way
+started seon.profile-test/an-evals-record-carries-its-costliest-functions
+ended seon.profile-test/an-evals-record-carries-its-costliest-functions
+started seon.profile-test/calls-is-the-epochs-total
+ended seon.profile-test/calls-is-the-epochs-total
+started seon.profile-test/every-call-of-a-contracted-function-is-counted
+ended seon.profile-test/every-call-of-a-contracted-function-is-counted
+started seon.profile-test/every-touched-function-has-an-estimated-time
+ended seon.profile-test/every-touched-function-has-an-estimated-time
+started seon.profile-test/reading-the-clock-allocates-nothing
+ended seon.profile-test/reading-the-clock-allocates-nothing
+started seon.profile-test/the-clock-is-the-one-every-process-reads
+ended seon.profile-test/the-clock-is-the-one-every-process-reads
+started seon.profile-test/top-orders-by-time-then-calls
+ended seon.profile-test/top-orders-by-time-then-calls
+started r3.inc-test/incremental-equals-full
+ended r3.inc-test/incremental-equals-full
+started r3.inc-test/a-refused-work-run-gets-its-verdict-in-both
+ended r3.inc-test/a-refused-work-run-gets-its-verdict-in-both
+started seon.print-test/rows-reserve-the-cut-they-print
+ended seon.print-test/rows-reserve-the-cut-they-print
+started seon.print-test/the-text-stays-inside-its-budget
+ended seon.print-test/the-text-stays-inside-its-budget
+started seon.print-test/an-entry-of-leaves-is-charged-what-it-prints
+ended seon.print-test/an-entry-of-leaves-is-charged-what-it-prints
+started seon.print-test/rows-show-whole-then-one-cut
+ended seon.print-test/rows-show-whole-then-one-cut
+started seon.print-test/the-layout-is-fipps
+ended seon.print-test/the-layout-is-fipps
+started seon.print-test/a-cut-counts-the-lines-it-left
+ended seon.print-test/a-cut-counts-the-lines-it-left
+started seon.print-test/a-long-name-cuts-the-same-anywhere
+ended seon.print-test/a-long-name-cuts-the-same-anywhere
+started seon.print-test/escaped-strings-stay-printable-under-a-small-budget
+ended seon.print-test/escaped-strings-stay-printable-under-a-small-budget
+started seon.print-test/a-refused-argument-is-shown-by-the-one-printer
+ended seon.print-test/a-refused-argument-is-shown-by-the-one-printer
+started seon.print-test/a-table-keeps-its-cuts-and-nested-cells
+ended seon.print-test/a-table-keeps-its-cuts-and-nested-cells
+started seon.print-test/a-cut-reads-its-rest-through-a-form-handle
+ended seon.print-test/a-cut-reads-its-rest-through-a-form-handle
+started seon.print-test/a-reply-value-cut-reads-its-rest-through-its-handle
+ended seon.print-test/a-reply-value-cut-reads-its-rest-through-its-handle
+started seon.print-test/code-prints-as-written
+ended seon.print-test/code-prints-as-written
+started seon.print-test/a-cut-of-prose-reads-its-rest-as-prose
+ended seon.print-test/a-cut-of-prose-reads-its-rest-as-prose
+started seon.print-test/a-cuts-form-reads-its-rest
+ended seon.print-test/a-cuts-form-reads-its-rest
+started seon.print-test/a-handle-links-to-its-row
+ended seon.print-test/a-handle-links-to-its-row
+started seon.print-test/a-lifted-map-keeps-its-namespace
+ended seon.print-test/a-lifted-map-keeps-its-namespace
+started seon.print-test/a-long-name-is-cut-in-chars-and-names-its-form
+ended seon.print-test/a-long-name-is-cut-in-chars-and-names-its-form
+started seon.print-test/a-map-is-key-and-value-rows
+ended seon.print-test/a-map-is-key-and-value-rows
+started seon.print-test/a-map-shows-its-first-entry-whenever-its-least-form-fits
+ended seon.print-test/a-map-shows-its-first-entry-whenever-its-least-form-fits
+started seon.print-test/a-one-line-cut-reads-the-source-rest
+ended seon.print-test/a-one-line-cut-reads-the-source-rest
+started seon.print-test/an-earlier-value-prints-as-its-handle
+ended seon.print-test/an-earlier-value-prints-as-its-handle
+started seon.print-test/code-and-prose-read-as-themselves
+ended seon.print-test/code-and-prose-read-as-themselves
+started seon.print-test/hiccup-and-text-come-from-one-selection
+ended seon.print-test/hiccup-and-text-come-from-one-selection
+started seon.print-test/maps-sharing-keys-are-a-table
+ended seon.print-test/maps-sharing-keys-are-a-table
+started seon.print-test/members-fill-breadth-before-depth
+ended seon.print-test/members-fill-breadth-before-depth
+started seon.print-test/prose-says-what-it-omitted
+ended seon.print-test/prose-says-what-it-omitted
+started seon.print-test/text-is-the-printed-text-or-the-error
+ended seon.print-test/text-is-the-printed-text-or-the-error
+started seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+ended seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+RED seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store {:pass 1, :fail 2, :error 0}
+started seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+ended seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+RED seon.agent-test/a-blocked-agent-ends-on-its-socket-eof {:pass 0, :fail 2, :error 0}
+started seon.agent-test/a-proof-run-ends-with-its-agent
+STALLED seon.agent-test/a-proof-run-ends-with-its-agent 134000 ms (bound 133356 ms, load 10.45, /Users/sean/src/seon-next/target/prove/shard-2.log)
