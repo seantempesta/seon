@@ -16,7 +16,7 @@
 # the process's pid), or the DIR --out names; the run says where on its first line ("prove: run ID,
 # logs in DIR"), so two runs on one checkout never overwrite each other's shard files and logs, and
 # every reader takes the path from the run. The newest :seon.config.proofs/runs-kept runs are kept
-# (test-runner/prune-runs!; target/prove/ms, each test's last measured ms, is the checkout's, shared by the runs).
+# (test-runner/prune-runs!). Each test's last measured ms is its result's, on the standing root's main.
 #
 # bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
 # runs every test and step with no green at its digest, the ones that

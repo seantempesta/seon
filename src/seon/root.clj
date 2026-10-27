@@ -843,7 +843,7 @@
           (docs/baseline-reads db plan (:value r)))))))
 
 (defn wiki-tx
-  "The wiki (the checkout's docs/) onto main db, written in the boot fact's own commit so main
+  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the system prompt every agent reads first is one of its pages
   (seon.context/system-text), and the help page another (seon.context/help-text). An unchanged wiki writes nothing. A link to no section is kept on
   its section and shows as a dead citation (seon.problems/health), never refuses the load.
@@ -851,7 +851,11 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
   ([db checkout] (wiki-tx db checkout {}))
-  ([db checkout baseline] (docs/load-dir-tx db checkout "docs" baseline)))
+  ([db checkout baseline]
+   ;; each of the checkout's wiki dirs in turn, on the db the ones before it made (a page links to the
+   ;; sections of the others, which are stored by then)
+   (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
+           [] (cfg/value :seon.config.root/wiki-dirs))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote

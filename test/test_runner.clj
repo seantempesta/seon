@@ -258,16 +258,12 @@
       (:seon.error/type r) [{:key :all :message (:seon.error/message r)}]
       :else [])))
 
-(def ^:private ms-dir
-  "Where each test's last measured ms is kept, one file per test (written by the shard that ran
-  it: no two shards write one file): this checkout's own, what orders its next run's deal."
-  "target/prove/ms")
-
 (defn- measured-ms
-  "{test ms} of tests whose last run is kept in ms-dir: what the deal orders by, never what a
-  test proves."
+  "{test ms} of tests: each one's newest measured ms on the standing root's main (its :results
+  :ms, seon.proofs/last-ms): what the deal orders by, never what a test proves. No root
+  answering: none, and the deal counts every test alike."
   [tests]
-  (into {} (for [t tests :let [f (io/file ms-dir (str t))] :when (.isFile f)] [t (parse-long (str/trim (slurp f)))])))
+  (if (seq tests) (:ms (ask-root {:op :results :digests [] :tests (vec tests)}) {}) {}))
 
 (defn shards
   "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
@@ -347,8 +343,6 @@
           ;; one request of the shard's results, their failures and each test's function costs
           unstored (when same?
                      (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} ran (proofs/failures {:reports @reports})))
-          _ (.mkdirs (io/file ms-dir))
-          _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
           red (count (remove proofs/green? (vals ran)))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
