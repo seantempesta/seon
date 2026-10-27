@@ -23,6 +23,7 @@
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
+;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
@@ -562,6 +563,21 @@
         (swap! state assoc :branch-graph {:db db :graph g :inputs in})
         g))))
 
+(defn branch-changes
+  "What branch db changed since base, its merge base (seon.merge/delta-changes, declared data
+  left out): read once per (base, db) pair and held while db is the newest asked, as
+  branch-graph is, so a turn's readers (its contract gaps, what it will merge, the problems it
+  caused, its test plan, my.branch/changes) take one diff, and a test child forked after it
+  inherits it. {} with no base."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :seon.merge/changes]}
+  [base db]
+  (let [{w-base :base w-db :db ch :changes} (:branch-changes @state)]
+    (cond (nil? base) {}
+          (and ch (identical? base w-base) (identical? db w-db)) ch
+          :else (let [ch (pm/delta-changes base db #{})]
+                  (swap! state assoc :branch-changes {:base base :db db :changes ch})
+                  ch))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -583,7 +599,7 @@
   :digests {test digest}, :dir (the results directory when shared), :graph (the reach graph it
   walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
-  are not automatic). The tests base holds that the branch removed (seon.program/divergence's
+  are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
   (:removed {test src}): main's tests judge a branch whether or not it still holds them (owner:
   \"deleting the old test doesn't stop the old test from running\")."
@@ -604,7 +620,7 @@
         ;; that reaches a process of its own (base's index says) stays a process test
         removed (into (sorted-map-by #(compare (str %1) (str %2)))
                       (when base
-                        (for [v (:removed (program/divergence base db))
+                        (for [v (:removed (pm/divergence (branch-changes base db)))
                               :let [e (some->> (pdb/eid base :var/name v) (d/entity base))
                                     nsym (symbol (namespace v))
                                     head (when-not (find-ns nsym)
@@ -635,6 +651,9 @@
   ([mode] (prove! mode #{}))
   ([mode names]
   (commit!)
+  ;; the turn's one diff, read here at the committed db, so the test child forked for this run
+  ;; inherits it and the turn's other readers find it held (branch-changes)
+  (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
                             (seq names) (assoc :names names))))
@@ -783,7 +802,7 @@
                    ;; the proofs as the plan selects them (one loaded but never recorded has
                    ;; no digest and is selected all the same), and the tests the branch changed
                    (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
-                                                             (into (filter (:digests plan) (program/changed-vars (:base @state) (db))))
+                                                             (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
                                                              (into (keys (:removed plan)))))))
                    judge)
         {:keys [reused digests dir]} plan
@@ -1052,7 +1071,7 @@
     (mark! :handlers)
     ;; :base is the branch's merge base with main: a new branch's is the image (main as it
     ;; forked); a resumed one's is older than main, and comparing against main's head would
-    ;; read main's later changes as the branch's (seon.program/divergence, changed-vars)
+    ;; read main's later changes as the branch's (branch-changes)
     (let [base (if resumed (pdb/branch-base store-conn (pdb/main-branch cfg) branch) db0)
           ;; a kept branch, resumed: this process (forked holding main's program) runs the
           ;; branch's own changes since its base on top, as merging main would; from main's

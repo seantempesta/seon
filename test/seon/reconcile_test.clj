@@ -196,7 +196,7 @@
                judged (first (filter #(and (map? %) (:seon.run/outcome %))
                                      (#'r/judge-tx {:db @conn :boot "boot-1" :rid 0 :flights {} :pending {}} {:act {:run "demo/a#1" :task "demo/a"}} {}
                                                    diff)))]
-           (is (= #{'app.gaps/u} (#'turn/added-gaps base @bc)) "the agent's done check")
+           (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc #{})))) "the agent's done check")
            (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
            (is (= '#{app.gaps/u} (set (:seon.run/uncontracted judged))) "root's judge: g is main's gap, fixed on main")
            (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))

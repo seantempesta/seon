@@ -48,7 +48,7 @@
   :seon.task/needs #{"seon.task/design-writes-the-implement-steps-proofs"}
   :seon.task/proofs #{seon.reconcile-test/a-design-is-refused-until-its-proofs-are-designed-red}}
  {:seon.task/name "an-unreached-change-refuses-the-last-task"
-  :seon.task/plan "What exists: `seon.reconcile/done-explain` refuses red, unknown and stray tests, regressions, contract gaps and unmerged entries, but not a change no test reaches. v1's done rule refused 'functions no green test covers' at the last task of a chain, and its `my.test/check` answered :seon.test/unreached. Correct: at a task that carries :seon.task/target (the merge), every var in `seon.program/divergence` against the branch's base that no green test's reach covers (the reach `seon.proofs/plan` selects by, over `seon.program/reach-digests`) refuses {:error :uncovered :symbol s}; the context names each with the form that lists what reaches it. Deletes nothing."
+  :seon.task/plan "What exists: `seon.reconcile/done-explain` refuses red, unknown and stray tests, regressions, contract gaps and unmerged entries, but not a change no test reaches. v1's done rule refused 'functions no green test covers' at the last task of a chain, and its `my.test/check` answered :seon.test/unreached. Correct: at a task that carries :seon.task/target (the merge), every var in `seon.merge/divergence` against the branch's base that no green test's reach covers (the reach `seon.proofs/plan` selects by, over `seon.program/reach-digests`) refuses {:error :uncovered :symbol s}; the context names each with the form that lists what reaches it. Deletes nothing."
   :seon.task/kind :work
   :seon.task/proofs #{seon.reconcile-test/an-unreached-change-refuses-at-the-merge}}
  {:seon.task/name "the-judge-reads-its-branch-in-one-request"
