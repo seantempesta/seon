@@ -235,7 +235,10 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m))
-                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))]
+                              (program/account (assoc l :src (:repl/src m) :lead (:lead m) :form (:repl/form m) :ran? (contains? m :repl/value))))
+                       ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
+                       nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
+                       acct (when-not nested? acct)]
                    (when l (vreset! last nil))
                    (if acct
                      (let [tx (when contract/record? (program/record-tx (agent/db) acct))
@@ -246,7 +249,9 @@
                        (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)))
-                     (cond-> m l (assoc :repl/defined (program/set-vars l))))))))))))
+                     (cond-> m
+                       l (assoc :repl/defined (program/set-vars l))
+                       nested? (assoc :not-program "a def beside calls is not program: it stays this eval (seon.program/definition-form?); define at a form's top level to make it program")))))))))))
 
 (defn- branch-registry
   "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
@@ -343,7 +348,8 @@
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
   seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
   of each var it defined, in order: the agent's uncontracted definitions as they stand at the
-  eval's end when it defined one, with the fix; each contract that could not be armed, by its var),
+  eval's end when it defined one, with the fix; each contract that could not be armed, by its var;
+  a def beside calls that stays the eval, not program),
   and its cost summed over its forms (ms, ticks, bytes allocated);
   each key only when present (DECISIONS Dogfood rulings; a change to a schema
   is an explicit fact the eval shows)."
@@ -363,7 +369,10 @@
                    (conj {:seon.repl/finding :uncontracted-definition
                           :seon.repl/fix (str "Declare a contract on each: (defn f {:malli/schema [:=> [:cat ...] ...]} [...] ...). "
                                               "A branch carrying an uncontracted function is refused at merge.")
-                          :uncontracted (vec (sort-by str left)) :count (count left)}))]
+                          :uncontracted (vec (sort-by str left)) :count (count left)})
+                   ;; a def beside calls (wrap-record): it stays this eval, not program
+                   (some :not-program fs)
+                   (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)}))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
       (and (> (count fs) 1) (seq vs)) (assoc :values vs)

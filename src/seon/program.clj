@@ -33,6 +33,28 @@
   [nsx]
   (or (= 'user (ns-name nsx)) (boolean (:scratch (meta nsx)))))
 
+(def ^:private env-forms
+  "The clojure.core forms a top-level form changes its namespace's environment by."
+  #{'ns 'in-ns 'require 'use 'import 'refer 'refer-clojure 'alias 'load 'extend 'extend-type 'extend-protocol})
+
+(defn definition-form?
+  "Is form, read in namespace nsx, a definition at its top level: its head is the special form def
+  or resolves (as the compiler does) to a var named def... (defn, deftest, defmethod, a
+  library's defschema), or to a clojure.core form that changes the namespace's environment
+  (ns, require, extend-type ...). An eval whose def sits beside calls, (let [r (f)] (def x r)), is
+  none: it stays the recorded eval, never program a later load runs again (root's ruling,
+  2026-10-27: one ran my.agent/prove at every load of its branch)."
+  {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
+  [form nsx]
+  (boolean
+    (when (and (seq? form) (symbol? (first form)))
+      (or (= 'def (first form))
+          (when-let [v (ns-resolve nsx (first form))]
+            (when (var? v)
+              (let [{n :name s :ns} (meta v)]
+                (or (str/starts-with? (str n) "def")
+                    (and (= 'clojure.core (ns-name s)) (contains? env-forms n))))))))))
+
 (defn edn-value?
   "Is v plain data that EDN prints and reads back equal: nil, booleans, numbers, strings,
   keywords, symbols, and lists, vectors, maps and sets of them."
