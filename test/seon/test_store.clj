@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib] [seon.program :as program] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -14,23 +14,38 @@
            (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
+(defn program-schema-digest
+  "The digest (8 hex digits) of the declarations in `decls` (seon.db/schema's form) of the attributes
+  that hold the program (seon.program/attr-namespaces): what the test runner's program store is named
+  by, so a change to any other attribute (a run's, a task's, a config key) keeps the store and its
+  imported program, where the whole schema's digest (seon.db/schema-digest) made a full import."
+  {:malli/schema [:=> [:cat [:sequential :map]] :string]}
+  [decls]
+  (subs (clojure.string/replace (str (hasch/uuid (filterv #(some-> (:db/ident %) namespace program/attr-namespaces) decls))) "-" "") 0 8))
+
+(def kept-program-digest
+  "program-schema-digest of this process's schema."
+  (program-schema-digest pdb/schema))
+
 (defn kept-store!
-  "The path of the kept store of regenerable output at base for this schema,
-  base-<seon.db/schema-digest> (the test runner's program store, the process tests' store); a
-  store at base made with another schema (base itself, or base-<8 hex digits> but this one) is
-  removed: it is output, made again from its inputs, never a record, so a changed schema makes a
-  new store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema).
-  Nothing is made here; the caller opens it."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [base]
-  (let [f (java.io.File. ^String base)
-        dir (.getParentFile f)
-        stem (.getName f)
-        keyed (str stem "-" pdb/schema-digest)
-        old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
-    (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-      (sh/sh "rm" "-rf" (str dir "/" n)))
-    (str dir "/" keyed)))
+  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's,
+  seon.db/schema-digest, unless given: the program store passes kept-program-digest),
+  base-<digest> (the test runner's program store, the process tests' store); a store at base made
+  with another digest (base itself, or base-<8 hex digits> but this one) is removed: it is output, made
+  again from its inputs, never a record, so a changed schema makes a new store, nothing migrated or
+  refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here; the caller
+  opens it."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
+  ([base] (kept-store! base pdb/schema-digest))
+  ([base digest]
+   (let [f (java.io.File. ^String base)
+         dir (.getParentFile f)
+         stem (.getName f)
+         keyed (str stem "-" digest)
+         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+       (sh/sh "rm" "-rf" (str dir "/" n)))
+     (str dir "/" keyed))))
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),

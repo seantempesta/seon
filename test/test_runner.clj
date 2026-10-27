@@ -9,7 +9,7 @@
     --store-steps OUT                 the steps bin/check ran green stored at their digests
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
-  (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
@@ -34,7 +34,7 @@
 ;; ---- reach -----------------------------------------------------------------------------
 
 ;; The program db is a function of the git tree (owner via root, 2026-10-23, option B of
-;; notes/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
+;; notes/archive/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
 (defn- tree-prefix
@@ -94,12 +94,13 @@
   per store (two runs never share a checkout, AGENTS section 3). A store past
   :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
   before it is opened, and starts again from this tree. The branch's connection stays open for
-  the process (the db value reads the store); the store's main connection is released."
-  [root store]
+  the process (the db value reads the store); the store's main connection is released. tree: the
+  checkout's tree-id when the caller holds it (the plan computes it once)."
+  ([root store] (program-db root store (fx/tree-id root)))
+  ([root store tree]
   (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
     (sh/sh "rm" "-rf" store))
-  (let [tree (fx/tree-id root)
-        b (tree-branch tree)
+  (let [b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
     (when-not (contains? (set branches) b)
@@ -120,7 +121,39 @@
              (vreset! committed true)
              (finally (when-not @committed (d/delete-branch! conn b))))))
     (d/release conn)
-    @(d/connect (assoc cfg :branch b))))
+    @(d/connect (assoc cfg :branch b)))))
+
+(defn- builder-id
+  "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of
+  seon.program (an index range of the var names, one entity read each), so a change to any of them
+  and the config keys its rows and flags read (pin-namespaces, process-vars, binary-vars), makes a stored graph (reach-graph-of) another builder's."
+  [db]
+  (error/digest (str (str/join " " (sort (for [dt (d/index-range db {:attrid :var/name :start (symbol "seon.program" "") :end (symbol "seon.program" "\uffff")})
+                                               :let [f (:var/form (d/entity db (:e dt)))] :when f]
+                                           (:form/id f))))
+                     ;; and the config the graph's rows and flags are read under
+                     (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
+
+(defn reach-graph-of
+  "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
+  a stored graph decodes in about a sixth of what building one costs, 23M ticks against 146M on
+  Seon's program) brought to db by seon.program/reach-update, which re-folds only what differs,
+  else built (seon.program/reach-graph); stored again when it moved. A stored graph is used
+  only when the code that builds one (builder-id) and the system's data-refs are the ones it was
+  built under; one that does not read is built over: it is regenerable output of the kept store."
+  [db data-refs store]
+  (let [f (io/file store "reach-graph.fasl")
+        id (builder-id db)
+        stored (when (.isFile f)
+                 (let [{:keys [builder graph]} (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))]
+                   (when (and (= id builder) (= data-refs (:data-refs graph))) graph)))
+        g (if stored (program/reach-update stored db) (program/reach-graph db data-refs))]
+    (when (or (nil? stored) (not= (:live g) (:live stored)))
+      (let [tmp (io/file store (str "reach-graph.fasl." (random-uuid)))]
+        (java.nio.file.Files/write (.toPath tmp) ^bytes (fasl/serialize {:builder id :graph (dissoc g :affected)})
+                                   (make-array java.nio.file.OpenOption 0))
+        (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))
+    g))
 
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
@@ -131,9 +164,10 @@
   it: never an empty selection that says OK)."
   [root names store]
   (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
-        db (program-db root store)
-        in (fx/inputs root)
-        g (program/reach-graph db (:data-refs in))
+        tree (fx/tree-id root)
+        db (program-db root store tree)
+        in (fx/inputs root config/config (config/checkout) tree)
+        g (reach-graph-of db (:data-refs in) store)
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
     {:graph g :inputs in
      :no-test (vec (sort (remove (set (map (comp symbol namespace key) idx)) nss)))
@@ -224,8 +258,7 @@
   (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
-    (let [before (fx/tree-id (System/getProperty "user.dir"))
-          ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
+    (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           ran (proofs/run-tests! tests digests
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
@@ -235,9 +268,10 @@
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks))
-          ;; the tree the tests read is the plan's from before the run to after it: an edit
-          ;; during the run (a test reading files reads it) is not what the digests name
-          same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
+          ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
+          ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
+          ;; tree-id per shard, not two)
+          same? (= tree (fx/tree-id (System/getProperty "user.dir")))
           unstored (when same? (proofs/store-verdicts! #(fx/write-file {:req %}) (config/value :seon.config.source/test-results-dir) ran))
           _ (.mkdirs (io/file ms-dir))
           _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
@@ -250,35 +284,24 @@
 
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
-  tests of names (or all) and the bin/check steps with no green at their digest
-  (seon.proofs/plan; all? true every one), less, when nothing is named, the ones that reach a
-  process (seon.proofs/left-out). all? :merge is a merge's verification (bin/prove --merge): every key with
-  no green at its digest, the ones that reach a process too, so nothing is left out and none is
-  named by hand. Its program read from the kept store at store (program-db). Answers
-  {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
-  :missing :inputs}."
+  program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
+  (the policy a root's service shares). Answers its plan."
   [root what all? names store]
-  (let [{:keys [graph inputs digests process binary no-test]} (tests-of root names store)
-        dir (config/value :seon.config.source/test-results-dir)
-        tests? (not= what "checks") checks? (not= what "tests")
-        ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
-        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
-        ;; the health step's base: the tree this checkout's caused problems are read against
-        base (some->> (fx/base-commit root) (fx/tree-of root))
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
-        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
-        named? (or (true? all?) (seq names))
-        merge? (= :merge all?)
-        all-cand (merge (when tests? digests) steps)
-        cand (apply dissoc all-cand (proofs/left-out (keys all-cand) process (boolean (or named? merge?)) #{}))
-        found (proofs/verdicts dir (vec (vals cand)))
-        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
-        {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
-     ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
-     :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
-     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
-     :digests digests :steps steps :missing missing :inputs inputs}))
+  (proofs/plan-of (tests-of root names store) what all? names
+                  (some->> (fx/base-commit root) (fx/tree-of root))
+                  (config/value :seon.config.source/test-results-dir)))
+
+(defn- prune-runs!
+  "Remove the oldest run directories beside out (target/prove/<timestamp>-<pid>: the names sort by
+  time) past :seon.config.proofs/runs-kept; out's own, the run starting, always stays. Answers nil."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [out]
+  (let [own (io/file out)
+        runs (some->> (.getParentFile own) .listFiles
+                      (filter #(and (.isDirectory ^java.io.File %) (re-matches #"\d{8}T\d{6}-\d+" (.getName ^java.io.File %))))
+                      (sort-by #(.getName ^java.io.File %)) reverse)]
+    (doseq [^java.io.File d (drop (config/value :seon.config.proofs/runs-kept) runs) :when (not= d own)]
+      (sh/sh "rm" "-rf" (.getPath d)))))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -294,7 +317,7 @@
   (let [t0 (profile/now-ns)
         dir (config/value :seon.config.source/test-results-dir)
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
@@ -374,6 +397,7 @@
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
+                   (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))))))

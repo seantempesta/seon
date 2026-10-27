@@ -1,5 +1,5 @@
 #!/bin/zsh
-# bin/prove [--tests | --checks] [NS ...] — run exactly what the change reaches (task
+# bin/prove [--out DIR] [--tests | --checks] [NS ...] — run exactly what the change reaches (task
 # seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md): every test (of the named
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
@@ -12,21 +12,27 @@
 # Ends on PROVE OK / PROVE FAILED and its exit status. The full runs are explicit:
 # bin/test --all, bin/check 100.
 #
+# Each run writes under a directory of its own, target/prove/<run-id> (the run id: a timestamp and
+# the process's pid), or the DIR --out names; the run says where on its first line ("prove: run ID,
+# logs in DIR"), so two runs on one checkout never overwrite each other's shard files and logs, and
+# every reader takes the path from the run. The newest :seon.config.proofs/runs-kept runs are kept
+# (test-runner/prune-runs!; target/prove/ms, each test's last measured ms, is the checkout's, shared by the runs).
+#
 # bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
 # runs every test and step with no green at its digest, the ones that
-# reach a process too (nothing left out, none named by hand), then bin/check contracts and
-# bin/check smoke; ends on MERGE OK / MERGE FAILED from those exit statuses alone, naming each
-# red and anything that did not run; and appends its line to notes/merge-log.md: the sha, the
+# reach a process too (nothing left out, none named by hand: bin/check contracts and bin/check smoke
+# are steps of that same run, keyed by digest, never run again beside it); ends on MERGE OK / MERGE
+# FAILED from its exit status alone, naming each red and anything that did not run; and appends its line to notes/merge-log.md: the sha, the
 # plan's counts, the verdicts, the reds, the src delta of HEAD against its first parent and the
 # keys left out against main's last merge line.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# merge_verdict OUT ST CST SST: the merge's one verdict from prove's, contracts' and smoke's exit
-# statuses alone, with the reds named from their logs in OUT; its line appended to MERGE_LOG
-# (notes/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST CST SST runs it alone.)
+# merge_verdict OUT ST: the merge's one verdict from prove's exit status alone (its steps include
+# contracts and smoke), with the reds named from its log in OUT; its line appended to MERGE_LOG
+# (notes/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
 merge_verdict() {
-  local out=$1 st=$2 cst=$3 sst=$4 log=${MERGE_LOG:-$ROOT/notes/merge-log.md}
+  local out=$1 st=$2 log=${MERGE_LOG:-$ROOT/notes/merge-log.md}
   v() { (( $1 == 0 )) && echo OK || echo "FAILED (exit $1)"; }
-  local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" "$out/contracts.log" "$out/smoke.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
+  local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
   local counts=$(grep -E "^prove: [0-9]+ keys" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: //; s/; selected in.*//')
   local merged=$(grep -E "^prove: a merge's verification" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: a merge.s verification: //')
   local srcd
@@ -36,23 +42,27 @@ merge_verdict() {
   local left=$(grep -oE "[0-9]+ left out\)?$" "$out/prove.log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
   local main_left=$(grep -oE "[0-9]+ process keys left out|left out [0-9]+" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
   local verdict="MERGE FAILED"
-  (( st == 0 && cst == 0 && sst == 0 )) && verdict="MERGE OK"
+  (( st == 0 )) && verdict="MERGE OK"
   [[ -z $reds && $verdict == "MERGE FAILED" ]] && reds="none named (see the logs in $out)"
-  local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); contracts $(v $cst); smoke $(v $sst); reds: ${reds:-none}; src $srcd; left out ${left:-not measured} (main's last line: ${main_left:-none recorded})"
+  local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); reds: ${reds:-none}; src $srcd; left out ${left:-not measured} (main's last line: ${main_left:-none recorded})"
   echo "$line" >> "$log"
   echo "$line"
   echo "$verdict"
   [[ $verdict == "MERGE OK" ]]
 }
-[[ ${1:-} == --merge-verdict ]] && { merge_verdict "$2" "$3" "$4" "$5"; exit $? }
+[[ ${1:-} == --merge-verdict ]] && { merge_verdict "$2" "$3"; exit $? }
+OUT=
+[[ ${1:-} == --out ]] && { OUT=$2; shift 2 }
 MERGE=0
 [[ ${1:-} == --merge ]] && { MERGE=1; shift }
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
 (( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }
-OUT=$ROOT/target/prove
+if [[ -z $OUT ]]; then
+  OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$
+fi
 mkdir -p "$OUT"
-rm -f "$OUT/steps" "$OUT/steps.edn" "$OUT/green"
+echo "prove: run ${OUT:t}, logs in $OUT"
 st=0
 PLAN=(); (( MERGE )) && PLAN=(--merge)
 # a subshell: the pipeline's first part, its status the run's (tee keeps the log the merge reads)
@@ -68,7 +78,4 @@ exit $st
 ) 2>&1 | tee "$OUT/prove.log"
 st=${pipestatus[1]}
 (( MERGE )) || exit $st
-# the merge's other two verdicts, each run whatever the one before answered
-"$ROOT/bin/check" contracts > "$OUT/contracts.log" 2>&1; cst=$?
-"$ROOT/bin/check" smoke > "$OUT/smoke.log" 2>&1; sst=$?
-merge_verdict "$OUT" $st $cst $sst
+merge_verdict "$OUT" $st

@@ -192,8 +192,11 @@
   {:malli/schema [:=> [:cat :any :seon.print/context] :map]}
   [x context]
   (let [c (class x) limit (:max-children context)
-        ;; a nested map whose schema declares a render shows as that render, one line, in its place
-        rendered (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
+        ;; a nested map whose schema declares a render shows as that render in its place: its text,
+        ;; one line (:text), or a value the render chooses to show (:value), printed here as any value
+        shown (when (and (:render context) (map-classes c) (not (identical? x (:root context)))) ((:render context) x))
+        rendered (when (contains? shown :text) shown)
+        summary (when (contains? shown :value) shown)
         ;; a call ([#'f opts value], a vector headed by a var, as seon.web.html expands it, whose opts
         ;; carry a budget): its value printed at that budget and handle, so a reader sees the cut the page shows
         ;; and the form that reads the rest. Its budget is its own, beside the enclosing value's, as the
@@ -204,6 +207,7 @@
         again (when (:seen context) (seen-form x c context))]
     (cond
       again (scalar :seon.print/rendered x (pr-str again))
+      summary (classify (:value summary) context)
       call (let [[f o v] call
                  r (show v (cond-> {:handle (:handle o) :budget (:budget o) :max-depth (:max-depth context)
                                     :width (:width context) :outputs #{:text}}
