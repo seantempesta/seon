@@ -114,6 +114,15 @@
         [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx r (val (first (:runs t)))] [(count (:runs t)) (:seon.run/id r) (get-in r [:task :seon.task/id])])"]))]
     (is (= [1 (:run @names) (:task @names)] (:value held)) "its run, with its task, in its record")))
 
+(deftest an-agent-reads-its-task-running
+  ;; task seon.task/an-agent-reads-its-task-as-main-holds-it (agent-repl, 2026-10-27): an attached
+  ;; agent's branch is cut before main writes the task's release, so (my.task/current) and the
+  ;; page's task read :held while main reads :running. The run's start on the branch says running
+  (let [[current page] (at/in-agent ["(:seon.task/execution (my.task/current))"
+                                     "(pr-str (seon.repl/render-ctx-hiccup))"])]
+    (is (= :running (:value current)) "the agent reads its task running, as main does")
+    (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message

@@ -9,7 +9,7 @@
  {:seon.task/name "an-agent-reads-its-task-as-main-holds-it"
   :seon.task/plan "What exists: `my.task/current` reads the agent's task on its own branch (`seon.agent/db`), forked before the run was written, so it reads its execution as held while main reads running. Correct: the execution an agent reads is main's at its turn's basis, or the render says which db it read."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.task-test/an-agent-reads-its-task-running}}
+  :seon.task/proofs #{seon.server-test/an-agent-reads-its-task-running}}
  {:seon.task/name "merged-work-leaves-the-task-files"
   :seon.task/plan "What exists: a task's state is derived from its runs on main (`seon.reconcile/task-state`), so work a Seon agent merges reads `:merged`. Work a worktree session merges into main has no run, and its entry in `resources/seon/tasks/` reads the same before and after: of the shipped tasks, dozens are merged work that loads as open (`seon.task/the-shipped-task-files-load` loads them all). What correct looks like (simplest, no new key): the merge that merges a task's work removes its entry from the task file in the same commit; git keeps the plan and its proofs stay in test/. A task still worked by Seon agents keeps its derived state. Proposed, not decided: root rules before it is built (docs/tasks.md#where-a-tasks-state-lives). Deletes: the merged entries now in the files."
   :seon.task/kind :work

@@ -1073,11 +1073,14 @@
   the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
   the run with its task. Written as the process starts with its run (init!: an outside agent's
   branch is cut before its run is written on main), or by the turn that begins a later run of the
-  session; once, nothing written when the branch holds it."
+  session; once, nothing written when the branch holds it. The task is running, as main holds it
+  (its release, written on main after the branch was cut, read :held here: my.task/current and the
+  page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
   (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
-    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
+    (transact! [{:seon.task/id task :seon.task/execution :running}
+                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
