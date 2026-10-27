@@ -340,6 +340,27 @@
     (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t" :config {}}) calc-tests))
         "the inputs without program facts are in every digest")))
 
+(deftest a-digest-is-the-content-reached-whatever-recorded-it
+  ;; task seon.program/reach-index-reads-each-attribute-once: a form's own digest is its :form/id
+  ;; (its content's hash), no longer a hash of the text read back
+  (let [in {:env "e" :tree "t"}
+        digests #(select-keys (program/reach-digests % in) calc-tests)
+        db (calc-db)
+        moved (record db 'app.pt-calc "(defn add [a b] (+ b a))")]
+    (is (= (digests db) (digests (calc-db))) "the same content in another value: the same digests")
+    (is (= (digests db) (digests (record moved 'app.pt-calc "(defn add [a b] (+ a b))")))
+        "a form changed and changed back: the digests of the content it had")
+    (is (= (digests db) (digests (record db 'app.pt-calc "(defn neg [x] (- x))")))
+        "a form recorded again as it was moves nothing")
+    (let [reach-rows @#'program/reach-rows
+          live (set (vals (@#'program/live-ids db)))
+          rows (fn [scan?] (into {} (map (juxt :id identity)) (reach-rows db live scan?)))
+          want (into {} (for [e live :let [f (program/form-row db e)]] [(:id f) (select-keys f [:id :ns :defines :refs])]))]
+      (doseq [scan? [true false]]
+        (is (= want (update-vals (rows scan?) #(select-keys % [:id :ns :defines :refs])))
+            (str "the walk's rows are the whole rows' id, namespace, definitions and references (scan " scan? ")")))
+      (is (every? #(= (:id %) (:own %)) (vals (rows true))) "a form's own digest is its id"))))
+
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}
