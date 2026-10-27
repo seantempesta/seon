@@ -250,35 +250,12 @@
 
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
-  tests of names (or all) and the bin/check steps with no green at their digest
-  (seon.proofs/plan; all? true every one), less, when nothing is named, the ones that reach a
-  process (seon.proofs/left-out). all? :merge is a merge's verification (bin/prove --merge): every key with
-  no green at its digest, the ones that reach a process too, so nothing is left out and none is
-  named by hand. Its program read from the kept store at store (program-db). Answers
-  {:run-tests :run-steps :reused :cand :left (the process keys left out) :digests :steps
-  :missing :inputs}."
+  program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
+  (the policy a root's service shares). Answers its plan."
   [root what all? names store]
-  (let [{:keys [graph inputs digests process binary no-test]} (tests-of root names store)
-        dir (config/value :seon.config.source/test-results-dir)
-        tests? (not= what "checks") checks? (not= what "tests")
-        ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
-        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) proofs/check-steps)))
-        ;; the health step's base: the tree this checkout's caused problems are read against
-        base (some->> (fx/base-commit root) (fx/tree-of root))
-        {steps :digests missing :missing} (when checks? (proofs/step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
-        process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
-        named? (or (true? all?) (seq names))
-        merge? (= :merge all?)
-        all-cand (merge (when tests? digests) steps)
-        cand (apply dissoc all-cand (proofs/left-out (keys all-cand) process (boolean (or named? merge?)) #{}))
-        found (proofs/verdicts dir (vec (vals cand)))
-        {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
-        {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
-     ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
-     :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
-     :left (when-not (or named? merge?) (vec (sort-by str (filter all-cand process))))
-     :digests digests :steps steps :missing missing :inputs inputs}))
+  (proofs/plan-of (tests-of root names store) what all? names
+                  (some->> (fx/base-commit root) (fx/tree-of root))
+                  (config/value :seon.config.source/test-results-dir)))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
