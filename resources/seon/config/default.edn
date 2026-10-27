@@ -377,6 +377,14 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
+ ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
+ ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
+ ;; in-process tests (344 in one child) dies at a varying test with exit 1 and no stderr, losing
+ ;; every result, about 200 s of CPU per commit for nothing; named runs (seon_prove, a turn's)
+ ;; are unaffected. On again when task seon.agent/a-test-run-streams-its-reports and the child's
+ ;; death are fixed. At the bound: a program commit starts no run.
+ :seon.config.proofs/prove-main-on-commit false
  ;; How many times its own last recorded run (ms) a test bin/test runs may be quiet before it is named
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
  ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each

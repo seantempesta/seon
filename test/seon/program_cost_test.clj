@@ -144,8 +144,15 @@
        ;; index's node boundaries fall (divergence's proof measured +-30% over layouts): the bound is
        ;; over layouts, not one. What it replaced per turn: this, plus divergence three or four times
        ;; (453-678 KB each), so a turn's diff reads went from ~2.5-3.3 MB to one of these
+       ;; Since touched-keys walks one :aevt range per program attribute (task
+       ;; seon.merge/touched-keys-skips-platform-records) instead of the one :eavt diff: 1.27M ticks /
+       ;; 4.7 MB at 100 forms, the 44 descents (10-13k ticks, 70 KB each) being the fixed part. A branch
+       ;; that changed one form pays about 0.8M ticks and 3.5 MB more than the :eavt diff read; the
+       ;; :eavt diff also read every datom a branch writes besides the program (its evals, turns,
+       ;; messages: thousands in a long run) and every embedding main wrote since the fork (22,000
+       ;; datoms, 313M ticks), which the ranges never touch
        :per-n {:ticks 34000.0 :bytes 100000.0}
-       :fixed {:ticks 300000.0 :bytes 900000.0 :calls 56}
+       :fixed {:ticks 1100000.0 :bytes 3900000.0 :calls 56}
        :sizes divergence-sizes})
     (cost/proof
       {:of 'seon.agent/branch-changes :input 'seon.program-cost-test/on-disk-diverged-of
