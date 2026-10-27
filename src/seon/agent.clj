@@ -216,6 +216,11 @@
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
+(def ^:dynamic *waiting*
+  "True while the loop waits for an answer of its own (await-op!): a :tests request taken there is
+  read inline, as the wait already holds the loop."
+  false)
+
 (defn- await-op!
   "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
   in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, and
@@ -232,7 +237,10 @@
          (arrived! m) (recur)
          ;; a request taken in place, and what this process's own fibers hand the loop (a test
          ;; child's lines and its finished run: a wait on the test service's answer is answered by them)
-         (or (and in-place (= in-place (:op m))) (#{::testing ::ran} (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
+         (or (and in-place (= in-place (:op m))) (#{::testing ::ran} (:op m)))
+         ;; taken inside a wait for its own answer (prove!): the wait is the loop's already, so a :tests
+         ;; read here reads its child inline (*waiting*), never handed to a fiber
+         (do (doseq [r (binding [*waiting* true] (handle! m))] (send! r)) (recur))
          :else (do (swap! state update :pending conj m) (recur)))))))
 
 
@@ -981,7 +989,7 @@
     :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
     ;; the loop never waits on the child (on a main carrier): a fiber reads it and hands the loop
     ;; each test as it starts and then the thunk that finishes the answer (::testing, ::ran)
-    :tests (let [ch (intake)
+    :tests (let [ch (when-not *waiting* (intake))
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                                      (or (:mode m) :judge)
