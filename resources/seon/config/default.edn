@@ -444,13 +444,9 @@
  ;; 2026-10-27: results are facts on the standing root's main, written by its one writer): bin/test's
  ;; shards and bin/prove's steps send theirs to its server (:record) and read results by digest from it
  ;; (:results). bin/env sets SEON_RESULTS_PORT to the main tree's server port; 0 (unset): none, so a
- ;; run reuses nothing and keeps what it ran in :seon.config.proofs/unsent-dir. A root records its own
+ ;; run's plan fails loudly (TEST FAILED, the typed :seon.proofs/unread), never as zero greens. A root records its own
  ;; test service's results on its own main whatever this says.
  :seon.config.proofs/results-port #long #or [#env SEON_RESULTS_PORT 0]
- ;; Unit: path. Where a run whose results no root took (the standing root down) keeps each request,
- ;; one file each (<uuid>.edn), until bin/test sends them at its next run; root names them as a problem
- ;; meanwhile (:unsent-results). bin/env sets SEON_UNSENT_DIR to the main tree's, one for every checkout.
- :seon.config.proofs/unsent-dir #or [#env SEON_UNSENT_DIR #seon/checkout "target/prove/unsent"]
  ;; Unit: ratio. How far a function's self ticks or self bytes per call must move from what main
  ;; holds before a run of main's tree writes it again, and before seon.proofs/slower calls it slower.
  ;; Provenance: estimate, 2026-10-27: a test's ticks at one digest are exact, but a function's per-call
