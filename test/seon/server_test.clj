@@ -145,6 +145,26 @@
     (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
+(deftest an-outside-agents-repl-answers-plainly
+  ;; THE PLAN 0.7's first attempt (2026-10-27) found four things in an outside agent's REPL: a
+  ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
+  ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
+  ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
+  (let [[miss no-ns not-a-name a-class switched sourced] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
+                                                                      "(source 'no.such.ns/missing-var)"
+                                                                      "(source :kw)"
+                                                                      "(source 'java.lang.String)"
+                                                                      "(in-ns 'my.task)"
+                                                                      "(source my.agent/help)"])]
+    (is (< (count (:text miss)) 1500) "a missed help address names what it did not find, not the help page")
+    (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))))
+    (doseq [[what r] [["no such namespace" no-ns] ["not a name" not-a-name] ["a class" a-class]]]
+      (is (nil? (:ex r)) (str "source of " what " answers, it does not fail: " (pr-str (:ex r)))))
+    (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
+    (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
+    (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
+    (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
+
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
