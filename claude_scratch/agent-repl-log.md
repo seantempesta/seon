@@ -32,3 +32,10 @@ Process notes: after `git merge main` the worktree's submodule checkout lagged t
 | 18 | main's f634a4a41c ("server_test: an old word in a comment") moved the Jolt pin back from 329c39f2 to 8e5f6304 | looks accidental | root / merge | reported |
 
 Proofs: seon.server-test/a-reset-starts-the-task-again-from-main, a-fork-goes-on-from-an-agents-head; bin/check smoke, orphan, mcp-proof, durable-write OK (clone's users).
+
+## One small real task end to end (my.agent/a-deferred-test-names-the-process-it-reaches, on this worktree's root)
+
+attach → seon_context → one reproducing eval (a deftest that calls in-agent, then `(my.agent/prove)`) → `(my.task/fail! ...)` → seon_done answered `:closed :failed`, the task held with the reason and its counterexample. Four requests, no workaround. What the context lacked:
+- the page cited only `seon.program/reach-graph`, not the producer of the answer the plan says is wrong (`my.agent/prove` → `seon.agent/run-tests-forked`); one eval found it, since its answer already carries `:why`. A plan names what it changes; this one named a helper (the task file's text, fixed by its removal here).
+- the code half of the premise was false on main: `:why` already names each deferred test's process var and the calls to it. The task was stale; a task whose proof was never written and whose plan names code that main already answers could be flagged before an agent is spent on it.
+- its other half was a wiki edit (help's Done section), which an agent cannot write back from its REPL (THE PLAN 0.8). Made on this branch (docs/agent.md, "Run what judges your branch now"), and the task's entry removed from resources/seon/tasks/my.agent.edn.
