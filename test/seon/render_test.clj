@@ -1200,8 +1200,8 @@
 
 (deftest the-merge-views-draw-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
-  ;; moves; a view of main and the merge base takes their commits as children (ctx's :main-commit
-  ;; :base-commit) and reads them from the branch's own store, so it is a function of its args
+  ;; moves; a view of main and the merge base takes their commits as children (the agent's :seon.agent/main-commit
+  ;; and :seon.agent/base-commit, facts its turn writes) and reads them from the branch's own store, so it is a function of its args
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
@@ -1233,7 +1233,7 @@
         (d/transact conn tx))
       (let [c0 (d/commit-id @conn)
             k (seon.task/agent-key "b1" :a3)
-            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :main-commit c0 :base-commit c0)
+            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
             views '#{seon.render.ui/merge-view seon.render.ui/caused-view seon.render.ui/gaps-view seon.render.ui/divergence-view}
@@ -1246,7 +1246,7 @@
             (r/frame! w nil)
             (is (= r0 (ran)) "an unrelated change redraws none of them")
             (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
-            (swap! a assoc :main-commit (d/commit-id @conn))
+            (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/frame! w nil)
             (let [r1 (ran)]
               (is (= #{'seon.render.ui/merge-view}

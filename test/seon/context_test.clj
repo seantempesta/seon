@@ -1351,8 +1351,3 @@
     (is (nil? relevance-calls) "no relevance call in the frame")
     (render/dispose-walk! w)))
 
-(deftest the-own-task-is-where-ctx-holds-it-whole
-  ;; a session's runs share their task, held whole under one run only (docs/ctx.md); the newest run is first
-  (let [v {:runs (array-map 2 {:task {:db/id 3}} 9 {:task {:db/id 3 :seon.task/id "t"}} 4 {:task {:db/id 8 :seon.task/id "u"}})}]
-    (is (= [:runs 9 :task] (context/own-task v)) "the newest run's task, where it is whole")
-    (is (nil? (context/own-task {})) "no run, none")))

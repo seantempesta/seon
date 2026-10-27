@@ -327,11 +327,12 @@
       (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
     (is (nil? (:value status)) "an in-process test is none")))
 
-(deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
+(deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
-  ;; process's exact counts (seon.profile/measure!), the page draws the contracted calls of seon.context/page
+  ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-hiccup),
+  ;; so seon.context/page, the cold draw, is never called, and it equals the cold draw at the commit it framed at
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
@@ -339,10 +340,14 @@
                              "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
                              "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
-                             "  (vec (repeatedly 5 m)))")]))
-        later (rest (:value reads))]
-    (is (= 5 (count (:value reads))))
-    (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
+                             "  {:reads (vec (repeatedly 5 m))"
+                             "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
+                             "                    cold (seon.context/page db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
+                             "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
+        later (rest (:reads (:value reads)))]
+    (is (= 5 (count (:reads (:value reads)))))
+    (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's at the commit it framed at; differing: " (pr-str (:live=cold (:value reads)))))
+    (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
 
