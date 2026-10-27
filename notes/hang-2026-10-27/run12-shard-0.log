@@ -1,0 +1,461 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.judge-test/a-pass-stops-at-its-bound
+ended seon.judge-test/a-pass-stops-at-its-bound
+started seon.judge-test/a-pass-scores-each-request-once
+ended seon.judge-test/a-pass-scores-each-request-once
+started seon.judge-test/a-first-move-is-read-by-the-compiler
+ended seon.judge-test/a-first-move-is-read-by-the-compiler
+started seon.judge-test/the-score-says-what-the-first-move-did
+ended seon.judge-test/the-score-says-what-the-first-move-did
+started seon.judge-test/a-request-is-keyed-by-what-it-sends
+ended seon.judge-test/a-request-is-keyed-by-what-it-sends
+started seon.prove-test/main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it
+ended seon.prove-test/main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it
+RED seon.prove-test/main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it {:pass 2, :fail 2, :error 0}
+started seon.prove-test/a-session-and-an-agents-turn-for-one-digest-end-in-one-run
+ended seon.prove-test/a-session-and-an-agents-turn-for-one-digest-end-in-one-run
+started seon.prove-test/test-reds-follow-the-tests-not-the-results
+ended seon.prove-test/test-reds-follow-the-tests-not-the-results
+started seon.prove-test/a-commit-that-moves-mains-program-proves-main
+ended seon.prove-test/a-commit-that-moves-mains-program-proves-main
+started seon.prove-test/a-run-leaves-a-fact-per-digest-and-a-red-closes-with-a-later-green
+ended seon.prove-test/a-run-leaves-a-fact-per-digest-and-a-red-closes-with-a-later-green
+started seon.prove-test/a-burst-is-one-run-per-branch-and-the-latest-wins-without-starving-another-branch
+ended seon.prove-test/a-burst-is-one-run-per-branch-and-the-latest-wins-without-starving-another-branch
+started seon.prove-test/a-red-on-an-agents-branch-is-not-a-problem-of-main
+ended seon.prove-test/a-red-on-an-agents-branch-is-not-a-problem-of-main
+started seon.prove-test/a-failed-run-answers-its-waiters-with-the-error
+ended seon.prove-test/a-failed-run-answers-its-waiters-with-the-error
+started seon.prove-test/a-request-naming-other-tests-never-takes-over-a-pending-run
+ended seon.prove-test/a-request-naming-other-tests-never-takes-over-a-pending-run
+started seon.prove-test/a-run-is-keyed-by-what-it-reads
+ended seon.prove-test/a-run-is-keyed-by-what-it-reads
+started seon.prove-test/a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
+ended seon.prove-test/a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
+started seon.prove-test/a-run-whose-agent-ended-is-answered-not-a-platform-problem
+ended seon.prove-test/a-run-whose-agent-ended-is-answered-not-a-platform-problem
+started seon.prove-test/a-running-key-is-joined-and-every-waiter-is-answered-once
+ended seon.prove-test/a-running-key-is-joined-and-every-waiter-is-answered-once
+started seon.prove-test/a-session-and-an-agents-turn-for-one-digest-are-one-run
+ended seon.prove-test/a-session-and-an-agents-turn-for-one-digest-are-one-run
+started seon.prove-test/a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
+ended seon.prove-test/a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
+started seon.prove-test/a-stale-answer-is-counted
+ended seon.prove-test/a-stale-answer-is-counted
+started seon.prove-test/an-error-is-answered-recorded-and-never-remembered
+ended seon.prove-test/an-error-is-answered-recorded-and-never-remembered
+started seon.prove-test/branches-take-turns
+ended seon.prove-test/branches-take-turns
+
+FAIL in (main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it) (prove_test.clj:212)
+a program commit the tests do not reach: main run again, both reused: {:handle result/e5, :text "{:handle result/e5,\n :ms 337.991,\n :ticks 1163233,\n :bytes 7860240,\n :value\n   \"{:key \\\"main@e721f73fec3760e7\\\", :ran 2, :reused 0, :pass 6, :fail 0, :error 0, :refused nil}\"}", :value "{:key \"main@e721f73fec3760e7\", :ran 2, :reused 0, :pass 6, :fail 0, :error 0, :refused nil}"}
+expected: (= {:ran 0, :reused 2, :pass 2, :fail 0, :error 0} (select-keys b' [:ran :reused :pass :fail :error]))
+  actual: (not (= {:ran 0, :reused 2, :pass 2, :fail 0, :error 0} {:ran 2, :reused 0, :pass 6, :fail 0, :error 0}))
+
+FAIL in (main-is-proved-at-each-program-commit-and-an-agent-forked-after-reuses-it) (prove_test.clj:215)
+an agent forked after finds both at their digests: {:handle result/e6, :text "{:handle result/e6,\n :ms 317.601,\n :ticks 134893,\n :bytes 1523584,\n :value\n   \"{:handle result/e6,\n :value [false false],\n :ms 267.931,\n :ticks 50423529,\n :bytes 336686752}\"}", :value "{:handle result/e6,\n :value [false false],\n :ms 267.931,\n :ticks 50423529,\n :bytes 336686752}"}
+expected: (= [true true] c')
+  actual: (not (= [true true] [false false]))
+started seon.fx-admit-test/a-later-step-of-a-chain-runs-first
+ended seon.fx-admit-test/a-later-step-of-a-chain-runs-first
+started seon.fx-admit-test/a-rate-limit-halves-the-rate-and-successes-raise-it-back
+ended seon.fx-admit-test/a-rate-limit-halves-the-rate-and-successes-raise-it-back
+started seon.fx-admit-test/a-rate-limited-model-call-waits-for-the-bucket-and-is-answered
+ended seon.fx-admit-test/a-rate-limited-model-call-waits-for-the-bucket-and-is-answered
+started seon.fx-admit-test/a-request-waits-on-the-bucket-and-a-tick-admits-it
+ended seon.fx-admit-test/a-request-waits-on-the-bucket-and-a-tick-admits-it
+started seon.fx-admit-test/the-actual-cost-settles-the-estimate
+ended seon.fx-admit-test/the-actual-cost-settles-the-estimate
+started seon.e2e-test/turns-count-the-work-runs
+ended seon.e2e-test/turns-count-the-work-runs
+started seon.e2e-test/a-model-run-is-judged-by-what-the-plan-asks
+ended seon.e2e-test/a-model-run-is-judged-by-what-the-plan-asks
+started seon.e2e-test/await-quiet-ends-on-a-recorded-defect
+:defect #:seon.error{:agents 0, :class :platform, :count 1, :first-ms 1793090790585, :last-ms 1793090790585, :message seon.reconcile/reconciler-proc: boom, :signature fedcba9876543210}
+ended seon.e2e-test/await-quiet-ends-on-a-recorded-defect
+started seon.e2e-test/a-default-plan-cites-the-vars-its-proof-calls
+ended seon.e2e-test/a-default-plan-cites-the-vars-its-proof-calls
+started seon.merge-test/three-way-cases
+ended seon.merge-test/three-way-cases
+started seon.merge-test/a-branch-that-merged-main-carries-only-its-own-changes
+ended seon.merge-test/a-branch-that-merged-main-carries-only-its-own-changes
+RED seon.merge-test/a-branch-that-merged-main-carries-only-its-own-changes {:pass 1, :fail 0, :error 1}
+started seon.merge-test/divergence-names-each-change-a-merge-carries
+ended seon.merge-test/divergence-names-each-change-a-merge-carries
+RED seon.merge-test/divergence-names-each-change-a-merge-carries {:pass 2, :fail 0, :error 1}
+started seon.merge-test/the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+ended seon.merge-test/the-delta-three-way-reads-data-and-schema-entries-as-the-program-does
+started seon.merge-test/a-schema-entry-merges-per-key
+ended seon.merge-test/a-schema-entry-merges-per-key
+started seon.merge-test/platform-records-never-put-a-branch-behind
+ended seon.merge-test/platform-records-never-put-a-branch-behind
+started seon.merge-test/unmap-merges-as-delete
+ended seon.merge-test/unmap-merges-as-delete
+started seon.merge-test/latest-redefinition-wins
+ended seon.merge-test/latest-redefinition-wins
+started seon.merge-test/behind-means-main-program-moved
+ended seon.merge-test/behind-means-main-program-moved
+started seon.merge-test/declared-data-merges-by-key
+ended seon.merge-test/declared-data-merges-by-key
+started seon.merge-test/scratch-and-observations-never-merge
+ended seon.merge-test/scratch-and-observations-never-merge
+started seon.merge-test/a-form-s-place-does-not-make-it-another
+ended seon.merge-test/a-form-s-place-does-not-make-it-another
+started seon.merge-test/a-conflict-value-reads-a-pulled-entry
+ended seon.merge-test/a-conflict-value-reads-a-pulled-entry
+started seon.merge-test/uncontracted-is-what-the-branch-changed
+ended seon.merge-test/uncontracted-is-what-the-branch-changed
+started seon.merge-test/identical-defs-on-two-branches-merge-clean
+ended seon.merge-test/identical-defs-on-two-branches-merge-clean
+started seon.merge-test/unmerged-entry-derivation
+ended seon.merge-test/unmerged-entry-derivation
+started seon.merge-test/a-merge-carries-the-branchs-own-datoms
+ended seon.merge-test/a-merge-carries-the-branchs-own-datoms
+
+ERROR in (a-branch-that-merged-main-carries-only-its-own-changes) (merge_test.clj:258)
+and the tests it reaches are k's
+expected: (= #{(quote app/k)} (pm/changed-vars (pm/delta-changes main merged #{})))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (divergence-names-each-change-a-merge-carries) (merge_test.clj:247)
+the changed vars are its vars
+expected: (= #{(quote app/c) (quote app/f) (quote app/g)} (pm/changed-vars ch))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+started seon.render-cost-test/main-info-reads-what-the-page-shows
+ended seon.render-cost-test/main-info-reads-what-the-page-shows
+started seon.render-cost-test/a-new-turn-costs-one-turns-messages
+ended seon.render-cost-test/a-new-turn-costs-one-turns-messages
+started seon.render-cost-test/the-printer-renders-nested-values-in-one-pass
+ended seon.render-cost-test/the-printer-renders-nested-values-in-one-pass
+started seon.render-cost-test/a-move-of-main-costs-what-moved
+ended seon.render-cost-test/a-move-of-main-costs-what-moved
+started seon.render-cost-test/a-change-costs-its-components
+ended seon.render-cost-test/a-change-costs-its-components
+started seon.render-cost-test/a-transaction-renders-what-it-touched
+ended seon.render-cost-test/a-transaction-renders-what-it-touched
+started seon.render-cost-test/a-transaction-costs-its-datoms-to-match
+ended seon.render-cost-test/a-transaction-costs-its-datoms-to-match
+started seon.render-cost-test/render-calls-are-one-pass-over-their-nodes
+ended seon.render-cost-test/render-calls-are-one-pass-over-their-nodes
+started seon.render-cost-test/matching-a-commit-is-flat-in-the-pages-watched
+ended seon.render-cost-test/matching-a-commit-is-flat-in-the-pages-watched
+started seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+ended seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+started seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+ended seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+started seon.server-test/a-refused-attach-writes-nothing
+ended seon.server-test/a-refused-attach-writes-nothing
+started seon.server-test/a-server-defect-answers-that-request-alone
+ended seon.server-test/a-server-defect-answers-that-request-alone
+started seon.server-test/the-context-op-answers-what-a-model-is-sent
+ended seon.server-test/the-context-op-answers-what-a-model-is-sent
+started seon.server-test/done-answers-the-judges-reasons
+ended seon.server-test/done-answers-the-judges-reasons
+RED seon.server-test/done-answers-the-judges-reasons {:pass 2, :fail 1, :error 0}
+started seon.server-test/an-attached-agent-holds-its-run
+ended seon.server-test/an-attached-agent-holds-its-run
+started seon.server-test/a-server-refused-answer-is-the-one-error-map
+ended seon.server-test/a-server-refused-answer-is-the-one-error-map
+started seon.server-test/a-message-reaches-the-agent
+ended seon.server-test/a-message-reaches-the-agent
+started seon.server-test/an-outside-agent-changes-its-task-by-swap
+ended seon.server-test/an-outside-agent-changes-its-task-by-swap
+RED seon.server-test/an-outside-agent-changes-its-task-by-swap {:pass 10, :fail 1, :error 0}
+started seon.server-test/a-root-eval-replies-like-an-agent-eval
+ended seon.server-test/a-root-eval-replies-like-an-agent-eval
+started seon.server-test/a-line-opening-a-string-key-is-mcps
+ended seon.server-test/a-line-opening-a-string-key-is-mcps
+started seon.server-test/the-server-speaks-mcp
+ended seon.server-test/the-server-speaks-mcp
+
+FAIL in (done-answers-the-judges-reasons) (server_test.clj:138)
+expected: (= :red (:outcome done))
+  actual: (not (= :red :error))
+
+FAIL in (an-outside-agent-changes-its-task-by-swap) (server_test.clj:179)
+a swap! is told in what it changed
+expected: (>= 230 (:tokens (:value told)))
+  actual: (not (>= 230 620))
+started seon.docs-test/every-section-of-the-wiki-has-a-lead
+ended seon.docs-test/every-section-of-the-wiki-has-a-lead
+started seon.docs-test/a-review-is-a-commit-and-survives-a-rebuilt-store
+ended seon.docs-test/a-review-is-a-commit-and-survives-a-rebuilt-store
+started seon.docs-test/a-review-on-another-branch-does-not-freshen-the-checkouts-section
+ended seon.docs-test/a-review-on-another-branch-does-not-freshen-the-checkouts-section
+started seon.docs-test/a-sections-baseline-is-the-code-as-of-its-last-commit
+ended seon.docs-test/a-sections-baseline-is-the-code-as-of-its-last-commit
+started seon.docs-test/no-text-uses-an-old-word
+ended seon.docs-test/no-text-uses-an-old-word
+RED seon.docs-test/no-text-uses-an-old-word {:pass 1, :fail 1, :error 0}
+started seon.docs-test/a-baseline-git-cannot-give-is-today-and-says-so
+ended seon.docs-test/a-baseline-git-cannot-give-is-today-and-says-so
+started seon.docs-test/no-name-uses-an-old-word
+ended seon.docs-test/no-name-uses-an-old-word
+started seon.docs-test/a-page-reads-at-a-depth
+ended seon.docs-test/a-page-reads-at-a-depth
+started seon.docs-test/backlinks-are-a-sections-instances
+ended seon.docs-test/backlinks-are-a-sections-instances
+started seon.docs-test/a-link-to-no-section-is-a-dead-link-and-the-rest-loads
+ended seon.docs-test/a-link-to-no-section-is-a-dead-link-and-the-rest-loads
+started seon.docs-test/a-view-at-summary-lists-references-and-cited-by
+ended seon.docs-test/a-view-at-summary-lists-references-and-cited-by
+started seon.docs-test/a-changed-section-rewrites-only-itself
+ended seon.docs-test/a-changed-section-rewrites-only-itself
+started seon.docs-test/an-unchanged-page-writes-nothing
+ended seon.docs-test/an-unchanged-page-writes-nothing
+started seon.docs-test/grep-ranks-names-before-bodies
+ended seon.docs-test/grep-ranks-names-before-bodies
+started seon.docs-test/one-address-shows-one-text-through-ref-and-docs
+ended seon.docs-test/one-address-shows-one-text-through-ref-and-docs
+started seon.docs-test/a-baseline-never-guesses
+ended seon.docs-test/a-baseline-never-guesses
+
+FAIL in (no-text-uses-an-old-word) (docs_test.clj:364)
+no text uses an old word outside text-kept: each is [file line word]
+expected: (empty? hits)
+  actual: (not (empty? (["docs/failure-points.md" 29 "refusal"] ["resources/seon/config/default.edn" 425 "landing"])))
+started seon.task-test/a-root-before-its-first-boot-is-no-entity-value
+ended seon.task-test/a-root-before-its-first-boot-is-no-entity-value
+started seon.task-test/an-agents-links-pull-from-its-root
+ended seon.task-test/an-agents-links-pull-from-its-root
+started seon.task-test/a-templates-instructions-are-cited-as-a-plan-is
+ended seon.task-test/a-templates-instructions-are-cited-as-a-plan-is
+started seon.task-test/a-resumed-branch-takes-its-needs-from-main
+ended seon.task-test/a-resumed-branch-takes-its-needs-from-main
+started seon.task-test/the-reader-answers-every-stored-member
+ended seon.task-test/the-reader-answers-every-stored-member
+started seon.task-test/the-writer-derives-a-tasks-sections
+ended seon.task-test/the-writer-derives-a-tasks-sections
+started seon.task-test/a-new-boot-leaves-the-earlier-boots-agents
+ended seon.task-test/a-new-boot-leaves-the-earlier-boots-agents
+started seon.task-test/a-released-branch-takes-its-task-from-main
+ended seon.task-test/a-released-branch-takes-its-task-from-main
+started seon.task-test/a-runs-lifecycle-is-read-from-its-schema
+ended seon.task-test/a-runs-lifecycle-is-read-from-its-schema
+started seon.task-test/the-writer-cites-the-programs-names-not-the-reproductions
+ended seon.task-test/the-writer-cites-the-programs-names-not-the-reproductions
+started seon.task-test/the-writer-derives-a-tasks-references
+ended seon.task-test/the-writer-derives-a-tasks-references
+started seon.task-test/a-design-adds-a-proof-with-update
+ended seon.task-test/a-design-adds-a-proof-with-update
+started seon.task-test/a-task-is-its-members-not-its-plans-vector
+ended seon.task-test/a-task-is-its-members-not-its-plans-vector
+started seon.task-test/an-agents-live-state-is-facts-on-its-entity
+ended seon.task-test/an-agents-live-state-is-facts-on-its-entity
+started seon.task-test/unresolved-citations-are-answered-not-refused
+ended seon.task-test/unresolved-citations-are-answered-not-refused
+started seon.reader-test/the-laws-hold-over-generated-replies
+ended seon.reader-test/the-laws-hold-over-generated-replies
+started seon.reader-test/forgiving-forgiven-text-changes-nothing
+ended seon.reader-test/forgiving-forgiven-text-changes-nothing
+started seon.reader-test/a-definitions-head-is-its-text-up-to-its-body
+ended seon.reader-test/a-definitions-head-is-its-text-up-to-its-body
+started seon.reader-test/a-fenced-reply-reads-only-its-code
+ended seon.reader-test/a-fenced-reply-reads-only-its-code
+started seon.reader-test/delimiters-are-repaired-each-change-a-repair
+ended seon.reader-test/delimiters-are-repaired-each-change-a-repair
+started seon.reader-test/line-starts-are-each-lines-offset
+ended seon.reader-test/line-starts-are-each-lines-offset
+started seon.reader-test/prose-without-a-fence-is-a-comment
+ended seon.reader-test/prose-without-a-fence-is-a-comment
+started seon.reader-test/the-repairs-account-for-every-change
+ended seon.reader-test/the-repairs-account-for-every-change
+started seon.reconcile-test/an-index-is-listed-at-the-cost-of-its-tasks
+ended seon.reconcile-test/an-index-is-listed-at-the-cost-of-its-tasks
+started seon.reconcile-test/an-index-is-observed-at-the-cost-of-what-changed
+ended seon.reconcile-test/an-index-is-observed-at-the-cost-of-what-changed
+started seon.reconcile-test/a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
+ended seon.reconcile-test/a-branch-carries-every-task-it-changed-and-records-a-two-sided-edit
+started seon.reconcile-test/an-index-observed-from-the-last-is-the-index-listed
+ended seon.reconcile-test/an-index-observed-from-the-last-is-the-index-listed
+started seon.reconcile-test/a-waiting-run-parks-and-a-message-wakes-it
+ended seon.reconcile-test/a-waiting-run-parks-and-a-message-wakes-it
+started seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none
+ended seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none
+started seon.reconcile-test/ended-runs-are-judged-by-the-done-rule
+ended seon.reconcile-test/ended-runs-are-judged-by-the-done-rule
+started seon.reconcile-test/a-merge-with-deferred-tests-is-gated-with-nobody-asking
+ended seon.reconcile-test/a-merge-with-deferred-tests-is-gated-with-nobody-asking
+started seon.reconcile-test/the-judge-and-the-merge-gate-agree-on-contract-gaps
+ended seon.reconcile-test/the-judge-and-the-merge-gate-agree-on-contract-gaps
+RED seon.reconcile-test/the-judge-and-the-merge-gate-agree-on-contract-gaps {:pass 0, :fail 0, :error 1}
+started seon.reconcile-test/merges-run-one-at-a-time
+ended seon.reconcile-test/merges-run-one-at-a-time
+started seon.reconcile-test/a-proof-a-branch-registers-reaches-main-at-the-runs-end
+ended seon.reconcile-test/a-proof-a-branch-registers-reaches-main-at-the-runs-end
+started seon.reconcile-test/needs-dag-starts-in-dependency-order
+ended seon.reconcile-test/needs-dag-starts-in-dependency-order
+started seon.reconcile-test/a-refused-end-is-a-verdict-that-wakes-and-the-same-one-again-holds
+ended seon.reconcile-test/a-refused-end-is-a-verdict-that-wakes-and-the-same-one-again-holds
+started seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges
+ended seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges
+started seon.reconcile-test/a-requests-green-work-is-merged-by-its-merge-task
+ended seon.reconcile-test/a-requests-green-work-is-merged-by-its-merge-task
+started seon.reconcile-test/max-running-caps-parallel-runs
+ended seon.reconcile-test/max-running-caps-parallel-runs
+started seon.reconcile-test/a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
+ended seon.reconcile-test/a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
+started seon.reconcile-test/cancel-kills-and-blocks-dependents
+ended seon.reconcile-test/cancel-kills-and-blocks-dependents
+started seon.reconcile-test/regression-is-judged-against-main-at-the-runs-basis
+ended seon.reconcile-test/regression-is-judged-against-main-at-the-runs-basis
+started seon.reconcile-test/task-state-is-what-happened
+ended seon.reconcile-test/task-state-is-what-happened
+started seon.reconcile-test/two-ready-disjoint-merges-run-one-at-a-time-by-default
+ended seon.reconcile-test/two-ready-disjoint-merges-run-one-at-a-time-by-default
+started seon.reconcile-test/a-task-marked-failed-is-held-for-root
+ended seon.reconcile-test/a-task-marked-failed-is-held-for-root
+started seon.reconcile-test/roots-release-runs-again-on-the-same-branch-with-the-evidence
+ended seon.reconcile-test/roots-release-runs-again-on-the-same-branch-with-the-evidence
+started seon.reconcile-test/with-merge-chains-work-through-merges
+ended seon.reconcile-test/with-merge-chains-work-through-merges
+started seon.reconcile-test/nothing-autoruns-held-and-cancelled
+ended seon.reconcile-test/nothing-autoruns-held-and-cancelled
+started seon.reconcile-test/a-step-reads-the-db-its-own-write-made
+ended seon.reconcile-test/a-step-reads-the-db-its-own-write-made
+started seon.reconcile-test/an-idle-system-does-nothing-after-a-reason
+ended seon.reconcile-test/an-idle-system-does-nothing-after-a-reason
+started seon.reconcile-test/a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
+ended seon.reconcile-test/a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
+started seon.reconcile-test/a-design-step-is-not-done-at-its-start
+ended seon.reconcile-test/a-design-step-is-not-done-at-its-start
+started seon.reconcile-test/a-sessions-next-stage-opens-with-roots-message
+ended seon.reconcile-test/a-sessions-next-stage-opens-with-roots-message
+started seon.reconcile-test/behind-merge-gets-a-new-run
+ended seon.reconcile-test/behind-merge-gets-a-new-run
+started seon.reconcile-test/plan-and-proofs-accumulate-along-needs
+ended seon.reconcile-test/plan-and-proofs-accumulate-along-needs
+started seon.reconcile-test/quiescence-is-reported-when-nothing-can-move
+ended seon.reconcile-test/quiescence-is-reported-when-nothing-can-move
+started seon.reconcile-test/a-held-task-shows-its-reason-among-the-problems
+ended seon.reconcile-test/a-held-task-shows-its-reason-among-the-problems
+started seon.reconcile-test/a-run-with-no-end-records-no-fake-spend
+ended seon.reconcile-test/a-run-with-no-end-records-no-fake-spend
+started seon.reconcile-test/a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn
+ended seon.reconcile-test/a-wake-whose-parked-process-is-gone-is-lost-and-the-next-run-a-spawn
+started seon.reconcile-test/an-ended-run-of-a-cancelled-task-is-closed
+ended seon.reconcile-test/an-ended-run-of-a-cancelled-task-is-closed
+started seon.reconcile-test/an-open-problem-its-work-caused-refuses-done
+ended seon.reconcile-test/an-open-problem-its-work-caused-refuses-done
+started seon.reconcile-test/unmerged-refuses-done
+ended seon.reconcile-test/unmerged-refuses-done
+started seon.reconcile-test/a-death-names-its-cause
+ended seon.reconcile-test/a-death-names-its-cause
+started seon.reconcile-test/a-design-step-is-done-when-it-improved-the-plan
+ended seon.reconcile-test/a-design-step-is-done-when-it-improved-the-plan
+started seon.reconcile-test/a-previous-roots-runs-are-reaped-and-resumed
+ended seon.reconcile-test/a-previous-roots-runs-are-reaped-and-resumed
+started seon.reconcile-test/stuck-names-cancelled-and-held-roots
+ended seon.reconcile-test/stuck-names-cancelled-and-held-roots
+started seon.reconcile-test/a-refused-spawn-writes-a-refused-run
+ended seon.reconcile-test/a-refused-spawn-writes-a-refused-run
+started seon.reconcile-test/a-refused-task-asks-again-when-main-moves
+ended seon.reconcile-test/a-refused-task-asks-again-when-main-moves
+started seon.reconcile-test/a-run-without-an-end-reads-nil
+ended seon.reconcile-test/a-run-without-an-end-reads-nil
+started seon.reconcile-test/a-stall-task-starts-no-agent
+ended seon.reconcile-test/a-stall-task-starts-no-agent
+started seon.reconcile-test/boot-records-merge-max-running-one
+ended seon.reconcile-test/boot-records-merge-max-running-one
+started seon.reconcile-test/environment-change-restarts-clean
+ended seon.reconcile-test/environment-change-restarts-clean
+started seon.reconcile-test/every-way-a-run-leaves-running-writes-its-outcome
+ended seon.reconcile-test/every-way-a-run-leaves-running-writes-its-outcome
+started seon.reconcile-test/green-merge-run-merges
+ended seon.reconcile-test/green-merge-run-merges
+started seon.reconcile-test/quiescence-names-a-task-that-cannot-start
+ended seon.reconcile-test/quiescence-names-a-task-that-cannot-start
+started seon.reconcile-test/the-judge-reads-its-branch-in-one-request
+ended seon.reconcile-test/the-judge-reads-its-branch-in-one-request
+started seon.reconcile-test/held-kills-without-restart
+ended seon.reconcile-test/held-kills-without-restart
+started seon.reconcile-test/a-refused-diff-ends-the-run-with-its-cause
+ended seon.reconcile-test/a-refused-diff-ends-the-run-with-its-cause
+started seon.reconcile-test/an-agent-dead-in-its-turn-loop-records-its-cause
+ended seon.reconcile-test/an-agent-dead-in-its-turn-loop-records-its-cause
+started seon.reconcile-test/a-deferred-proof-is-neither-red-nor-unknown
+ended seon.reconcile-test/a-deferred-proof-is-neither-red-nor-unknown
+started seon.reconcile-test/contracts-are-checked
+ended seon.reconcile-test/contracts-are-checked
+started seon.reconcile-test/design-may-leave-its-proofs-red
+ended seon.reconcile-test/design-may-leave-its-proofs-red
+started seon.reconcile-test/done-explain-table
+ended seon.reconcile-test/done-explain-table
+started seon.reconcile-test/hairy-rule
+ended seon.reconcile-test/hairy-rule
+started seon.reconcile-test/the-writer-refuses-cycles-and-unknown-needs
+ended seon.reconcile-test/the-writer-refuses-cycles-and-unknown-needs
+
+ERROR in (the-judge-and-the-merge-gate-agree-on-contract-gaps) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: seon.reconcile/judge-tx invalid-input: its arguments do not satisfy its contract {:seon.error/type :seon.instrument/contract-error, :seon.error/operation seon.reconcile/judge-tx, :seon.error/member :malli.core/invalid-input, :seon.error/message seon.reconcile/judge-tx invalid-input: its arguments do not satisfy its contract, :seon.error/fix Call seon.reconcile/judge-tx with arguments its contract declares., :seon.error/problems [{:path [3 :db], :in [3 :db], :expected [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]], :value {:seon.print/code nil}} {:path [3 :base], :in [3 :base], :expected [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]], :value {:seon.print/code nil}} {:path [3 :ours], :in [3 :ours], :expected [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]], :value {:seon.print/code nil}} {:path [3 :unmerged], :in [3 :unmerged], :expected [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]], :value {:seon.print/code nil}} {:path [3 :uncontracted], :in [3 :uncontracted], :expected [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]], :value {:seon.print/code nil}}]}
+started seon.cost-test/the-unit-table-is-current
+ended seon.cost-test/the-unit-table-is-current
+started seon.cost-test/a-measure-takes-a-count-of-samples-never-a-time
+ended seon.cost-test/a-measure-takes-a-count-of-samples-never-a-time
+started seon.cost-test/a-bound-holds-on-its-contracts-generated-inputs
+ended seon.cost-test/a-bound-holds-on-its-contracts-generated-inputs
+started seon.cost-test/a-scan-inside-the-loop-is-red-under-the-bound
+ended seon.cost-test/a-scan-inside-the-loop-is-red-under-the-bound
+started seon.cost-test/a-one-pass-function-meets-its-estimate
+ended seon.cost-test/a-one-pass-function-meets-its-estimate
+started seon.cost-test/a-proof-the-cap-leaves-too-few-sizes-is-refused
+ended seon.cost-test/a-proof-the-cap-leaves-too-few-sizes-is-refused
+started seon.cost-test/a-loose-estimate-is-a-finding-not-red
+ended seon.cost-test/a-loose-estimate-is-a-finding-not-red
+started seon.cost-test/a-proofs-sizes-stop-at-the-cap
+ended seon.cost-test/a-proofs-sizes-stop-at-the-cap
+started seon.cost-test/a-scan-inside-the-loop-is-red-and-says-why
+ended seon.cost-test/a-scan-inside-the-loop-is-red-and-says-why
+started seon.cost-test/a-second-pass-is-steeper-even-inside-the-slack
+ended seon.cost-test/a-second-pass-is-steeper-even-inside-the-slack
+started seon.cost-test/a-size-over-its-slack-is-red
+ended seon.cost-test/a-size-over-its-slack-is-red
+started seon.cost-test/a-speedup-never-reads-as-steeper
+ended seon.cost-test/a-speedup-never-reads-as-steeper
+started seon.cost-test/a-stated-dimension-never-measured-is-named
+ended seon.cost-test/a-stated-dimension-never-measured-is-named
+started seon.cost-test/an-estimate-of-time-alone-is-red-it-could-not-fail
+ended seon.cost-test/an-estimate-of-time-alone-is-red-it-could-not-fail
+started seon.cost-test/an-open-overrun-is-accepted-until-it-regresses
+ended seon.cost-test/an-open-overrun-is-accepted-until-it-regresses
+started seon.cost-test/expected-is-fixed-plus-per-unit-times-work
+ended seon.cost-test/expected-is-fixed-plus-per-unit-times-work
+started seon.cost-test/exponent-is-the-log-log-slope
+ended seon.cost-test/exponent-is-the-log-log-slope
+started seon.cost-test/growth-takes-the-basis-the-rows-allow
+ended seon.cost-test/growth-takes-the-basis-the-rows-allow
+started seon.cost-test/more-work-with-the-same-bytes-and-calls-is-red-on-ticks
+ended seon.cost-test/more-work-with-the-same-bytes-and-calls-is-red-on-ticks
+started seon.cost-test/n-log-n-under-a-linear-estimate-is-not-steeper
+ended seon.cost-test/n-log-n-under-a-linear-estimate-is-not-steeper
+started seon.cost-test/one-timer-chunk-is-not-a-red-and-a-real-regression-is
+ended seon.cost-test/one-timer-chunk-is-not-a-red-and-a-real-regression-is
+started seon.cost-test/within-the-estimate-is-green
+ended seon.cost-test/within-the-estimate-is-green
+started seon.cost-test/work-is-the-growth-at-n
+ended seon.cost-test/work-is-the-growth-at-n
+started seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query
+ended seon.union-test/a-message-and-its-reply-on-two-branches-are-one-query
+started seon.stage-test/staging-is-one-pass-over-the-recorded-vars
+ended seon.stage-test/staging-is-one-pass-over-the-recorded-vars
+started seon.stage-test/staging-retracts-exactly-what-the-runtime-dropped
+ended seon.stage-test/staging-retracts-exactly-what-the-runtime-dropped
+started seon.step-test/an-edge-asks-one-way
+ended seon.step-test/an-edge-asks-one-way
+started datahike.reads-test/a-transaction-costs-its-datoms-to-match
+ended datahike.reads-test/a-transaction-costs-its-datoms-to-match
+started datahike.reads-test/a-transaction-touches-only-what-a-read-scanned
+ended datahike.reads-test/a-transaction-touches-only-what-a-read-scanned
+started datahike.reads-test/matching-is-flat-in-what-was-read
+ended datahike.reads-test/matching-is-flat-in-what-was-read
+started datahike.reads-test/a-read-inside-a-flow-step-is-recorded
+ended datahike.reads-test/a-read-inside-a-flow-step-is-recorded
+started datahike.reads-test/a-read-records-what-it-scanned
+ended datahike.reads-test/a-read-records-what-it-scanned
+started seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+ended seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+started seon.source-test/a-restart-catches-up-and-a-new-generation-resumes
+jolt fiber dump: 0 live fibers of 214 held, on thread 0
+generation-resumes 31000 ms (bound 30000 ms, load 10.08, /Users/sean/src/seon-next/target/prove/shard-0.log)
