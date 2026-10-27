@@ -1125,8 +1125,9 @@
 (defn- reach-rows
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
   :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
-  is not read again), :ns, :defines, :refs and the config keys it reads (config-reads), and none of the other facts, which no edge, digest
-  or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
+  is not read again), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
+  in a test's namespace, reach-step) and the config keys it reads (config-reads), and none of
+  the other facts, which no edge, digest or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
@@ -1134,7 +1135,7 @@
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
-        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es)
+        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
         key-of (merge ;; definition-key's order: the earlier kind wins
@@ -1143,7 +1144,7 @@
                  (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
                  (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
     (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
-           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs
+           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
             :defines (into #{} (keep key-of) (dv e))
             :config (config-reads (set (kv e)) refs nsym)}))))
 
@@ -1167,8 +1168,8 @@
 (defn- reach-step
   "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
-  referring to, or defining the methods, extensions or contract of, a var a changed form
-  defines), and the components of the changed forms and of every form reaching them re-folded
+  referring to, naming in a test's namespace (:quoted), or defining the methods, extensions or
+  contract of, a var a changed form defines), and the components of the changed forms and of every form reaching them re-folded
   (components over those alone, the rest kept). :affected, how many forms were re-folded."
   {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :string] [:sequential :map]] :map]}
   [g db removed added]
@@ -1194,14 +1195,19 @@
         sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:var/contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (= :test (:var/kind e)) (conj s v) (disj s v))) (:tests g) facts)
-        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (:refs f)))
-                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (:refs f))) (:refd g) gone) added)
+        ;; a name quoted in a test's namespace is one the test hands to what runs it by name
+        ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
+        ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
+        test-nss (if (identical? tests (:tests g)) (:test-nss g #{}) (into #{} (map (comp symbol namespace)) tests))
+        named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
+        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
+                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added)
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
-                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+                        (vec (concat (remove test-ids (keep var-form (named f)))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
@@ -1252,7 +1258,7 @@
                                    (transient (apply dissoc (:flags g) olds))
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
-    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :refd refd :adj adj :rev rev
+    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
            :reads reads :proc proc :bin bin :plain plain :own own
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))))
 
@@ -1281,14 +1287,17 @@
   "Graph g (reach-graph's, of another value) for db: the live forms g holds that db does not
   removed, db's that g does not added (live-ids: index scans, no entity read), and only the
   components those touch and their ancestors re-folded (reach-step), so a branch's graph is
-  its base's at the cost of what it changed. A schema entry added or changed rebuilds."
+  its base's at the cost of what it changed. A schema entry added or changed rebuilds, and so
+  does a namespace gaining its first test or losing its last (its forms' quoted names become
+  or stop being edges: reach-step's test-nss)."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [g db]
   (if (not= (:schemas g) (schema-texts db))
     (reach-graph db (:data-refs g))
-    (let [live (live-ids db) was (:live g)]
-      (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
-             :live live))))
+    (let [live (live-ids db) was (:live g)
+          g' (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
+                    :live live)]
+      (if (= (:test-nss g' #{}) (:test-nss g #{})) g' (reach-graph db (:data-refs g))))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
