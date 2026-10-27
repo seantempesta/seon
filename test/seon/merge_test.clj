@@ -321,6 +321,11 @@
              (is (empty? (d/datoms after :avet :note/text "a platform-free scratch note")))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
+(deftest changed-vars-are-the-var-keys-of-a-change
+  ;; found red on main (2026-10-27): it read each key [kind x] one level too deep, so any branch
+  ;; that changed something threw "nth not supported on this type: Keyword" in every turn's test plan
+  (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:kind :fn}] [:var 'app/g] [{:kind :fn} nil] [:schema :app/k] [nil {}]})))
+  (is (= #{} (pm/changed-vars {}))))
 (deftest a-merge-carries-the-namespace-of-a-form-it-carries
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
   ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read

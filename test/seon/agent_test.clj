@@ -231,6 +231,44 @@
     (is (= 49 began) "the proof run was in its test")
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
 
+(deftest an-agent-answers-while-its-tests-run
+  ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
+  ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
+  ;; child holds in its test until this test lets it go (a fifo, no clock): the eval is answered
+  ;; while it holds, then the run answers green
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "answers-" (random-uuid))
+        store (ts/process-store checkout)
+        runs (str checkout "/target/runs/" main "-runs")
+        began (str checkout "/target/runs/" main ".began")
+        gate (str checkout "/target/runs/" main ".gate")
+        _ (doseq [f [began gate]] (sh/sh "mkfifo" f))
+        root (ts/start-root! {:store store :main main :runs runs})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (value-of (:response r)))))
+        _ (eval-root "(c/spawn! sys {})")
+        ;; two forms, as an agent writes them: each recorded on its branch (a definition inside a do is not)
+        held (str "(deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
+                  " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) ")))))")
+        _ (eval-root (str "@(c/submit! sys :a1 " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") ")"))
+        defined (eval-root (str "@(c/submit! sys :a1 " (pr-str held) ")"))
+        ;; the test service proves a1's branch as its turn does (mode :turn: the tests the branch changed,
+        ;; held-proof/h among them): it asks the idle agent for :tests
+        _ (eval-root "(def held-run (future @(c/prove! sys :a1 #{} :turn)))")
+        in (java.io.FileInputStream. ^String began)
+        in-test (.read in)
+        ;; the child holds in its test: the agent answers an eval meanwhile
+        answered (ts/ask root {:op :eval :agent "root" :code "@(c/submit! sys :a1 \"(+ 40 2)\")"})
+        out (java.io.FileOutputStream. ^String gate)
+        _ (do (.write out 50) (.flush out) (.close out) (.close in))
+        result (eval-root "(select-keys @held-run [:pass :fail :error])")]
+    (ts/kill-root! root)
+    (ts/drop-main! store main)
+    (sh/sh "rm" "-rf" runs began gate)
+    (is (= 49 in-test) (str "the test child was in its test (" (pr-str defined) ")"))
+    (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
+    (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
+
 (deftest a-blocked-agent-ends-with-its-root
   ;; task seon.agent/an-agent-ends-with-its-root, an agent blocked in a wait: its thread in
   ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
