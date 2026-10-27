@@ -86,6 +86,7 @@
   ([{:keys [db cfg store conn graph index kq]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
     :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
+    ;; listed here when the server boots; a standby inherits its server's
     :index (or index {:db db :index (r/index db)})})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
@@ -115,7 +116,9 @@
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [t0 (profile/now-ns)
-                 st (-> st graph-at-fork index-at-fork)
+                 st (graph-at-fork st)
+                 tg (profile/now-ns)
+                 st (index-at-fork st)
                  ;; the heap made static first, so the agent's collections never trace (and un-share)
                  ;; what it inherits (design agent-loop section 2: 163 MB of this heap sat in
                  ;; generations 3-4 at fork; static, an agent's work left 106 MB where it left 333).
@@ -125,7 +128,7 @@
                  _ (lib/static!)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
-                 marks [[:fork-server-in t0 nil] [:reach-graph t1 nil] [:static (profile/now-ns) nil]]]
+                 marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
              (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :index (:index st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (adopt st pid)]

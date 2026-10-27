@@ -688,7 +688,17 @@
             (is (not (contains? (get-in st3 [:index :index :tasks]) "demo/forked")) "a commit leaves it: a fork brings it forward")
             (is (= (:db st3) (:db held)))
             (is (contains? (get-in held [:index :tasks]) "demo/forked"))
-            (is (= (reconcile/index (:db st3)) (:index held)) "the index listed at that db")))))))))
+            (is (= (reconcile/index (:db st3)) (:index held)) "the index listed at that db")
+            (testing "and an agent observes its branch from it, read through its own connection"
+              (let [ab (pdb/on-main (:branch cfg) :held-index)
+                    _ (d/branch! conn (:branch cfg) ab)
+                    bc (d/connect (assoc cfg :branch ab))]
+                (try
+                  (d/transact bc (seon.task/create-tx @bc [{:seon.task/ns 'demo :seon.task/name "branched" :seon.task/plan "Make branched true."}]))
+                  (let [observed (reconcile/index (:index held) (:db held) @bc)]
+                    (is (contains? (:tasks observed) "demo/branched"))
+                    (is (= (reconcile/index @bc) observed) "the branch's index listed"))
+                  (finally (d/release bc)))))))))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
