@@ -29,14 +29,14 @@
 
 (defn desired-env
   "The environment task t's runs must run in; with prior, a run's environment it goes on from,
-  an outside agent's stays outside (seon.server's attach: the model is the outside agent's,
-  whatever the task's)."
+  an outside agent's stays outside (seon.server's attach: the model and its :holder are the
+  outside agent's, whatever the task's)."
   {:malli/schema [:function [:=> [:cat :seon.task/own] :seon.task/env] [:=> [:cat :seon.task/own [:maybe :map]] :seon.task/env]]}
   ([t] (desired-env t nil))
   ([t prior]
    (cond-> {:branch (:seon.task/branch t) :model (:seon.task/model t)
             :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})}
-     (outside? prior) (assoc :model "outside"))))
+     (outside? prior) (merge (select-keys prior [:model :holder])))))
 
 ;; ---- the done rule -----------------------------------------------------------------
 

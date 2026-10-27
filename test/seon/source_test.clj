@@ -159,6 +159,20 @@
       (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
       (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
+(deftest a-form-that-fails-at-load-is-named
+  ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
+  ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
+  (let [main (main-with-file)
+        b0 (pt/record main 'app.pt-src "(def boom 1)")
+        ;; its text as a load would meet it: recorded, it ran (pt/record evaluates as the agent does)
+        branch (d/db-with b0 [{:db/id (:db/id (:var/form (d/entity b0 [:var/name 'app.pt-src/boom])))
+                               :form/src "(def boom (throw (ex-info \"boom at load\" {})))"}])
+        [e] (program/load-diff! main branch)]
+    (is (= 'app.pt-src (:ns e)) (pr-str e))
+    (is (string? (:form e)) "the form, by its id")
+    (is (= "(def boom (throw (ex-info \"boom at load\" {})))" (:lead e)) "and its text's first line")
+    (is (clojure.string/includes? (str (:message e)) "boom at load"))))
+
 (deftest an-imported-namespace-the-process-does-not-hold-is-loaded
   ;; task seon.agent/an-agent-holds-mains-tests: test/ is imported but not built into the
   ;; binary; its forms load where main's program runs (root, the fork server, so every agent)

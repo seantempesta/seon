@@ -1,0 +1,6 @@
+{
+ "error": "task: find the code that causes this error | query: ",
+ "similar": "task: code retrieval | query: functions similar to the code this changes: ",
+ "tests": "task: find the tests that cover this code | query: ",
+ "docs": "task: find the documentation that explains this | query: "
+}

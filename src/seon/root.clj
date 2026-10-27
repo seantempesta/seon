@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -581,7 +581,11 @@
       ;; the api's own throw answers every message its step took (::lost)
       :error (let [e (if (contract/error? (:data m))
                        (:data m)
-                       (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message") {:pid (:pid m)}))
+                       (contract/error :seon.root/proc-defect (proc-sym st (:pid m)) (or (:message m) "a defect with no message")
+                                       ;; where it threw, and what it took (a message's op, or an answer's keys)
+                                       (cond-> {:pid (:pid m)}
+                                         (:in m) (assoc :seon.error/in (:in m))
+                                         (map? (:msg m)) (assoc :took (or (:op (:msg m)) (vec (sort (keys (:msg m)))))))))
                    taken (distinct (cond-> (if (= :api (:pid m)) (::lost st) []) (:msg m) (conj (:msg m))))]
                ;; the view keeps the newest :seon.config.root/view-window and counts them all (renders say how many it left)
                (-> (reduce (fn [st x] (answer-taken st o (:pid m) x e)) (cond-> st (= :api (:pid m)) (dissoc ::lost)) taken)
@@ -904,6 +908,18 @@
                  {:db db :agents-dir agents-dir :open-ms open-ms :preload-ms preload-ms :load-ms load-ms
                   :program program :program-ms program-ms :contracts contracts}))))))
 
+(defn- flow-error
+  "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
+  data, the message its step took (:msg), and the fn it was thrown in (:in, clojure.main's triage
+  of its top frame, as seon.repl/located reads an eval's): a case meeting nil said only \"No
+  matching clause: \", 255 times from the reconciler, and where it threw was nowhere."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [e]
+  (let [ex (::flow/ex e)
+        in (when ex (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))))]
+    (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data) :msg (::flow/msg e)}
+      (qualified-symbol? in) (assoc :in in))))
+
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
   the one store (DECISIONS, Branches as in production). opts:
@@ -990,11 +1006,7 @@
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
         ;; fed to the api as data, with the message the step took (:msg), which the api
         ;; answers (task `seon.root/a-proc-answers-every-request-it-took`); :back outlives it
-        _ (a/pipe (a/pipe root-errors (a/chan 1 (map (fn [e] {:op :error :pid (::flow/pid e)
-                                                              :message (or (some-> (::flow/ex e) ex-message) (str e))
-                                                              :data (some-> (::flow/ex e) ex-data)
-                                                              :msg (::flow/msg e)}))))
-                  (:back chans) false)
+        _ (a/pipe (a/pipe root-errors (a/chan 1 (map flow-error))) (:back chans) false)
         sys (merge chans {:cfg store-cfg :conn conn :graph g :t0 t0
                           :store-path path :boot boot
                           :bindings bindings

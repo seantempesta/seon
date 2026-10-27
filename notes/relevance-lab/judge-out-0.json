@@ -1,0 +1,2650 @@
+[
+ {
+  "task": "seon.ctx/a-turns-diff-tells-an-eval-by-its-handle",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 28,
+    "label": "noise",
+    "why": "ctx maintenance, not the diff"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 24,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#changing-it-swap",
+    "pct": 15,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/README.md#the-program-and-its-loop",
+    "pct": 11,
+    "label": "noise",
+    "why": "generic map page"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#context-printing-the-page",
+    "pct": 5,
+    "label": "noise",
+    "why": "parity table"
+   },
+   {
+    "kind": "function",
+    "name": "seon.context/request",
+    "pct": 14,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/render-ctx",
+    "pct": 11,
+    "label": "noise",
+    "why": "ui layout, not the diff"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/eval-item",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/act!",
+    "pct": 7,
+    "label": "noise",
+    "why": "generic turn plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/heard-keys",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ctx/ctx",
+    "pct": 19,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.eval/record",
+    "pct": 17,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/sent-request",
+    "pct": 4,
+    "label": "noise",
+    "why": "debug-page record"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run-fact",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated run fact"
+   }
+  ],
+  "missing": [
+   "seon.context/world",
+   "seon.context/turn-pages",
+   "seon.agent/begin-run!",
+   "docs/agent.md#ctx",
+   "seon.turn/context-block"
+  ]
+ },
+ {
+  "task": "seon.proofs/prove-is-the-one-runner",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 66,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#the-test-service",
+    "pct": 61,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 13,
+    "label": "noise",
+    "why": "parity table"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 12,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#data-datahikes-and-gits-words",
+    "pct": 10,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/handle!",
+    "pct": 5,
+    "label": "noise",
+    "why": "generic request handler"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/on?",
+    "pct": 4,
+    "label": "noise",
+    "why": "contract plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/prove!",
+    "pct": 4,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/run-tests-here",
+    "pct": 3,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/gate-checkout",
+    "pct": 11,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/jobs",
+    "pct": 5,
+    "label": "noise",
+    "why": "shard count, unrelated"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/test-results-dir",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/test-ticks",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   }
+  ],
+  "missing": [
+   "seon.prove/request",
+   "seon.prove/prove-proc",
+   "seon.proofs/left-out",
+   "seon.fx/test-results",
+   "my.agent/prove"
+  ]
+ },
+ {
+  "task": "seon.cost/a-call-allocates-the-same-bytes-each-time",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/cost.md#what-is-measured",
+    "pct": 60,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 21,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#merges-read-what-changed",
+    "pct": 15,
+    "label": "noise",
+    "why": "merge storage, different subsystem"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#physics-who-may-run-threads",
+    "pct": 8,
+    "label": "noise",
+    "why": "thread rules, not the cause"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#datahike",
+    "pct": 5,
+    "label": "noise",
+    "why": "datahike pin list"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/units",
+    "pct": 4,
+    "label": "noise",
+    "why": "unit price table"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/measure",
+    "pct": 3,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/readiness",
+    "pct": 3,
+    "label": "noise",
+    "why": "merge subsystem"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/change-steps",
+    "pct": 2,
+    "label": "noise",
+    "why": "ctx walk costs"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/touched-keys",
+    "pct": 2,
+    "label": "noise",
+    "why": "merge subsystem"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/result",
+    "pct": 11,
+    "label": "noise",
+    "why": "merge result schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/cost-settled",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/cost-max-samples",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/big-alloc",
+    "pct": 4,
+    "label": "noise",
+    "why": "render alloc config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/case-sizes",
+    "pct": 3,
+    "label": "noise",
+    "why": "proof sizes, unrelated"
+   }
+  ],
+  "missing": [
+   ":seon.cost/unsettled",
+   ":seon.profile/fn-cost",
+   "docs/config.md#constants"
+  ]
+ },
+ {
+  "task": "seon.proofs/main-is-proved-in-a-fork",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/merging.md#the-test-service",
+    "pct": 69,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 27,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#mains-program-follows-the-tree",
+    "pct": 6,
+    "label": "noise",
+    "why": "boot import, not the prove path"
+   },
+   {
+    "kind": "section",
+    "name": "docs/plan.md#the-plan-1",
+    "pct": 5,
+    "label": "noise",
+    "why": "generic plan"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 4,
+    "label": "noise",
+    "why": "server op table"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/start!",
+    "pct": 4,
+    "label": "noise",
+    "why": "boot plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/attr-namespaces",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/server-step",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/jobs",
+    "pct": 6,
+    "label": "noise",
+    "why": "shard count"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/test-results-dir",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/dirs",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/tree-excludes",
+    "pct": 6,
+    "label": "noise",
+    "why": "import excludes"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated state schema"
+   }
+  ],
+  "missing": [
+   "seon.prove/answered",
+   "seon.agent/run-tests-forked",
+   "seon.program/moves-program?",
+   "seon.proofs/stored-results",
+   "seon.root/prove!"
+  ]
+ },
+ {
+  "task": "seon.render/every-page-is-its-parts",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-page",
+    "pct": 51,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 23,
+    "label": "noise",
+    "why": "ctx maintenance, other layer"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#reactive-renders",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#components",
+    "pct": 14,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 12,
+    "label": "noise",
+    "why": "model request layout"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.proc/agent-view",
+    "pct": 9,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.proc/root-walk",
+    "pct": 6,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/render-ctx",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/eval-item",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/render!",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ctx/ctx",
+    "pct": 23,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 7,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 5,
+    "label": "noise",
+    "why": "generic fact schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.db/agent-fact",
+    "pct": 5,
+    "label": "noise",
+    "why": "generic fact schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/class",
+    "pct": 5,
+    "label": "noise",
+    "why": "problem classes"
+   }
+  ],
+  "missing": [
+   "seon.render.proc/root-page",
+   "seon.render.proc/page-value",
+   "seon.render.ui/root-ctx",
+   ":seon.render/root-ctx",
+   "seon.render.proc/render-proc"
+  ]
+ },
+ {
+  "task": "seon.problems/health-reads-each-part-once",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/health.md#two-kinds-of-problem",
+    "pct": 49,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/errors.md#problems",
+    "pct": 28,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#health",
+    "pct": 27,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#checks-are-callers-of-seon",
+    "pct": 12,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/root.md#root-causes-at-quiescence",
+    "pct": 11,
+    "label": "noise",
+    "why": "quiescence, other topic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/problem-unlinked",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/problems",
+    "pct": 5,
+    "label": "noise",
+    "why": "caller only"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/caused-split",
+    "pct": 3,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/unnamed-sites",
+    "pct": 3,
+    "label": "noise",
+    "why": "sibling check, untouched"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/stale-sections",
+    "pct": 3,
+    "label": "noise",
+    "why": "sibling check, untouched"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/report",
+    "pct": 31,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/class",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/judge-pass-usd",
+    "pct": 7,
+    "label": "noise",
+    "why": "ai config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/unsettled",
+    "pct": 4,
+    "label": "noise",
+    "why": "cost proof key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/not-observed",
+    "pct": 2,
+    "label": "noise",
+    "why": "turn schema"
+   }
+  ],
+  "missing": [
+   "seon.problems/report-with",
+   "seon.problems/caused-classes",
+   "seon.problems/run-pull",
+   "seon.problems/run-rows",
+   "seon.problems/report"
+  ]
+ },
+ {
+  "task": "seon.reconcile/the-index-is-checked-once",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 20,
+    "label": "noise",
+    "why": "ctx maintenance, not reconciler index"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#observe",
+    "pct": 18,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 9,
+    "label": "noise",
+    "why": "test reach, unrelated"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#tasks-task-chains-words",
+    "pct": 8,
+    "label": "noise",
+    "why": "word list"
+   },
+   {
+    "kind": "section",
+    "name": "docs/root.md#runs-and-judging",
+    "pct": 3,
+    "label": "noise",
+    "why": "run judging"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/observe",
+    "pct": 8,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/index-at-fork",
+    "pct": 8,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/empty-index",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.proc/main-info",
+    "pct": 5,
+    "label": "noise",
+    "why": "render proc holder"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/units",
+    "pct": 5,
+    "label": "noise",
+    "why": "unit price table"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/own",
+    "pct": 26,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/index",
+    "pct": 21,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run",
+    "pct": 12,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task-fact",
+    "pct": 4,
+    "label": "noise",
+    "why": "generic fact schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/tick-quantum",
+    "pct": 4,
+    "label": "noise",
+    "why": "tick config"
+   }
+  ],
+  "missing": [
+   "docs/cost.md#what-a-contract-costs",
+   ":seon.reconcile/state",
+   "seon.reconcile/index",
+   "seon.reconcile/put-task"
+  ]
+ },
+ {
+  "task": "datahike.transaction/an-index-insert-allocates-nothing-extra",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 54,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#datahike",
+    "pct": 38,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#how-we-measure",
+    "pct": 23,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#what-a-datom-costs-to-add",
+    "pct": 21,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 9,
+    "label": "noise",
+    "why": "test reach, unrelated"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/units",
+    "pct": 7,
+    "label": "noise",
+    "why": "unit table, not changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/program-digest",
+    "pct": 4,
+    "label": "noise",
+    "why": "program digest"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/run",
+    "pct": 3,
+    "label": "noise",
+    "why": "proof runner"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/prove!",
+    "pct": 2,
+    "label": "noise",
+    "why": "test service"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/caused-split",
+    "pct": 2,
+    "label": "noise",
+    "why": "problems"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/tick-quantum",
+    "pct": 13,
+    "label": "noise",
+    "why": "tick config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/value-out-of-line-bytes",
+    "pct": 4,
+    "label": "noise",
+    "why": "storage config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/judge-pass-usd",
+    "pct": 4,
+    "label": "noise",
+    "why": "ai config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.db/ref",
+    "pct": 3,
+    "label": "noise",
+    "why": "ref schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/end",
+    "pct": 2,
+    "label": "noise",
+    "why": "root end schema"
+   }
+  ],
+  "missing": [
+   "seon.profile/measure!",
+   "seon.db-test/a-datom-costs-its-index-inserts"
+  ]
+ },
+ {
+  "task": "seon.reconcile/an-index-is-observed-at-the-cost-of-what-changed",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/cost.md#how-we-measure",
+    "pct": 56,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#observe",
+    "pct": 23,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#datahike",
+    "pct": 18,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 9,
+    "label": "noise",
+    "why": "ctx maintenance"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#ids",
+    "pct": 4,
+    "label": "noise",
+    "why": "id issuing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/empty-index",
+    "pct": 5,
+    "label": "noise",
+    "why": "trivial constructor"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/observe",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.proc/main-info",
+    "pct": 4,
+    "label": "noise",
+    "why": "render proc holder"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/server-step",
+    "pct": 3,
+    "label": "noise",
+    "why": "fork server plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/index-at-fork",
+    "pct": 3,
+    "label": "noise",
+    "why": "fork-time index"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/value-out-of-line-bytes",
+    "pct": 9,
+    "label": "noise",
+    "why": "storage config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/program-store-max-bytes",
+    "pct": 7,
+    "label": "noise",
+    "why": "program store bound"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/test-ticks",
+    "pct": 6,
+    "label": "noise",
+    "why": "test tick config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/node-cache-bytes",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/tick-quantum",
+    "pct": 3,
+    "label": "noise",
+    "why": "tick config"
+   }
+  ],
+  "missing": [
+   "seon.reconcile/index",
+   "seon.reconcile-test/observed-input",
+   "seon.turn/index!"
+  ]
+ },
+ {
+  "task": "seon.watch/root-watches-what-its-loaders-read",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/health.md#every-writer-root-loads-what-changed",
+    "pct": 79,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 12,
+    "label": "noise",
+    "why": "merge reach"
+   },
+   {
+    "kind": "section",
+    "name": "docs/machine.md#builds-and-checks",
+    "pct": 5,
+    "label": "noise",
+    "why": "build setup"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#lmdb-robust-locks",
+    "pct": 4,
+    "label": "noise",
+    "why": "lmdb locks"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 4,
+    "label": "noise",
+    "why": "catch edges"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/watch!",
+    "pct": 18,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/watch-loads",
+    "pct": 4,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/watch-died-tx",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/loader",
+    "pct": 3,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/import-source!",
+    "pct": 3,
+    "label": "noise",
+    "why": "source import"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/watch",
+    "pct": 28,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/tasks-dir",
+    "pct": 13,
+    "label": "noise",
+    "why": "tasks config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 7,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.watch/died",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.lib/unwatched",
+    "pct": 5,
+    "label": "noise",
+    "why": "wiki lib schema"
+   }
+  ],
+  "missing": [
+   "seon.watch/start!",
+   "seon.main/root-serve"
+  ]
+ },
+ {
+  "task": "seon.cost/a-contract-carries-its-cost-bound",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 50,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#how-we-measure",
+    "pct": 14,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#how-growth-is-judged",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#cost-proofs",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 5,
+    "label": "noise",
+    "why": "test reach"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/exact",
+    "pct": 9,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/measure",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/checked",
+    "pct": 5,
+    "label": "noise",
+    "why": "contract wrapper"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/units",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/dimensions",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/case-sizes",
+    "pct": 33,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/no-bound",
+    "pct": 28,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/generated",
+    "pct": 14,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/tick-quantum",
+    "pct": 6,
+    "label": "noise",
+    "why": "tick config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/cost-max-samples",
+    "pct": 5,
+    "label": "noise",
+    "why": "sampling bound"
+   }
+  ],
+  "missing": [
+   ":seon.cost/estimate",
+   ":seon.cost/row",
+   "seon.cost/proof",
+   "seon.cost/growth",
+   "seon.cost/explain"
+  ]
+ },
+ {
+  "task": "seon.fork-server/every-fork-server-wait-ends-with-the-server",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct": 59,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#physics-who-may-run-threads",
+    "pct": 25,
+    "label": "noise",
+    "why": "thread physics"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#lmdb-robust-locks",
+    "pct": 20,
+    "label": "noise",
+    "why": "lmdb locks"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 14,
+    "label": "noise",
+    "why": "catch edges list"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#jolt",
+    "pct": 11,
+    "label": "noise",
+    "why": "jolt pin list"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/fork-server-proc",
+    "pct": 9,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/ext-op",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/request-standby",
+    "pct": 3,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/back-op",
+    "pct": 3,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/server-step",
+    "pct": 3,
+    "label": "noise",
+    "why": "fork server step, not the wait"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/refused",
+    "pct": 18,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/fork-refused",
+    "pct": 5,
+    "label": "noise",
+    "why": "test schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/stall-ms",
+    "pct": 5,
+    "label": "noise",
+    "why": "stall config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/quiet-before-true",
+    "pct": 4,
+    "label": "noise",
+    "why": "quiescence schema"
+   }
+  ],
+  "missing": [
+   "seon.fork-server/release!"
+  ]
+ },
+ {
+  "task": "datahike.db/a-time-predicate-read-keeps-index-order",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#the-pattern",
+    "pct": 61,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#ids",
+    "pct": 22,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#values-out-of-line",
+    "pct": 21,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#collection",
+    "pct": 21,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#plain-values",
+    "pct": 14,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/members",
+    "pct": 6,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/window-moves",
+    "pct": 5,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/in-time-order?",
+    "pct": 5,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/join",
+    "pct": 4,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/reconciler-proc",
+    "pct": 4,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 4,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/step",
+    "pct": 3,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ctx/ix",
+    "pct": 3,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/wiki-baseline",
+    "pct": 3,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/index",
+    "pct": 3,
+    "label": "noise",
+    "why": "ctx/storage reader of the symptom, not the Datahike fix"
+   }
+  ],
+  "missing": [
+   "docs/forks.md#datahike"
+  ]
+ },
+ {
+  "task": "seon.db/a-store-is-made-whole-or-not-at-all",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#lmdb-robust-locks",
+    "pct": 72,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#identity",
+    "pct": 47,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 22,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct": 10,
+    "label": "noise",
+    "why": "catch edges"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#lmdb",
+    "pct": 8,
+    "label": "noise",
+    "why": "lmdb pin"
+   },
+   {
+    "kind": "function",
+    "name": "seon.db/make!",
+    "pct": 19,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.db/MDB_NOSYNC",
+    "pct": 5,
+    "label": "noise",
+    "why": "sync flag"
+   },
+   {
+    "kind": "function",
+    "name": "seon.db/writer-cfg",
+    "pct": 4,
+    "label": "noise",
+    "why": "writer config"
+   },
+   {
+    "kind": "function",
+    "name": "seon.db/ids!",
+    "pct": 4,
+    "label": "noise",
+    "why": "id paging"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/boot!",
+    "pct": 3,
+    "label": "noise",
+    "why": "boot plumbing"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/lmdb-map-bytes",
+    "pct": 15,
+    "label": "noise",
+    "why": "map size"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 10,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/value-out-of-line-bytes",
+    "pct": 6,
+    "label": "noise",
+    "why": "storage config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/program-store-max-bytes",
+    "pct": 6,
+    "label": "noise",
+    "why": "program store bound"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.db/store-unplaced",
+    "pct": 4,
+    "label": "useful",
+    "why": "in :changed"
+   }
+  ],
+  "missing": [
+   "seon.db/open!",
+   "seon.db/store-cfg"
+  ]
+ },
+ {
+  "task": "seon.repl/an-eval-answer-carries-its-warnings",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 19,
+    "label": "noise",
+    "why": "catch edges"
+   },
+   {
+    "kind": "section",
+    "name": "docs/restart.md#restarting-root-on-the-same-account",
+    "pct": 8,
+    "label": "noise",
+    "why": "restart page"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#sanctioned",
+    "pct": 7,
+    "label": "noise",
+    "why": "resolution sites"
+   },
+   {
+    "kind": "section",
+    "name": "docs/tasks.md#the-done-rule",
+    "pct": 7,
+    "label": "noise",
+    "why": "done rule"
+   },
+   {
+    "kind": "section",
+    "name": "docs/errors.md#an-eval-errors-diagnostics",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.repl/wrap-instrument",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/arm!",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.repl/eval-string",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/on?",
+    "pct": 3,
+    "label": "noise",
+    "why": "contract plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/checked",
+    "pct": 2,
+    "label": "noise",
+    "why": "contract wrapper"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.instrument/contract-error",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.contract/invalid",
+    "pct": 3,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/test-ticks",
+    "pct": 3,
+    "label": "noise",
+    "why": "tick config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.eval/response",
+    "pct": 3,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/not-observed",
+    "pct": 2,
+    "label": "noise",
+    "why": "turn schema"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "my.agent/a-name-that-is-no-var-says-so",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 34,
+    "label": "noise",
+    "why": "ctx maintenance"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#sections-in-a-tasks-context",
+    "pct": 20,
+    "label": "noise",
+    "why": "plan citations"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 15,
+    "label": "noise",
+    "why": "test reach"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 9,
+    "label": "noise",
+    "why": "context prose"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/no-var",
+    "pct": 14,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/tests-reaching",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 4,
+    "label": "noise",
+    "why": "reconciler"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/asked",
+    "pct": 4,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.prove/result-tx",
+    "pct": 4,
+    "label": "noise",
+    "why": "prove facts"
+   },
+   {
+    "kind": "schema",
+    "name": ":my.agent/no-var",
+    "pct": 50,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/status",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/provider",
+    "pct": 6,
+    "label": "noise",
+    "why": "ai config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ctx/callers",
+    "pct": 6,
+    "label": "noise",
+    "why": "ctx config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/process-vars",
+    "pct": 5,
+    "label": "noise",
+    "why": "process-var config"
+   }
+  ],
+  "missing": [
+   "docs/resolution.md#sanctioned",
+   ":seon.turn/not-observed"
+  ]
+ },
+ {
+  "task": "seon.proofs/a-failed-import-leaves-no-branch",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#what-you-read",
+    "pct": 25,
+    "label": "noise",
+    "why": "context prose"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 25,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 24,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 19,
+    "label": "noise",
+    "why": "catch edges"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#mains-program-follows-the-tree",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/run-tests-forked",
+    "pct": 6,
+    "label": "noise",
+    "why": "forked run, not plan failing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/config-key-readers",
+    "pct": 5,
+    "label": "noise",
+    "why": "config readers"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/other-op",
+    "pct": 5,
+    "label": "noise",
+    "why": "writer plumbing"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/reach-update",
+    "pct": 5,
+    "label": "noise",
+    "why": "reach graph update"
+   },
+   {
+    "kind": "schema",
+    "name": ":form/keywords",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/program-store",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/program-store-max-bytes",
+    "pct": 4,
+    "label": "noise",
+    "why": "store bound"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.program/inputs",
+    "pct": 4,
+    "label": "noise",
+    "why": "program inputs"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/binary-vars",
+    "pct": 4,
+    "label": "noise",
+    "why": "binary vars config"
+   }
+  ],
+  "missing": [
+   "test-runner/program-db",
+   "test-runner/tests-of"
+  ]
+ },
+ {
+  "task": "seon.source/a-tests-reach-is-the-same-however-the-program-was-analyzed",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 66,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 26,
+    "label": "noise",
+    "why": "merge reach"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#mains-program-follows-the-tree",
+    "pct": 20,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#shared-build-caches",
+    "pct": 13,
+    "label": "noise",
+    "why": "build caches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 12,
+    "label": "noise",
+    "why": "ctx maintenance"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/import-source!",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/start",
+    "pct": 4,
+    "label": "noise",
+    "why": "reconciler"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/unit-account",
+    "pct": 4,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 4,
+    "label": "noise",
+    "why": "plan caller"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/checked",
+    "pct": 4,
+    "label": "noise",
+    "why": "contract wrapper"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/process-vars",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/binary-vars",
+    "pct": 4,
+    "label": "noise",
+    "why": "binary vars"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/class",
+    "pct": 3,
+    "label": "noise",
+    "why": "problem classes"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/step",
+    "pct": 2,
+    "label": "noise",
+    "why": "reconciler"
+   }
+  ],
+  "missing": [
+   "seon.program/reach-step",
+   "seon.program/macro-uses",
+   ":form/quoted",
+   "seon.program/form-sets",
+   ":form/refs"
+  ]
+ },
+ {
+  "task": "seon.context/related-weighs-a-neighbour-by-its-rarity",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/vector.md#fused-with-the-call-graph",
+    "pct": 79,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 20,
+    "label": "noise",
+    "why": "test reach"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 5,
+    "label": "noise",
+    "why": "ctx maintenance"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-dead-citation",
+    "pct": 4,
+    "label": "noise",
+    "why": "dead citation"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 2,
+    "label": "noise",
+    "why": "merge reach"
+   },
+   {
+    "kind": "function",
+    "name": "my.task/related",
+    "pct": 21,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.context/related-view",
+    "pct": 13,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/related",
+    "pct": 13,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/rrf",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 10,
+    "label": "noise",
+    "why": "test plan"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related-rarity",
+    "pct": 24,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related-seeds-near",
+    "pct": 15,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":form/refs",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/class",
+    "pct": 5,
+    "label": "noise",
+    "why": "problem classes"
+   }
+  ],
+  "missing": [
+   "seon.context/by-frequency",
+   "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+   "seon.context/related-count"
+  ]
+ },
+ {
+  "task": "seon.vector/a-text-written-on-a-branch-is-embedded-there",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct": 22,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vector.md#the-pyramid",
+    "pct": 11,
+    "label": "noise",
+    "why": "matryoshka prefix"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vector.md#fused-with-the-call-graph",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 8,
+    "label": "noise",
+    "why": "catch edges"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/round",
+    "pct": 8,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/texts",
+    "pct": 6,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/observe",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/attr-namespaces",
+    "pct": 4,
+    "label": "noise",
+    "why": "program attrs"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/on?",
+    "pct": 4,
+    "label": "noise",
+    "why": "contract plumbing"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.vector/texts",
+    "pct": 40,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/tree-excludes",
+    "pct": 5,
+    "label": "noise",
+    "why": "import excludes"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.problems/class",
+    "pct": 4,
+    "label": "noise",
+    "why": "problem classes"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/gate-checkout",
+    "pct": 2,
+    "label": "noise",
+    "why": "gate config"
+   }
+  ],
+  "missing": [
+   "seon.agent/embed-written!",
+   "seon.vector/written",
+   "seon.vector/due-among",
+   "seon.agent/fx!",
+   "my.agent/query-of"
+  ]
+ },
+ {
+  "task": "seon.server/done-answers-the-verdict",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 49,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/tasks.md#the-done-rule",
+    "pct": 18,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/root.md#runs-and-judging",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#the-server",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#one-run-from-release-to-judge",
+    "pct": 8,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.server/ops",
+    "pct": 11,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/hand-back!",
+    "pct": 9,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/await-db",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/start",
+    "pct": 5,
+    "label": "noise",
+    "why": "reconciler"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/observe",
+    "pct": 5,
+    "label": "noise",
+    "why": "turn observe"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/end",
+    "pct": 10,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 8,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/not-done",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/status",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/form-ticks",
+    "pct": 5,
+    "label": "noise",
+    "why": "tick config"
+   }
+  ],
+  "missing": [
+   "seon.server/verdict",
+   "seon.root/defect"
+  ]
+ },
+ {
+  "task": "seon.reconcile/the-judge-asks-the-test-service",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/merging.md#the-test-service",
+    "pct": 47,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 18,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#observe",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/plan.md#the-plan-1",
+    "pct": 8,
+    "label": "noise",
+    "why": "generic plan"
+   },
+   {
+    "kind": "section",
+    "name": "docs/server.md#ops",
+    "pct": 6,
+    "label": "noise",
+    "why": "ops table"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/run-tests-forked",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/prove!",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/prove",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/observe",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/on?",
+    "pct": 4,
+    "label": "noise",
+    "why": "contract plumbing"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/test-ticks",
+    "pct": 15,
+    "label": "noise",
+    "why": "tick config"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated state schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/step",
+    "pct": 4,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/jobs",
+    "pct": 3,
+    "label": "noise",
+    "why": "shard count"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.agent/stall-ms",
+    "pct": 3,
+    "label": "noise",
+    "why": "stall config"
+   }
+  ],
+  "missing": [
+   "seon.agent/handle!",
+   "seon.root/ext-op",
+   "seon.reconcile/reconciler-proc",
+   "seon.prove/result-tx"
+  ]
+ },
+ {
+  "task": "seon.proofs/a-red-at-its-digest-is-reused",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/merging.md#the-test-service",
+    "pct": 58,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct": 30,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-flaky-test",
+    "pct": 23,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 16,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#tasks-merges-tests",
+    "pct": 12,
+    "label": "noise",
+    "why": "parity table"
+   },
+   {
+    "kind": "function",
+    "name": "seon.proofs/stored-results",
+    "pct": 23,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/test-reds",
+    "pct": 7,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/run-tests-forked",
+    "pct": 6,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.proofs/plan",
+    "pct": 5,
+    "label": "useful",
+    "why": "in :changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.proofs/verdicts",
+    "pct": 5,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/test-results-dir",
+    "pct": 12,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/status",
+    "pct": 9,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/digest",
+    "pct": 6,
+    "label": "useful",
+    "why": "mechanism the plan touches"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/max-assertions",
+    "pct": 4,
+    "label": "noise",
+    "why": "assertion cap"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated state schema"
+   }
+  ],
+  "missing": [
+   "my.agent/prove",
+   "seon.prove/result-tx"
+  ]
+ }
+]

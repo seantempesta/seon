@@ -33,6 +33,28 @@
   [nsx]
   (or (= 'user (ns-name nsx)) (boolean (:scratch (meta nsx)))))
 
+(def ^:private env-forms
+  "The clojure.core forms a top-level form changes its namespace's environment by."
+  #{'ns 'in-ns 'require 'use 'import 'refer 'refer-clojure 'alias 'load 'extend 'extend-type 'extend-protocol})
+
+(defn definition-form?
+  "Is form, read in namespace nsx, a definition at its top level: its head is the special form def
+  or resolves (as the compiler does) to a var named def... (defn, deftest, defmethod, a
+  library's defschema), or to a clojure.core form that changes the namespace's environment
+  (ns, require, extend-type ...). An eval whose def sits beside calls, (let [r (f)] (def x r)), is
+  none: it stays the recorded eval, never program a later load runs again (root's ruling,
+  2026-10-27: one ran my.agent/prove at every load of its branch)."
+  {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
+  [form nsx]
+  (boolean
+    (when (and (seq? form) (symbol? (first form)))
+      (or (= 'def (first form))
+          (when-let [v (ns-resolve nsx (first form))]
+            (when (var? v)
+              (let [{n :name s :ns} (meta v)]
+                (or (str/starts-with? (str n) "def")
+                    (and (= 'clojure.core (ns-name s)) (contains? env-forms n))))))))))
+
 (defn edn-value?
   "Is v plain data that EDN prints and reads back equal: nil, booleans, numbers, strings,
   keywords, symbols, and lists, vectors, maps and sets of them."
@@ -854,18 +876,20 @@
 
 (defn- load-form!
   "Evaluate one form row in its namespace, and arm the contracted functions it defines
-  (seon.contract/arm!). Answers nil, or an error map."
+  (seon.contract/arm!). Answers nil, or an error map naming the form (its id and its text's first
+  line), so a load that fails says which definition failed."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.program/error]]}
-  [{:keys [ns src defines]}]
-  (try
-    (binding [*ns* (ensure-ns! ns)]
-      (eval (read-string src)))
-    (some (fn [[k s]]
-            (when-let [v (and (= :var k) (find-var s))]
-              (let [r (contract/arm! v)]
-                (when (contract/error? r) {:ns ns :message (:seon.error/message r)}))))
-          defines)
-    (catch Throwable e {:ns ns :message (step/error-msg e)})))
+  [{:keys [id ns src defines]}]
+  (let [named #(cond-> {:ns ns :message %} id (assoc :form id :lead (first (str/split-lines (str src)))))]
+    (try
+      (binding [*ns* (ensure-ns! ns)]
+        (eval (read-string src)))
+      (some (fn [[k s]]
+              (when-let [v (and (= :var k) (find-var s))]
+                (let [r (contract/arm! v)]
+                  (when (contract/error? r) (named (:seon.error/message r))))))
+            defines)
+      (catch Throwable e (named (step/error-msg e))))))
 
 ;; ---- schema entries: the program's schemas (seon.source imports them, my.schema/register!
 ;; changes them, seon.merge carries them per key) ----------------------------------------
@@ -882,9 +906,10 @@
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
   with changes (schema-changes) recompiled whole, since a schema naming a changed key keeps
-  the old one compiled in; empty (the built registry answers) when nothing changed."
-  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :any]}
-  [changes] (if (empty? changes) {} (contract/registry-of (merge contract/forms changes))))
+  the old one compiled in; the built registry itself when nothing changed (what a binding of it
+  answers, and what a merge's declarations are read from: seon.merge/merge-tx)."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
+  [changes] (if (empty? changes) contract/registry (contract/registry-of (merge contract/forms changes))))
 
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a
@@ -1041,13 +1066,22 @@
   tests took the tree, so any edit anywhere reran them."
   (conj (set (keys env-class-readers)) 'seon.config/baked-schema-forms))
 
-(def config-key-readers
-  "The vars that read a config key named in data rather than in their own code: a form defining
-  one reads every config key a schema entry's form names (schema-config-keys), so a test reaching
-  it takes those keys' values (config-reads names the rest). seon.render/pattern reads a join's
-  :limit (config/value lim), a key a schema entry's :seon.ctx/pattern names (seon.facts.edn's
-  :limit :seon.config.ctx/window). A reader not named here is missed: its key moves no digest."
-  '#{seon.render/pattern})
+(def config-resolvers
+  "seon.config's resolvers, which read the key they are passed (seon.config/value, resolve and
+  resolve-in): a form outside seon.config that calls one and names no config key of its own reads a
+  key it computes, from data (computed-config-reader?)."
+  '#{seon.config/value seon.config/resolve seon.config/resolve-in})
+
+(defn- computed-config-reader?
+  "Does row f read a config key named in data rather than in its own code, by its facts: it
+  references a resolver (config-resolvers), is not seon.config's own, and its keywords name no
+  seon.config.* key (seon.render/pattern reads a join's :limit, a key a schema entry's
+  :seon.ctx/pattern names). Such a form takes every config key a schema entry names
+  (schema-config-keys). A form that names one key and computes another is the daily full run's."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f]
+  (boolean (and (some config-resolvers (:refs f)) (not= 'seon.config (:ns f))
+                (not-any? #(some-> (namespace %) (str/starts-with? "seon.config.")) (:keywords f)))))
 
 (defn- schema-config-keys
   "The config keys schema entries' forms (schemas: {key text}) name as data, the entries
@@ -1081,18 +1115,13 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
-(def input-class-namespaces
-  "The namespaces of the :config entries that are a class of files rather than a config key
-  (seon.fx/inputs): :seon.env/* (env-class-readers) and :seon.pin/* (pin-reads). A test that
-  reads files or runs a process takes every one (graph-index)."
-  #{"seon.env" "seon.pin"})
-
 (defn- pin-rules
-  "pins (:seon.config.source/pin-namespaces: prefix -> submodules) as [prefix prefix. [:seon.pin/NAME ...]]
-  rows, matched against a namespace by = and starts-with?."
+  "pins (:seon.config.source/pin-namespaces: prefix -> submodules or source groups) as [prefix
+  prefix. [:seon.pin/NAME ...]] rows (seon.config/pin-class), matched against a namespace by = and
+  starts-with?."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [pins]
-  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv #(keyword "seon.pin" (last (str/split % #"/"))) ms)])))
+  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv cfg/pin-class ms)])))
 
 (defn- pin-reads
   "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
@@ -1110,7 +1139,7 @@
   catch (owner, 2026-10-27: \"no test digests the whole tree\"; every config key a root's boot
   took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
   (value, resolve) name no key of their own; every one of their callers names its key, but for
-  config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
+  computed-config-reader?'s. A form baking the schemas (referencing seon.config/baked-schema-forms:
   seon.config/schema-forms, its one form, which holds nothing else) names every key as its
   declaration, data its class holds, and reads none. Beside the keys, the file classes it reads
   (env-class-readers): the :seon.env/* entries of :config. A test's digest takes the values of
@@ -1167,6 +1196,17 @@
   (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
         (reached-by rev (get defs v))))
 
+(defn- indexed
+  "{k ids} of pairs [k id], in order, each ids a vector (a set when set? is true): the map a graph's
+  defs, refd, rev and plain are, built in one pass over transients. reach-step builds a graph from
+  nothing this way, where folding the pairs in one at a time copied a vector or a set per pair."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :any :any]] :boolean] :map]}
+  [pairs set?]
+  (let [empty-of (fn [] (if set? (transient #{}) (transient [])))
+        m (reduce (fn [m [k id]] (let [t (get m k)] (if t (do (conj! t id) m) (assoc! m k (conj! (empty-of) id)))))
+                  (transient {}) pairs)]
+    (persistent! (reduce-kv (fn [m k t] (assoc! m k (persistent! t))) (transient {}) (persistent! m)))))
+
 (defn- reach-step
   "Graph g after the forms removed (ids) and the rows added (reach-rows', live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
@@ -1177,6 +1217,7 @@
   [g db removed added]
   (let [data-refs (:data-refs g)
         old (:rows g)
+        bulk? (empty? old)
         gone (keep old removed)
         defined (fn [f kind] (for [[k a] (:defines f) :when (= kind k)] a))
         V (set (mapcat #(defined % :var) (concat gone added)))
@@ -1187,8 +1228,8 @@
         step (fn [m k ids] (update m k #(into (into [] (remove drop-ids) %) ids)))
         by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
                                 (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
-        ;; a config-key-reader reads the config keys schema entries name (config-key-readers)
-        added (for [f added] (cond-> f (and (set? (:config f)) (some (fn [[k s]] (and (= :var k) (config-key-readers s))) (:defines f)))
+        ;; a form reading a key it computes reads the config keys schema entries name
+        added (for [f added] (cond-> f (computed-config-reader? f)
                                    (update :config into (:schema-config g))))
         ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
         ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.
@@ -1198,19 +1239,29 @@
                                                          (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
                                       (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
-        defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
+        defs (if bulk? (indexed (for [f added a (defined f :var)] [a (:id f)]) false) (by (:defs g) :var))
+        methods (if bulk? (indexed (for [f added a (defined f :method)] [a (:id f)]) false) (by (:methods g) :method))
+        impls (if bulk? (indexed (for [f added a (defined f :impl)] [a (:id f)]) false) (by (:impls g) :impl))
         var-form #(peek (get defs %))
-        facts (for [v V] [v (d/entity db [:var/name v])])
+        ;; a var's contract text and kind: one pass over the three indexes for a whole build, else a seek per var
+        facts (if bulk?
+                (let [scan (fn [a] (into {} (map (juxt :e :v)) (d/datoms db :aevt a)))
+                      contract (scan :var/contract) kind (scan :var/kind)]
+                  (into {} (for [{e :e v :v} (d/datoms db :aevt :var/name) :when (V v)] [v {:contract (contract e) :kind (kind e)}])))
+                (into {} (for [v V :let [e (:e (first (d/datoms db :avet :var/name v)))]]
+                           [v (when e {:contract (:v (first (d/datoms db :eavt e :var/contract))) :kind (:v (first (d/datoms db :eavt e :var/kind)))})])))
         sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
-        contract (reduce (fn [m [v e]] (if-let [t (:var/contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
-        tests (reduce (fn [s [v e]] (if (= :test (:var/kind e)) (conj s v) (disj s v))) (:tests g) facts)
+        contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
+        tests (reduce (fn [s [v e]] (if (= :test (:kind e)) (conj s v) (disj s v))) (:tests g) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
         test-nss (if (identical? tests (:tests g)) (:test-nss g #{}) (into #{} (map (comp symbol namespace)) tests))
         named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
-        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
-                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added)
+        refd (if bulk?
+               (indexed (for [f added r (named f)] [r (:id f)]) true)
+               (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
+                       (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added))
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
@@ -1240,14 +1291,18 @@
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
-        rev (as-> (:rev g) r
-              (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
-              (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
-              (apply dissoc r gone-ids))
+        rev (if bulk?
+              (indexed (for [id dirty t (adj id)] [t id]) true)
+              (as-> (:rev g) r
+                (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
+                (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
+                (apply dissoc r gone-ids)))
         plain? (fn [f] (and (not (schema-row? f)) (not-any? (fn [[k]] (= :var k)) (:defines f))))
-        plain (as-> (:plain g) pl
-                (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
-                (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added)))
+        plain (if bulk?
+                (indexed (for [f added :when (plain? f)] [(:ns f) (:id f)]) true)
+                (as-> (:plain g) pl
+                  (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
+                  (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added))))
         own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (:own f)]))
         changed (into dirty (map :id) added)
         affected (into changed (reached-by rev changed))
@@ -1332,9 +1387,11 @@
                        ks (map #(:config (flags %)) cs)
                        ;; the values of the config keys its reach reads (config-reads)
                        kvs (select-keys config (into #{} cat ks))
-                       ;; a reader of files or a process (the tree, a root, the binary) can read any class
+                       ;; a reader of files or a process (the tree, a root, the binary) can read any class of
+                       ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
+                       ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
                        kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
-                             (into kvs (filter (fn [[ck]] (input-class-namespaces (namespace ck)))) config)
+                             (into kvs (filter (fn [[ck]] (= "seon.env" (namespace ck)))) config)
                              kvs)]
                    {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
