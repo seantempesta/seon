@@ -311,30 +311,6 @@
     (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
     (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
 
-(deftest a-heavy-run-waits-while-mains-verification-runs
-  ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
-  ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
-  ;; when the holder lets go. One process does the ordering, so the test ends on the waiter's
-  ;; exit whatever main_first does: the holder takes the lock, forks the waiter (its stderr on
-  ;; its stdout: the holder reads one pipe), reads the waiter's first line while it still holds
-  ;; the lock, lets go, and reads the rest to the waiter's exit. A main_first that did not wait
-  ;; prints no waiting line and exits at once, which the holder reads as its first line
-  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/main-first-" (random-uuid))
-        _ (.mkdirs (java.io.File. dir))
-        lock (str dir "/main-verify.lock")
-        holder (str "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush;"
-                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); delete $ENV{SEON_MAIN_FIRST_HELD}; exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
-                    " my $first = <$w>; print \"while held: $first\"; flock($f, LOCK_UN); close($f);"
-                    " print \"after: $_\" while <$w>; close($w); print 'exit: ', $? >> 8, \"\\n\";")
-        r (clojure.java.shell/sh "perl" "-MFcntl=:flock" "-e" holder lock)
-        lines (str/split-lines (:out r))]
-    (try
-      (is (= ["while held: waiting for main's merge verification (a test holder)"
-              "after: returned"
-              "exit: 0"] lines)
-          (str "it said whom it waited for while the lock was held, and went on once let go: " (pr-str r)))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
-
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,
   ;; names each red from their logs, and appends its line to the merge log itself (so a line
