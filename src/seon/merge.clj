@@ -255,7 +255,7 @@
 (defn changed-vars
   "The vars changes ch add, redefine or remove (divergence's vars): what the branch changed."
   {:malli/schema [:=> [:cat :seon.merge/changes] [:set :qualified-symbol]]}
-  [ch] (into #{} (keep (fn [[[kind x]]] (when (= :var kind) x))) (keys ch)))
+  [ch] (into #{} (keep (fn [[kind x]] (when (= :var kind) x))) (keys ch)))
 
 ;; ---- verbatim merges: a merged datom is the same datom ------------------------------
 

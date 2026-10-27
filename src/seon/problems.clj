@@ -375,9 +375,9 @@
   (let [group (fn [attr] (reduce (fn [m {:keys [e v]}] (update m e (fnil conj #{}) v)) {} (d/datoms db :aevt attr)))
         one (fn [attr] (into {} (map (juxt :e :v)) (d/datoms db :aevt attr)))
         names (group :seon.section/names) dead (group :seon.section/dead-links)
-        read (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)]
+        reads (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)]
     (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.section/address)]
-               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (read e) :reviewed (reviewed e) :baseline (baseline e)}]))))
+               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (reads e) :reviewed (reviewed e) :baseline (baseline e)}]))))
 
 (defn- existing-names
   "The names db's vars and tasks hold (a task id as a symbol): what a citation may name."
@@ -408,7 +408,12 @@
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
         changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
-        secs (-> changed (into (for [[a st] hs :when (some removed (:names st))] a)) (into (for [a (keys bs) :when (not (contains? hs a))] a)))
+        added (set/difference (existing-names head) (existing-names base))
+        new-sections (set/difference (set (keys hs)) (set (keys bs)))
+        ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
+        secs (-> changed
+                 (into (for [[a st] hs :when (or (some removed (:names st)) (some added (:names st)) (some new-sections (:dead st)))] a))
+                 (into (for [a (keys bs) :when (not (contains? hs a))] a)))
         eids (fn [state] (set (keep #(:e (state %)) secs)))
         page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
         all-sites? (some page? changed)
@@ -717,14 +722,14 @@
   (let [ans (answers head)
         {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{}))
         gone (into #{} (map :signature) closed)
-        current (fn [row] (assoc row :answered-by (get-in ans [:signature (:signature row)] [])))
+        current (fn [row] (assoc row :answered-by (get-in ans (if (:run row) [:from (:run row)] [:signature (:signature row)]) [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))
                               (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
         touched (touched-runs head moved)
         ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.run/id)))) touched)
         recorded (:classes (report-with head ans {} touched))
         recorded (into recorded (for [c run-classes
-                                      :let [rows (into (filterv #(not (ids (:run %))) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
+                                      :let [rows (into (into [] (comp (remove #(ids (:run %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
     (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)

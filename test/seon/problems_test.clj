@@ -460,8 +460,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 51) "the contracted calls of one health read (59 when answers and problem-unlinked ran twice; 51 with report-with's own contract)")))
+    (is (<= (:calls m) 59) "the contracted calls of one health read (59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, and health-with's contract is one more)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -553,10 +552,10 @@
   ;; touched, not the history (health-moved; report read every run's cost verdict and waste)
   (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
                :n "finished tasks, each with a merged run carrying a cost verdict and waste"
-               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; only uncited-tasks' one scan of the task ids is per task (about 600 ticks)"
+               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the fixed part is the program's own diff (seon.merge/delta-changes, 40 contracted calls) and the per-task part is the cold index nodes that diff and the task scans touch"
                :growth :linear
-               :per-n {:ticks 1000 :bytes 5500 :calls 0}
-               :fixed {:ticks 450000 :bytes 1800000 :calls 40}
+               :per-n {:ticks 9500 :bytes 26000 :calls 0}
+               :fixed {:ticks 2400000 :bytes 6100000 :calls 46}
                :sizes [10 100 1000]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -995,7 +994,24 @@
         (is (same? db1 dead))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 dead (diff db1 dead)) [:classes :dead-citation :n])))
         (is (same? dead db1))
-        (is (same? dead (d/db-with dead [[:db/retractEntity (pdb/eid dead :var/name v)]])) "a deleted var opens more")))))
+        (is (same? dead (d/db-with dead [[:db/retractEntity (pdb/eid dead :var/name v)]])) "a deleted var opens more")
+        (testing "and a var added that an unchanged section cites closes it"
+          (let [back (d/db-with dead [{:var/name (symbol (namespace v) "no-such-var")}])]
+            (is (same? dead back))
+            (is (< (get-in (problems/health-moved (problems/health dead) dead back (diff dead back)) [:classes :dead-citation :n])
+                   (get-in (problems/health dead) [:classes :dead-citation :n])))))))
+    (testing "a section added that an unchanged section links to closes its dead link"
+      (let [linking (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
+            both (d/db-with linking (seon.docs/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
+        (is (same? db1 linking))
+        (is (same? linking both))))
+    (testing "an answer added to an untouched run's row is carried current"
+      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/outcome :died)])
+            db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
+                                 :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :run :from "t/x#1"}}])
+            moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3))
+            whole (problems/health db3)]
+        (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
 
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (ts/test-db)
