@@ -19,11 +19,11 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 
 A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
 
-- `seon_attach` with the task (ns/name) starts your agent on the task's branch and answers its id; every other tool names that id.
+- `seon_attach` with the task (ns/name) starts your agent on the task's branch and answers its id; every other tool names that id. A task already worked answers its agent. With `fresh: true` it resets the task: a new branch from main and an empty conversation (the old branch stays). With `from: "a3"` instead of a task it forks agent a3: a clone of it, live values and all, on a branch of its head, working a sibling task `<name>-fork-<n>`; read its context first, then work it as any task, and cancel the one you do not want (`(my.root/cancel! sys ["ns/name"])` as root).
 - `seon_context` is your turn: it answers what a model is sent now (the system prompt, your page and your conversation), runs your proofs and takes the messages sent to you. The first read shows the page whole, each later one what changed since the read before. Read it after every few evals, not after each.
 - `seon_eval` evaluates Clojure in your agent: the forms in this page, `@ctx` and its `swap!`, your definitions. It is your REPL, one call per eval, answered as an eval is (`:handle :value :out :err :ex`). Pass the agent `root` for root's own REPL.
 - `seon_prove` runs the tests your branch's change reaches, as the judge will; a result already green at its digest is not run again.
-- `seon_message` tells an agent something; `seon_agents` lists the agents and every task with its runs.
+- `seon_message` tells an agent something; `seon_agents` lists the live agents and the tasks running or with runs, newest first, and counts the rest.
 - `seon_done` ends your run: your proofs run, then root judges the run and merges it when the done rule refuses nothing. It answers the verdict, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
 
 ## What you read
@@ -98,7 +98,7 @@ Your task is done when every proof passes and the done rule refuses nothing; the
 
 - A proof is a deftest in a test namespace: `(ns app.workout-test (:require [clojure.test :refer [deftest is]] [app.workout :as w]))`, then `(deftest total-sums (is (= 6 (w/total [1 2 3]))))`, run with `(clojure.test/run-tests 'app.workout-test)`.
 - A cost proof (`seon.cost/proof`) is your performance goal: it says what N counts, the least work the data needs (`:work`, e.g. one pass with one lookup per row), how that grows and what it may cost. Read it before writing code and do no more work than it states.
-- Run what judges your branch now, as root's judge does: ``(my.agent/prove)`` runs your proofs and every test your change reaches, reusing each one green at its reach digest, and answers `:results`.
+- Run what judges your branch now, as root's judge does: ``(my.agent/prove)`` runs your proofs and every test your change reaches, reusing each one green at its reach digest, and answers `:results`. A process test (one whose reach holds a process var: it starts an agent, a root, a fork or the binary) never runs there: it is under `:deferred`, and `:why` names the process var it reaches and the calls to it. A process test that is your proof runs at the judge, after `seon_done`, before the merge; to see it red or green first, run its namespace by name (`seon_prove` with `names`).
 - The judge counts exactly (`seon.cost/slack`): allocated bytes may reach 1.25x the estimate, contracted calls 1.0x and ticks (the counted time dimension) 3x. CPU time (`:ns`) is measured and shown ("TIME OVER") but never red. A dimension whose growth exponent exceeds `:growth`'s by more than `seon.cost/steeper-by` (0.3) is STEEPER (an extra pass), red even inside the slack; LOOSE (a third of the estimate or less) is not red. Its failure message prints measured over estimate per size.
 
 ## Merging

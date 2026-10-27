@@ -4,7 +4,8 @@
 # no green result at their reach digest, the rest reused from the results directory every
 # checkout shares (bin/prove's tests; seon.proofs/plan). --all runs every one, green or not (the
 # full run). The selected tests are dealt, a namespace at a time, into :seon.config.proofs/jobs
-# shards, each run at once in a process of its own (logs and shard files in target/prove/);
+# shards, each run at once in a process of its own (logs and shard files in the run's directory,
+# target/prove/<run-id>, which the run's first line names: no two runs share one);
 # each result is stored at its digest, after target/seon is built from this tree when anything
 # runs. Ends on TEST OK / TEST FAILED and its exit status.
 # bin/test --plan|--shard|--store-steps ... are test/test_runner.clj's parts (bin/prove's).
@@ -30,9 +31,9 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 # and draws every randomized property test's seeds (:seon.config.proofs/seeds)
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 case ${1:-} in
-  --plan|--shard|--store-steps) runner "$@"; exit $? ;;
+  --plan|--shard|--store-steps|--send-unsent) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
-  *) WHAT=tests OUT=$ROOT/target/prove/tests ;;
+  *) WHAT=tests OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }

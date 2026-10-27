@@ -68,6 +68,7 @@ The failure points met without a catch, where the edge answers with data.
 
 | failure point | edge | answer |
 |---|---|---|
+| The standing root that holds every result (`:seon.config.proofs/results-port`) is down, refuses the connection, or answers no results, when a run reads results or records its own | `bin/ask` from `test-runner/ask-root` (bin/test, bin/prove) and `seon.fx/results-at` (the merge gate's `:tests` effect) | `{:error :refused}`, `:eof`, `:reset` or `:no-answer` (bin/ask's); the plan then reuses nothing and says so, a shard or step run keeps its request in `:seon.config.proofs/unsent-dir` (`NOT RECORDED`) for the next run, or the results root's start, to send; the gate answers `:seon.fx/io-error`, and its tests read `:error` |
 | The embedding model is missing or llama.cpp cannot load it (no file at `:seon.config.vector/model`, a file it cannot read) | `seon.vector/open`, the `:embed` worker's `:open` | `:seon.vector/model-unopened` (`:path`) as every queued request's outcome; the worker holds nothing and opens again on its next request; `seon.vector/vectors-proc` tries again at main's next commit, and `bin/check vectors` is red |
 | llama.cpp's encode fails (`seon_embed_batch` answers negative) | `seon.vector/embed` (its `embed-texts`) | `:seon.vector/encode-failed` (`:code`) for each request of the batch |
 | A peer's socket is gone (EOF, or its end frame) | root: `jolt.async.remote`'s reader pump; agents and the fork server: `seon.sock/fill!`, `seon.sock/recv!` | root: the end's `:in` closes, the agent proc's `:from` reads nil and becomes `{:op :dead}`; elsewhere `:eof` |
@@ -96,6 +97,7 @@ The failure points met without a catch, where the edge answers with data.
 | A test never ends or kills its process | `seon.agent/run-tests-forked` | a test past its own tick budget stops and the next runs (`seon.proofs/run-tests!`); a death ends that child's socket (its socketpair to the agent), and the agent reads it to its end (no clock) and names the last test started: an `:error` report with its `:exit`, no verdict (`seon.proofs/results` leaves it out); the reports of the tests that ended stream as each ends, and the tests not yet run go to a new child (`seon.agent/test-child`) |
 | An agent past its heap bound | Jolt's heap ceiling (`seon.lib/heap-cap!`) | `OutOfMemoryError` in the form: an `:err` item |
 | A forked process holding its parent's LMDB env and connections (physics: fork shares handles) | `seon.db/after-fork!` | forgotten, not closed; the agent opens the store itself (the ids page stays mapped: [storage](storage.md#ids)) |
+| A db value read after its store's last release closed the LMDB env (its nodes are read lazily) | `konserve.jolt.lmdb-ffi/live-env`, at every transaction's begin | `{:type :lmdb-env-closed :path}`, never the invalid memory reference it was; a value is read before its last release ([storage](storage.md#a-value-is-read-before-its-last-release)). A release racing a transaction already begun on another fiber is not covered: release follows the reads |
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge), called by `seon.agent/transact!` | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item). Inside a test fork the transaction applies with `d/with` to the fork's value only |
 | A process dies inside an LMDB write txn while other processes hold the store's env open (a root SIGKILLed mid-commit, a crash check) | LMDB's own writer lock, built robust (`bin/build lmdb`, below) | the kernel releases the dead holder's lock (SysV `SEM_UNDO`); the txn is lost, the next writer commits |
 
@@ -221,38 +223,42 @@ robust from `reference-code/lmdb` (stamped with its commit), `bin/env` points `J
 at it, and `bin/check`'s `lmdb-kill` step proves it. Every process on a store must load the
 same build: the lock scheme is part of the lock file's format.
 
-The robust build uses SysV semaphores, one set per env, from our fork (``jolt/sysv-sem-identity``,
-[forks](forks.md#lmdb)). A set has six semaphores: the reader and writer locks, a count of the
-processes using it (each counted with SEM_UNDO, so the kernel takes back a dead process's count),
-one held while a process takes the set (a joiner waits for none of it and joins no set being
-taken), and two values naming the lock file it belongs to. LMDB finds it from `ftok(lock.mdb,'M')`, which
-keeps only the inode's low 16 bits, so two stores can have one key; an opener takes the first set,
-from its key on, that no process uses, so two stores never share one. Upstream's build shared it:
-one store's first open reset the other's writer lock (two writers at once), and one store's last
-close removed the set the other still used, whose next open failed with `lmdb env_open: Invalid
-argument` (rc 22). The last close also raced a process waiting for the lock file, which then joined
-the removed set (rc 22 again: the deaths of test roots under load, 2026-10-23 and 2026-10-26). The
-last close now marks the lock file's set gone before removing it, and a joiner that finds its set
-gone or not its own makes a new one. `bin/check`'s `lmdb-sem` step (`target/lmdb-sem`,
-`native/lmdb_sem.c`) proves it in four cases: two stores sharing a key (the holder's set stays and
-its writer lock stays held), a set gone under a holder, 16 processes opening one store and adding
-under its writer lock (no open fails, no addition lost), and the undo limit (below). On upstream's
-build the first two are red every run, the third by a count (a few EINVALs in 3,200 opens, not
-every run) and the fourth reaches no limit.
+The robust build uses SysV semaphores, one set per env, from our fork
+(``jolt/an-env-holds-no-semaphore-undo-for-its-life``, [forks](forks.md#lmdb)). A set has four
+semaphores: the reader and writer locks, and two values naming the lock file it belongs to (a hash
+of its inode and device). Its key comes from the same hash, not from `ftok(lock.mdb,'M')`, which
+keeps only the inode's low 16 bits. A new set is claimed in one `semop` (its identity written and
+its locks freed only while it names no lock file); a set naming another lock file is passed over
+to the next key, so two stores never share one. Upstream's build shared it: one store's first open
+reset the other's writer lock (two writers at once), and one store's last close removed the set the
+other still used, whose next open failed with `lmdb env_open: Invalid argument` (rc 22). The last
+user is the process that gets the lock file's exclusive lock at its close, as for LMDB's POSIX
+semaphores; it marks the lock file's set gone and removes it, and a process that waited on the lock
+file meanwhile takes the set again by the same key (rc 22 was that race: the deaths of test roots
+under load, 2026-10-23 and 2026-10-26). `bin/check`'s `lmdb-sem` step (`target/lmdb-sem`,
+`native/lmdb_sem.c`) proves it in five cases: another lock file's set at a store's key, its writer
+lock held, stays untouched while the store is opened, written and closed; a set gone under a
+holder; 16 processes opening one store and adding under its writer lock (no open fails, no
+addition lost); one process opening and writing 50 stores at once; and a process killed inside a
+write txn, whose set is left with its writer lock given back, then taken by the next open and
+removed by its close. Each case counts the sets naming its store after the last close: none.
 
-A set outlives its processes only when the last one died without closing (a SIGKILL); a clean last
-close removes it. See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you). A set nobody
-uses is taken by the next opener whose key reaches it, so the left sets stay about a tenth of the
-key space (6,400 measured after 23 days, before the fork); the bound is `sysctl kern.sysv.semmns`
-(87,381 semaphores, 14,563 sets at six a set), and at it an open fails in `semget` (ENOSPC).
-Upstream's two-semaphore sets are never taken (not of this layout); those left before the fork
-were removed on 2026-10-26, except the ones a process still on upstream's build used
-(notes/archive/lmdb-leftover-sets-2026-10-26.md). Removing a set (`ipcrm -s ID`) while no process has its store open is safe; LMDB
-makes a new one at the next open.
+A process holds a SEM_UNDO entry of its `kern.sysv.semume` (10 on macOS) only while it holds a
+lock (a writer's, a reader registering), as upstream does; an open env holds none. The fork before
+held one for each env's life, so a process could open about five stores and the next failed with
+`MDB_SEM_UNDO_FULL` (the 2026-10-26 full run's shard, nine of `seon.proofs-test`'s scratch stores
+open; `lmdb-sem` case 4 stopped at 9 envs on it). That error is still named, never EINVAL, for a
+process holding ten locks at once.
 
-Each env a process has open holds one SEM_UNDO entry of the process's `kern.sysv.semume` (10 on
-macOS), and each lock held (a writer's, a reader registering) one more while held, so one process
-has room for eight envs open with a writer and a reader locking at once (measured: nine open and
-written one at a time, the tenth's first write fails).
+A set outlives its processes when the last one died without closing (a SIGKILL); the next first
+open of its store takes it again (its key is the store's), and a clean last close removes it. A
+store deleted after such a death leaves its set (task `seon.db/a-deleted-store-leaves-no-semaphore-set`).
+See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you); the bound is `sysctl
+kern.sysv.semmns` (87,381 semaphores, about 21,800 sets at four a set), and at it an open fails in
+`semget` (ENOSPC). Sets of an earlier layout (two or six semaphores) are never taken, and a process
+on an earlier layout refuses this one's lock file (LMDB's lock format, type 7), so every process on
+a store must run this build. Removing a set (`ipcrm -s ID`) while no process has its store open is
+safe; LMDB makes a new one at the next open.
+
 Production code opens one store per process (root's, which its agents and fork server branch: `seon.root/start!`, `seon.agent`, `seon.fork-server`; 13 live processes, `lsof`, 2026-10-26). A process that runs tests (a `bin/test` shard, an agent's test fork) holds what its tests open, so a test's own store ends with the test: the 2026-10-26 full run's shard kept nine of `seon.proofs-test`'s scratch stores open (`test-runner/program-db` keeps its branch's connection for the process) and its next opens failed (`seon.proofs-test/a-process-plans-on-more-scratch-stores-than-its-undo-entries`, twelve in turn). Past the limit the open or the lock fails with `MDB_SEM_UNDO_FULL` (named in its message), never EINVAL. A store is made whole or not at all (```seon.db/open!```, task `seon.db/a-store-is-made-whole-or-not-at-all`): it is built in a sibling directory and renamed to its path, so a create that fails or is killed leaves only that directory (`<path>.making-<uuid>`, garbage), never a data file holding no database, which every later open read as "Database does not exist" (`seon.db-test/a-create-that-fails-leaves-no-store`).
 
