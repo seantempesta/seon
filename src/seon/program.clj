@@ -876,18 +876,20 @@
 
 (defn- load-form!
   "Evaluate one form row in its namespace, and arm the contracted functions it defines
-  (seon.contract/arm!). Answers nil, or an error map."
+  (seon.contract/arm!). Answers nil, or an error map naming the form (its id and its text's first
+  line), so a load that fails says which definition failed."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.program/error]]}
-  [{:keys [ns src defines]}]
-  (try
-    (binding [*ns* (ensure-ns! ns)]
-      (eval (read-string src)))
-    (some (fn [[k s]]
-            (when-let [v (and (= :var k) (find-var s))]
-              (let [r (contract/arm! v)]
-                (when (contract/error? r) {:ns ns :message (:seon.error/message r)}))))
-          defines)
-    (catch Throwable e {:ns ns :message (step/error-msg e)})))
+  [{:keys [id ns src defines]}]
+  (let [named #(cond-> {:ns ns :message %} id (assoc :form id :lead (first (str/split-lines (str src)))))]
+    (try
+      (binding [*ns* (ensure-ns! ns)]
+        (eval (read-string src)))
+      (some (fn [[k s]]
+              (when-let [v (and (= :var k) (find-var s))]
+                (let [r (contract/arm! v)]
+                  (when (contract/error? r) (named (:seon.error/message r))))))
+            defines)
+      (catch Throwable e (named (step/error-msg e))))))
 
 ;; ---- schema entries: the program's schemas (seon.source imports them, my.schema/register!
 ;; changes them, seon.merge carries them per key) ----------------------------------------
