@@ -583,7 +583,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
   (let [w (render/draw (:tree c) ctx/changes db (render/declared-var :seon.render/render-ctx))]
-    (try (apply array-map (mapcat identity (render/placed-hiccup w "#p-task")))
+    (try (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task"])))
          (finally (render/dispose-walk! w)))))
 
 (defn world

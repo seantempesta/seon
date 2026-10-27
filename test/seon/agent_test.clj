@@ -915,7 +915,7 @@
                   " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
         [r] (in-agent [{:op :eval :agent "root" :code code}])
         [before after phases] (:value r)]
-    (is (= [:fork-server-in :reach-graph :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
+    (is (= [:fork-server-in :reach-graph :index :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
            phases)
         (pr-str r))
     (is (seq before))

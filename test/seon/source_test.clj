@@ -709,3 +709,24 @@
                :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [10 100 1000]}))
+
+(defn tree-of
+  "read-source's request for one changed file in a tree of n source files (a new directory under
+  target/, no git repository): the :paths of the file that changed, the others never asked."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [d (scratch-dir (str "tree" n))]
+    (.mkdirs (java.io.File. (str d "/src")))
+    (dotimes [i n] (spit (str d "/src/f" i ".clj") (str "(ns f" i ")\n\n(defn a [] " i ")\n")))
+    [{:req {:root d :dirs ["src"] :paths #{"src/f0.clj"}}}]))
+
+(deftest a-batch-of-edits-reads-the-changed-files-not-the-tree
+  ;; the watcher's source batch (my.root/source-changes) names its files, and the :source read takes
+  ;; them (seon.fx/read-source :paths) in place of walking and reading every file, so an edit costs
+  ;; the same in a tree of any size (task seon.source/an-import-reads-only-changed-files)
+  (cost/proof {:of 'seon.fx/read-source :input 'seon.source-test/tree-of
+               :n "source files in the tree, one of them changed"
+               :work "the one changed file read; the others neither listed nor read"
+               :growth :constant
+               :fixed {:bytes 500000 :calls 20}
+               :sizes [10 100 1000]}))
