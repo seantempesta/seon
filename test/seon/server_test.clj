@@ -204,7 +204,7 @@
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
 (deftest an-outside-agents-repl-answers-plainly
-  ;; THE PLAN 0.7's first attempt (2026-10-27) found four things in an outside agent's REPL: a
+  ;; THE PLAN 0.7's first run (2026-10-27) found four things in an outside agent's REPL: a
   ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
   ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
   ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces

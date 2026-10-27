@@ -323,7 +323,7 @@
         :else (vec (distinct (concat (for [m (re-seq #"[a-z][a-z0-9.*+!?<>=-]*/[a-z0-9.*+!?<>=-]+" q)
                                        :let [sym (symbol m)] :when (d/entity db [:var/name sym])]
                                    sym)
-                                     (for [m (re-seq #":[a-z][a-z0-9.-]*/[a-z0-9.-]+" q)] (keyword (subs m 1))))))))
+                                     (for [[_ m] (re-seq #":([a-z][a-z0-9.-]*/[a-z0-9.-]+)" q)] (keyword m)))))))
 
 (defn search
   "What on db is the best match for q (a text; a var's name, whose neighbours it also finds by who

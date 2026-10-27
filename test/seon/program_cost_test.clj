@@ -273,7 +273,9 @@
      ;; The fixed part fell with it (~714 ticks a form, so ~356k fixed): the old 420k left 7k
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
-     :fixed {:ticks 350000 :bytes 4000000 :calls 16}
+     ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
+     ;; per added form), 2026-10-27
+     :fixed {:ticks 350000 :bytes 4000000 :calls 18}
      :sizes [100 300 1000 10000]}))
 
 (defn- calls-form

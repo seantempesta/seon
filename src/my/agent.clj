@@ -182,7 +182,7 @@
    (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
      (cond (contract/error? r) r
            (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name) (take k)) r)})))))
+           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name)) r)})))))
 
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
