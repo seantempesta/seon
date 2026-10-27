@@ -55,10 +55,11 @@
   (round (priced {:map/assoc! 60})))
 
 (deftest printing-a-map-is-one-pass-over-its-entries
-  ;; the printer's own work, unarmed wherever it runs (contract/unarmed disarms what a root, an agent or
-  ;; an earlier test armed, and arms it again after): an armed printer allocates 30% more
-  (contract/unarmed
-    (fn []
+  ;; the printer's own work: its namespaces as defined, whatever an earlier test armed (and
+  ;; armed again after, as that test left them)
+  (let [armed? (contract/armed? #'seon.print/print-value)]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
          :n "entries of a flat map, all shown (~13 characters each), unarmed"
@@ -66,7 +67,8 @@
          :growth :linear
          :ops per-entry
          :fixed fixed
-         :sizes [100 300 1000 10000]}))))
+         :sizes [100 300 1000 10000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (deftest armed-printing-adds-only-its-contracted-calls
   ;; as root runs it: every contracted printer function armed. Calls are exact; bytes are the
@@ -112,19 +114,21 @@
   ;; (seon.print.select/line-breaks): what grows with the text is that one pass, never a scan of
   ;; the rest at every sizing. What the budget shows is fixed: its characters escaped once into
   ;; the literal, and read by the sizing passes (fill-end and escaped-width, about three).
-  (let [shown (select/estimate-chars shown-budget)]
-    (contract/unarmed
-      (fn []
-        (cost/proof
-          {:of 'seon.print/print-value :input 'seon.print-cost-test/text
-           :n "lines of a text cut under 6,144 tokens, unarmed"
-           :work (str "per line, one indexOf to its line break (~50 characters read) and one conj! of the break's offset; "
-                      "fixed, the ~" shown " characters shown: each escaped once into the string literal and looked up by "
-                      "about three sizing passes (char-escape-string)")
-           :growth :linear
-           :ops {:vec/conj! 1 :seq/reduce 50}
-           :fixed (round (priced {:str/escape shown :map/get (* 3 shown)}))
-           :sizes [250 500 1000 10000 100000]})))))
+  (let [armed? (contract/armed? #'seon.print/print-value)
+        shown (select/estimate-chars shown-budget)]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
+      (cost/proof
+        {:of 'seon.print/print-value :input 'seon.print-cost-test/text
+         :n "lines of a text cut under 6,144 tokens, unarmed"
+         :work (str "per line, one indexOf to its line break (~50 characters read) and one conj! of the break's offset; "
+                    "fixed, the ~" shown " characters shown: each escaped once into the string literal and looked up by "
+                    "about three sizing passes (char-escape-string)")
+         :growth :linear
+         :ops {:vec/conj! 1 :seq/reduce 50}
+         :fixed (round (priced {:str/escape shown :map/get (* 3 shown)}))
+         :sizes [250 500 1000 10000 100000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (defn rows
   "The input of size n: n problem rows (7 keys each, as my.root/problems' :stale-section rows),
@@ -142,8 +146,9 @@
   ;; breadth path on the same input cost 16.0 MB and 4.28M ticks at 100 rows, growing with them,
   ;; for 493 cuts and no row shown. The fixed part is the selection trying each level whole
   ;; (the root map, its :rows entry, the vector, each row: about four walks of what shows).
-  (contract/unarmed
-    (fn []
+  (let [armed? (contract/armed? #'seon.print/print-value)]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
       (cost/proof
         {:of 'seon.print/print-value :input 'seon.print-cost-test/rows
          :n "problem rows under 6,144 tokens, unarmed"
@@ -152,7 +157,8 @@
                     "that does not fit is sized until its charge passes the room; no row past the cut is read")
          :growth :constant
          :fixed {:ticks 3.4e6 :ns 7.8e6 :bytes 13.2e6}
-         :sizes [100 300 1000 10000]}))))
+         :sizes [100 300 1000 10000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
 
 (defn code
   "The input of size n: n lines of a test's source (~50 characters each) as code
@@ -168,19 +174,21 @@
   ;; for each time the selection makes the map's child (three);
   ;; what shows is fixed by the budget, each shown character sized about three times (fill-end,
   ;; code-width's line count) and re-indented once (emit/code-text)
-  (let [shown (select/estimate-chars shown-budget)]
-    (contract/unarmed
-      (fn []
-        (cost/proof
-          {:of 'seon.print/print-value :input 'seon.print-cost-test/code
-           :n "lines of code cut under 6,144 tokens, unarmed"
-           :work (str "per line, three times (the map's child is made three times, whole, at its least and filled, "
-                      "and each finds its line breaks: seon.print.select/node-of), one indexOf to its line break (~50 "
-                      "characters read) and one conj! of the break's offset; "
-                      "fixed, the ~" shown " characters shown, read by the sizing passes with no escaping and copied once "
-                      "into the text: measured 2026-10-25 at 1,000 lines, 576 KB and 350k ticks in all (a string's escaping, "
-                      "a-cut-text-reads-its-lines-once, prices the same characters at 13.5 MB)")
-           :growth :linear
-           :ops {:vec/conj! 3 :seq/reduce 150}
-           :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
-           :sizes [250 500 1000 10000 100000]})))))
+  (let [armed? (contract/armed? #'seon.print/print-value)
+        shown (select/estimate-chars shown-budget)]
+    (require 'seon.print.emit 'seon.print.select 'seon.print :reload)
+    (try
+      (cost/proof
+        {:of 'seon.print/print-value :input 'seon.print-cost-test/code
+         :n "lines of code cut under 6,144 tokens, unarmed"
+         :work (str "per line, three times (the map's child is made three times, whole, at its least and filled, "
+                    "and each finds its line breaks: seon.print.select/node-of), one indexOf to its line break (~50 "
+                    "characters read) and one conj! of the break's offset; "
+                    "fixed, the ~" shown " characters shown, read by the sizing passes with no escaping and copied once "
+                    "into the text: measured 2026-10-25 at 1,000 lines, 576 KB and 350k ticks in all (a string's escaping, "
+                    "a-cut-text-reads-its-lines-once, prices the same characters at 13.5 MB)")
+         :growth :linear
+         :ops {:vec/conj! 3 :seq/reduce 150}
+         :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
+         :sizes [250 500 1000 10000 100000]})
+      (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
