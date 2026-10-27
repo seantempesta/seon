@@ -134,10 +134,12 @@
       (is (= #{'app.pt-calc-test/adds 'app.pt-shell-test/shells} (set (:run-tests auto))) "named nothing: the in-process test runs, the shelling one too (a shell is no process), the forking one does not")
       (is (= ['app.pt-fork-test/forks] (:left auto)) "and the plan says it left that one out")
       (is (= ['app.pt-fork-test/forks] (:run-tests named)) "named, it runs")
-      (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes"
+      (testing "a plan of tests and check steps walks the program once: one reach graph serves both indexes, and the next plan reads it stored"
         (profile/begin!)
         (runner/plan-of d "both" false nil (ts/program-store))
-        (is (= 1 (some #(when (= 'seon.program/reach-graph (:var %)) (:calls %)) (profile/touched))) "the plan built one reach graph (none counted: instrumentation is off)")))))
+        (let [calls (fn [v] (or (some #(when (= v (:var %)) (:calls %)) (profile/touched)) 0))]
+          (is (= 0 (calls 'seon.program/reach-graph)) "the plan built no reach graph: the two before it stored one in the program store")
+          (is (= 1 (calls 'seon.program/reach-update)) "and brought the stored one to the tree once: one graph serves both indexes"))))))
 
 (deftest shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
