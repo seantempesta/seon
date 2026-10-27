@@ -3,8 +3,8 @@
   seon.merge/program-cost-follows-what-changed): over branches that hold n forms and each
   changed one, seon.merge/delta-three-way reads only the keys the datoms that differ bear."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector]
+  (:require [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
+            [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector] [seon.merge :as merge]
             [clojure.java.shell]))
 
 ;; A store on disk of this test's own, the last resort (docs/storage.md): the in-memory test
@@ -96,8 +96,9 @@
        :work (str "the datoms that differ (one value each side), the keys their entity bears, each "
                   "asked whether its attribute is data: never the schema, so never the attributes' count")
        :growth :constant
-       ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000;
-       ;; (39 calls before touched-keys asked each datom's attribute whether it bears a key); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
+       ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000
+       ;; (43 calls since touched-keys asks each differing datom's attribute whether a key reads
+       ;; it); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
        ;; 8,126 calls
        :fixed {:bytes 650000 :calls 43}
        :sizes [100 300 1000]})
@@ -125,6 +126,11 @@
         r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s) #{}]]
     (d/release c) (d/release bc)
     r))
+
+(deftest a-main-that-only-embedded-changes-no-key
+  (let [[base ours theirs das] (embedded-of 10)]
+    (is (empty? (merge/touched-keys base [theirs] das)) "embeddings are no program content")
+    (is (= {:theirs {} :apply [] :conflicts []} (select-keys (merge/delta-three-way base ours theirs das) [:theirs :apply :conflicts])) "so main changed nothing")))
 
 (deftest a-main-that-only-embedded-costs-nothing
   ;; task seon.merge/touched-keys-are-what-the-program-changed: an entity whose only differing
