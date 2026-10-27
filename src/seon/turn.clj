@@ -83,7 +83,10 @@
   the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's
   judge and the merge gate ask it), its unmerged entries, the problems its work made true
   (seon.problems/caused, as root's judge asks it), the done rule over them, and
-  the task as the branch holds it (its plan may have improved)."
+  the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing
+  else. What else a reader wants of the branch (whether it can merge, what its merge carries,
+  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/merge-view,
+  divergence-view, caused-view, tests-view), drawn when what it reads moves, never per turn."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
@@ -95,19 +98,9 @@
         db (agent/db)
         unc (added-gaps (:base @agent/state) db)
         unmerged (branch/unmerged)
-        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db)
+        caused (problems/caused (:base @agent/state) db)
         t (task/task db id)]
-    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task t
-     ;; a task that merges itself sees, every turn, whether main moved under it and whether
-     ;; merging main would conflict (seon.agent/merge-readiness), so it ends when it can merge
-     :merge (when (task/merges? (:seon.task/kind t)) (agent/merge-readiness))
-     :will-merge (program/divergence (:base @agent/state) db)
-     ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
-     :tests (when-not (contract/error? test-run)
-              (let [results (proofs/results test-run)
-                    unfinished (count (remove #(contains? results %) (:selected test-run)))]
-                (cond-> {:this-turn (count (:selected test-run)) :at-judge (:at-judge test-run) :when-asked (count (:deferred test-run))}
-                  (pos? unfinished) (assoc :unfinished unfinished))))
+    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task t
      :reasons (r/done-explain (assoc (r/done-input (index! db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                                    (if (contract/error? test-run) #{} (set (:deferred test-run))))
                                      :caused (set caused)))}))
@@ -142,17 +135,14 @@
 
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every reason of the
-  done rule, the failing assertions of each test it names, the test run's own errors, and what the
-  branch's merge will carry to main, and, for a task that merges itself, its merge readiness."
+  done rule, the failing assertions of each test it names and the test run's own errors."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{:keys [test-run reasons task results will-merge tests attention merge]}]
+  [{:keys [test-run reasons task results]}]
   (let [proofs (:proofs (:seon.task/accumulated task))
         named (into (set proofs) (keep :symbol) reasons)]
-    (cond-> {:results results :reasons reasons
-             :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
-             :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))
-             :will-merge will-merge :tests tests :attention attention}
-      merge (assoc :merge merge))))
+    {:results results :reasons reasons
+     :reds (if (contract/error? test-run) [] (proofs/red-reports test-run named))
+     :test-run-errors (if (contract/error? test-run) [(:seon.error/message test-run)] (proofs/test-run-errors test-run))}))
 
 (defn- take!
   "The entries since the last turn (a person's message, root's at a stage boundary, a refused

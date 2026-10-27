@@ -465,32 +465,19 @@
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
 
-(deftest the-turn-names-what-the-merge-will-carry
-  ;; owner D4 (2026-10-22): the branch's divergence from main, compact, every turn; it changes
-  ;; as the agent works, so it is turn content, never the cached prefix
+(deftest what-the-merge-carries-is-the-task-renders-not-the-turns
+  ;; owner, 2026-10-27 (task seon.turn/observe-reads-are-renders): what is derived for the reader goes
+  ;; into the hiccup, drawn when what it reads moves; a turn observes only the done rule's inputs.
+  ;; What the branch's merge carries (owner D4) and whether it can merge are the task render's
+  ;; views (seon.render.ui/divergence-view, merge-view) over the same functions a turn called
   (let [db (db-with-program)
-        will {:added ['demo/h] :changed ['demo/f] :schemas [:demo/k]}
-        state (context/turn-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will})]
-    (is (= will (:will-merge state)) "in the turn's state, which the page's [:status] prints")
-    (is (not (contains? (context/task-data db (task-f db)) :will-merge)) "not in the task's data")
-    (is (= {} (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}})))
-        "measured and nothing to carry says so")
-    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))
-        "not measured (a basis from before it was) is no section, never an empty one")))
-
-(deftest a-task-that-merges-itself-sees-whether-it-can-merge
-  ;; owner, 2026-10-26: merge readiness on the page every turn, so the agent knows when it can
-  ;; merge: ready when the done rule passes and merging main conflicts nowhere; what main changed
-  ;; is shown, never a reason; a task that does not merge itself has no such section
-  (let [db (db-with-program)
-        state #(context/turn-state db (task-f db) (assoc % :turn 1 :max-turns 4))]
-    (is (= {:main-moved [[:var 'demo/g]] :conflicts [] :ready true}
-           (:merge (state {:merge {:main-moved [[:var 'demo/g]] :conflicts []} :reasons []}))) "green, main moved: ready")
-    (is (false? (get-in (state {:merge {:main-moved [[:var 'demo/f]] :conflicts [[:var 'demo/f]]} :reasons []}) [:merge :ready]))
-        "merging main would conflict: not ready")
-    (is (false? (get-in (state {:merge {:main-moved [] :conflicts []} :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}) [:merge :ready]))
-        "a red proof: not ready")
-    (is (not (contains? (state {:reasons []}) :merge)) "unmeasured: no section")))
+        state (context/turn-state db (task-f db) {:turn 1 :max-turns 4 :reasons []})
+        ours (d/db-with db (program-facts '[[demo/h "(defn h [] 1)" []]]))
+        theirs (d/db-with db (program-facts '[[demo/k "(defn k [] 2)" []]]))]
+    (is (not-any? #(contains? state %) [:will-merge :merge :attention :tests]) "no turn section of them")
+    (is (= ['demo/h] (:added (seon.program/divergence db ours))) "what the branch's merge carries")
+    (is (= {:main-moved [[:var 'demo/k]] :conflicts []} (seon.merge/readiness db ours theirs))
+        "what main changed since the base, and no key both changed: it can merge")))
 
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name

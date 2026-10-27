@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm] [seon.agent]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -840,6 +840,69 @@
          [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
           (context/turn-state db (task/task db task) (context/turn-input db b l))]]))))
 
+(defn- commit-db
+  "The db at commit cid of the store branch db reads (datahike.api/commit-as-db): main's or the
+  merge base's value as a render's child names it, read from the branch's own store, so a render
+  of them is a function of its args wherever it is drawn (an agent's walk, root's cold draw)."
+  {:malli/schema [:=> [:cat :seon.host/db :any] :seon.host/db]}
+  [db cid] (d/commit-as-db (:store db) cid))
+
+(defn merge-view
+  "Whether the branch can merge into main now (a component over the db; main's and its merge
+  base's commits its children, ctx's environment): what main changed since the base and which of
+  those the branch changed too (seon.merge/readiness, the three-way a merge of main runs). It runs
+  again when main or the base moves, or the branch's db reads change."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :any] :any]}
+  [{db :seon.db/db} main base]
+  (let [{:keys [main-moved conflicts]} (pm/readiness (commit-db db base) db (commit-db db main))]
+    [:section [:h2 "merge"]
+     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.agent/merge-readiness)}
+      {:main-moved main-moved :conflicts conflicts}]]))
+
+(defn caused-view
+  "What the branch's own work made wrong since its merge base (a component over the db; the base's
+  commit its child): seon.problems/caused-split's open problems it caused, which the done rule
+  refuses, and what it changed under the wiki (:attention)."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} base]
+  (let [{:keys [caused attention]} (problems/caused-split (commit-db db base) db)]
+    [:section [:h2 "caused"]
+     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
+      {:caused caused :attention attention}]]))
+
+(defn gaps-view
+  "The functions the branch defines without a contract since its merge base (a component over the
+  db; the base's commit its child): seon.merge/uncontracted over the branch's own changes, what
+  root's judge and the merge gate ask."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} base]
+  [:section [:h2 "without a contract"]
+   [#'render/html {:budget (config/value :seon.config.render/value-budget)}
+    (vec (sort-by str (pm/uncontracted (pm/delta-changes (commit-db db base) db #{}))))]])
+
+(defn divergence-view
+  "What the branch's merge carries to main (a component over the db; the base's commit its child):
+  seon.program/divergence, the vars it added, redefined and removed and the schema keys it changed."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} base]
+  [:section [:h2 "its merge carries"]
+   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (program/divergence (commit-db db base) db)]])
+
+(defn tests-view
+  "The branch's tests now (a component over the db; main's and the base's commits its children):
+  what the test plan selects (seon.agent/test-plan: the proofs and the tests the change reaches)
+  and each one's result at its digest, as the test service recorded it on main or a shared green
+  holds it, a test with none yet :running (the test service runs it: a result arrives on main)."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int :any :any] :any]}
+  [{db :seon.db/db} rid main base]
+  (let [proofs (or (some-> (d/pull db [{:seon.run/task [:seon.task/id]}] rid) :seon.run/task :seon.task/id (->> (task/task db)) :seon.task/accumulated :proofs set) #{})
+        p (seon.agent/test-plan db (commit-db db base) proofs (commit-db db main))]
+    [:section [:h2 "tests"]
+     [#'render/html {:budget (config/value :seon.config.render/value-budget)}
+      (into (sorted-map-by #(compare (str %1) (str %2)))
+            (for [t (:selected p)]
+              [t (if-let [r (get (:reused p) t)] (if (proofs/green? r) :green :red) :running)]))]]))
+
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
   seon.context/related over the db as seon.context/related-view lines it (each section its first
@@ -965,7 +1028,14 @@
                        (let [proved (set (map :var/name (vals (:proved task))))]
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} rid n]))
                        [#'related {} rid]
-                       (when (seq (:turns run)) [#'status {} rid])))
+                       (when (seq (:turns run)) [#'status {} rid])
+                       ;; what the turn no longer computes, drawn when what it reads moves: main's and the
+                       ;; merge base's commits (ctx's environment) are their children
+                       [#'tests-view {} rid (:main c) (:base c)]
+                       [#'caused-view {} (:base c)]
+                       [#'gaps-view {} (:base c)]
+                       [#'divergence-view {} (:base c)]
+                       [#'merge-view {} (:main c) (:base c)]))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
