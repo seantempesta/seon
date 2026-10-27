@@ -168,7 +168,10 @@
   the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
   sections naming it), :line the line of its text that holds q. opts, all optional: :kinds (a set of
   those kinds), :by (a set of :text :meaning :refs), :ns (a prefix: only vars and tests whose namespace
-  starts with it), :k (:seon.config.render/search). Each hit also holds :e, its entity, and :at, the line of its text
+  starts with it), :k (:seon.config.render/search), :min (a chance: 0.4, the page's cut, unless given). A
+  function, section or schema key hit holds :relevance, the chance it is worth reading for q (calibrated
+  on a judge's labels: docs/vector.md#relevance), and hits are best first by it; those below :min are
+  counted in the last entry, not shown. Each hit also holds :e, its entity, and :at, the line of its text
   (my.agent/help takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
   last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
   or key with no vector yet is searched without meaning."

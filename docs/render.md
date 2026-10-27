@@ -149,8 +149,12 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
-- `seon.context/search`: the top `k` of a search's ranking (`take` and `drop`), with a last entry that counts the hits left out per kind and names the call that returns them: a search's answer, whose cut says what it left, not a cut of output. my.agent/related asks it for the sections.
-- `seon.context/related`: the top k of a search over the wiki's sections (`take` the config's `:seon.config.render/related` of its ranking, the cited ones left out), with the forms that read one whole and search further (`seon.context/related-view`): a search's answer, not a cut of output.
+- `seon.context/related`: what a search ranked (`seon.context/relevance`), cut by its chance (`:seon.config.render/relevance-summary`) and counted (`take` the config's `:seon.config.render/related`), the cited ones left out; what the cut left out is counted with the form that lists it: a search's answer, not a cut of output.
+- `seon.context/search`, `my.agent/related`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
+- `seon.context/names-in`: a keyword's name out of the query's text (`subs` off its colon), to seed a search's references.
+- `seon.context/item-text`, `seon.context/tokens`: a text's identifier tokens for relevance's lexical feature (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
+- `seon.context/focus`: the words of the agent's last three evals (`take-last`), matched beside the plan's by relevance's lexical feature: an input to a score, never shown.
+- `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
