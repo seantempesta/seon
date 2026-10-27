@@ -274,7 +274,8 @@
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
-                           (not= (desired-env t) (:seon.run/env a)) :env-changed)
+                           ;; an outside run's model is the outside agent's (attach), whatever the task's
+                           (not= (cond-> (desired-env t) (outside? (:seon.run/env a)) (assoc :model "outside")) (:seon.run/env a)) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))

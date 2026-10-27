@@ -69,7 +69,7 @@
     (dissoc r :value)))
 
 (defn- attach!
-  "Start an outside run of task id: its desired model is \"outside\", so the
+  "Start an outside run of task id: its env's model is \"outside\" (the task keeps its own), so the
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
   only once it exists are its env, the release and the run written, in one transaction,
   so a refused spawn writes nothing and the reconciler never sees a release with no run
@@ -85,7 +85,7 @@
             ;; the session's agent continues (design agent-loop section 1)
             k (task/session-key db id)
             ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
-        @(c/transact-main! sys (vec (concat (task/env-tx id {:model "outside"}) (task/execution-tx [id] :running)
+        @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
                                             (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
                                                                    (:plan (:seon.task/accumulated t)) k))))
         {:agent ag :task id :run aid}))))
