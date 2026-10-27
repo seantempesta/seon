@@ -115,9 +115,11 @@
   main's t moved: O(vars) for the vars (an index count), O(tasks) for the rest, nothing per
   datom of main (seon.render-cost-test/main-info-reads-what-the-page-shows: was a count of
   every datom, 15 ms at 47k datoms, 174 ms on the owner's main). Main's datom count is root's
-  state's on demand ((c/state sys {:datoms true}))."
-  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
-  [st db]
+  state's on demand ((c/state sys {:datoms true})). With moved, the datoms that differ between the
+  main held and db (what `advance-main` reads), the problems are the held ones changed by them
+  (seon.problems/health-moved)."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe [:sequential :any]]] :map]}
+  [st db moved]
   ;; a db no newer than the one held (a first read answered after a commit already came) changes nothing
   (if (<= (:max-tx db) (get-in st [:main :t] -1))
     st
@@ -130,7 +132,7 @@
              ;; main's open problems, recorded (D2's one read; ~2.7 ms, costs the problems) and
              ;; derived (dead citations: a set of var names and a lookup per cited name,
              ;; docs/health.md#cost), read when main moved
-             :recorded (problems/health db)
+             :recorded (if (and moved (:main-db st) (:recorded st)) (problems/health-moved (:recorded st) (:main-db st) db moved) (problems/health db))
              :task-rows (task-rows idx)
              ;; how each agent's work ended, for the words its card and its events use
              :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals runs))] [(:seon.run/agent a) a]))))))
@@ -505,7 +507,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (main-info st db)
+        (cond-> (main-info st db moved)
           (seq moved) (-> (update :dirty (fnil into #{}) (touched st moved))
                           (invalidate (comps-touched st :main moved))))))))
 

@@ -82,11 +82,11 @@
   evaluation records on main (three datoms each: data, not program; 60 datoms a unit, so at
   n = 1000 the records' 60k datoms dwarf the seed's ~5k), as the render proc reads main when
   its t moves."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :nil]]}
   [n]
   [{} (d/db-with (ts/test-db) (into [{:db/id "a" :seon.agent/id :a1}]
                                     (for [i (range (* 20 n))] {:seon.eval/id (str "a1-1-1/" i) :seon.eval/agent "a"
-                                                        :seon.eval/record {:code "(+ 1 2)" :response {:value 3}}})))])
+                                                        :seon.eval/record {:code "(+ 1 2)" :response {:value 3}}}))) nil])
 
 (deftest main-info-reads-what-the-page-shows
   ;; global-ids' profile (2026-10-23): main-info took 174 ms a call on the owner's main, 695 ms
