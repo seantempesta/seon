@@ -286,22 +286,21 @@
        (println (if (or (symbol? x#) (var? x#))
                   (let [s# (named x#)]
                     (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#)))
-                  (str "Source not found for " (pr-str x#) ": source reads a name or a var"))))))
+                  (str "Source not found for " x# ": source reads a name or a var"))))))
 
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address or heading holds a word of it (three letters or more), then the nearest by Jolt's
-  did-you-mean ranking (as no-var), at most six addresses. Not the page: (my.agent/help) lists it."
+  whose address holds a word of it (four letters or more), then the nearest by Jolt's did-you-mean
+  ranking (as no-var): a few addresses, never the page ((my.agent/help) lists it)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (docs/page db context/help-page :summary)
-        by-address (into {} (map (juxt :seon.ref/address :seon.ref/heading)) sections)
+        addresses (mapv :seon.ref/address sections)
         pages (docs/page-paths db)
-        words (re-seq #"[a-z0-9]{3,}" (str/lower-case address))
+        words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
         holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
-        named (concat (for [[a h] by-address :when (or (holds? a) (holds? (str h)))] a) (filter holds? pages))
-        ranked (jolt.analyzer/suggestions-for address (concat (keys by-address) pages))]
-    (vec (take 6 (distinct (concat named ranked))))))
+        ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
+    (vec (distinct (concat (filter holds? pages) (filter holds? addresses) ranked)))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help

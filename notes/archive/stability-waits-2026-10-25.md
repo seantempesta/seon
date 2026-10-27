@@ -1,6 +1,6 @@
 # The sweep of waits, 2026-10-25
 
-Two read-only agents' tables (by reading, nothing run), for notes/stability-2026-10-25.md. A: a recorded end exists; B: a clock ends it; C: nothing ends it but its answer.
+Two read-only agents' tables (by reading, nothing run), for notes/archive/stability-2026-10-25.md. A: a recorded end exists; B: a clock ends it; C: nothing ends it but its answer.
 
 ## src
 

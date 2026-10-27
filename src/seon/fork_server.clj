@@ -86,7 +86,7 @@
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
   ;; root SIGKILLed the server first, and outlived stop! (bin/check lifecycle's :left,
-  ;; notes/pure-tests/lifecycle.md)
+  ;; docs/processes.md#a-stop-reaps-every-child)
   ([st tr]
    (when (= tr ::flow/stop)
      (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))

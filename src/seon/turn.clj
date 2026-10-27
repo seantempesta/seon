@@ -40,11 +40,11 @@
   [task run]
   (if (= run (get-in @agent/state [:turn :run]))
     (:turn @agent/state)
-    (let [db (agent/db)]
-      ;; the run is this session's on its own branch too (seon.agent/begin-run!)
-      (agent/begin-run! task run)
-      (:turn (swap! agent/state assoc :turn {:run run
-                                             :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
+    ;; the run is this session's on its own branch too (seon.agent/begin-run!), and a fork's task
+    ;; with it, read after that write
+    (do (agent/begin-run! task run)
+        (:turn (swap! agent/state assoc :turn {:run run
+                                               :plan-before (:plan (:seon.task/accumulated (task/task (agent/db) task)))})))))
 
 (defn last-evals
   "The responses of this process's last model turn, one per eval call, in order, each with its
@@ -360,19 +360,32 @@
                         sent (assoc :seon.turn/sent sent))])
     text))
 
+(defn hand-back-end
+  "How an outside agent's run ends: [outcome reason] from the stop its agent requested
+  (my.task/fail! makes it :failed, with the reason it gave) and the done rule's reasons. A task
+  the agent failed ends :failed whatever the proofs say, as the turn loop ends it (work!); else
+  :green when the done rule has no reason, else :red with the reasons."
+  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :any]] [:tuple :seon.run/outcome [:maybe :string]]]}
+  [stop reasons]
+  (cond (= :failed (:outcome stop)) [:failed (:reason stop)]
+        (empty? reasons) [:green nil]
+        :else [:red (r/explain-text reasons)]))
+
 (defn hand-back!
   "End run of task as an outside agent hands it back (seon.server's :done): the proofs run
   again, and the run's end written as the turn loop writes its own (end!: the live runtime
-  staged, the end committed on the branch), :green when the done rule has no reason, else
-  :red with the reasons. Its turns, model calls, tokens and time are the outside model's,
+  staged, the end committed on the branch): hand-back-end says how it ends. Its turns, model calls, tokens and time are the outside model's,
   unknown here, so absent (never 0). The judge decides from its own run of the proofs and the
   plan the run began with on main; this end is what the run says of itself. Without it the
   judge read no end and named the run :no-end. Answers the end."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :seon.turn/end]}
   [task run]
-  (let [{:keys [plan-before]} (begin! task run)
-        {:keys [reasons]} (observe task plan-before)]
-    (end! {:run run} (if (empty? reasons) :green :red) (when (seq reasons) (r/explain-text reasons)) nil)))
+  (let [;; read before begin!, which starts the turn state anew when this run has none yet
+        stop (get-in @agent/state [:turn :stop])
+        {:keys [plan-before]} (begin! task run)
+        {:keys [reasons]} (observe task plan-before)
+        [outcome reason] (hand-back-end stop reasons)]
+    (end! {:run run} outcome reason nil)))
 
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most

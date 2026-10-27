@@ -74,11 +74,15 @@
   rest, `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {:strings
   :colls}, `seen`) prints as the form that reads it again, `(:value result/e12)`. Made when r is
   sent or shown, never stored (seon.repl/record-details keeps the value). A response with each
-  form's value (:values) prints them, its last once: :value is that last."
-  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
-  ([r] (response-text r nil))
-  ([r seen]
-   (let [p (print-value (cond-> r (contains? r :values) (dissoc :value)) (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen)))]
+  form's value (:values) prints them, its last once: :value is that last. render (seon.render/summarized):
+  a value whose schema declares a summary prints as that summary, the printer's own values."
+  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]
+                  [:=> [:cat :map [:maybe :map] [:maybe :seon.host/fn]] :string]]}
+  ([r] (response-text r nil nil))
+  ([r seen] (response-text r seen nil))
+  ([r seen render]
+   (let [p (print-value (cond-> r (contains? r :values) (dissoc :value))
+                        (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen) render (assoc :render render)))]
      (or (:text p) (:seon.error/message p)))))
 
 (defn seen

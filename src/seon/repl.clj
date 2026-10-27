@@ -415,7 +415,7 @@
         data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
               {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp) :type (str (type (:value resp)))}
+              (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
                 basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
@@ -463,7 +463,7 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state))]))
+     (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state) render/summarized)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)

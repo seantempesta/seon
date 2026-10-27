@@ -1104,21 +1104,23 @@
 
 (defn config-reads
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
-  of a seon.config.* namespace, the config's keys), or :all when it takes a whole config map
-  from outside seon.config: the config in force (seon.config/config) or the one root wrote on
-  main (seon.config/from-db), whose keys its caller reads as it likes ((get c k)). seon.config's
-  own readers (value, resolve) name no key of their own; every one of their callers names its
-  key, but for config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
+  of a seon.config.* namespace, the config's keys). A form that takes a whole config map (the
+  config in force, seon.config/config, or the one root wrote on main, seon.config/from-db) reads
+  the keys it names, no more: a key it reads by a value it computes is the daily full run's to
+  catch (owner, 2026-10-27: \"no test digests the whole tree\"; every config key a root's boot
+  took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
+  (value, resolve) name no key of their own; every one of their callers names its key, but for
+  config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
   seon.config/schema-forms, its one form, which holds nothing else) names every key as its
   declaration, data its class holds, and reads none. Beside the keys, the file classes it reads
   (env-class-readers): the :seon.env/* entries of :config. A test's digest takes the values of
   the keys and classes its reach reads (graph-index), so a key no test reads moves no digest."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol] [:vector :any]] [:or [:= :all] [:set :qualified-keyword]]]}
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol] [:vector :any]] [:set :qualified-keyword]]}
   [keywords refs nsym pins]
   (let [classes (into (pin-reads refs pins) (keep env-class-readers) refs)]
-    (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
-          (refs 'seon.config/baked-schema-forms) classes
-          :else (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
+    (if (refs 'seon.config/baked-schema-forms)
+      classes
+      (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
 
 (defn- reach-rows
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
@@ -1264,10 +1266,8 @@
                                                     ;; kid's set grown by the rest
                                                     :config (let [own (map (comp :config rows) c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
-                                                              (if (or (some #{:all} own) (some #{:all} ks))
-                                                                :all
-                                                                (let [[k & more] (sort-by (comp - count) ks)]
-                                                                  (-> (or k #{}) (into cat own) (into cat more)))))})
+                                                              (let [[k & more] (sort-by (comp - count) ks)]
+                                                                (-> (or k #{}) (into cat own) (into cat more))))})
                                        (inc n)]))
                                   [(transient (apply dissoc old-comp gone-ids))
                                    (transient (apply dissoc (:cd g) olds))
@@ -1322,7 +1322,7 @@
   what it reaches, a file it reads or a binary it runs not in its reach is the full run's to
   catch, bin/test --all, docs/merging.md), its starting forms' components' digests (its forms and their
   namespaces' plain forms) and the values in inputs' :config of the config keys those
-  components read (config-reads: every key's when one reads the config map); :process? and :binary?, whether one of those components uses a
+  components read (config-reads); :process? and :binary?, whether one of those components uses a
   process or a binary var. A root naming a var with no form in g gets none."
   {:malli/schema [:=> [:cat :map :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]}
   [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree config]} roots]
@@ -1330,8 +1330,8 @@
         answer (fn [k ids]
                  (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
                        ks (map #(:config (flags %)) cs)
-                       ;; the values of the config keys its reach reads (config-reads), every key's for one reading the map
-                       kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))
+                       ;; the values of the config keys its reach reads (config-reads)
+                       kvs (select-keys config (into #{} cat ks))
                        ;; a reader of files or a process (the tree, a root, the binary) can read any class
                        kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
                              (into kvs (filter (fn [[ck]] (input-class-namespaces (namespace ck)))) config)

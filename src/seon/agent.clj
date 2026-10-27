@@ -939,6 +939,21 @@
       (alias 'str 'clojure.string))
     nsx))
 
+(defn state-summary
+  "The agent's process state m as the printer shows it (seon.render/summarized, the schema
+  :seon.agent/state): each key with its value when that is a scalar, else what it holds, a count
+  for a collection and its type for a host object (a database, a connection, a descriptor),
+  with the form that reads it whole. A bare (swap! seon.agent/state ...) answers the state: it
+  costs what the state names, not what it holds."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [m]
+  (into (array-map)
+        (for [[k v] m
+              :let [read (list 'get (list 'deref 'seon.agent/state) k)]]
+          [k (cond (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)) v
+                   (coll? v) {:count (count v) :read read}
+                   :else {:host (str (type v)) :read read})])))
+
 (defn- key-of
   "Agent id's key (seon.task/agent-key) in the boot of the root that forked it: main's
   :seon.root/boot, read from main (db: main as the agent forked, or main's head), never from the
@@ -1046,7 +1061,8 @@
                       (pdb/after-fork! (:cfg r))
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
                       (let [store-conn (d/connect (assoc (:cfg r) :branch (:branch m)))]
-                        (swap! state assoc :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
+                        ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
+                        (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (key-of (pdb/head store-conn (pdb/main-branch (:cfg r))) (:agent m)) :branch (:branch m) :fd fd :conn (sock/conn fd) :mode :agent :tx-seq 0
                                :pending clojure.lang.PersistentQueue/EMPTY :fx-pending {}
                                :store-conn store-conn :db @store-conn))
                       (let [unwatched (sock/signal-at-input! fd)]
@@ -1067,11 +1083,21 @@
   the conversation finds the messages its runs took by it (seon.context/records), and @ctx holds
   the run with its task. Written as the process starts with its run (init!: an outside agent's
   branch is cut before its run is written on main), or by the turn that begins a later run of the
-  session; once, nothing written when the branch holds it."
+  session; once, nothing written when the branch holds it. The task is running, as main holds it
+  (its release, written on main after the branch was cut, read :held here: my.task/current and the
+  page's task said held); a task's execution is no content a merge carries (seon.merge/carried-platform-attrs).
+  A task the branch lacks (a fork's: its branch is cut from another task's) is written as main
+  declares it first (seon.task/create-tx)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id] :any]}
   [task run]
   (when-not (some-> (d/entity (db) [:seon.run/id run]) :seon.run/agent)
-    (transact! [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
+    (when-not (d/entity (db) [:seon.task/id task])
+      (let [t (task/task (heard-main) task)]
+        (transact! (task/create-tx (db) [(-> (select-keys t [:seon.task/ns :seon.task/name :seon.task/plan :seon.task/instructions :seon.task/proofs
+                                                             :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
+                                             (update :seon.task/ns symbol))]))))
+    (transact! [{:seon.task/id task :seon.task/execution :running}
+                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
@@ -1139,6 +1165,7 @@
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.turn's index!), never lists it here
                    index (assoc :index index)))
+     (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
      (mark! :state)
      (swap! state assoc :marks @marks)
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes

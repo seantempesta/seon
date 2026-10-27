@@ -654,7 +654,7 @@
                                        :seon.run/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
 
-;; ---- derived: a dead citation is true while it is true (notes/health-design-2026-10-23.md) ----
+;; ---- derived: a dead citation is true while it is true (notes/archive/health-design-2026-10-23.md) ----
 
 (deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
   (let [db (ts/test-db)

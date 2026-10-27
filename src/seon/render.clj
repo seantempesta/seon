@@ -42,6 +42,25 @@
     (or (:seon.render/html (contract/properties k))
         (some declared (parents k)))))
 
+(defn summary-declared
+  "The summary function symbol schema k (or its nearest parent) declares, {:seon.render/summary
+  sym}: what to show of a value too large or too host-bound to print whole, or nil."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:maybe :symbol]]}
+  [k]
+  (when k
+    (or (:seon.render/summary (contract/properties k))
+        (some summary-declared (parents k)))))
+
+(defn summarized
+  "What the printer shows in place of v (seon.print/print-value's :render): {:value summary}
+  when v's schema (its metadata :seon.render/schema) declares a summary function, which makes a
+  value (an array map of what matters, docs/render.md#a-render-is-a-value-printed-once) that the
+  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read."
+  {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
+  [v]
+  (when-let [sym (summary-declared (:seon.render/schema (meta v)))]
+    {:value ((requiring-resolve sym) v)}))
+
 (defn- identity-attr?
   "Is attribute a an upsert key ([:and {:seon.db/identity true} ...])?"
   {:malli/schema [:=> [:cat :any] :boolean]}

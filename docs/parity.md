@@ -27,7 +27,7 @@ Each v1 MCP tool and where it stands here.
 | an outside agent works a task | `seon_attach`, `seon_context`, `seon_done` | new |
 | reasons and defects answered per request | a defect answers that request the typed `:seon.server/defect` and the server goes on (`seon.server/respond`); a refused attach still writes the task's state first (task `seon.server/attach-writes-nothing-when-it-is-refused`) | partial |
 
-The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` returns every task, the cancelled ones included: too much context for an outside agent.
+The server's ops, the MCP tools and root's evaluation path are [server](server.md#ops). `seon_agents` answers the live agents and the tasks running or with runs, and counts the rest (```seon.server/live-tasks```).
 
 ## The agent's REPL (`my.*`)
 
