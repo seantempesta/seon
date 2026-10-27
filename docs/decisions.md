@@ -14,8 +14,8 @@ The name `ctx` stays as it is; no rename to another word. Stated: the code (`seo
 ### An agent changes a function by (in-ns) and defn (owner, 2026-10-27)
 An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clojure's own way, not a special edit function. Stated: AGENTS §4 (get out of an agent's way).
 
-### bin/build never waits on main's lock (owner, 2026-10-27: "Keep the lock for tests and checks, but bin/build never waits on it")
-Stated: docs/merging.md#main-goes-first, bin/env.
+### No lock on main's verification (owner, 2026-10-27: "Remove it")
+Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tests and checks": main's verification rarely runs (a branch that holds main and proved its tip merges with no run), and a hung run on main stalled every worktree for 48 minutes. Stated: docs/merging.md#main-goes-first, AGENTS §2.
 
 ### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
 Worktrees run plain `bin/prove` and report ready; the merge session merges a batch and runs one `bin/build` and one `bin/prove --merge`, because per-branch fast-forwards after a branch's own `--merge` are about N² process-test runs. Stated: AGENTS §3, docs/merging.md#a-branch-proves-its-in-process-tests-mains-batch-runs-the-process-tests-once.
