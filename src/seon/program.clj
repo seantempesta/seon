@@ -1041,18 +1041,6 @@
   tests took the tree, so any edit anywhere reran them."
   (conj (set (keys env-class-readers)) 'seon.proofs/verdicts 'seon.config/baked-schema-forms))
 
-(def schema-readers
-  "The vars that look a schema up by a key they are given, or list the registry: a form outside
-  seon.contract and seon.config referencing one reads the schema resources (:seon.env/schemas)
-  as a class, because the key is a value it computes (seon.db/schema derives the store's
-  attributes from every entity schema). A schema key a form names as a literal keyword is an
-  edge to that entry instead (reach-step), so an edit to an entry moves the tests that reach
-  it; the contract machinery inside seon.contract and seon.config (checked, forms, the registry
-  a contracted function validates its arguments against) reaches the entries the function's own
-  contract names, edges too."
-  '#{seon.contract/forms seon.contract/registry seon.contract/registry-of seon.contract/schema
-     seon.contract/properties seon.contract/valid? seon.contract/arm! seon.config/schema-forms})
-
 (def config-key-readers
   "The vars that read a config key named in data rather than in their own code: a form defining
   one reads every config key a schema entry's form names (schema-config-keys), so a test reaching
@@ -1106,8 +1094,7 @@
   the keys and classes its reach reads (graph-index), so a key no test reads moves no digest."
   {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol]] [:or [:= :all] [:set :qualified-keyword]]]}
   [keywords refs nsym]
-  (let [classes (cond-> (into #{} (keep env-class-readers) refs)
-                  (and (not (#{'seon.contract 'seon.config} nsym)) (some schema-readers refs)) (conj :seon.env/schemas))]
+  (let [classes (into #{} (keep env-class-readers) refs)]
     (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
           (refs 'seon.config/baked-schema-forms) classes
           :else (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
@@ -1203,28 +1190,36 @@
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
+        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
+        pvars (cfg/value :seon.config.source/process-vars)
+        bvars (cfg/value :seon.config.source/binary-vars)
+        reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
+        ;; a form that starts a process (a process var, the binary) reaches the program that process
+        ;; runs: the entry vars' forms. The process's code is reached over a socket, by keyword ops
+        ;; and as a quoted form it is sent, edges no reference shows
+        entry (cfg/value :seon.config.source/process-entry)
+        entry-ids (vec (keep var-form entry))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
                         (vec (concat (remove test-ids (keep var-form (named f)))
+                                     (when (or (proc (:id f)) (bin (:id f))) entry-ids)
                                      (filter rows (:sedges f))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
         holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
+        starters (when (some V entry) (concat proc bin))
         dirty (-> (set (map :id added))
                   (into (mapcat #(get refd %)) V)
                   (into (keep var-form) (concat V M P))
                   (into holders)
+                  (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (as-> (:rev g) r
               (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
               (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
               (apply dissoc r gone-ids))
-        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
-        pvars (cfg/value :seon.config.source/process-vars)
-        bvars (cfg/value :seon.config.source/binary-vars)
-        reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
         plain? (fn [f] (and (not (schema-row? f)) (not-any? (fn [[k]] (= :var k)) (:defines f))))
         plain (as-> (:plain g) pl
                 (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))

@@ -447,8 +447,8 @@
     (spit (str b "/resources/seon/config/default.edn") "{:a 1}")
     (is (= (:env in-a) (:env (fx/inputs b))) "the shipped config file is no input of every test")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= (:env in-a) (:env (fx/inputs b))) "a schema resource is a class of its own, no input of every test")
-    (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in (fx/inputs b) [:config :seon.env/schemas])) "but its digest changed")
+    (is (= (select-keys in-a [:env :config]) (select-keys (fx/inputs b) [:env :config]))
+        "a schema resource is no input: its entries are program facts, taken by the tests whose reach names them")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
     (.mkdirs (java.io.File. (str b "/native")))
@@ -471,10 +471,6 @@
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       ;; and a test that reads files or runs a process takes every class
       (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
-    ;; the tests that look a schema up by a key they compute (seon.program/schema-readers: seon.db/schema
-    ;; derives the store's attributes from every entity schema) take the schemas class: the floor of a
-    ;; schema edit, until those readers declare the entries they use
-    (is (< 0 (count (moved :seon.env/schemas)) (count all-tests)) "some tests take the schemas class, not every test")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (< 0 (count m) (count all-tests)) (str (count m) " of " (count all-tests) " tests take the " c " class: some, not every test"))
       (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
@@ -496,6 +492,23 @@
     (is (not= (before 'app.pt-sk-test/names-test) (changed 'app.pt-sk-test/names-test)) "the test naming the entry moves with it")
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
+
+(deftest a-test-that-starts-a-process-reaches-the-program-it-runs
+  ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
+  ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
+  ;; green shared it and bin/test listed them flaky. The agent's code is reached over a socket and as
+  ;; a quoted form root sends it: a form using a process var has an edge to the process's entry vars
+  ;; (:seon.config.source/process-entry)
+  (let [here (System/getProperty "user.dir")
+        in (fx/inputs here)
+        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        idx (program/graph-index g in nil)
+        process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
+        reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
+    (is (seq process) "there are process tests")
+    (is (= process reaching) "exactly the tests that start a process reach the code the agent they start runs")
+    (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
+    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
