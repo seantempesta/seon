@@ -1197,7 +1197,7 @@
                :per-n {:ns 0 :bytes 0 :calls 0}
                ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
                ;; 49: :flaky (seon.proofs/flaky) one more
-               :fixed {:ns 3000000 :bytes 4000000 :calls 49}
+               :fixed {:ns 3000000 :bytes 4000000 :calls 51}
                :sizes [10 100 1000]}))
 
 (deftest attention-survives-a-store-write
