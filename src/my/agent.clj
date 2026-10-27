@@ -282,9 +282,11 @@
 
 (defn grep
   "The program vars and tests whose recorded definition holds the words of s, best first: the text half of
-  (search s {:by #{:text} :kinds #{:var :test}}), one hit each ({:kind :name :e :score :by :line :at})."
+  (search s {:by #{:text} :kinds #{:var :test} :min 0.0}), one hit each ({:kind :name :e :score :by :line :at}).
+  Every text hit is shown up to :k, whatever its relevance (a grep finds the words; the page's cut is the
+  page's, and a text-only query has no meaning for relevance to weigh)."
   {:malli/schema [:=> [:cat :string] [:or [:vector :map] :map]]}
-  [s] (search s {:by #{:text} :kinds #{:var :test}}))
+  [s] (search s {:by #{:text} :kinds #{:var :test} :min 0.0}))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
