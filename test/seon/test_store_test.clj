@@ -111,3 +111,16 @@
     (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))
     (is (not-any? #(re-find (re-pattern (str "task-" (:ns @first-names) "-")) %) branches)
         (str "the first test's branches are gone: " branches))))
+
+(deftest the-program-store-is-named-by-the-programs-own-schema
+  ;; task seon.test-store/the-kept-program-store-survives-unrelated-schema-changes: every schema change named the
+  ;; store anew, and the next plan imported the whole program (18-28 s, 3-4 G ticks)
+  (let [decl (fn [k] {:db/ident k :db/valueType :db.type/string :db/cardinality :db.cardinality/one})
+        base (vec pdb/schema)
+        digest ts/program-schema-digest]
+    (is (= (digest base) (digest (conj base (decl :seon.run/zzz)))) "a run's attribute: the same store")
+    (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
+    (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
+    (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
+    (is (= ts/kept-program-digest (digest base)) "this process's")
+    (is (re-matches #"[0-9a-f]{8}" ts/kept-program-digest))))
