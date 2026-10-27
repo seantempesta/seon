@@ -427,7 +427,9 @@
         basis (when (and (contains? resp :value) (not (contains? resp :values))) (:seon.render/basis (meta (:value resp))))
         data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
-              {:code code :response resp}
+              ;; data that names its render schema (a prove's run, :seon.test/proved) keeps it: the page draws the value by it
+              (cond-> {:code code :response resp}
+                (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp)))))
               (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
                 basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
       (or (contains? r :value) (:ex r))

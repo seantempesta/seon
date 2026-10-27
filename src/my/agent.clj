@@ -232,7 +232,7 @@
              task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))]
          (with-meta (assoc test-run :results results
-                           :proofs (into (sorted-map-by #(compare (str %1) (str %2)))
+                           :proofs (into {}
                                          (for [p (into (set proofs) task-proofs)]
                                            [p (or (results p) (when (deferred p) :deferred) :none)])))
            {:seon.render/schema :seon.test/proved}))))))
