@@ -1312,14 +1312,14 @@
 
 (defn branch-health
   "A branch's health (root's ruling, 2026-10-23): what head caused that base had not, the done rule's
-  own reading (seon.problems/caused-split), judged on classes (every class caused-split reads when nil).
+  own reading (seon.problems/caused-split), judged on classes (every derived class when nil).
   {:caused [{:class :message}] :attention [{:class :message}] :checks {:no-<class> bool}}: a
   problem base already had is not the branch's, and is root's to show (its context and page)."
   [base head classes]
   (let [{:keys [rows]} (seon.problems/caused-split base head)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))
-        derived seon.problems/caused-classes
-        ;; a class asked for that no verdict judges (not read by caused-split, or attention: it never fails a branch) is refused, never a green
+        derived (:seon.problems/derived (contract/properties :seon.problems/class))
+        ;; a class asked for that no verdict judges (not derived, or attention: it never fails a branch) is refused, never a green
         _ (when-let [bad (seq (remove #(and (derived %) (not (attention? %))) classes))]
             (throw (ex-info (str "health judges the derived classes that fail a branch, not " (clojure.string/join ", " (map name bad))) {})))
         cs (or (seq classes) (sort derived))
@@ -1342,7 +1342,7 @@
 (defn health-check
   "The health step (root's ruling, 2026-10-23): what this checkout caused since its base
   (seon.fx/base-commit: its merge base with git's main; on main, the previous main), the done
-  rule's reading (branch-health) of classes (every class `caused-split` reads when none is named). A root
+  rule's reading (branch-health) of classes (every derived class when none is named). A root
   booted on this checkout's source (src and the schemas) and its task files, its wiki loaded once
   they are (a prose word is a citation when it names something), is the head; the base is that
   db with the base commit's tree loaded by the same loaders (base-db). One line per row the
@@ -1363,9 +1363,8 @@
              based (try (base-db sys head (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) dir) dirs)
                         (finally (clojure.java.shell/sh "rm" "-rf" dir)))
              {:keys [caused attention checks]} (branch-health based head classes)
-             health (seon.problems/health head)
-             open (reduce + 0 (for [c (or (seq classes) (sort seon.problems/caused-classes))]
-                                (get-in health [:classes c :n] 0)))]
+             open (reduce + 0 (for [c (or (seq classes) (:seon.problems/derived (contract/properties :seon.problems/class)))]
+                                (get-in (seon.problems/health head) [:classes c :n] 0)))]
          (doseq [r caused] (out! (name (:class r)) " " (:message r)))
          (doseq [r attention] (out! "attention " (name (:class r)) " " (:message r)))
          {:report {:base base :caused (count caused) :attention (count attention) :open-in-head open}

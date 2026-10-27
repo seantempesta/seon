@@ -98,18 +98,21 @@
  ;; Its parts agree with each other (every id in a set is a run it holds), which a
  ;; generator of the parts alone breaks: mg/check generates the empty index only, and the
  ;; index's laws are R3's oracle property test (test/r3/inc_test.clj, the same actions as a
- ;; full reconcile on generated dbs)
+ ;; full reconcile on generated dbs). Each part is checked shallowly: every helper of the
+ ;; reconciler takes the index, so a check of its entries would cost tasks on every call and
+ ;; tasks x tasks a listing; each entry is checked once, where it enters (put-task's
+ ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
  :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
                                               :runs {} :by-task {} :done {} :ready #{} :ready-key {}
                                               :live #{} :reap #{} :kill {} :judge #{} :merging #{} :msgs {}}]}
-                        [:root [:maybe :map]] [:tasks [:map-of :seon.task/id :map]] [:keys :map] [:needed-by :map]
-                        [:acc :map] [:depth [:map-of :seon.task/id :int]] [:claims :map]
-                        [:runs [:map-of :seon.run/id :map]] [:by-task :map] [:done :map]
-                        [:ready [:set [:tuple :int :seon.task/id]]] [:ready-key :map]
-                        [:live [:set :seon.run/id]] [:reap [:set :seon.run/id]] [:kill [:map-of :seon.run/id :keyword]]
-                        [:judge [:set :seon.run/id]] [:merging [:set :seon.run/id]]
+                        [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
+                        [:acc :map] [:depth :map] [:claims :map]
+                        [:runs :map] [:by-task :map] [:done :map]
+                        [:ready set?] [:ready-key :map]
+                        [:live set?] [:reap set?] [:kill :map]
+                        [:judge set?] [:merging set?]
                         ;; messages main holds to each branch's runs (seon.reconcile/branch-messages): a parked session's wake
-                        [:msgs {:optional true} [:map-of :keyword :int]]]
+                        [:msgs {:optional true} :map]]
  :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task and a run as Datahike pulls them (the readers' inputs)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
