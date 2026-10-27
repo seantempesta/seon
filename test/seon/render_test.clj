@@ -1177,3 +1177,38 @@
         (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
         (is (str/includes? carries "demo/h") "what the branch's merge carries")
         (is (not (str/includes? carries "demo/k")) "never main's change")))))
+
+(deftest an-unrelated-change-redraws-none-of-the-merge-views
+  ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; each is a component
+  ;; drawn again only when what it reads moves. An unrelated change of ctx (an eval) redraws none;
+  ;; main moving redraws the views of main (merge, tests) and none of the base's
+  (ts/test-branch!
+    (fn [_ conn]
+      (doseq [tx [[{:seon.root/id :root :seon.root/boot "b1"}]
+                  [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make demo/f." :seon.task/execution :running
+                    :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
+                  (seon.task/agent-tx "b1" :a3 {:status :idle :branch :task-demo-f})
+                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")]]
+        (d/transact conn tx))
+      (let [c0 (d/commit-id @conn)
+            k (seon.task/agent-key "b1" :a3)
+            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :main-commit c0 :base-commit c0)
+            a (seon.ratom/atom tree)
+            w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
+            views '#{seon.render.ui/merge-view seon.render.ui/tests-view seon.render.ui/caused-view seon.render.ui/gaps-view seon.render.ui/divergence-view}
+            ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
+        (try
+          (r/frame! w nil)
+          (is (= views (set (keys (ran)))) "each view drawn once, as a component of the task's list")
+          (let [r0 (ran)]
+            (swap! a assoc :seon.agent/description "an unrelated change")
+            (r/frame! w nil)
+            (is (= r0 (ran)) "an unrelated change redraws none of them")
+            (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
+            (swap! a assoc :main-commit (d/commit-id @conn))
+            (r/frame! w nil)
+            (let [r1 (ran)]
+              (is (= #{'seon.render.ui/merge-view 'seon.render.ui/tests-view}
+                     (set (for [[f n] r1 :when (not= n (r0 f))] f)))
+                  "main moving redraws the views of main, and none of the base's")))
+          (finally (r/dispose-walk! w)))))))
