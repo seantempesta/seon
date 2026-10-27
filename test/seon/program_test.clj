@@ -518,7 +518,9 @@
     (is (= (before 'app.pt-res-test/plain-test) (changed 'app.pt-res-test/plain-test) (defined 'app.pt-res-test/plain-test))
         "a test resolving nothing kept its digest")
     (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")
-    (is (= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name passed to no resolver is data: no reference")))
+    ;; root, 2026-10-27: a name quoted in a test's namespace is one the test hands over by name
+    ;; (seon.program-test/a-name-a-test-hands-over-quoted-is-what-it-reaches): a rerun, never a stale green
+    (is (not= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name a test's namespace quotes is what it reaches")))
 
 (deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
@@ -603,8 +605,12 @@
         a (program/reach-digests (runner/program-db here (ts/program-store)) in)
         b (program/reach-digests (runner/program-db here (ts/program-store)) in)
         c (program/reach-digests (runner/program-db copy (ts/program-store)) in)
-        db (ts/test-db)
-        r (program/reach-digests (d/db-with db (source/import-tx db (:value (fx/read-source {:req {:root here :dirs dirs}})))) in)
+        ;; root imports into its own store, which holds no example program (the test store's seed
+        ;; does: names a test quotes would reach it)
+        {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
+        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
+               (program/reach-digests @conn in)
+               (finally (d/release conn true)))
         dir (scratch-dir "same-tree")]
     (is (< 300 (count a)) "the whole suite")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
