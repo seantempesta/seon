@@ -708,7 +708,9 @@
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
       (nil? (get-in @held [:tree :db/id])) (in (agent-record b n))
       (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b (:branch n)))
-      :else (let [c (update (patch @held b (moved a b (:tx n)) (:branch n)) :tree merge (heard n))]
+      ;; a patch keeps what the record heard; it is set again only when the agent heard anew
+      :else (let [c (cond-> (patch @held b (moved a b (:tx n)) (:branch n))
+                      (not (and (identical? (:main o) (:main n)) (identical? (:base o) (:base n)))) (update :tree merge (heard n)))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
               (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
 
