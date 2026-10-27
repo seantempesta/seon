@@ -390,11 +390,17 @@
   "Make this forked process (an agent, a clone) open the store itself: an LMDB env and the
   connections inherited from its parent must not be used across fork(), so they are
   forgotten (not closed: they are the parent's). The store's ids page stays: fork maps the
-  parent's page (ids!). Physics, not a guard: fork shares the parent's handles."
+  parent's page (ids!). Physics, not a guard: fork shares the parent's handles. Each node cache
+  the parent's connections held stays, alone: its nodes are decoded values at content
+  addresses, so this process's first connect to that store adopts it (datahike.connections/
+  reserve-connection-opening! shares a cache by node store and threshold) and reads what the
+  parent decoded instead of fetching and decoding it again."
   {:malli/schema [:=> [:cat :seon.db/cfg] :any]}
   [cfg]
   (swap! @#'konserve.jolt.lmdb/envs dissoc (get-in cfg [:store :path]))
-  (reset! datahike.connections/*connections* {}))
+  (swap! datahike.connections/*connections*
+         (fn [cs] (into {} (for [[_ {:keys [node-store-key threshold node-cache]}] cs :when node-cache]
+                             [[::inherited node-store-key threshold] {:count 0 :node-store-key node-store-key :threshold threshold :node-cache node-cache}])))))
 
 (defn map-use
   "The LMDB store's use of its map: {:used-bytes (data.mdb's length: LMDB grows the file as it
