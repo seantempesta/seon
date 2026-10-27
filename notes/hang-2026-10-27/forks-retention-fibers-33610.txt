@@ -1,0 +1,55 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+2026-10-27T11:06:09.637Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given false, :stored true}}, :config {:keep-history? false, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "12ab002a-c022-45f7-b031-56ac004af53c"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+2026-10-27T11:06:09.641Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given false, :stored true}}, :config {:keep-history? false, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "12ab002a-c022-45f7-b031-56ac004af53c"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+2026-10-27T11:06:09.642Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given false, :stored true}}, :config {:keep-history? false, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "12ab002a-c022-45f7-b031-56ac004af53c"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+2026-10-27T11:06:09.649Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given true, :stored false}}, :config {:keep-history? true, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "c547d440-75d9-4268-8e69-d9a1ba607207"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+2026-10-27T11:06:09.654Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given true, :stored false}}, :config {:keep-history? true, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "c547d440-75d9-4268-8e69-d9a1ba607207"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+2026-10-27T11:06:09.655Z :error datahike.connector [232 7] Create-time-fixed index settings differ from the stored configuration. 
+  data: {:type :create-time-fixed-index-config-mismatch, :conflicts {:keep-history? {:given true, :stored false}}, :config {:keep-history? true, :search-cache-size 10000, :index :datahike.index/persistent-set, :store {:backend :memory, :id #uuid "c547d440-75d9-4268-8e69-d9a1ba607207"}, :store-cache-size 1000, :attribute-refs? false, :writer {:backend :self}, :crypto-hash? false, :schema-flexibility :write, :branch :db}}
+jolt fiber dump: 3 live fibers of 84 held, on thread 0
+fiber 0: parked, carrier 12, parked on alt-handler, wait state none, 39 ticks
+  a CPS step: the procedure ?
+fiber 1: parked, carrier 11, parked on alt-handler, wait state none, 43 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 2: parked, carrier 10, parked on alt-handler, wait state none, 104 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke

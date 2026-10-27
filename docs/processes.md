@@ -12,6 +12,23 @@ The fork server is one thread that holds main's db value, takes every main commi
 
 The boot server makes a process group every agent, test child and clone inherits; EOF on its socket to root is root's death, and it kills the group ([failure points](failure-points.md)). Root's side is ```seon.fork-server/fork-server-proc```, the one writer of the command pipe: it keeps a standby (a fork of the server, idle until promoted) and promotes it when the server dies, so no fork ever comes from root.
 
+## What a fork inherits
+
+A forked process gets the parent's compiled program and db values copy-on-write, and every rule of fork, LMDB and Chez that follows from that is already handled in `src`, so a process that holds a commit's program (a test run included) can fork from it like an agent does.
+- **The program and db values** are copied copy-on-write (on macOS arm64 the JIT pages are first moved out of `MAP_JIT` by a static collect, Chez patches 0006 and 0007). Compiled code cannot be stored (Jolt units are 15 times their source, hold absolute paths and are valid under one runtime: [storage](storage.md)), so a fork has exactly its parent's program, and any other commit's is that plus the forms it differs by (```seon.program/load-changes!```, 1.6-5 ms a form; `d/commit-as-db` 0.7-0.9 ms; the reach graph by ```seon.program/reach-update```, 20-45 ms).
+- **The LMDB env and Datahike connections** must not be used across a fork: ```seon.db/after-fork!``` forgets them, and the child connects again. A storeless parent forks the same way, and the in-memory test store is copied as a value.
+- **Threads and fibers**: only the calling thread survives (```seon.lib/fork!``` refuses with more than one active, and `jolt-after-fork-child!` repairs the host's books), and a process that ever started Chez's parallel sweepers never forks, which is why root cannot be the forker ([failure points](failure-points.md)).
+- **The fork costs** about 0.8 ms, and an agent about 5 MB of its own beside the parent's shared pages.
+
+What the tests still need beyond this is a program per git tree, not a fork: ```seon.proofs``` keeps one durable store per checkout holding a branch per tree id, brought current by `seon.source/refresh-tx` ([source](source.md#tests-run-by-reach)). Only a per-process, in-memory store has no node addresses, so a diff between two values there shares nothing.
+
+## A stop reaps every child
+
+Stopping the fork server ends every process it forked before it exits, so root's `waitpid` of the server is also the end of each agent and standby (```seon.fork-server/server-step``` on `::flow/stop` kills and reaps its `:children`).
+An agent's socket EOF is not its exit (`_exit` closes the descriptors before the process is a zombie), so a server killed on that EOF handed an exiting agent to launchd, which `bin/check lifecycle` read as `:left` (14 of 1000 stops under four busy processes, 0 of 1000 once the server reaps first). A promoted server is not root's child, so its end is unobservable to root.
+
+Open, in Jolt: a joined thread is still counted by the kernel (`task_threads`) for a moment, in 164 of 200 trials, because Chez creates threads detached and on macOS even `pthread_join` returns before the kernel removes the thread. Only a Mach dead-name notification on the thread's port follows the removal (0 of 2000 still counted), so a `Thread.join` that awaited it would end the `:os` term of `bin/check lifecycle`'s thread comparison; until then that term can flake under load, and the named roster is what a stop can promise.
+
 ## The agent process
 
 An agent is a forked process holding its branch's db value and running its REPL over one socket to root, single-threaded: `seon.agent`, `seon.repl`.

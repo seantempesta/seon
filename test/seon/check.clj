@@ -881,7 +881,7 @@
     ;; after stop!, the named roster and the sweepers are what stop! answers for; the OS's
     ;; count is recorded, not compared: a thread Thread.join answered for is still in the
     ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
-    ;; pthread_join), and nothing can await its removal (notes/pure-tests/lifecycle.md)
+    ;; pthread_join), and nothing can await its removal (docs/processes.md#a-stop-reaps-every-child)
     (let [stopped (thread-diff (declared-threads) (threads))]
       {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
        :health (set health)
@@ -961,7 +961,19 @@
    #(vector (try (lib/fork! {:child (fn [] (throw (ex-info "out of the child" {})))
                              :refused (fn [n] {:refused n}) :parent lib/wait-status})
                  (catch clojure.lang.ExceptionInfo _ (lib/c-exit 7)))
-            (lib/fork! {:child (fn [] :returned) :refused (fn [n] {:refused n}) :parent lib/wait-status}))})
+            (lib/fork! {:child (fn [] :returned) :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+   "child-hooks"
+   ;; a shutdown hook belongs to the process that registered it: root's (seon.main/root-serve,
+   ;; its whole stop) ran in every fork of root that left by Jolt's exit (an agent, a test child),
+   ;; on root's copied state and the shared store. The parent's hook writes a file; the child
+   ;; leaves by System/exit, which runs hooks: none of its parent's may run there
+   #(let [f (java.io.File/createTempFile "seon-child-hook" ".txt")
+          _ (.delete f)
+          hook (Thread. ^Runnable (fn [] (spit f (str (lib/c-getpid)) :append true)))]
+      (.addShutdownHook (Runtime/getRuntime) hook)
+      (try (let [st (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [n] {:refused n}) :parent lib/wait-status})]
+             {:status st :parents-hook-ran-in (when (.exists f) (slurp f))})
+           (finally (.removeShutdownHook (Runtime/getRuntime) hook) (.delete f))))})
 
 (defn forks
   "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."

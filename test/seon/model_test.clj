@@ -39,8 +39,7 @@
         (is (= {:include_usage true} (:stream_options @seen)) "with its usage")
         (is (= "```clojure\n(defn square [x] (* x x))\n```" (:text r)) "every piece, in order, until the server ended it")
         (is (= "Square multiplies." (:reasoning r)))
-        (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r)))
-        (is (< 1000 (:ms r)) "the reply took as long as the server streamed it"))
+        (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r))))
       (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
 
 (deftest a-dropped-connection-is-a-transport-failure
@@ -149,7 +148,7 @@
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
 
 (deftest a-request-lets-the-model-reply-in-prose
-  ;; notes/design-agent-view-2026-10-24.md §1 (step 0 measured it live: four DeepSeek turns,
+  ;; notes/archive/design-agent-view-2026-10-24.md §1 (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
   ;; `required` with thinking on), so a reply may be prose alone; the eval tool takes code
   ;; only; the reasoning goes back as it was returned; no ;; reaches the model

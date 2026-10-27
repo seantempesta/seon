@@ -285,7 +285,7 @@
   "The observed members of a run's end (proto.agents/end), as attributes: a count
   nobody measured (no end written, a reply without usage) is absent, never 0."
   {:malli/schema [:=> [:cat :seon.turn/end :int :int] :map]}
-  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused]} end-ms basis-t]
+  [{:keys [outcome turns model-calls tokens results uncontracted reason conflicts unmerged changed deferred caused behind]} end-ms basis-t]
   (cond-> {:seon.run/outcome outcome :seon.run/basis-t basis-t :seon.run/end-ms end-ms
            :seon.run/results (vec (for [[t s] results] {:seon.proof/test t :seon.proof/status s}))}
     turns (assoc :seon.run/turns turns)
@@ -297,6 +297,7 @@
     (seq changed) (assoc :seon.run/changed (vec changed))
     (seq deferred) (assoc :seon.run/deferred (vec deferred))
     (seq caused) (assoc :seon.run/caused (vec caused))
+    (some-> behind pos?) (assoc :seon.run/behind behind)
     reason (assoc :seon.run/reason reason)))
 
 (defn carry-tx

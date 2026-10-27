@@ -110,7 +110,7 @@
 
 (deftest every-section-of-the-wiki-has-a-lead
   ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
-  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  ;; real wiki as main holds it (notes/archive/dogfood/docs-audit.md found 54 of 364 without)
   (let [db0 (empty-db)
         db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
     (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
@@ -262,7 +262,7 @@
         r (seon.docs/baseline-reads db plan answer)]
     (testing "a var defined by a form of a head defining-ids knows is found at that commit, never absent"
       ;; this db holds no app.m0/f0 today, so what the section described of it (its meaning at the
-      ;; commit) is not today's: :changed (the string sentinel "changed" passed a string? check here)
+      ;; commit) is not today's: :changed
       (is (= :changed (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
       (is (nil? (:unread (r "docs/p.md#a")))))
     (testing "a var the old file mentions but no known head defines is unread, never absent"
@@ -345,6 +345,9 @@
             (recur (.indexOf low s (inc i)))))))))
 
 (deftest no-text-uses-an-old-word
+  ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
+  ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
+  ;; kept at the digest the green tree has, seon.proofs/flaky)
   (let [root (config/checkout)
         words (old-word-spellings (slurp (str root "/AGENTS.md")))
         kept-span #"(?i)owner,? [^\"]{0,40}?\"[^\"]*\"|Attempting to call unbound fn|zoom-a8-attempt|\(was attempt\)"
@@ -361,7 +364,7 @@
                    [w _] (used (str/replace line0 kept-span ""))]
                [p (inc i) w])]
     (is (contains? (set (map first words)) "attempt") "the table is read, the run row included")
-    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
+    (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word] (AGENTS 7a; a file whose use is the subject goes in text-kept with its reason)")))
 
 (defn grep-db
   "A test db holding forms [name doc src]: each a var app/<name> defined by its form."

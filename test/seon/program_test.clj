@@ -546,10 +546,14 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's are not: they are in :env")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto]]
-      (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
+    (is (every? #(contains? (:config in) %) [:seon.pin/lmdb :seon.pin/zstd]) "lmdb and zstd are classes too")
+    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/llama.cpp :seon.pin/awesome-jolt])
+        "the runtime's are in :env: a test's reach is transitive, so 937 of 977 tests reach jolt.* and 913 jolt.scheme: a class by namespace narrows nothing")
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd]]
+      (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test")))
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd]]
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
+    (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input

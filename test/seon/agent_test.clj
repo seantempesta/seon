@@ -541,7 +541,7 @@
   ;; task failed on its branch, hands the run back (seon_done), and root, at the
   ;; run's end, holds the task as :failed and reports it among the problems
   (let [names (volatile! nil)
-        [_ f _ _ seen] (in-agent (fn [{:keys [agent task] :as n}]
+        [_ f _ done seen] (in-agent (fn [{:keys [agent task] :as n}]
                                    (vreset! names n)
                                    [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
                                     before-done {:op :done :agent agent}
@@ -550,6 +550,8 @@
                                                 " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
                                                 " (select-keys (first (filter #(= " (pr-str task) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows]))) [:task :reason :counterexample :open?])])")}]))]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
+    ;; and the run says so itself: a failed run is never reported :green
+    (is (= [:failed "the premise is refuted"] ((juxt :outcome :reason) done)) (pr-str done))
     (is (= [:failed {:task (:task @names) :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
            (:value seen)))))
 
@@ -741,7 +743,7 @@
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
-             "so the agent's :will-merge carries none of main's changes")
+             "so the agent's divergence carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried
@@ -1133,7 +1135,7 @@
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
   ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
-  ;; (notes/design-agent-view-2026-10-24.md §7)
+  ;; (notes/archive/design-agent-view-2026-10-24.md §7)
   (let [names (volatile! nil)
         [_ end turn on-main] (in-agent (fn [{:keys [agent task ns run] :as n}]
                                          (vreset! names n)
@@ -1155,7 +1157,7 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, notes/design-agent-view-2026-10-24.md
+    ;; the prose comes in the eval call (its first argument, notes/archive/design-agent-view-2026-10-24.md
     ;; section 1), so the reply's own text is empty and the prose is the eval's
     (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
