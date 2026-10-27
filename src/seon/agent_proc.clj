@@ -243,7 +243,9 @@
        :ins {:in "requests from the api, and the writer's answers it routes"} :outs {}
        ;; socket writes are short; a full socket blocks only this agent's proc
        :workload :io
-       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :inflight (count (:inflight st)) :noise (:noise st)})})
+       :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :noise (:noise st)
+                              ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
+                              :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st 0)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
                  :inflight {} :noise 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}

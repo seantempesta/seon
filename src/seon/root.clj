@@ -247,7 +247,9 @@
                       (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
                         (step/out! o [:fx/evidence :in]
                                    {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
-                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
+                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)
+                                          ;; every ask the api holds unanswered, rid -> [kind agent]: what the stuck agent may be owed
+                                          :asks (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))}
                                     :prio 0 :dest {:stall-evidence tid :agent id}}))
                       st)))
       st)))
@@ -641,7 +643,9 @@
   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
        :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :closing (boolean (:closing st))})})
+       :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
+                              ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
+                              :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))})})
   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
   ;; seon.root/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
