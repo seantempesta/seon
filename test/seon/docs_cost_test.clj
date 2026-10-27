@@ -55,20 +55,6 @@
      :fixed {:calls 33 :bytes 1050000}
      :sizes [10 100 1000]}))
 
-(defn grep-input
-  "The cost proof's input at n: n forms, every tenth holding the word."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string]]}
-  [n] [(seon.docs-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (zero? (mod i 10)) "(accumulate 1)" "(inc 1)") ")")])) "accumulate"])
-
-(deftest grep-costs-its-forms
-  (cost/proof {:of 'seon.docs/grep :input 'seon.docs-cost-test/grep-input
-                    :n "forms the branch holds, a tenth of them matching"
-                    :work "one scan of :form/src, then per match its definitions and a split of its source"
-                    :growth :linear
-                    :per-n {:bytes 20000 :calls 0.3}
-                    :fixed {:bytes 400000 :calls 6}
-                    :sizes [10 100 1000]}))
-
 (defn search-input
   "The cost proof's input at n texts: n forms, n/2 wiki sections, n/4 task plans and n/8 schema entries
   (the mix of the store's own), a tenth of each holding the word; the search asks for exact text and

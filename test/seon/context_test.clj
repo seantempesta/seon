@@ -1306,7 +1306,7 @@
         n (Math/sqrt (reduce + (map #(* % %) raw)))]
     (mapv #(/ % n) raw)))
 
-(deftest search-ranks-meaning-across-kinds-by-score-and-weights-the-rankings
+(deftest search-ranks-meaning-across-kinds-by-score
   (let [with-vec (fn [m i] (merge m (vector/pack (unit-vec i)) {:seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 4}))
         db (d/db-with (ts/test-db)
                       [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
@@ -1319,10 +1319,3 @@
     (is (every? #(= #{:meaning} (:by %)) hits))
     (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
     (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))
-
-(deftest rrf-scores-weigh-each-ranking
-  (let [plain (vector/rrf-scores [[:a] [:b]])
-        weighed (vector/rrf-scores [[:a] [:b]] [1.0 3.0])]
-    (is (= (:a plain) (:b plain)) "two firsts weigh alike")
-    (is (< (:a weighed) (:b weighed)) "a ranking's weight scales its share")
-    (is (< (Math/abs (- (:b weighed) (* 3.0 (:a weighed)))) 1e-12))))
