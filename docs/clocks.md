@@ -57,7 +57,7 @@ A bound passed under another name, which the marks do not see; each is owed its 
 
 Names that look like clock reads but are quoted as data, so no time decides at these sites.
 
-- `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text) and `seon.render-test/long-text` (the test after it names the removed `SAMPLE-MS` to show it is gone): clock reads quoted as data.
+- `seon.program-test/var-row` (the form after it records a guarded function's source, `Thread/sleep` and a timed `deref` as text) and `seon.render-test/task` (the test after it names the removed `SAMPLE-MS` to show it is gone): clock reads quoted as data.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
 ## Time orders a queue (measured workload)

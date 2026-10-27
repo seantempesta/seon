@@ -327,8 +327,9 @@
         st1 (#'p/pass st (volatile! {}))
         ctx (:context st1)
         budget (seon.config/value :seon.config.render/root-context-budget)]
-    (testing "its agents list is on it, and it is the printer's text at the budget"
-      (is (str/includes? (:text ctx) "a3"))
+    (testing "what is wrong comes first (its tiles: its process, main's problems and runs), at the printer's budget"
+      (is (str/starts-with? (:text ctx) "{\"process-tile\""))
+      (is (str/includes? (:text ctx) "root's process"))
       (is (<= (:tokens ctx) budget))
       (is (= (:tokens ctx) (seon.print.select/estimate (:text ctx)))))
     (testing "no clock: an unchanged system gives the same text"
