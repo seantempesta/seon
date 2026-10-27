@@ -361,7 +361,7 @@
                                        (str (name c) " has open problems, and its section " page " is no section of the wiki")
                                        (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
                                      {:kind :problem-unlinked :class c :page page} {:class c :page page})))
-          rows (mapv row (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (not= :problem-unlinked c) :when (some #(not (false? (:open? %))) rows) :when (unlinked? c)] c))]
+          rows (mapv row (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (not= :problem-unlinked c) :when (not= :problem-unlinked c) :when (some #(not (false? (:open? %))) rows) :when (unlinked? c)] c))]
       (cond-> rows (and (seq rows) (unlinked? :problem-unlinked)) (conj (row :problem-unlinked))))))
 
 ;; ---- caused: what a branch's own work made true -----------------------------------------
@@ -604,6 +604,7 @@
 
 (defn- report-with
   "`report` over the answers its caller read."
+  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold] :seon.problems/report]}
   [db ans fold]
   (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))

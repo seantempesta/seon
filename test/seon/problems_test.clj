@@ -460,6 +460,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
+    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
     (is (<= (:calls m) 50) "the contracted calls of one health read (59 when answers and problem-unlinked ran twice)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
