@@ -1184,6 +1184,34 @@
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
 
+(deftest a-read-draws-one-page-when-it-holds-the-one-before
+  ;; the owner, 2026-10-27 ("these ops seem wildly high for both memory usage and ticks"): a later
+  ;; read told what changed since the read before by drawing that read's page again, beside its own:
+  ;; two pages of 35M ticks and 109 MB each on Seon's own tasks, to diff them. seon.context/world takes
+  ;; the earlier page from the one printed-run kept (`pages`, {commit page}), so a read draws one, and
+  ;; tells the same
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (program-facts '[[demo/g "(defn g \"Halves.\" [x] (/ x 2))" []] [demo-test/f-test "(deftest f-test (is (= 1 (g 2))))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1"}}])
+      (let [c0 (d/commit-id @conn)
+            _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan "Make ```demo/g``` exact, and say so."}])
+            db1 @conn
+            c1 (d/commit-id db1)
+            a (pdb/eid db1 :seon.agent/key "b/a1")
+            pages-called (fn [f] (seon.profile/begin!)
+                           (let [r (f)] [r (some #(when (= 'seon.context/page (:var %)) (:calls %)) (seon.profile/touched))]))
+            [whole drawn-whole] (pages-called #(context/world db1 a c0 c1))
+            p0 (context/page (d/commit-as-db db1 c0) (ctx/build (d/commit-as-db db1 c0) a :b))
+            [held drawn-held] (pages-called #(context/world db1 a c0 c1 {c0 p0}))]
+        (is (= 2 drawn-whole) "without the earlier page, both are drawn")
+        (is (= 1 drawn-held) "with it, only the page being told is drawn")
+        (is (= (map :content whole) (map :content held)) "and the read tells the same")
+        (is (= {:commit c1 :page (:page (meta whole))} (select-keys (meta held) [:commit :page])) "and hands on the page it drew, for the next read")
+        (is (some? (:page (meta held))) "which holds the page")))))
+
 (deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
   (let [db (d/db-with (seon.docs-test/corpus-db)

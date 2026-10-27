@@ -75,7 +75,8 @@
                         [:seon.run/changed {:optional true} :seon.run/changed]
                         [:seon.run/deferred {:optional true} [:set :qualified-symbol]]
                         [:seon.run/deferred-results {:optional true} :seon.proof/results]
-                        [:seon.run/caused {:optional true} [:set :string]]]
+                        [:seon.run/caused {:optional true} [:set :string]]
+                        [:seon.run/behind {:optional true} pos-int?]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a
@@ -130,14 +131,16 @@
                              [:uncontracted [:set :qualified-symbol]] [:unmerged {:optional true} [:vector :string]]
                              ;; the derived problems the branch's work made true (seon.problems/caused)
                              [:caused {:optional true} [:set :string]]
+                             ;; the keys main changed since the branch's merge base (the writer's :theirs)
+                             [:behind {:optional true} pos-int?]
                              [:kind {:optional true} :seon.task/kind]
                              ;; a :design task's accumulated plan now and as its run began
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
                              ;; the process tests the run's run left to root's gate (neither red nor unknown)
                              [:deferred {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/not-done [:map {:closed true}
-                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem]]
-                          [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string]]
+                          [:reason [:enum :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
+                          [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:run :seon.run/id]]]
                          [:kill [:map {:closed true} [:op [:= :kill]] [:run :seon.run/id]
@@ -211,4 +214,5 @@
                  [:unmerged {:optional true} [:vector :string]]
                  [:changed {:optional true} [:set :string]]
                  [:deferred {:optional true} [:vector :qualified-symbol]]
-                 [:caused {:optional true} [:set :string]]]}
+                 [:caused {:optional true} [:set :string]]
+                 [:behind {:optional true} nat-int?]]}

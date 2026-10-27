@@ -75,7 +75,7 @@
     ;; a contract gap and an unmerged entry say one thing about many names: one entry each,
     ;; its names a list the printer budgets
     (vec (concat
-           (for [{:keys [reason symbol]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
+           (for [{:keys [reason symbol behind]} rs :when (not (#{:contract-gap :unmerged :open-problem} reason))]
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
@@ -87,6 +87,8 @@
                                           (and (= :stray-red reason) (not (defined? symbol)))
                                           (assoc :removed true))
                ;; a design made from a request carries none: it registers each it writes
+               ;; judged before it merged main: merge it in, rerun the proofs, and done again
+               :behind {:reason reason :behind behind :do '(my.branch/merge-main!)}
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
@@ -826,7 +828,8 @@
   shows its own answer). A record's text is a function of it and
   the records before it, which never change, so a request prints only its new records and every
   older message is the same bytes (the provider's cache). An item already printed is skipped.
-  Answers the cache: {:ids :parts {id part} :seen :canon :codes :tx} (:codes, each code's last
+  Answers the cache: {:ids :parts {id part} :seen :canon :codes :tx :pages} (:pages, {commit page}: the
+  page of the newest page item, `world` takes the next read's earlier page from it; :codes, each code's last
   eval: its handle and its answer's hash), each part {:ref :whole :collapsed
   :cost [whole collapsed] :call}, a folded one also :fold and :plain (it unfolded), :tx the newest
   record's."
@@ -840,7 +843,10 @@
                 (get-in c [:parts id]) (update c :ids pop)
                 (= :message kind) (let [ms (message-messages v {})] (assoc-in c [:parts id] (part [:message id] ms ms)))
                 ;; the page at a turn: drawn only now, when no earlier request printed it (v, a delay)
-                (= :page kind) (let [ms @v] (assoc-in c [:parts id] (part (into [:page] id) ms ms)))
+                ;; and its page kept (:pages, the newest only), so the next read's diff draws no page twice
+                (= :page kind) (let [ms @v m (meta ms)]
+                                 (cond-> (assoc-in c [:parts id] (part (into [:page] id) (with-meta ms nil) (with-meta ms nil)))
+                                   (:page m) (assoc :pages {(:commit m) (:page m)})))
                 :else
                 (let [rec (:seon.eval/record v) r (:response rec)
                       ;; the agent's eval of code an eval of the run ran before, answered the same: that one's handle
@@ -943,18 +949,25 @@
   changed}, the empty ones left out; in the diff the agent's own records, which its conversation
   already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
   {:page page}.
-  Printed whole as one user message: the page and each change told once."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
-  [db a c0 c1]
+  Printed whole as one user message: the page and each change told once. pages, {commit page}
+  (the page drawn at the read before, which printed-run keeps): c0's page is taken from it when
+  it holds it, never drawn again (a page is 35M ticks and 109 MB on Seon's own tasks); the
+  answer's metadata is {:commit c1 :page the page at c1}, the one printed-run keeps for the next."
+  {:malli/schema [:function [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]
+                  [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any [:maybe :map]] [:vector :seon.model/message]]]}
+  ([db a c0 c1] (world db a c0 c1 nil))
+  ([db a c0 c1 pages]
   ;; the request's own commit is db itself (a judge's speculative db, d/with, has no commit of its own)
   (let [at #(if (= % (d/commit-id db)) db (d/commit-as-db db %))
         branch (:seon.agent/branch (d/entity db a))
         db1 (at c1)
+        p1-of (volatile! nil)
         v (if (nil? c0)
-            {:page (page db1 (ctx/build db1 a branch))}
+            (let [p1 (page db1 (ctx/build db1 a branch))] (vreset! p1-of p1) {:page p1})
             ;; the record at c0, built, then advanced to c1 by what the two commits differ by: one build
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
-                  p0 (page db0 r0) p1 (page db1 r1)
+                  p0 (or (get pages c0) (page db0 r0)) p1 (page db1 r1)
+                  _ (vreset! p1-of p1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
                   ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
                   told #(cond (not (map? %)) %
@@ -964,7 +977,7 @@
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
                            (for [[p ov] (ctx/diff r0 r1)] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
-    [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}]))
+    (with-meta [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}] {:commit c1 :page @p1-of}))))
 
 (defn- turn-pages
   "The turns of agent entity a's session on db made by origin (:model or :outside), oldest
@@ -1001,7 +1014,7 @@
   c0 c1], the page at commit c1 (c0 nil) or what changed since c0; [:history n], the n parts the
   budget left out. Called by the turn."
   {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
-  [a {:keys [db basis help help-ref printed]}]
+  [a {:keys [db basis help help-ref printed pages]}]
   (let [e (:db/id a)
         model? (= :model (:origin basis))
         since (when model? (:tx printed))
@@ -1015,7 +1028,7 @@
              (conj (turn-pages db e :outside) [(:max-tx db) (d/commit-id db)]))
         pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
                     :when (or (nil? since) (>= tx since))]
-                [[:page [e prev c]] (delay (world db e prev c)) nil tx])
+                [[:page [e prev c]] (delay (world db e prev c (or pages (:pages printed)))) nil tx])
         pages (if model? pages [(last pages)])
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
@@ -1097,13 +1110,14 @@
   observed: the block the turn's waste reads, what the page shows), and the messages, the agent's
   request (`request`), b's :agent's. The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :printed, what the run's earlier requests printed (the cache
-  `printed-run` answers): only what is new is printed. {:block :messages :sent :printed}."
+  `printed-run` answers): only what is new is printed; :pages, {commit page} of the read
+  before (its answer's :printed :pages), which the next read's diff takes its earlier page from. {:block :messages :sent :printed}."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
                   [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [task agent] :as basis} {:keys [printed]}]
+  ([db {:keys [task agent] :as basis} {:keys [printed pages]}]
   (let [block (current-state db (task/task db task) (turn-input db basis nil))
         a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
-        r (request a {:db db :basis basis :block block :help (system-text db) :printed printed
+        r (request a {:db db :basis basis :block block :help (system-text db) :printed printed :pages pages
                       :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]})]
     {:block block :messages (:messages r) :sent (:sent r) :printed (:printed r)})))
