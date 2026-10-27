@@ -871,7 +871,9 @@
                                   f (or (seq (:failures r))
                                         [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                                            (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
-                              (assoc f :var (str "#'" t) :reused true)))
+                              (cond-> (assoc f :var (str "#'" t) :reused true)
+                                ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
+                                (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
