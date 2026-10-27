@@ -58,7 +58,7 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 - `(ns app.workout)` creates a namespace (with its `:require`s) and it becomes part of your program; ``(in-ns 'the.ns)`` then ``(defn f ...)`` changes an existing one, and its callers see it at once.
 - Every function you define needs a Malli contract in its metadata: `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`.
-- Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here.
+- Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here. The REPL's own helpers (`source`, `doc`, `dir`, `apropos`, `find-doc`, `pst`) follow you into any namespace you switch to, as `clojure.repl`'s do at a REPL.
 - A schema changes as a function does, on your branch: `(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])`; your next forms see it. To change an existing key, start from its form: `(get (my.schema/forms) :seon.task/task)`.
 - Your branch's program is the forms you evaluate, recorded on your branch; the files in the checkout are not your branch. Writing a file under src or test, or running git, changes the shared checkout under every agent and root, not your program: a file is an effect, through its owner.
 - An earlier response: ``result/e3``, or ``(my.agent/$ :e3)`` by its handle; the last value `*1`; the last error is `*e`, and ``(my.agent/pst)`` prints it with its causes.

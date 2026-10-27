@@ -115,9 +115,18 @@
     (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
       (str refs (subs ref (count "refs"))))))
 
+(defn- same-repository?
+  "Are the checkouts a and b of one git repository (the same common dir: a worktree and its main
+  tree are, a clone or a test's own repository is not)?"
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
+  [a b]
+  (let [common #(some-> (git-try % ["rev-parse" "--path-format=absolute" "--git-common-dir"]) java.io.File. .getCanonicalPath)]
+    (= (common a) (common b))))
+
 (defn- follow-main
   "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
-  branch of the main checkout co: fast-forwarded (git merge --ff-only in base) when its HEAD is an
+  branch of the main checkout co (of the same repository: another one's commits are none of its
+  history): fast-forwarded (git merge --ff-only in base) when its HEAD is an
   ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
   either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
   {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
@@ -125,7 +134,7 @@
   is refused (a dirty tree): read-source records either and imports the tree as it is."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [base co]
-  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base))
+  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base) (same-repository? base co))
                  (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
         main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
         source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]

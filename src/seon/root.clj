@@ -646,7 +646,9 @@
   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
        :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :closing (boolean (:closing st))})})
+       :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
+                              ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
+                              :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))})})
   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
   ;; seon.root/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
@@ -791,16 +793,21 @@
                                built? (assoc :inputs (:inputs r))
                                (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
                                                                                        ", the source is tree " (:tree (:inputs r))))))
+        tx (when (and files (not= digest (:digest held))) (source/tx-of @(:conn sys) files (boolean changed)))
         fact (if (and digest (= digest (:digest held)))
                (this-boot held)
-               (let [tx (when files ((if changed source/refresh-tx source/replace-tx) @(:conn sys) files))
-                     w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
+               (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))]
                  (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
                               (:commit r) (assoc :commit (:commit r))
                               (seq (:pins r)) (assoc :pins (:pins r))
                               (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
                               (contract/error? r) (assoc :error (:seon.error/message r))
+                              (contract/error? tx) (assoc :error (:seon.error/message tx))
                               (contract/error? w) (assoc :error (:seon.error/message w))))))]
+    ;; a source the running image cannot analyze is root's defect to show, a :platform cause; the import
+    ;; changed nothing, so no digest is recorded and the next batch tries again
+    (when (contract/error? tx)
+      @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc tx :seon.error/subject :seon.root/source) (System/currentTimeMillis))}}))
     ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
     (let [w @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})]
       (if-not (contract/error? w)
@@ -1067,7 +1074,9 @@
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
-      run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
+      ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
+      ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
+      run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
       message! {:op :message :id id :from :owner :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's

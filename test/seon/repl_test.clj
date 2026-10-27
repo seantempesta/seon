@@ -65,7 +65,7 @@
               ["(+ 1 2)" :text "3"]
               ["*1" :text "3"]
               ["(pprint {:a 1})" :text "{:a 1}"]
-              ["(/ 1 0)" :text ""]
+              ["(/ 1 0)" :text "Divide by zero"]
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
@@ -239,8 +239,8 @@
 
 (deftest help-reads-any-address-and-lists-on-a-miss
   ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Help is the
-  ;; wiki's one view: the help page at :summary, any section at :code, and on a miss the page's
-  ;; sections and the form that lists every page's, never nil
+  ;; wiki's one view: the help page at :summary, any section at :code, and on a miss what it
+  ;; did not find, the nearest addresses and the form that lists the rest, never nil or a page dump
   (let [[toc anchor other miss] (rest (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                        "(my.agent/help)" "(my.agent/help \"done\")" "(my.agent/help \"docs/vector.md#the-model\")"
                                                        "(my.agent/help \"references\")")))
@@ -248,9 +248,9 @@
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
     (is (str/includes? (printed other) "docs/vector.md#the-model") "any address of the wiki")
-    (is (= #{:no-section :help-page :pages :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
-    (is (str/includes? (printed miss) "docs/agent.md#done") "a miss lists the help page's sections")
-    (is (str/includes? (printed miss) "docs/vector.md") "every page's path")
+    (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))) "a miss is the declared map, not nil")
+    (is (some #(str/starts-with? % "docs/references.md") (:nearest (:value miss))) "a miss names the nearest addresses: the page that holds the word")
+    (is (< (count (printed miss)) 1500) "and not the help page: a miss costs what it names")
     (is (str/includes? (printed miss) "my.agent/help") "and the form that reads one")))
 
 (defn- outcome [ticks thunk]
@@ -375,10 +375,6 @@
     (let [r (h/html (render/html {} (assoc em :seon.error/at {:line 3 :column 6})))]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (str/includes? r "at line 3:6") r))))
-
-(def evals-run
-  "How many times the ticks proof's form ran."
-  (atom 0))
 
 (deftest an-evals-response-carries-its-ticks
   ;; task seon.turn/a-turn-shows-its-cost-against-its-budget (1), owner 2026-10-23 (the model sees

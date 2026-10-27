@@ -70,8 +70,10 @@
   :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
   {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
   [run answer]
-  (proof-facts run answer (proofs/results {:reports (:reports answer)}) (proofs/failures {:reports (:reports answer)})
-               (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))))
+  (let [died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))]
+    ;; a died test has no result (proofs/results), but main's newest of it is an :error
+    (proof-facts run answer (merge (proofs/results {:reports (:reports answer)}) (zipmap died (repeat :error)))
+                 (proofs/failures {:reports (:reports answer)}) died)))
 
 (defn full-run-tx
   "The facts of the daily full run (:full mode) on main: result-tx's, from the effect's answer
@@ -163,7 +165,9 @@
 (defn- finish
   "The running run ended with answer r: every waiter answered once, the next run started. A run
   that answered is remembered under its slot (a key asked again gets that answer, nothing runs);
-  an error is never remembered, so asking again retries, and it is recorded as a :platform problem
+  an error is never remembered, nor an answer whose test child died (a report with its :exit: a
+  death is no verdict, so asking again runs it again rather than answering the death), so asking
+  again retries, and it is recorded as a :platform problem
   (the api's :problem) as well as answered, but for :seon.root/ended: the agent it asked ended (a
   cancel, its run's end, its run's record), and the run ends with it, no fault of the
   platform (bin/check e2e-calc: a cancel killed an agent whose turn had asked for its tests); a
@@ -174,8 +178,9 @@
   (let [{:keys [key branch waiters] :as run} (:running st)
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
+        died? (and (not err?) (some :exit (:reports r)))
         st (cond-> (-> st (dissoc :running) (assoc :last branch))
-             (not err?) (assoc-in [:done (slot run)] {:key key :r r}))
+             (not (or err? died?)) (assoc-in [:done (slot run)] {:key key :r r}))
         [st more] (take-next st branch)]
     [st (cond-> (into (reply [] waiters r) more) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
