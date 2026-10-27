@@ -25,7 +25,7 @@ The run's part:
 - `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:similar`: a few program functions nearest the plan in meaning that it does not name, a line each (name and first sentence); often a helper the task needs.
-- More helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
+- More helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/tests-reaching 'ns/f)`` (every test whose reach includes it, nearest first, with its last result), ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
 
 The conversation: each of your replies with its eval calls and their responses, and the messages sent to you, each `{:from :body}` (the owner's words, `:from "owner"`; root's; another agent's, its run id), where they arrived. The owner's is a fact (`:seon.message/*`) your turn writes on your branch.
 
@@ -56,18 +56,25 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 ## ctx
 
-`@ctx` is your record as one map: your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process). It is kept current by a patch from each transaction you make, so a read is a deref and builds nothing; `(keys @ctx)` lists what it holds.
+`@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process). It is kept current by a patch from each transaction you make, so a read is a deref and builds nothing; `(keys @ctx)` lists what it holds.
 
 - To see more or less of it, change its pattern: Datahike's pull syntax, held as data at `:seon.ctx/pattern`. `(:seon.ctx/pattern @ctx)` is your own edit (nil until you make one), and ``(swap! ctx assoc :seon.ctx/pattern [...])`` writes it; the record is built again by it (`(my.agent/help "docs/ctx.md#the-pattern")`). A window (your evals, a run's turns) holds the newest few, and a printed cut names the form that reads the rest.
-- To change something, `swap!` it as any atom: ``(swap! ctx assoc-in [path] value)``. The change is one transaction on your branch, each value checked by its schema, or it is refused with the error that says why and nothing is written: ``:seon.ctx/invalid`` (no schema, or a value its schema refuses), ``:seon.ctx/not-held`` (the db would not hold it), ``:seon.ctx/basis`` (the swap!'s function wrote the db itself, or wrote `:t`, `:branch` or `:commit`, which are read-only). A refused swap! is never retried.
-- What arrives each turn: your first request shows your page whole; each later turn shows what changed since your last, `{:page {part-key hiccup} :ctx {path [old new]}}`: the parts whose drawing changed, and each path of your record that changed and no part shows (old nil for what joined, new nil for what went; ``seon.ctx/diff``). An eval runs once, when you send it: nothing is evaluated again for you, and what changed is told.
+- To change something, `swap!` it as any atom, with no query to write: a collection (your runs, a run's turns and messages, your evals) is keyed by each member's id, newest first, so your run is `(key (first (:runs @ctx)))`:
+  - your task's plan: ``(swap! ctx assoc-in [:runs rid :task :seon.task/plan] "...")``, or ``(swap! ctx update-in [:runs rid :task :seon.task/plan] str "\n\nFound: ...")``;
+  - its proofs, or what it cites: ``(swap! ctx update-in [:runs rid :task :seon.task/proofs] conj 'app.x-test/t1)``;
+  - a member gone: ``(swap! ctx update :evals dissoc eid)``; a new one, its identity in its value: ``(swap! ctx assoc-in [:runs rid :messages "m-note"] {:seon.message/id "m-note" :seon.message/from "agent" :seon.message/body "..."})``;
+  - your own datum: register its key, then ``(swap! ctx assoc :app.x/notes [...])``;
+  - a var the task cites is changed by its definition, as at any REPL: ``(in-ns 'app.x)`` then ``(defn f0 ...)``, and `:cited` holds the new source at the next deref (a `swap!` of it is refused, naming that form).
+
+  The change is one transaction on your branch, each value checked by its schema, or it is refused with the error that says why and nothing is written: ``:seon.ctx/invalid`` (no schema, or a value its schema refuses), ``:seon.ctx/not-held`` (the db would not hold it), ``:seon.ctx/basis`` (the swap!'s function wrote the db itself, or wrote `:t`, `:branch` or `:commit`, which are read-only). A refused swap! is never retried.
+- What arrives each turn: your first request shows your page whole; each later turn shows what changed since your last, `{:page {part-key hiccup} :ctx {path [old new]}}`: the parts whose drawing changed, and each path of your record that changed (old nil for what joined, new nil for what went; ``seon.ctx/diff``). An eval runs once, when you send it: nothing is evaluated again for you, and what changed is told.
 
 ## Finding your way
 
 The program as your branch records it answers where things are, so read before you write.
 
 - By name: `(clojure.repl/apropos "accumulate")`; by docstring: `(clojure.repl/find-doc "accumulated plan")`; by the text of a definition: `(my.agent/grep "accumulated")`, best first (a name holding it, then a docstring, then a body), each with its matching line.
-- A function: `(clojure.repl/doc seon.task/accumulate)` and `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`.
+- A function: `(clojure.repl/doc seon.task/accumulate)` and `(clojure.repl/source seon.task/accumulate)`; who calls it: `(my.agent/callers 'seon.task/accumulate)`; every test that reaches it, nearest first, with its last result: `(my.agent/tests-reaching 'seon.task/accumulate)`; what it calls: `(my.agent/callees 'seon.task/accumulate)`.
 - A namespace's ns form, its requires and aliases (to write a test where its siblings are), then every definition, privates included, a line each with its doc's first sentence: `(clojure.repl/source seon.task)` (```my.agent/source-fn```). A name that is no var answers ```my.agent/no-var```, the one answer for a missing name that `source`, `callers` and `callees` give: the nearest existing names by Jolt's did-you-mean ranking (the namespace's definitions, or the nearest namespaces when it names none), the registry key of that name if there is one, the form that lists the namespace, and "write it" only when your task cites the name.
 - A schema: its form, `(my.schema/forms :seon.task/task)`; the file that registers it, `(my.db/q '[:find ?f . :where [?e :schema/key :seon.task/task] [?e :schema/file ?f]])`; every key, `(keys (my.schema/forms))`.
 - A namespace, every definition, privates too, in file order, a line each (its name and its doc's first sentence): `(my.agent/help 'seon.print.select)`; read the few you need whole with `source`. Its publics alone: `(clojure.repl/dir my.task)`; every program namespace: `(my.db/q '[:find [?n ...] :where [_ :ns/name ?n]])`.

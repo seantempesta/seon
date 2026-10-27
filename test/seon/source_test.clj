@@ -486,7 +486,7 @@
         db (d/db-with (empty-db) (source/import-tx (empty-db) {"src/app/proc.clj" "(ns app.proc)\n\n(defn twice [x] (* 2 x))\n"
                                                                "src/seon/program.clj" "(ns seon.program)\n\n(def tree-readers '#{seon.test-store/binary-sh clojure.java.shell/sh})\n"
                                                                "test/app/proc_test.clj" text}))
-        idx (program/reach-index db {:env "" :tree ""})
+        idx (program/reach-index db {:env "" :tree "" :config {}})
         mine (into {} (filter #(= "app.proc-test" (namespace (key %)))) idx)]
     (is (= {'app.proc-test/via-shell false 'app.proc-test/via-fork true 'app.proc-test/via-binary true
             'app.proc-test/via-root true 'app.proc-test/via-names false 'app.proc-test/pure false}
@@ -801,3 +801,24 @@
       (finally
         (when @root (ts/stop-root! @root))
         (sh/sh "rm" "-rf" dir)))))
+
+(defn tree-of
+  "read-source's request for one changed file in a tree of n source files (a new directory under
+  target/, no git repository): the :paths of the file that changed, the others never asked."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [d (scratch-dir (str "tree" n))]
+    (.mkdirs (java.io.File. (str d "/src")))
+    (dotimes [i n] (spit (str d "/src/f" i ".clj") (str "(ns f" i ")\n\n(defn a [] " i ")\n")))
+    [{:req {:root d :dirs ["src"] :paths #{"src/f0.clj"}}}]))
+
+(deftest a-batch-of-edits-reads-the-changed-files-not-the-tree
+  ;; the watcher's source batch (my.root/source-changes) names its files, and the :source read takes
+  ;; them (seon.fx/read-source :paths) in place of walking and reading every file, so an edit costs
+  ;; the same in a tree of any size (task seon.source/an-import-reads-only-changed-files)
+  (cost/proof {:of 'seon.fx/read-source :input 'seon.source-test/tree-of
+               :n "source files in the tree, one of them changed"
+               :work "the one changed file read; the others neither listed nor read"
+               :growth :constant
+               :fixed {:bytes 500000 :calls 20}
+               :sizes [10 100 1000]}))

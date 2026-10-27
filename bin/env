@@ -29,8 +29,8 @@ export HOME=$ROOT/target/home
 # names the same absolute path.
 MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 # Main's merge verification goes first (docs/merging.md#main-goes-first): bin/prove --merge holds
-# an exclusive flock on MAIN_LOCK for its whole run, and every other heavy run (bin/test, bin/check,
-# bin/build) calls main_first as it starts: a blocking flock, released at once, so it waits only
+# an exclusive flock on MAIN_LOCK for its whole run, and every other heavy run (bin/test, bin/check;
+# never bin/build, owner 2026-10-27) calls main_first as it starts: a blocking flock, released at once, so it waits only
 # while main's verification runs, and says so once on stderr. No poll, no clock: the kernel
 # answers the wait when the holder's run ends (or it dies: the lock is its process's). A run
 # under the holder (SEON_MAIN_FIRST_HELD, its steps) is the holder's and does not wait.
@@ -57,6 +57,9 @@ main_first() {
 # is_main_tree: this checkout (ROOT) is the main tree. Only main's merge verification goes first:
 # bin/prove --merge holds the lock there, and a worktree's --merge holds nothing, waiting like any run
 is_main_tree() { [ "$(cd "$ROOT" && pwd -P)" = "$(cd "$MAIN_TREE" && pwd -P)" ]; }
+# worktrees share refs: what runs here commits its merges on a branch of this worktree's own
+# (:seon.config.source/branch), never the main tree's jolt/seon-merges
+is_main_tree || export SEON_SOURCE_BRANCH=${SEON_SOURCE_BRANCH:-jolt/seon-merges-$(basename "$ROOT")}
 # main_hold NAME CMD ARGS: CMD run under the lock (waiting for another holder first), NAME in the lock file
 main_hold() {
   mkdir -p "$(dirname "$MAIN_LOCK")"

@@ -1,7 +1,8 @@
 (ns seon.test-store-test
-  "The test store's own rules: the process tests' store is made once, before any shard."
-  (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [datahike.api :as d]
-            [seon.db :as pdb] [seon.test-store :as ts])
+  "The test store's own rules: the process tests' store is made once, before any shard, and a
+  test process's agent tests share one root of it."
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [datahike.api :as d]
+            [seon.db :as pdb] [seon.test-store :as ts] [seon.agent-test :as at])
   (:import [clojure.lang ExceptionInfo]))
 
 (deftest the-process-store-is-made-before-any-shard
@@ -67,3 +68,46 @@
           (is seeded? "the new path is made fresh")
           (d/release conn)))
       (finally (sh/sh "rm" "-rf" dir)))))
+
+(deftest n-roots-open-the-process-store-at-once
+  ;; task seon.test-store/a-process-root-opens-the-shared-store-under-load: under load one shard's
+  ;; root died before listening, `lmdb env_open: Invalid argument` opening the shared process store
+  ;; other shards' roots held open. n = 4 roots start on it at once: every one listens
+  (let [store (ts/process-store)
+        dir (.getParent (java.io.File. ^String store))
+        roots (vec (for [i (range 4)] {:store store :main (str "n4-" i "-" (random-uuid)) :runs (str dir "/n4-" i "-" (random-uuid) "-runs")}))
+        started (mapv deref (mapv #(future (ts/start-root! %)) roots))]
+    (try
+      (is (every? :port started)
+          (str "every root listens; the logs of those that did not: " (pr-str (map :log (remove :port started)))))
+      (testing "a root that did not listen is the test's error with its log, never an ask of no port"
+        (is (= {:error :root-did-not-listen :log "lmdb env_open: Invalid argument"}
+               (ts/ask {:port nil :log "lmdb env_open: Invalid argument"} {:op :agents}))))
+      (finally
+        (doseq [r started :when (:port r)] (ts/stop-root! r))
+        (doseq [r started] (sh/sh "rm" "-rf" (:runs r)) (ts/drop-main! store (:main r)))))))
+
+(deftest agent-tests-in-one-process-share-its-root
+  ;; task seon.test-store/an-agent-test-shares-its-shards-root: a root booted per in-agent test
+  ;; was most of its time; the tests of one process now share one root, each with an
+  ;; agent and a task of its own, and what one made is gone when it ends. The root runs the
+  ;; checkout's own source (its source fact names it), so a test sees the code it is run on
+  (let [ask (fn [names] [{:op :eval :agent "root"
+                          :code (str "[(seon.lib/c-getpid)"
+                                     " (:root (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"
+                                     " (vec (sort (map name (datahike.api/branches (:conn sys)))))"
+                                     " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))]")}
+                         "(:seon.task/id (my.task/current))"])
+        first-names (volatile! nil)
+        [a] (at/in-agent (fn [n] (vreset! first-names n) (ask n)))
+        [b task] (at/in-agent ask)
+        [pid-a source _] (:value a)
+        [pid-b _ branches agents] (:value b)]
+    (is (int? pid-a) (pr-str a))
+    (is (= pid-a pid-b) "one root answered both tests")
+    (is (= (.getCanonicalPath (java.io.File. ".")) source) "it runs the checkout's source")
+    (is (not= (:task @first-names) (:value task)) "each test has a task of its own")
+    (is (re-find #"^t[0-9a-f]{8}/t$" (str (:value task))) (pr-str task))
+    (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))
+    (is (not-any? #(re-find (re-pattern (str "task-" (:ns @first-names) "-")) %) branches)
+        (str "the first test's branches are gone: " branches))))

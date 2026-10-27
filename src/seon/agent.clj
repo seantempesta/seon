@@ -22,7 +22,8 @@
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
-;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
+;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
+;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
@@ -177,16 +178,21 @@
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
 (defn- await-op!
-  "Wait for {:op op :k k} from root; anything else waits in :pending for the loop."
-  {:malli/schema [:=> [:cat :keyword :int] :seon.wire/seon-msg]}
-  [op k]
-  (loop []
-    (let [m (recv-raw!)]
-      (cond
-        (= m :dead) (lib/c-exit 0)
-        (and (= op (:op m)) (= k (:k m))) m
-        (arrived! m) (recur)
-        :else (do (swap! state update :pending conj m) (recur))))))
+  "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
+  in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, and
+  anything else waits in :pending for the loop. The process ends when root is gone."
+  {:malli/schema [:function [:=> [:cat :keyword :int] :seon.wire/seon-msg]
+                  [:=> [:cat :keyword :int [:maybe :keyword]] :seon.wire/seon-msg]]}
+  ([op k] (await-op! op k nil))
+  ([op k in-place]
+   (loop []
+     (let [m (recv-raw!)]
+       (cond
+         (= m :dead) (lib/c-exit 0)
+         (and (= op (:op m)) (= k (:k m))) m
+         (arrived! m) (recur)
+         (and in-place (= in-place (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
+         :else (do (swap! state update :pending conj m) (recur)))))))
 
 
 (defn mem-mb
@@ -522,6 +528,40 @@
         (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
         v))))
 
+(defn judges?
+  "Whether test var t judges a branch, as the test plan selects (test-plan): a deftest (:test) of a
+  namespace that is not scratch (seon.program/scratch-ns?: user, or ^:scratch), which never merges."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
+        (boolean (and (:test m) (not (program/scratch-ns? (:ns m)))))))
+
+(defn test-inputs
+  "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
+  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and
+  system.edn's declared refs)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :map] :seon.program/inputs]]}
+  [db]
+  (let [root (d/entity db [:seon.root/id :root])
+        source (:seon.root/source root)
+        shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))]
+    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
+
+(defn branch-graph
+  "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
+  updated to db (seon.program/reach-update), or db's own with no base; reused while db is the very
+  value it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
+  key lookup; a new db value is base's graph updated again, at the cost of what the branch changed
+  from base (20-45 ms for one form). Holds that one db value while it is the newest asked."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
+  [db base in]
+  (let [{w-db :db g :graph w-in :inputs} (:branch-graph @state)]
+    (if (and g (identical? db w-db) (= in w-in))
+      g
+      (let [b (when base (base-graph base in))
+            g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))]
+        (swap! state assoc :branch-graph {:db db :graph g :inputs in})
+        g))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -552,15 +592,10 @@
                    [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]
                    [:removed [:map-of :qualified-symbol :string]]]]}
   [db base proofs]
-  (let [root (d/entity db [:seon.root/id :root])
-        source (:seon.root/source root)
-        shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
-        in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
+  (let [[shared in] (test-inputs db)
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
-        judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
-                          (and (:test m) (not (program/scratch-ns? (:ns m))))))
         b (when base (base-graph base in))
-        g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))
+        g (branch-graph db base in)
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
@@ -602,19 +637,6 @@
         (count files))
       r)))
 
-(defn- await-reply!
-  "Wait for root's answer k to this agent's ask (a :reply on the api's route back to its proc):
-  root's :tests request arriving meanwhile is taken here (its test service may need this agent to
-  run them); other messages wait for the loop. The process ends when root is gone."
-  {:malli/schema [:=> [:cat :int] :any]}
-  [k]
-  (loop []
-    (let [m (recv-raw!)]
-      (cond (= m :dead) (lib/c-exit 0)
-            (and (= :reply (:op m)) (= k (:k m))) (:result m)
-            (= :tests (:op m)) (do (doseq [r (handle! m)] (send! r)) (recur))
-            :else (do (swap! state update :pending conj m) (recur))))))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
@@ -629,7 +651,7 @@
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
-    (await-reply! k))))
+    (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
@@ -1008,7 +1030,7 @@
   "Make this process the agent: its socket (fd), its namespace, its state map, its
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
-  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph session :key
+  [fd {id :agent branch :branch task :task run :run cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index session :key
        marks0 :marks} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
@@ -1064,7 +1086,10 @@
                    :ns nsx :interrupt-ok intr-ok :serve serve}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
-                   graph (assoc :base-graph {:db db0 :graph graph})))
+                   graph (assoc :base-graph {:db db0 :graph graph})
+                   ;; main's reconciler index as the fork server keeps it, for db0: the first turn
+                   ;; observes the branch from it (seon.turn's index!), never lists it here
+                   index (assoc :index index)))
      (mark! :state)
      (swap! state assoc :marks @marks)
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes

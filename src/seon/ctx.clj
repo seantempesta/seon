@@ -453,7 +453,13 @@
          (let [om (get old key) nm (get new key) path (conj p key)]
            (cond
              (identical? om nm) acc
-             by (refuse acc path (str "a lookup's members follow " attr ": change it"))
+             ;; a lookup's members follow the attribute it reads; a var's, its definition, evaluated as at any REPL
+             by (let [vs (keep (fn [[k m]] (when-not (or (identical? m (get om k)) (stub? m)) (:var/name m))) nm)]
+                  (refuse acc path (if (seq vs)
+                                     (str "a var changes by its definition, not by swap!: evaluate "
+                                          (str/join ", " (for [v vs] (str "(in-ns '" (namespace v) ") (defn " (name v) " ...)")))
+                                          ", and the next @seon.ctx/ctx holds its new source")
+                                     (str "a lookup's members follow " attr ": change it"))))
              (and rev? (many? db j))
              (as-> acc acc
                  (reduce-kv (fn [acc k m]

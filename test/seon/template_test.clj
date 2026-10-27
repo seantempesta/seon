@@ -83,7 +83,7 @@
     (doseq [k [:whole :work]
             :let [w (k tpl/instructions)
                   steps ["reproduce what the plan says is wrong in one eval" "if the output is already right" "(my.task/fail! "
-                         "Once the output is wrong, stop reading" "as a deftest beside the function's existing tests" "(my.agent/callers 'ns/f)" "never the live db"
+                         "Once the output is wrong, stop reading" "as a deftest beside the function's existing tests" "(my.agent/tests-reaching 'ns/f)" "never the live db"
                          "register it" "run it red" "(my.agent/prove)" "make it pass"]]]
       (is (every? #(str/includes? w %) steps) (str k ": each step is in the instructions"))
       (is (= steps (sort-by #(or (str/index-of w %) -1) steps)) (str k ": in that order: reproduce, fail! or stop reading, the deftest, red, green")))

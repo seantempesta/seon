@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -63,6 +63,40 @@
   "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
+
+(defn write-back!
+  "Write the source files of the merged runs ids (run ids) onto the merges branch again: those a
+  failed write-back left (the :seon.git/commit-failed error on the run, naming them), read from
+  main as it is now and committed in one :git effect like the reconciler's. What the git effect
+  answers is recorded by seon.reconcile/commit-tx: the sha on each run, which clears the error (and
+  holds a new one for any file main has no text for), or the error again. A run with no lost
+  write-back is answered :seon.root/nothing-lost under :not-lost and left out; no source root, or no
+  text on main for any of the files, is answered at once and recorded nowhere (the runs keep their
+  error). Answers {:written ids :sha}, the git effect's error, or the precondition's, with :not-lost
+  when any."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.run/id]] :map]}
+  [sys ids]
+  (let [db @(:conn sys)
+        runs (into {} (for [id ids] [id (task/run db id)]))
+        lost (filterv #(some? (reconcile/lost-write-back (runs %))) ids)
+        not-lost (vec (for [id ids :when (not-any? #{id} lost)]
+                        (contract/error :seon.root/nothing-lost #'my.root/write-back!
+                                        (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
+        paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (runs %))) lost))))
+        root (config/value :seon.config.source/root)
+        files (when (and (seq lost) root) (source/files db paths))
+        members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))
+        r (cond (empty? lost) {:written []}
+                (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!
+                                            "no source root declared (:seon.config.source/root): nothing is written back here" {:runs lost})
+                (empty? files) (contract/error :seon.root/no-source-text #'my.root/write-back!
+                                               (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
+                :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files
+                                               :message (source/commit-message members)}))
+        tx (when (seq files) (reconcile/commit-tx db r members paths (keys files)))]
+    (when (seq tx) @(root/transact-main! sys tx))
+    (cond-> (if (contract/error? r) r {:written lost :sha (get-in r [:value :sha])})
+      (seq not-lost) (assoc :not-lost not-lost))))
 
 (defn gate!
   "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
@@ -184,17 +218,19 @@
   (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,
   imported only when it reads otherwise; none when root follows no source). Answers each
   loader's answer and :opened, the derived problems the loads made true (seon.problems/caused
-  of main before and after)."
-  {:malli/schema [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]}
-  [sys ks]
+  of main before and after). With changed (source-changes) the source loads only those files."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]
+                  [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]] [:maybe [:set :string]]] [:map [:loaded :map] [:opened [:set :string]]]]]}
+  ([sys ks] (load-kinds! sys ks nil))
+  ([sys ks changed]
   (let [before @(:conn sys)
         source (get-in sys [:bindings :source])
         loaded (into {} (for [k (sort ks) :when (or (not= :source k) source)]
                           [k (case k
                                :docs (load-docs! sys)
                                :tasks (load-tasks! sys)
-                               :source (root/import-source! sys source))]))]
-    {:loaded loaded :opened (problems/caused before @(:conn sys))}))
+                               :source (root/import-source! sys source changed))]))]
+    {:loaded loaded :opened (problems/caused before @(:conn sys))})))
 
 (defn load-errors
   "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
@@ -252,6 +288,17 @@
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
             {} batch)))
 
+(defn source-changes
+  "The source files a watcher's batch changed, as relative paths under checkout co, when the batch
+  made root load the source by files alone: every record that makes the source load is a changed
+  path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or the branch's own ref moving
+  (a commit, a merge): the whole tree is then read. Cost: the batch."
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
+  [co refs own batch]
+  (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
+    (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)) (re-find #"\.(clj|edn)$" path))) source))
+      (into #{} (map (fn [[_ path]] (str/replace-first path (str co "/") ""))) source))))
+
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
   (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
@@ -291,9 +338,9 @@
         ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
         ;; one written after a newer one would undo it, and its event is spent)
         one (Object.)
-        load! (fn [ks]
+        load! (fn [ks changed]
                 (locking one
-                  (let [r (load-kinds! sys ks)]
+                  (let [r (load-kinds! sys ks changed)]
                     (doseq [e (load-errors (:loaded r))]
                       @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
                     r)))
@@ -301,18 +348,19 @@
                         (fn [batch]
                           (let [why (watch-loads co refs own batch)
                                 ks (set (keys why))
+                                changed (when (contains? ks :source) (source-changes co refs own batch))
                                 rescan (last (filter (comp #{:rescan :root} first) batch))]
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
                             (when (seq ks)
                               ;; the problems the load made true, the last kept in the fact
-                              (let [{:keys [opened]} (load! ks)]
+                              (let [{:keys [opened]} (load! ks changed)]
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]
     (if (contract/error? w)
-      (do (died w) (load! #{:tasks}) w)
-      (do @(fact fresh) (load! #{:tasks}) w))))
+      (do (died w) (load! #{:tasks} nil) w)
+      (do @(fact fresh) (load! #{:tasks} nil) w))))
 
 (defn union
   "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union

@@ -97,9 +97,10 @@
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however
   it ended; what a test starts runs under bin/held, which ends it then (task
-  seon.check/a-test-root-names-its-store-and-main). Removed when the process ends or is
-  terminated (a shutdown hook); a SIGKILLed one's is reclaimed by the next process's first use
-  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo.
+  seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
+  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
+  never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
+  (shared-roots), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
   (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
@@ -107,7 +108,6 @@
            (sh/sh "bin/held" "--reclaim" dir)
            (sh/sh "rm" "-f" path)
            (sh/sh "mkfifo" path)
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.delete (java.io.File. path)))))
            [path (java.io.RandomAccessFile. path "rw")])))
 
 (defn binary-sh
@@ -150,8 +150,8 @@
   had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
   never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
-  root arguments. Answers the options with :port, nil when the root died before listening (its
-  log says why). runs is one root's, named per main by its caller: a root still running there
+  root arguments. Answers the options with :port, nil when the root died before listening, and
+  then its :log, which says why (ask answers it as the test's error). runs is one root's, named per main by its caller: a root still running there
   is refused, never answered (bin/root start in it would only report that root, and the test
   would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refused start
   backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
@@ -168,7 +168,10 @@
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
   (root-sh root "start" (into ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))] args))
-  (assoc root :port (bound-port runs)))
+  (let [port (bound-port runs) log (java.io.File. (str runs "/root.log"))]
+    (cond-> (assoc root :port port)
+      ;; it died before listening: its log says why, kept with it for the test's error (ask)
+      (nil? port) (assoc :log (if (.exists log) (slurp log) "")))))
 
 (defn next-root!
   "bin/root next on root: the running root's next generation started on the same store and main.
@@ -199,13 +202,16 @@
   ending on the reply or when the root closes the connection or dies): the reply as data
   (tagged literals kept), or one recorded error value, {:error :eof} (closed with no reply),
   {:error :reset} or {:error :refused} (docs/failure-points.md), never a hang on nc's timeout,
-  which macOS never fires. A caller asserts on :error."
-  {:malli/schema [:=> [:cat [:map [:port :int]] :map] :map]}
-  [{:keys [port]} m]
-  (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
-    (if (clojure.string/blank? out)
-      {:error :no-answer}
-      (clojure.edn/read-string {:default tagged-literal} out))))
+  which macOS never fires. A root that died before listening (start-root!'s :port nil) answers
+  {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error."
+  {:malli/schema [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]}
+  [{:keys [port log]} m]
+  (if (nil? port)
+    {:error :root-did-not-listen :log log}
+    (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
+      (if (clojure.string/blank? out)
+        {:error :no-answer}
+        (clojure.edn/read-string {:default tagged-literal} out)))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/root stop: its stdin closes, it stops cleanly, and the
@@ -217,3 +223,27 @@
         log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
+
+(def ^:private shared-roots
+  "This test process's shared roots, one per [checkout args] and started at the first test that
+  asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
+  of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
+  its own of the process store, stopped and its main dropped when the process ends (a shutdown
+  hook)."
+  (memoize
+    (fn [checkout args]
+      (let [main (str "shard-" (random-uuid))
+            store (process-store checkout)
+            root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
+                                                   (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+        root))))
+
+(defn shared-root!
+  "The root this test process shares among its tests for root arguments args (shared-roots):
+  start-root!'s answer, started at the first call. A test sharing it works on branches of its
+  main and deletes them when it ends (seon.agent-test/in-agent); a test whose subject is a root's
+  life (boot, stop, kill, a generation) or main itself starts a root of its own."
+  {:malli/schema [:=> [:cat [:sequential :string]] :map]}
+  [args] (shared-roots (.getCanonicalPath (java.io.File. ".")) (vec args)))

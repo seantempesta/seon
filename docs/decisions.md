@@ -2,6 +2,27 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
+## 2026-10-27 day rulings
+The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
+
+### A merge runs the process tests its change reaches, automatically (owner, 2026-10-27)
+`bin/prove --merge` runs every test and step the change reaches with no green at its digest, process tests included, so no one names them by hand. Stated: AGENTS §3, docs/merging.md#a-merge-runs-what-the-change-reaches.
+
+### ctx stays seon.ctx/ctx (owner, 2026-10-27)
+The name `ctx` stays as it is; no rename to another word. Stated: the code (`seon.ctx/ctx`).
+
+### An agent changes a function by (in-ns) and defn (owner, 2026-10-27)
+An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clojure's own way, not a special edit function. Stated: AGENTS §4 (get out of an agent's way).
+
+### bin/build never waits on main's lock (owner, 2026-10-27: "Keep the lock for tests and checks, but bin/build never waits on it")
+Stated: docs/merging.md#main-goes-first, bin/env.
+
+### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
+Worktrees run plain `bin/prove` and report ready; the merge session merges a batch and runs one `bin/build` and one `bin/prove --merge`, because per-branch fast-forwards after a branch's own `--merge` are about N² process-test runs. Stated: AGENTS §3, docs/merging.md#a-branch-proves-its-in-process-tests-mains-batch-runs-the-process-tests-once.
+
+### Unused is not dead (owner, 2026-10-27)
+"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
+
 ## 2026-10-26 night rulings
 The owner's rulings of the night of 2026-10-26, each with his words and where it is now stated; they stand over earlier entries where they differ.
 
@@ -21,6 +42,8 @@ Asked whether main's verification goes first, the owner chose "main first, as a 
 Asked whether to erase both for the flaky-results change: "Yes: erase test-results/ and runs/store at that merge (both are test data)." A digest records every status it has seen; red and green both is :flaky, judged red, never reused as green and never rerun. Stated in: docs/merging.md (on that branch).
 ### A work task merges itself through the one gate; no merge task per file task (owner, 2026-10-27)
 Asked whether file tasks keep a merge task each (434 declarations became 868 tasks): "Yes: drop with-merge from task files; a work task merges itself through the one gate. Keep design-build and stages as experiment templates." Stated in: the one-merge design (scratchpad merge-audit-2026-10-27.md), on its way.
+### All work happens inside Seon; worktrees are retired (owner, 2026-10-27)
+"The goal is to stop using the worktrees and to do all work within seon itself". Claude sessions work as outside agents through Seon's server (seon_attach, seon_eval, seon_done): each on its own Seon branch at the REPL, merged by Seon's one gate and written back to git by root. Git worktrees and bin/prove --merge in a checkout are the bridge until that path holds every kind of change. Stated in: docs/plan.md (THE PLAN, step 0).
 ### Styling: compact hiccup, every element earns its spot (owner, 2026-10-26 night)
 "Find efficient styling that we can pull in references for automatically and make it so the fully printed hiccup is compact and everything earns it's spot. The goal isn't to render everything, but to highlight key things to the user and to compute additional derived things to help the agent too". A component's root element carries one class, its render's name; the stylesheet is gathered from the renders drawn. Stated in: docs/render.md#style.
 ### Old branches: audit, then delete (owner, 2026-10-26 night)

@@ -202,7 +202,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
   [n]
   (let [[db] (branch-of n)]
-    [db {:env "e" :tree "t"} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
+    [db {:env "e" :tree "t" :config {}} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
 
 (deftest the-reach-walk-is-one-pass-whatever-the-keys
   (cost/proof
@@ -211,12 +211,14 @@
      :work (str "the live forms read and digested once, each form's neighbours once, the components once "
                 "(Tarjan's) and each one's Merkle digest once, sinks first; then per key its starting "
                 "components' digests: linear in the forms, never forms x keys (a walk per key was "
-                "quadratic here); a form is read as reach-row's five facts, none of the rest. Measured: "
-                "79 MB at 100, 242 MB at 1,000, 982 MB at 5,000; the fixed part is the test store's example program")
+                "quadratic here); a form is read as reach-rows' four facts, none of the rest. Measured: "
+                "each attribute read once over its index (by-entity), no entity lookup per fact and no hash of the "
+                "text (a form's own digest is its :form/id): 41 MB at 100, 128 MB at 1,000 (was 67 and 205 MB); "
+                "the fixed part is the test store's example program")
      :growth :linear
-     ;; ticks measured (seon.cost's once): 15.6M at 100, 47.2M at 1,000, 192.2M at 5,000
-     :per-n {:ticks 36000 :bytes 185000}
-     :fixed {:ticks 12500000 :bytes 62000000}
+     ;; ticks measured (seon.cost's once): 7.1M at 100, 21.3M at 1,000 (was 14.7M and 44.4M, 33k a form)
+     :per-n {:ticks 16500 :bytes 100000}
+     :fixed {:ticks 5800000 :bytes 33000000}
      :sizes [100 300 1000 10000]}))
 
 (defn changed-top
@@ -229,11 +231,12 @@
     [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
 
 (deftest a-change-re-folds-only-what-reaches-it
+  ;; task seon.program/reach-index-reads-each-attribute-once: the proof's digest does not reach reach-update (named by a quoted symbol)
   (cost/proof
     {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
      :n "forms the graph already holds"
      :work (str "four index scans of the forms and their definitions' pointers (live-ids, no entity read), "
-                "then the changed form only: its row, its var's facts, its neighbours, and the components "
+                "then the changed form only: its row (reach-rows, a seek per attribute), its var's facts, its neighbours, and the components "
                 "of it and of what reaches it (nothing, here) re-folded; every other form's neighbours and "
                 "component digest kept. Measured 2026-10-23: 2.1 ms / 2.7 MB at 100, 3.9 ms / 6.5 MB at 1,000, "
                 "11.5 ms / 16 MB at 3,000, one form re-folded each time; the per-form part is the scan "
