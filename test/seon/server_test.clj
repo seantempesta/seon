@@ -129,3 +129,33 @@
     (is (= :red (:outcome done)))
     (is (clojure.string/includes? (str (get-in done [:held :seon.task/failure :reason])) "proof-unknown demo-test/t")
         "the done rule's reasons, as the judge wrote them on the held task")))
+
+(deftest an-outside-agent-changes-its-task-by-swap
+  ;; the owner, 2026-10-27: "I want the ctx atom to be a mirror of the agents context that we are
+  ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
+  ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
+  ;; function), and the change is on its branch, in its next @ctx, on its page, and told as the
+  ;; next turn's diff between the two commits (seon.context/world, what a model turn is sent:
+  ;; an outside agent's own context reads are each whole)
+  (let [plan "Work: f0 returns its input."
+        [first-turn _ swapped page elsewhere on-branch told]
+        (at/in-agent [{:op :context :agent "a1"}
+                      "(def c0 (datahike.api/commit-id (seon.agent/db)))"
+                      (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
+                           " (get-in @ctx [:runs rid :task :seon.task/plan]))")
+                      "(pr-str (seon.repl/render-ctx-hiccup))"
+                      ;; from any namespace, the record by its qualified name (a value the printer
+                      ;; would show as an earlier eval's handle is compared here instead)
+                      (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan]))")
+                      {:op :eval :agent "root"
+                       :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\")))"
+                                  " [:seon.task/id \"demo/t\"]))")}
+                      (str "(let [c1 (datahike.api/commit-id (seon.agent/db)) t (:content (first (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) agent.a1/c0 c1)))]"
+                           " [(clojure.string/includes? t \":seon.task/plan]\") (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
+                           " (clojure.string/includes? t " (pr-str (pr-str plan)) ")])")])]
+    (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
+    (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
+    (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
+    (is (true? (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
+    (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
+    (is (= [true true true] (:value told)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value")))
