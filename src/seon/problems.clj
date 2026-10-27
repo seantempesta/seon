@@ -831,8 +831,11 @@
   base had not (`split-rows`, read where the two differ, each row's answers current), and a run
   class holds prev's rows of the runs the move left alone and the rows of those it touched
   (`touched-runs`), so a move of main costs what it changed, not its closed history; the errors
-  and the few cheap derived classes are read anew. Equal to `health` of head
-  (seon.problems-test/health-moved-is-health)."
+  and the few cheap derived classes are read anew. Measured on main's own db (514 tasks, 3,472 vars)
+  for a one-run change: 8.2 M ticks, 43.6 MB and 77 contracted calls, against 168 M, 462 MB and 3,674 for
+  `health` of the head. Equal to `health` of head (seon.problems-test/health-moved-is-health). `health` is
+  the same per-class readers over every place, so there is one reader of each class and two selections of
+  its candidates, not two implementations."
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
