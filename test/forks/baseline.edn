@@ -62,6 +62,7 @@ datahike.test.reference-test {:test 6, :pass 54, :fail 0, :error 0}
 datahike.test.secondary-dynamic-test {:test 4, :pass 7, :fail 0, :error 0}
 datahike.test.secondary-vt-test {:test 3, :pass 8, :fail 0, :error 0}
 datahike.test.speculative-cache-context-test {:test 5, :pass 20, :fail 0, :error 0}
+datahike.test.storage-retention-test {:test 2, :pass 23, :fail 0, :error 0}
 datahike.test.stress-test {:test 1, :pass 1, :fail 0, :error 0}
 datahike.test.temporal-history-only-test {:test 2, :pass 12, :fail 0, :error 0}
 datahike.test.time-predicate-order-test {:test 2, :pass 14, :fail 0, :error 0}
