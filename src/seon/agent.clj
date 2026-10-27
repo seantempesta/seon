@@ -5,7 +5,10 @@
   each form stays here under its handle.
 
   The agent is single-threaded and reads and writes its socket itself (seon.sock frames,
-  the protocol of root's jolt.async.remote end), never through remote-channel pumps. That
+  the protocol of root's jolt.async.remote end), never through remote-channel pumps: one
+  fiber of its own reads root's frames onto its intake (`intake`), which the loop is the one
+  taker of, and the loop is the one sender (a test child's watcher puts its result there too,
+  so the loop answers root: run-tests-forked). That
   is physics, not style: an agent forks (its test children, clone!), and a process that
   forks must never have started Chez's parallel-collector sweeper threads, which start at
   the first collection that finds a second thread; a child of such a process hangs in its
@@ -15,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
-            [malli.registry :as mr]))
+            [malli.registry :as mr] [clojure.core.async :as a]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :pending :tx-seq :mode :ns :home :mismatch
@@ -41,12 +44,45 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:or [:= true] [:= :dead]]]}
   [m] (if (= :epipe (sock/send! (:fd @state) m)) :dead true))
 
+(defn- intake
+  "This process's one intake: a channel of root's messages ({:op k ...}, then :dead at EOF or
+  root's end frame), read off root's socket by one fiber of this process (sock/recv! parks it
+  on the socket's readiness), and of what this process's own fibers hand the loop (a test
+  child's result: run-tests-forked). Made when first asked on this connection (a clone's is
+  its own: its connection is new). The loop takes from it (recv-raw!, next-msg!, inbox,
+  await-op!), and nothing else reads the socket. Where there is no main carrier (Linux), there
+  are no fibers: nil, and the socket is read directly."
+  {:malli/schema [:=> [:cat] [:maybe :seon.host/chan]]}
+  []
+  (when (jolt.host/main-carrier?)
+    (let [c (:conn @state) in (:intake @state)]
+      (if (and in (identical? c (:conn in)))
+        (:ch in)
+        ;; unbuffered: the reader parks with each message until the loop takes it, so root's
+        ;; further frames wait in the socket's own buffer, as when the loop read it itself
+        (let [ch (a/chan)]
+          (a/io-thread (loop [] (let [m (sock/recv! c)]
+                                  (a/>!! ch (if (= :eof m) :dead m))
+                                  (when-not (= :eof m) (recur)))))
+          (swap! state assoc :intake {:conn c :ch ch})
+          ch)))))
+
 (defn- recv-raw!
-  "The next message from root ({:op k ...}), or :dead at EOF or root's end frame."
+  "The next message for this process: its intake's next, or root's next frame read directly
+  where there is no intake; :dead at EOF or root's end frame."
   {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
   []
-  (let [m (sock/recv! (:conn @state))]
-    (if (= m :eof) :dead m)))
+  (if-let [ch (intake)]
+    (a/<!! ch)
+    (let [m (sock/recv! (:conn @state))] (if (= m :eof) :dead m))))
+
+(defn- poll!
+  "The next message already there, without waiting: :none when none is, :dead at EOF."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (if-let [ch (intake)]
+    (or (a/poll! ch) :none)
+    (let [m (sock/next-frame! (:conn @state))] (if (= m :eof) :dead m))))
 
 (declare commit!)
 
@@ -58,11 +94,8 @@
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
     (if (:dirty? @state)
-      (let [m (sock/next-frame! (:conn @state))]
-        (case m
-          :none (do (commit!) (recv-raw!))
-          :eof :dead
-          m))
+      (let [m (poll!)]
+        (if (= :none m) (do (commit!) (recv-raw!)) m))
       (recv-raw!))))
 
 ;; ---- the agent's own API ------------------------------------------------------
@@ -86,14 +119,13 @@
   "The messages delivered to this agent and not yet taken ({:from :body}), left in the inbox:
   root's requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends. Words to
   its session's runs (the owner's, root's at a stage, a verdict) are entries on main, which its
-  turn takes (seon.turn/take!), never the inbox. What root sent
-  before this call is read off the socket first (without waiting); any other request read
-  waits in :pending for the loop."
+  turn takes (seon.turn/take!), never the inbox. What the intake holds now is taken
+  first (without waiting); any other request taken waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (loop []
-    (let [m (sock/next-frame! (:conn @state))]
-      (when-not (#{:none :eof} m)
+    (let [m (poll!)]
+      (when-not (#{:none :dead} m)
         (when-not (arrived! m) (swap! state update :pending conj m))
         (recur))))
   (:inbox @state))
