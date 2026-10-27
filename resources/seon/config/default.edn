@@ -354,7 +354,7 @@
  ;; reach digest across two fixes to code their agent runs (a green and a red shared it, bin/test
  ;; listed them flaky), because the agent's code is reached through a socket and a keyword :op.
  :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
- ;; Unit: namespace prefix (or one var) -> submodules, or source groups inside one (a path under a
+ ;; Unit: namespace prefix -> submodules, or source groups inside one (a path under a
  ;; submodule: a file or a directory). The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
  ;; reach datahike.*, not every test. Each submodule and each group is a class (seon.config/pin-class),
@@ -363,7 +363,8 @@
  ;; clojure.core.async and jolt.async (its Clojure and its host fibers); lmdb and zstd by
  ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none. What
  ;; no prefix names takes no pin: Chez and Jolt's runtime core (its host layer, clojure.core, the
- ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing). The trade: a
+ ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing; their classes are
+ ;; recorded in the inputs and read by no test's digest). The trade: a
  ;; change there in a Jolt or Chez bump is caught by the forks' own suites (bin/check forks) and the
  ;; daily full run (:seon.config.proofs/full-run-at), not by the bump's own prove (owner, 2026-10-27:
  ;; "no test digests the whole tree"). Measured 2026-10-27 over the last 15 Jolt bumps: 122 tests a

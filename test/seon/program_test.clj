@@ -616,6 +616,36 @@
       (spit core "(ns lib.core)")
       (is (= before (lib)) "its files back as committed: the same input as before"))))
 
+(deftest a-source-group-moves-with-its-own-files-only
+  ;; root's ruling D (2026-10-27): Jolt is keyed by source group. A group is the git entry of its path
+  ;; in the tree of the submodule's files as they are: an edit, or an untracked file, in it moves its
+  ;; class and no other group's; a group path the tree does not hold refuses the inputs
+  (let [p (checkout! "with-groups" {"deps.edn" "{}"})
+        s (str p "/reference-code/lib")
+        core (str s "/core.clj")]
+    (.mkdirs (java.io.File. (str s "/x")))
+    (spit core "(ns lib.core)")
+    (spit (str s "/x/a.clj") "(ns lib.x.a)")
+    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
+      (apply sh/sh "git" "-C" s args))
+    (sh/sh "git" "-C" p "add" "reference-code/lib")
+    (let [c (assoc cfg/config :seon.config.source/pin-namespaces '{lib.core #{"reference-code/lib/core.clj"} lib.x #{"reference-code/lib/x"}})
+          classes #(select-keys (:config (fx/inputs p c (cfg/checkout))) [:seon.pin/lib.core.clj :seon.pin/lib.x])
+          before (classes)]
+      (is (= 2 (count (filter string? (vals before)))) "each group is a class of the inputs")
+      (spit core "(ns lib.core) (def edited 1)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "an edit moves its group's class")
+        (is (= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "and no other group's"))
+      (spit core "(ns lib.core)")
+      (spit (str s "/x/b.clj") "(ns lib.x.b)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "an untracked file in a group moves its class")
+        (is (= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "its files back as committed: the same as before"))
+      (is (thrown-with-msg? Exception #"reference-code/lib/nope.clj"
+                            (fx/inputs p (assoc c :seon.config.source/pin-namespaces '{lib.nope #{"reference-code/lib/nope.clj"}}) (cfg/checkout)))
+          "a group path the tree does not hold refuses the inputs, naming it"))))
+
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 
 (defn- refs-of [db sym]

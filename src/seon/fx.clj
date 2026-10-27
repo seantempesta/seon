@@ -232,21 +232,24 @@
 
 (defn- group-entries
   "The :seon.pin class of each source group cfg's :seon.config.source/pin-namespaces names
-  inside a submodule at sub (relative to root), with its git entry at the submodule's HEAD (one
-  ls-tree for all of them) and, when the submodule's files are not HEAD's (pn holds +), its
-  uncommitted diff: [class text] pairs."
+  inside the submodule at sub (relative to root), with its git entry in the tree of the
+  submodule's files as they are (pin: HEAD's, or HEAD+ the tree-id of its files, an uncommitted
+  or untracked file included), one ls-tree for all of them: [class text] pairs. A group path the
+  tree does not hold is refused, naming it (a typo or an upstream rename would key nothing)."
   {:malli/schema [:=> [:cat :string :map :string [:maybe :string]] [:sequential [:tuple :qualified-keyword :string]]]}
   [root cfg sub pn]
   (let [ps (sort (into #{} (comp (mapcat val) (filter #(str/starts-with? % (str sub "/")))) (get cfg :seon.config.source/pin-namespaces)))
-        rel #(subs % (inc (count sub)))
-        d (str root "/" sub)]
+        rel #(subs % (inc (count sub)))]
     (if-not (and (seq ps) pn)
       []
-      (let [ls (into {} (for [l (str/split-lines (git! {} d (into ["ls-tree" "HEAD" "--"] (map rel ps)) nil)) :when (seq l)]
+      (let [tree (or (second (str/split pn #"\+" 2)) "HEAD")
+            ls (into {} (for [l (str/split-lines (git! {} (str root "/" sub) (into ["ls-tree" tree "--"] (map rel ps)) nil)) :when (seq l)]
                           [(second (str/split l #"\t" 2)) l]))]
         (for [p ps]
-          [(cfg/pin-class p) (str (get ls (rel p) (str "absent " (rel p)))
-                                  (when (str/includes? pn "+") (str "\n" (git! {} d ["diff" "HEAD" "--" (rel p)] nil))))])))))
+          (if-let [l (get ls (rel p))]
+            [(cfg/pin-class p) l]
+            (throw (ex-info (str "inputs: " p ", a source group of :seon.config.source/pin-namespaces, is not in " sub "'s tree")
+                            {:path p}))))))))
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
