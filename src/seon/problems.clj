@@ -611,7 +611,12 @@
         live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
+        done? (memoize #(task/done? db %))
+        ;; a run of a done task has no open problem but its unrun tests: its history is never pulled
+        open-run? (fn [e] (or (seq (d/datoms db :eavt e :seon.run/deferred))
+                              (not (done? (:v (first (d/datoms db :eavt e :seon.run/task)))))))
         runs (into (sorted-set)
+                       (filter open-run?)
                        (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
                                                    :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
                                (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind))))

@@ -499,6 +499,30 @@
   green run."
   [k] [(seeded 4 k)])
 
+(defn history-input
+  "The flatness proof's input at k: 4 problems of each class beside k finished tasks, each with
+  a green run as production writes it (judge-tx records its cost verdict and its waste too)."
+  [k] [(ts/test-branch! (fn [_ conn]
+                          (d/transact conn (vec (concat
+                                                 (for [i (range k)] {:seon.task/id (str "t/h" i) :seon.task/ns 't :seon.task/name (str "h" i) :seon.task/plan "p"
+                                                                     :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work})
+                                                 (for [i (range k)] {:seon.run/id (str "t/h" i "#1") :seon.run/task [:seon.task/id (str "t/h" i)] :seon.run/boot "b"
+                                                                     :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 1 :seon.run/end-ms 2
+                                                                     :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :done :seon.run/outcome :green
+                                                                     :seon.run/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
+                                                                     :seon.run/waste {:turns 1}}))))
+                          @conn))
+       {}])
+
+(deftest problems-cost-nothing-for-the-history-of-finished-runs
+  ;; no recorded problem at all: the read must cost nothing for finished history
+  (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/history-input
+               :n "finished tasks, each with a green run carrying a cost verdict and waste"
+               :work "none per finished task: its run is a candidate by its cost attribute, found by one datom, its task's done-ness by datoms; no pull"
+               :growth :constant
+               :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
+               :sizes [10 100 1000]}))
+
 (deftest problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
                :n "clean tasks (each with a green run), beside 4 problems of each class"
