@@ -34,9 +34,9 @@
 ;; ---- resolving a section's citations ----------------------------------------------------
 
 (defn- under?
-  "Is address a section of a page under dir?"
+  "Is address a section of a page under dir? \".\" is the checkout's top level: a page with no directory."
   {:malli/schema [:=> [:cat :string :string] :boolean]}
-  [dir address] (str/starts-with? address (str dir "/")))
+  [dir address] (if (= "." dir) (boolean (re-find #"^[^/#]+#" address)) (str/starts-with? address (str dir "/"))))
 
 (defn- citation-target
   "What citation c of a section reaches: [:section address] (a section this load holds, or one
@@ -249,10 +249,10 @@
 
 (defn pages
   "The wiki pages under dir of the checkout (docs by default), read: {path text}, each path
-  relative to the checkout (docs/flow.md)."
+  relative to the checkout (docs/flow.md; AGENTS.md for dir \".\", the top level)."
   {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
   [checkout dir]
-  (into (sorted-map) (for [[n text] (lib/dir-texts (str checkout "/" dir) ".md")] [(str dir "/" n) text])))
+  (into (sorted-map) (for [[n text] (lib/dir-texts (str checkout "/" dir) ".md")] [(if (= "." dir) n (str dir "/" n)) text])))
 
 (defn load-dir-tx
   "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an

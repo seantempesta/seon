@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [clojure.edn] [clojure.walk :as walk]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [clojure.edn] [clojure.walk :as walk]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -747,8 +747,10 @@
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections it cites; the functions nearest its plan
-  by meaning that it does not name (`similar`). With write-set? false (the page's task part, whose
-  cited vars are parts of their own, `cited`), no write set is made."
+  by meaning that it does not name (`similar`); :green-on-main, each written proof whose last result
+  on main is green (seon.proofs/latest-status: the premise may already hold, so the agent checks
+  it before anything else). With write-set? false (the page's task part, whose cited vars are
+  parts of their own, `cited`), no write set is made."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task] :map] [:=> [:cat :seon.host/db :seon.task/task :boolean] :map]]}
   ([db t] (task-data db t true))
   ([db t write-set?]
@@ -774,6 +776,9 @@
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
+      ;; 4 of 6 picks for THE PLAN 0.7, and an outside agent's task, were already done on main
+      (some #(and (docs/source-of db %) (= :pass (proofs/latest-status db %))) proofs)
+      (assoc :green-on-main (vec (sort-by str (filter #(and (docs/source-of db %) (= :pass (proofs/latest-status db %))) proofs))))
       near (assoc :similar near)
       (not write-set?) (dissoc :write-set)))))
 
