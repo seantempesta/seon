@@ -1196,7 +1196,9 @@
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
   (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
         ;; the agent working the task, as a session holds it: its entity and its running run
-        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}
+                          ;; the toy's chances sit far below the page's entry cut, so every item scored enters
+                          [:db/add te :seon.config.render/relevance-doc 0.0]])
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
