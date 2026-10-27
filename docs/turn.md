@@ -41,6 +41,12 @@ Words to the agent and what root decided of its runs are facts on main, and a tu
 
 A run the done rule refuses (`:green` or `:red` by the agent's own word, but not done by root's facts) is told why rather than held: root's judge writes a `:verdict` entry with the reasons and results it judged on and parks the run, and the entry wakes the session ([processes](processes.md#a-parked-process)). The same reasons again hold the task. A merge task's refused run holds at once, and so does an outside agent's, which read the verdict as `seon_done`'s answer.
 
+## A session parks, wakes on a message and is loaded at a commit
+
+A session is the agent's branch across its runs, and a run that ends waiting or out of turns parks its process until the next message to the session wakes it for its next run ([processes](processes.md#a-parked-process)); a parked agent costs its memory and nothing else. A message is a fact on main first and a turn takes it onto the branch (above), so a wake that was lost, or a process that died, loses no word.
+
+Starting and resuming are meant to be one mechanism (owner, 2026-10-25), loading the session at a commit: a new task loads its branch's head, a dead process loads the same head, and a rewind (`d/branch!` at the commit, a pointer) loads the earlier one. A load forks, loads the program diff from main's image to the commit (about 0.35 s, most of its cost), binds `result/eN` to each recorded data value, and replays only the pure evals of the record, each marked as replayed; an eval that asked an effect is listed and never replayed unless the agent evaluates it again by hand ([processes](processes.md#a-parked-process): a replay trusts no form whose effect hides behind a helper or whose world moved on). This is planned, not built (task `seon.reconcile/root-work-is-tasks`; the design and its lab measurements are in `notes/archive/design-agent-loop-2026-10-25.md`).
+
 ## An outside agent
 
 A Claude session works a task through the same path: `seon_attach` and `seon_done` on the server. ```seon.turn/context-block``` gives it the request a model would be sent, observed now (the page as its model would read it), and records the read as a turn of the run with origin `:outside`.

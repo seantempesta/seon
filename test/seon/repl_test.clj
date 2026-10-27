@@ -70,7 +70,7 @@
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
               ;; the same source a row above printed: an earlier response's output prints as the form
-              ;; that reads it again, never twice (notes/design-agent-view-2026-10-24.md section 1)
+              ;; that reads it again, never twice (notes/archive/design-agent-view-2026-10-24.md section 1)
               ["(clojure.repl/source root-causes)" :text "(:out result/e"]
               ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(:out result/e"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
@@ -92,7 +92,7 @@
               ;; clojure.test reports to *test-out*: the step E dry run's agent ran a red
               ;; proof and saw nothing (2026-10-22)
               ["(do (in-ns 'user) (clojure.test/deftest red (clojure.test/is (= 1 2))) (clojure.test/run-tests))" :text "FAIL in (red)"]
-              ;; every value is data, printed by the one printer (notes/design-agent-view-2026-10-24.md:
+              ;; every value is data, printed by the one printer (notes/archive/design-agent-view-2026-10-24.md:
               ;; nothing renders an eval's value), its producer's schema or not
               ;; a namespaced map as Clojure's REPL prints one (*print-namespace-maps*)
               ["(my.task/current)" :text "#:seon.task{"]
@@ -176,7 +176,7 @@
       (is (str/includes? (printed "(my.agent/help \"done\")") "The judge counts exactly") "and one section's text"))))
 
 (deftest a-name-that-is-no-var-says-so
-  ;; the live rounds (notes/live-2026-10-25.md): (my.agent/callers 'seon.proof/status) answered [],
+  ;; the live rounds (notes/archive/live-2026-10-25.md): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
   (let [[_ nothing key-name real callees library _ fresh aliased] (at/in-agent #(vector {:op :context :agent (:agent %)}
@@ -199,7 +199,7 @@
     (is (seq (:value aliased)) (str "an alias reads as the var it resolves to, whose callers are recorded by its full name: " (pr-str aliased)))))
 
 (deftest a-missing-name-says-the-nearest
-  ;; the live rounds' repeats (notes/live-2026-10-25.md; jolt/repeat-causes): agents re-sent a guessed
+  ;; the live rounds' repeats (notes/archive/live-2026-10-25.md; jolt/repeat-causes): agents re-sent a guessed
   ;; name after "Source not found ... If your plan names it as new, write it" and after a missing
   ;; namespace with no alternative. The one answer (my.agent/no-var) names the nearest existing names
   ;; by Jolt's did-you-mean ranking, and says write it only when the task cites the name
@@ -390,7 +390,7 @@
     (is (every? #(and (number? (:ms %)) (pos? (:bytes %))) [small big bad]) "its ms and bytes too")))
 
 (deftest a-call-is-one-response
-  ;; notes/design-agent-view-2026-10-24.md §1: one response per eval call, {:handle :value :out
+  ;; notes/archive/design-agent-view-2026-10-24.md §1: one response per eval call, {:handle :value :out
   ;; :err :ex}, each key only when present; its forms run in order as load-string runs them,
   ;; and the first exception stops them; its handle result/e<n> holds it
   (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]

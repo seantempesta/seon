@@ -85,7 +85,7 @@
  ;; 2026-10-22: "why are we not resuming one main by default"); a store without it makes it
  ;; from the seed (:db). A run's record is main's commit history. bin/check names each step's
  ;; own main (SEON_MAIN=check-<step>, deleted when the step is green); SEON_MAIN=db is :db itself.
- ;; Provenance: notes/PLAN-branches.md point 1. At the bound: n/a.
+ ;; Provenance: the branches plan, not kept point 1. At the bound: n/a.
  :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
@@ -146,7 +146,7 @@
  ;; (seon.db/collect!; docs/storage.md#collection): Datahike's collection sees only its own
  ;; process's in-flight commits (datahike.gc/gc-storage!), so a commit of another process can
  ;; reuse a value the sweep is deleting. False: root never collects, and the store keeps its
- ;; garbage. Provenance, 2026-10-23 (notes/store-gc-bug-2026-10-23.md): the :scripted profile is
+ ;; garbage. Provenance, 2026-10-23 (the store-gc finding, 2026-10-23, not kept): the :scripted profile is
  ;; bin/test's and bin/check's, whose roots (a shard's, a step's) share one store; production
  ;; runs one root per store (task seon.db/two-processes-branch-one-store-at-once).
  :seon.config.store/sole-writer? #profile {:default true :scripted false}
@@ -259,7 +259,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 ;; Unit: behind runs. A merge run the writer refuses as behind main (main moved under it) is green, so
-;; max-merge-turns never counts it and its task ran again without end (notes/root-repair-findings-2026-10-27.md
+;; max-merge-turns never counts it and its task ran again without end (notes/archive/root-repair-findings-2026-10-27.md
 ;; gap 4: a namespace main gained made every merge behind). Past this many behind runs of one merge task the next
 ;; behind answer holds the task for root with the writer's evidence. Provenance: worktree session
 ;; a-behind-merge-is-bounded-and-merges-main-first; three reruns are three chances for main to hold still.
@@ -445,7 +445,7 @@
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
- ;; Provenance: owner via root, 2026-10-23 (option B of notes/test-fork-main-2026-10-23.md).
+ ;; Provenance: owner via root, 2026-10-23 (option B of notes/archive/test-fork-main-2026-10-23.md).
  ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
  ;; (two runs never share a checkout, AGENTS section 3). Derived data: deleting it costs one
  ;; import. At the bound: see program-store-max-bytes.
@@ -464,7 +464,7 @@
  :seon.config.proofs/seed-salt 0
  ;; Unit: the size n of a cost proof's input (seon.cost/sizes). A proof measures its sizes up to
  ;; this, and at least its two smallest (a growth fit needs two). Provenance: root, 2026-10-23
- ;; (notes/test-time-2026-10-23.md: building inputs at 10k took 10-19 s per proof in every run).
+ ;; (root's test-time measurement, 2026-10-23, not kept: building inputs at 10k took 10-19 s per proof in every run).
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
@@ -496,7 +496,7 @@
  :seon.config.proofs/tick-quantum #long 1050
  ;; Unit: seeds (a count). How many seeds a randomized property test draws in this run, each
  ;; from its own test-seed (seon.proofs/test-seed) and the next ones after it. Provenance: root,
- ;; 2026-10-23 (notes/test-time-2026-10-23.md: r3.inc-test's 5 seeds x 150 steps took 47 s, the
+ ;; 2026-10-23 (root's test-time measurement, 2026-10-23, not kept: r3.inc-test's 5 seeds x 150 steps took 47 s, the
  ;; automatic run's critical path). bin/test --all sets SEON_SEEDS=5, so the full run draws as
  ;; many as before. At the bound: the test draws this many and no more.
  :seon.config.proofs/seeds #long #or [#env SEON_SEEDS 1]
@@ -527,7 +527,7 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
- ;; 2,048. 2026-10-22, step E (root's research, notes/agent-context-research-2026-10-22.md §3.3):
+ ;; 2,048. 2026-10-22, step E (root's research, notes/archive/agent-context-research-2026-10-22.md §3.3):
  ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
  ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
@@ -628,7 +628,7 @@
  ;; tool message, the agent's page). Provenance: v1's 6144 (owner 2026-10-12: print more, so
  ;; help and the current-state block show whole), raised to 16000 (owner 2026-10-25: "a
  ;; generous context budget"; main's problems through their render measured 14,218 tokens
- ;; whole, cut at 6144; notes/printer-audit-2026-10-25.md). Past it the value is cut, every
+ ;; whole, cut at 6144; notes/archive/printer-audit-2026-10-25.md). Past it the value is cut, every
  ;; cut carrying the form that reads its rest.
  :seon.config.render.agent/token-budget 16000
  ;; Unit: nested levels shown (v1's :seon.config.render.agent/max-depth).
@@ -699,7 +699,7 @@
  ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
  ;; concepts that we can refine over the session"); 5 each found 0.51 of what 31 merged tasks
  ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
- ;; turn (notes/related-search-2026-10-25.md).
+ ;; turn (docs/vector.md#what-was-compared-and-what-it-left-out).
  :seon.config.render/related 5
  ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
  ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
@@ -738,7 +738,7 @@
  ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
  ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
  ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the
- ;; fused related was measured with (b9920ecf5b, notes/related-search-2026-10-25.md); no other value
+ ;; fused related was measured with (b9920ecf5b, docs/vector.md#what-was-compared-and-what-it-left-out); no other value
  ;; was measured. At the bound: a candidate past it is never ranked by meaning.
  :seon.config.render/related-near 4
  ;; Unit: forms. When the plan cites no defined var (a user's request in prose), the call graph's half

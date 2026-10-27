@@ -34,7 +34,7 @@
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
 (deftest a-render-is-opts-then-children
-  ;; Reagent's form (notes/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
+  ;; Reagent's form (notes/archive/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
   (testing "every render a schema declares takes [opts v]: its contract's first argument is :seon.render/opts"
     (let [declared (distinct (keep #(r/declared %) (keys seon.contract/forms)))

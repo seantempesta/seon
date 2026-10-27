@@ -665,7 +665,7 @@
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
 (deftest content-ids-cost-the-writes-the-model-says
-  ;; content eids scatter a commit's new identities over the indexes (notes/content-eids-2026-10-23.md
+  ;; content eids scatter a commit's new identities over the indexes (the content-eids pricing study, 2026-10-23, not kept
   ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
   ;; 2 new identities, 2.3-5.1x at 10), red when steeper. Measured 2026-10-23 at 110k datoms:
   ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
