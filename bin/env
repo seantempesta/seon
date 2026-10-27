@@ -29,8 +29,8 @@ export HOME=$ROOT/target/home
 # names the same absolute path.
 MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 # Main's merge verification goes first (docs/merging.md#main-goes-first): bin/prove --merge holds
-# an exclusive flock on MAIN_LOCK for its whole run, and every other heavy run (bin/test, bin/check,
-# bin/build) calls main_first as it starts: a blocking flock, released at once, so it waits only
+# an exclusive flock on MAIN_LOCK for its whole run, and every other heavy run (bin/test, bin/check;
+# never bin/build, owner 2026-10-27) calls main_first as it starts: a blocking flock, released at once, so it waits only
 # while main's verification runs, and says so once on stderr. No poll, no clock: the kernel
 # answers the wait when the holder's run ends (or it dies: the lock is its process's). A run
 # under the holder (SEON_MAIN_FIRST_HELD, its steps) is the holder's and does not wait.

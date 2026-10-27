@@ -2,6 +2,27 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in notes/archive/DECISIONS-superseded.md.
 
+## 2026-10-27 day rulings
+The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
+
+### A merge runs the process tests its change reaches, automatically (owner, 2026-10-27)
+`bin/prove --merge` runs every test and step the change reaches with no green at its digest, process tests included, so no one names them by hand. Stated: AGENTS §3, docs/merging.md#a-merge-runs-what-the-change-reaches.
+
+### ctx stays seon.ctx/ctx (owner, 2026-10-27)
+The name `ctx` stays as it is; no rename to another word. Stated: the code (`seon.ctx/ctx`).
+
+### An agent changes a function by (in-ns) and defn (owner, 2026-10-27)
+An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clojure's own way, not a special edit function. Stated: AGENTS §4 (get out of an agent's way).
+
+### bin/build never waits on main's lock (owner, 2026-10-27: "Keep the lock for tests and checks, but bin/build never waits on it")
+Stated: docs/merging.md#main-goes-first, bin/env.
+
+### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
+Worktrees run plain `bin/prove` and report ready; the merge session merges a batch and runs one `bin/build` and one `bin/prove --merge`, because per-branch fast-forwards after a branch's own `--merge` are about N² process-test runs. Stated: AGENTS §3, docs/merging.md#a-branch-proves-its-in-process-tests-mains-batch-runs-the-process-tests-once.
+
+### Unused is not dead (owner, 2026-10-27)
+"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
+
 ## 2026-10-26 night rulings
 The owner's rulings of the night of 2026-10-26, each with his words and where it is now stated; they stand over earlier entries where they differ.
 
