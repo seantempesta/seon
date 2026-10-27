@@ -290,9 +290,9 @@
 (defn source-changes
   "The source files a watcher's batch changed, as relative paths under checkout co, when the batch
   made root load the source by files alone: every record that makes the source load is a changed
-  path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or the branch's own ref moving
+  path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or a branch's own ref moving
   (a commit, a merge): the whole tree is then read. Cost: the batch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
   [co refs own batch]
   (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
     (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)) (re-find #"\.(clj|edn)$" path))) source))
