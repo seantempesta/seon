@@ -184,6 +184,25 @@
 
 (declare show)
 
+(defn- lifted-namespace
+  "The namespace map `x` is lifted to, `#:ns{...}` (Clojure's *print-namespace-maps*): the one
+  namespace every key of a map of two or more keys shares, each a keyword or symbol with one, short
+  enough to be shown whole (`max-name`: a longer name may be cut, and a cut name keeps its own
+  spelling); else nil. Decided once here, over the keys the map holds, so the selection charges the
+  opener `#:ns{` and the unqualified keys it lays out and the emitter prints what is charged (a
+  map whose shown keys share a namespace but whose cut keys do not is not lifted)."
+  {:malli/schema [:=> [:cat :map :int] [:maybe :string]]}
+  [x max-name]
+  (let [named? #(or (keyword? %) (symbol? %))
+        ns (some-> (first (keys x)) (#(when (named? %) (namespace %))))]
+    (when (and ns (< 1 (count x))
+               (every? #(and (named? %) (= ns (namespace %))
+                             ;; its text's length, ":ns/name" or "ns/name", counted without a call per key
+                             (<= (+ (if (keyword? %) 2 1) (count ns) (count (name %))) max-name))
+                       (keys x)))
+      ns)))
+
+
 (defn- classify
   "One row of the permitted-operation table: exact classes for scalars, maps and sets; seqs and
   other sequentials by interface, stepped to the context's `:max-children`; anything else is its
@@ -247,8 +266,9 @@
       (let [u (integer-digits (biginteger (.unscaledValue ^java.math.BigDecimal x)))]
         (big-number x (<= (+ u (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits limits)) (str x "M") "bigdec" u))
       (map-classes c)
-      {:kind :map :face :seon.print/map :open "{" :close "}" :total (count x) :indexed? true
-       :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)}
+      (let [lift (lifted-namespace x (:max-name context))]
+        {:kind :map :face :seon.print/map :open (if lift (str "#:" lift "{") "{") :lift lift :close "}" :total (count x) :indexed? true
+         :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)})
       (set-classes c)
       {:kind :coll :face :seon.print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
        :sorted? (sorts? x identity) :members (held-order x identity)}
@@ -428,7 +448,7 @@
     :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
               (:code? c) (assoc :code? (:code? c)))
     (merge (placed context depth path indent)
-           (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
+           (select-keys c [:kind :face :open :lift :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
 
 (defn- make-node
@@ -438,8 +458,12 @@
   [context value depth path indent]
   (node-of context (classify value context) depth path indent))
 
-(defn- member-indent {:malli/schema [:=> [:cat :seon.print/alloc] :int]} [node]
-  (+ (:indent node) (if (= :seon.print/set (:face node)) 2 1)))
+(defn- member-indent
+  "The column a collection's members start at: past its opener, whatever it is (`{`, `#{`, a lifted
+  map's `#:ns{`), as the emitter nests them."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :int]}
+  [node]
+  (+ (:indent node) (count (:open node))))
 
 (defn- breaks-before
   "How many of a text's line breaks (`line-breaks`) sit before offset at: a binary search."
@@ -525,7 +549,7 @@
         member (if paired? (nth held 1) held)]
     ;; a classified leaf is its node; any other member's place is made, since it can be cut
     (if (= :map (:kind parent))
-      (let [k (classify (key member) context) v (classify (val member) context)]
+      (let [k (classify (let [k (key member)] (cond (not (:lift parent)) k (keyword? k) (keyword (name k)) :else (symbol (name k)))) context) v (classify (val member) context)]
         (entry context indent
                [(case (:kind k)
                   :leaf k
@@ -849,6 +873,7 @@
                            (= :map (:kind node)) (assoc :seon.print/entries children)
                            (= :coll (:kind node)) (assoc :seon.print/items children)
                            (:ordered? node) (assoc :seon.print/ordered? true)
+                           (:lift node) (assoc :seon.print/lift (:lift node))
                            (:total node) (assoc :seon.render.data/total (:total node)))]
           (if (= :seon.print/throwable (:face node))
             {:seon.print/face :seon.print/throwable :seon.print/value collection}

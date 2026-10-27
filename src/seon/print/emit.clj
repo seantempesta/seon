@@ -14,7 +14,7 @@
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
   in the packaged schemas, read once there; a constant here)."
-  {:seon.print/width 72 :seon.print/namespace-maps? true})
+  {:seon.print/width 72})
 
 (defn literal
   "`value` as readable EDN under fixed print bindings."
@@ -203,31 +203,6 @@
       :seon.print/elided (let [text (elided-text node)]
                            (text-op :seon.print/elision text (elided-hiccup node text))))))
 
-(defn- same-key-namespace
-  "The one namespace every key of a map's `entries` (its `[key value]` members; cuts are skipped)
-  shares, when there are two or more and each is a keyword or symbol shown in its own spelling;
-  else nil. One pass, stopping at the first key that differs."
-  {:malli/schema [:=> [:cat [:sequential :any]] [:maybe :string]]}
-  [entries]
-  (loop [[e & more :as remaining] (seq entries) shared nil k 0]
-    (cond
-      (nil? remaining) (when (< 1 k) shared)
-      (not (vector? e)) (recur more shared k)
-      :else (let [node (nth e 0)]
-              (when (contains? #{:seon.print/keyword :seon.print/symbol} (:seon.print/face node))
-                (let [ns (namespace (:seon.print/value node))]
-                  ;; a key shown as a cut name keeps its own spelling
-                  (when (and (some? ns) (or (nil? shared) (= shared ns))
-                             (or (nil? (:seon.print/text node)) (= (:seon.print/text node) (literal (:seon.print/value node)))))
-                    (recur more ns (inc k)))))))))
-
-(defn- unqualified-key-node
-  {:malli/schema [:=> [:cat :seon.print/node] :seon.print/node]}
-  [node]
-  (-> node
-      (dissoc :seon.print/text)
-      (update :seon.print/value (if (= :seon.print/keyword (:seon.print/face node)) #(keyword (name %)) #(symbol (name %))))))
-
 (defn- summary
   {:malli/schema [:=> [:cat :seon.print/node [:vector :any]] :string]}
   [node path]
@@ -248,14 +223,15 @@
                      (= :seon.print/symbol (:seon.print/face (first children))) (= 'quote (:seon.print/value (first children))))
         children (if quoted? (subvec children 1) children)
         map-like? (= :seon.print/map (:seon.print/face node))
-        lifted (when (and map-like? (:seon.print/namespace-maps? options)) (same-key-namespace children))
-        shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) children) children)
+        ;; a map lifted to `#:ns{` was decided by the selection (seon.print.select/lifted-namespace), which
+        ;; charged the opener and laid out its keys unqualified: members nest past the whole opener
+        lifted (:seon.print/lift node)
         open (case (:seon.print/face node)
                :seon.print/vector "[" :seon.print/list (if quoted? "'" "(") :seon.print/set "#{"
                :seon.print/map (str (when lifted (str "#:" lifted)) "{"))
         close (case (:seon.print/face node) :seon.print/vector "]" :seon.print/list (if quoted? "" ")") "}")
                 d (inc depth)
-        fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) shown))
+        fill? (and (not map-like?) (every? (comp scalar-kinds :seon.print/face) children))
         ;; a member's path, `path` then its index (and 0 for a key, 1 for a value)
         member (fn [ops child index part]
                  (if (contains? structural-kinds (:seon.print/face child))
@@ -264,7 +240,7 @@
         ops (-> ops
                 (conj! {:op :begin :seon.print/open (assoc node :seon.print/path path)})
                 (conj! (text-op :seon.print/delimiter open))
-                (conj! (nests (if (= :seon.print/set (:seon.print/face node)) 2 1))))
+                (conj! (or (get nests (count open)) {:op :nest :offset (count open)})))   ; the shared op, or an opener wider than two made (a lifted map's #:ns{)
         ops (reduce-kv
              (fn [ops index child]
                (let [ops (cond (zero? index) ops
@@ -278,7 +254,7 @@
                        (member (nth child 1) index 1) (conj! outdent) (conj! entry-end))
                    (or (zero? index) map-like? (not fill?)) (member ops child index nil)
                    :else (-> ops (conj! begin) (conj! line) (member child index nil) (conj! end)))))
-             ops shown)]
+             ops children)]
     (-> ops
         (conj! outdent)
         (conj! (text-op :seon.print/delimiter close))
