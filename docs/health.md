@@ -91,6 +91,10 @@ Root watches what its loaders read (the wiki, the task files, the source dirs: `
 
 `load-kinds!` answers the problems a load made true (`seon.problems/caused`, of main before and after), kept as `:last-opened` in the watch fact; a loader's typed error (a refused task file) is recorded as a `:platform` error (`my.root/load-errors`), and a throw in a batch's handler is the watcher's recorded death, whose message is also kept on the watch fact as `:error`.
 
+## An old word
+
+A place that uses a word of AGENTS.md section 7a's table (verb, lane, landing, fence, ...) is an `:old-word` row naming the place and the word (`seon.problems/old-words-in`): a var's source and docstring, a wiki section's text, a task's plan, each read from the store and judged by the file it is stored from (`seon.problems/old-word-kept` names the files that keep an old word as their subject, with each reason; an owner's quoted sentence is kept too, `old-word-span`). The words are the table's, read from the checkout's AGENTS.md as `seon.docs-test` reads them. The row closes when the place is edited to say the replacement. A branch is judged on the places it changed (the vars it changed, the sections whose text differs, the tasks whose plan differs: `caused-split`, so the feed `health-moved` also uses), and a branch that adds one fails its health step. `seon.docs-test/no-text-uses-an-old-word` reads only what the store does not hold (`bin/`, the root pages, comment lines of source).
+
 ## Cost
 
 Measured on 2026-10-23 (`seon.problems-test/dead-citations-follow-the-citations`, every citation dead, the worst case): 68 us, 68 KB and 4 contracted calls per cited name at n=1000, against an estimate of 90 us, 170 KB and 6. A citation that names something costs one set lookup. On root's own store (152 sections, 1,280 vars), a set built from main's var names and read for 1,712 names took 0.37 ms, against 18 ms for one AVET seek per name; that is why the class reads a set.

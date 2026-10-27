@@ -460,7 +460,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 59) "the contracted calls of one health read (59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, and health-with's contract is one more)")))
+    (is (<= (:calls m) 63) "the contracted calls of one health read (59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -567,8 +567,8 @@
                :n "finished tasks, each with a merged run carrying a cost verdict and waste"
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
-               :per-n {:ticks 1400 :bytes 7000 :calls 0}
-               :fixed {:ticks 390000 :bytes 1900000 :calls 46}
+               :per-n {:ticks 1700 :bytes 10500 :calls 0}
+               :fixed {:ticks 650000 :bytes 3000000 :calls 54}
                :sizes [10 100 1000]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -895,7 +895,7 @@
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 3000000 :bytes 2500000 :calls 60}
+               :fixed {:ns 19500000 :bytes 17500000 :calls 62}
                :sizes [10 100 1000]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -973,6 +973,28 @@
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
 
+(deftest an-old-word-is-a-problem
+  ;; task seon.problems/an-old-word-is-a-problem: a place that uses a word of AGENTS.md section 7a's table is a row
+  ;; naming it and the word, found for the places a branch changed and failing its health step; a kept file is not read
+  (let [base (ts/test-db)
+        page (fn [text] {"demo/p.md" (str "# P\n\nThe lead.\n\n## Part\n\n" text "\n")})
+        with (fn [db text] (d/db-with db (seon.docs/load-tx db "demo" (page text))))
+        row (fn [db] (set (map (juxt :id :word) (get-in (problems/health db) [:classes :old-word :rows]))))]
+    (testing "a section that says lane"
+      (let [head (with base "A lane of work.")]
+        (is (= #{["demo/p.md#part" "lane"]} (row head)) "the section and the word")
+        (is (= [{:class :old-word :message "demo/p.md#part (demo/p.md) uses the old word \"lane\": AGENTS.md section 7a says what to say instead"}]
+               (:rows (problems/caused-split base head))) "the branch that added it caused it")
+        (is (seq (:caused (problems/caused-split base head))) "the done rule refuses")
+        (is (empty? (row (with head "A worktree session."))) "editing it closes the row")))
+    (testing "a task plan that says verb, and a clean one"
+      (let [t (fn [plan] {:seon.task/id "demo/x" :seon.task/ns 'demo :seon.task/name "x" :seon.task/plan plan :seon.task/execution :held :seon.task/branch :b :seon.task/kind :work})
+            head (d/db-with base [(t "Add a verb for it.")])]
+        (is (= #{["demo/x" "verb"]} (row head)))
+        (is (empty? (row (d/db-with base [(t "Add a function for it.")]))))))
+    (testing "a word as part of another word is no use of it"
+      (is (empty? (row (with base "The landscape and a laneway.")))))))
+
 (deftest health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
@@ -989,6 +1011,12 @@
         run (fn [n status] {:seon.run/id (str "t/x#" n) :seon.run/task [:seon.task/id "t/x"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
                             :seon.run/start-ms 1 :seon.run/end-ms n :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status status})]
     (is (same? db1 db1) "nothing moved")
+    (testing "an old word added to a section opens a row, and editing it closes it"
+      (let [bad (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nA lane of work.\n")}))
+            fixed (d/db-with bad (seon.docs/load-tx bad "demo" {"demo/p.md" (str page "\nA worktree session.\n")}))]
+        (is (same? db1 bad))
+        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 bad (diff db1 bad)) [:classes :old-word :n])))
+        (is (same? bad fixed))))
     (testing "a run that died opens a problem, and a later run that finished its task closes it"
       (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
             db3 (d/db-with db2 [(assoc (run 2 :merged) :seon.run/outcome :green)])]
