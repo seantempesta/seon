@@ -750,6 +750,11 @@
     ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
     (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
     (is (seq readers) "tests reach the reader of a computed key")
+    (is (true? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:limit}}))
+        "a resolver call naming no key of its own reads a computed one")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:seon.config.ctx/window}}))
+        "one naming its key reads that key")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
 (deftest no-test-takes-the-tree-in-its-digest

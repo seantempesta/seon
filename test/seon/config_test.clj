@@ -4,7 +4,7 @@
   invalid or missing key, the config written as facts on main and read back from the db, and
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
-  (:require [aero.core] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
@@ -359,7 +359,7 @@
         worktree? (not= (git "rev-parse" "--git-dir") (git "rev-parse" "--git-common-dir"))
         own (fn [dir] (let [f (java.io.File/createTempFile "own-branch" ".edn")]
                         (spit f "{:b #seon/own-branch \"jolt/seon-merges\"}")
-                        (:b (aero.core/read-config (str f) {:seon.config/checkout dir}))))
+                        (try (:b (aero/read-config (str f) {:seon.config/checkout dir})) (finally (.delete f)))))
         main-tree (str/replace (git "rev-parse" "--path-format=absolute" "--git-common-dir") #"/\.git$" "")]
     (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "jolt/seon-merges")
            (:seon.config.source/branch config/config))
@@ -367,4 +367,5 @@
     (is (= "jolt/seon-merges" (own main-tree)) "the main tree's is the shipped name")
     (let [wt (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/own-branch-" (System/nanoTime) "/x")) .mkdirs)]
       (spit (java.io.File. wt ".git") (str "gitdir: " main-tree "/.git/worktrees/x\n"))
-      (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file"))))
+      (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file")
+      (.delete (java.io.File. wt ".git")) (.delete wt) (.delete (.getParentFile wt)))))

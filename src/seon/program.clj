@@ -1197,7 +1197,7 @@
         by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
                                 (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
         ;; a form reading a key it computes reads the config keys schema entries name
-        added (for [f added] (cond-> f (and (set? (:config f)) (computed-config-reader? f))
+        added (for [f added] (cond-> f (computed-config-reader? f)
                                    (update :config into (:schema-config g))))
         ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
         ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.
