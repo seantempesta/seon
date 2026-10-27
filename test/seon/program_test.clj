@@ -214,6 +214,21 @@
     (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
     (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
 
+(deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
+  ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
+  ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
+  ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
+  ;; edge there; quoted in src it stays data (schema-forms' renders, tree-readers)
+  (let [srcs {"src/app/pt_hq.clj" "(ns app.pt-hq)\n(defn f [x] x)\n(defn g [x] x)\n(defn run-by-name [sym] (@(requiring-resolve sym) 1))\n(def names ['app.pt-hq/g])\n"
+              "test/app/pt_hq_test.clj" "(ns app.pt-hq-test (:require [clojure.test :refer [deftest is]] [app.pt-hq]))\n(deftest by-name (is (= 1 (app.pt-hq/run-by-name 'app.pt-hq/f))))\n(deftest other (is (= 1 (app.pt-hq/run-by-name (first app.pt-hq/names)))))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        g (program/reach-graph db nil)]
+    (is (some #{'app.pt-hq-test/by-name} (program/tests-reaching g 'app.pt-hq/f)) "the test that quotes f reaches it")
+    (is (not (some #{'app.pt-hq-test/other} (program/tests-reaching g 'app.pt-hq/g))) "a name src quotes as data is no edge")
+    (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
+              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/program-store)) nil) 'seon.program/reach-update))
+        "Seon's own cost proof reaches the function it names")))
+
 (deftest load-order-reads-no-quoted-name
   ;; task seon.program/load-dependencies-leave-quoted-names-out: a form recorded at a REPL that
   ;; quotes a later var (an error's data naming it) is not ordered after it

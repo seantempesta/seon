@@ -1118,8 +1118,9 @@
 (defn- reach-rows
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
   :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
-  is not read again), :ns, :defines, :refs and the config keys it reads (config-reads), and none of the other facts, which no edge, digest
-  or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
+  is not read again), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
+  in a test's namespace, reach-step) and the config keys it reads (config-reads), and none of
+  the other facts, which no edge, digest or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
@@ -1127,7 +1128,7 @@
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
-        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es)
+        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
         key-of (merge ;; definition-key's order: the earlier kind wins
@@ -1136,7 +1137,7 @@
                  (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
                  (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
     (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
-           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs
+           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
             :defines (into #{} (keep key-of) (dv e))
             :config (config-reads (set (kv e)) refs nsym)}))))
 
@@ -1187,14 +1188,19 @@
         sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:var/contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (= :test (:var/kind e)) (conj s v) (disj s v))) (:tests g) facts)
-        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (:refs f)))
-                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (:refs f))) (:refd g) gone) added)
+        ;; a name quoted in a test's namespace is one the test hands to what runs it by name
+        ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
+        ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
+        test-nss (into #{} (map (comp symbol namespace)) tests)
+        named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
+        refd (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
+                     (reduce (fn [m f] (reduce #(update %1 %2 disj (:id f)) m (named f))) (:refd g) gone) added)
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
-                        (vec (concat (remove test-ids (keep var-form (:refs f)))
+                        (vec (concat (remove test-ids (keep var-form (named f)))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
