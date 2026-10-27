@@ -6,6 +6,8 @@ datahike.test.back-correction-test {:test 1, :pass 4, :fail 0, :error 0}
 datahike.test.branch-head-test {:test 1, :pass 15, :fail 0, :error 0}
 datahike.test.cache-test {:test 1, :pass 1, :fail 0, :error 0}
 datahike.test.capability-catalog-test {:test 2, :pass 18, :fail 0, :error 0}
+datahike.test.cljs-pattern-scan-test {:test 4, :pass 6, :fail 0, :error 0}
+datahike.test.cljs-recursive-rule-test {:test 9, :pass 21, :fail 0, :error 0}
 datahike.test.components-test {:test 2, :pass 12, :fail 0, :error 0}
 datahike.test.cross-connection-revision-test {:test 4, :pass 13, :fail 0, :error 0}
 datahike.test.cross-tx-vt-validation-test {:test 15, :pass 19, :fail 0, :error 0}
@@ -32,9 +34,11 @@ datahike.test.lru-weighted-property-test {:test 2, :pass 2, :fail 0, :error 0}
 datahike.test.lru-weighted-test {:test 12, :pass 35, :fail 0, :error 0}
 datahike.test.model-test {:test 7, :pass 16, :fail 0, :error 0}
 datahike.test.node-not-found-test {:test 1, :pass 3, :fail 0, :error 0}
+datahike.test.optimistic-test {:test 13, :pass 56, :fail 0, :error 0}
 datahike.test.pull-api-test {:test 28, :pass 99, :fail 0, :error 0}
 datahike.test.pull-reverse-test {:test 4, :pass 20, :fail 0, :error 0}
 datahike.test.purge-test {:test 6, :pass 32, :fail 0, :error 0}
+datahike.test.query-aggregates-test {:test 1, :pass 15, :fail 0, :error 0}
 datahike.test.query-cache-test {:test 50, :pass 354, :fail 0, :error 0}
 datahike.test.query-cancel-test {:test 6, :pass 20, :fail 0, :error 0}
 datahike.test.query-cartesian-test {:test 7, :pass 18, :fail 0, :error 0}
@@ -50,6 +54,7 @@ datahike.test.query-predicate-pushdown-test {:test 1, :pass 2, :fail 0, :error 0
 datahike.test.query-pull-test {:test 8, :pass 22, :fail 0, :error 0}
 datahike.test.query-single-flight-test {:test 12, :pass 94, :fail 0, :error 0}
 datahike.test.query-stats-test {:test 4, :pass 5, :fail 0, :error 0}
+datahike.test.reference-test {:test 6, :pass 54, :fail 0, :error 0}
 datahike.test.secondary-dynamic-test {:test 4, :pass 7, :fail 0, :error 0}
 datahike.test.secondary-vt-test {:test 3, :pass 8, :fail 0, :error 0}
 datahike.test.speculative-cache-context-test {:test 5, :pass 20, :fail 0, :error 0}
@@ -61,6 +66,8 @@ datahike.test.tuples-test {:test 12, :pass 63, :fail 0, :error 0}
 datahike.test.tx-instant-monotonic-test {:test 5, :pass 8, :fail 0, :error 0}
 datahike.test.unstructured-test {:test 9, :pass 41, :fail 0, :error 0}
 datahike.test.valid-at-test {:test 41, :pass 73, :fail 0, :error 0}
+datahike.test.valid-time-test {:test 9, :pass 44, :fail 0, :error 0}
 datahike.test.versioning-test {:test 13, :pass 97, :fail 0, :error 0}
+datahike.test.writer-error-test {:test 11, :pass 154, :fail 0, :error 0}
 reference-code/konserve/test/konserve/jolt/fasl_test.jolt {:test 10, :pass 190, :fail 0, :error 0}
 reference-code/konserve/test/konserve/jolt/lmdb_test.jolt {:test 2, :pass 137, :fail 0, :error 0}
