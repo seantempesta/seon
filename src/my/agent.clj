@@ -170,17 +170,18 @@
                                                            (vector/near db q k {:of :seon.section/address}))})))))
 
 (defn prove
-  "Run what root's judge will run on this branch (seon.agent/run-tests-forked :judge, in a fork
-  of this agent): the task's proofs (or the given ones) and every in-process test reaching what
-  the branch changed since the main it forked from, each test with a result at its reach digest
-  reused (a red as recorded),
-  not run; the process tests it reaches run only when root asks (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with :results
-  {test :pass|:fail|:error}."
+  "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
+  :judge, so the run is recorded on main and is one run with any other asker's of this head):
+  the task's proofs and every in-process test reaching what the branch changed since the main it
+  forked from, each test with a result at its reach digest reused (a red as recorded), not run;
+  given proofs, the tests of their namespaces. The process tests it reaches run at the judge,
+  before a merge (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused
+  :ms ...}) with :results {test :pass|:fail|:error}."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
-  ([] (prove (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})))
+  ([] (prove #{}))
   ([proofs]
-   (let [test-run (agent/run-tests-forked (cfg/value :seon.config.agent/test-ticks) proofs :judge)]
-     (assoc test-run :results (proofs/results test-run)))))
+   (let [test-run (agent/prove! :judge (into #{} (map (comp symbol namespace)) proofs))]
+     (cond-> test-run (not (contract/error? test-run)) (assoc :results (proofs/results test-run))))))
 
 (defn grep
   "The program vars whose recorded definition on this branch holds the string s, best first, each
@@ -221,8 +222,8 @@
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
-  root's judge never run them, root's gate runs them when root asks (my.root/gate!; DECISIONS,
-  Process tests are not automatic). seon.agent/test-plan's :process among what it selects, each
+  root's judge never run them in a fork; the judge's merge gate runs them on a checkout before
+  the merge, nobody asking (seon.reconcile's :gate). seon.agent/test-plan's :process among what it selects, each
   with why: the process var it uses and the calls from the test to it (seon.program/process-path)."
   {:malli/schema [:=> [:cat] [:vector [:map [:test :qualified-symbol] [:uses [:vector :qualified-symbol]] [:through [:vector :qualified-symbol]]]]]}
   [] (let [proofs (or (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs) #{})

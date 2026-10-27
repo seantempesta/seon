@@ -1,0 +1,12 @@
+;; One fork test unit on Jolt, in a process of its own (bin/check's forks step): arg 1 a
+;; Datahike test namespace (on the :dhtest alias's path) or a konserve test file's path. Jolt's
+;; konserve backends load first, as seon.db loads them, so a test's {:backend :file} is Jolt's
+;; file store. Prints one line, FORK <unit> <its counts>, the line test/forks/baseline.edn holds.
+(require 'clojure.test 'konserve.jolt.store)
+(let [[unit] *command-line-args*
+      r (if (.endsWith ^String unit ".jolt")
+          (do (load-file unit)
+              (clojure.test/run-tests (symbol (second (re-find #"\(ns\s+([^\s\)]+)" (slurp unit))))))
+          (do (require (symbol unit)) (clojure.test/run-tests (symbol unit))))]
+  (println "FORK" unit (pr-str (select-keys r [:test :pass :fail :error])))
+  (System/exit 0))

@@ -286,9 +286,11 @@
  ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
  ;; root importing test/ could not host a checkout, and its gated merges were all refused).
- ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
- ;; reaches process tests merges with them recorded unrun on its run, an open problem
- ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
+ ;; Absent (as here): root's own source root (:seon.config.source/root as it resolves, the
+ ;; standing root's merges tree; seon.root/start! writes it with the config in force), so every
+ ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
+ ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
+ ;; that no checkout runs them: never merged with them silently unrun.
  :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent

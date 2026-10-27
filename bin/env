@@ -28,44 +28,11 @@ export HOME=$ROOT/target/home
 # tree's target/, found from git's common dir so a worktree anywhere (bin/worktree --at DIR too)
 # names the same absolute path.
 MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
-# Main's merge verification goes first (docs/merging.md#main-goes-first): bin/prove --merge holds
-# an exclusive flock on MAIN_LOCK for its whole run, and every other heavy run (bin/test, bin/check;
-# never bin/build, owner 2026-10-27) calls main_first as it starts: a blocking flock, released at once, so it waits only
-# while main's verification runs, and says so once on stderr. No poll, no clock: the kernel
-# answers the wait when the holder's run ends (or it dies: the lock is its process's). A run
-# under the holder (SEON_MAIN_FIRST_HELD, its steps) is the holder's and does not wait.
-MAIN_LOCK=$MAIN_TREE/target/main-verify.lock
-# the one lock program: ARGV lock, holder ("" to only wait), then the command a holder runs
-MAIN_LOCK_PL='
-  my ($lock, $hold, @cmd) = @ARGV;
-  open(my $f, ">>", $lock) or die "main lock: $lock: $!\n";
-  unless (flock($f, LOCK_EX | LOCK_NB)) {
-    open(my $r, "<", $lock); my $w = <$r> // ""; chomp $w; $w = "its holder starting" if $w eq "";
-    print STDERR "waiting for main\x27s merge verification ($w)\n";
-    flock($f, LOCK_EX) or die "main lock: flock: $!\n";
-  }
-  exit 0 if $hold eq "";
-  truncate($f, 0); print $f "$hold\n"; $f->flush;
-  $ENV{SEON_MAIN_FIRST_HELD} = $$;
-  my $st = system(@cmd);
-  exit($st == -1 ? 127 : ($st & 127) ? 128 + ($st & 127) : $st >> 8);'
-main_first() {
-  [ -n "${SEON_MAIN_FIRST_HELD:-}" ] && return 0
-  mkdir -p "$(dirname "$MAIN_LOCK")"
-  perl -MFcntl=:flock -e "$MAIN_LOCK_PL" "$MAIN_LOCK" ""
-}
-# is_main_tree: this checkout (ROOT) is the main tree. Only main's merge verification goes first:
-# bin/prove --merge holds the lock there, and a worktree's --merge holds nothing, waiting like any run
+# is_main_tree: this checkout (ROOT) is the main tree
 is_main_tree() { [ "$(cd "$ROOT" && pwd -P)" = "$(cd "$MAIN_TREE" && pwd -P)" ]; }
 # worktrees share refs: what runs here commits its merges on a branch of this worktree's own
 # (:seon.config.source/branch), never the main tree's jolt/seon-merges
 is_main_tree || export SEON_SOURCE_BRANCH=${SEON_SOURCE_BRANCH:-jolt/seon-merges-$(basename "$ROOT")}
-# main_hold NAME CMD ARGS: CMD run under the lock (waiting for another holder first), NAME in the lock file
-main_hold() {
-  mkdir -p "$(dirname "$MAIN_LOCK")"
-  _who=$1; shift
-  perl -MFcntl=:flock -e "$MAIN_LOCK_PL" "$MAIN_LOCK" "$_who" "$@"
-}
 JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
 JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
 JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$MAIN_TREE/target/cache/aot}

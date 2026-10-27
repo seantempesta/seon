@@ -334,9 +334,9 @@
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
-  (let [[sent proved taken] (in-agent [{:op :message :agent "a1" :body "while proving"}
-                                       "(select-keys (prove) [:results])"
-                                       "(my.agent/messages)"])]
+  (let [[sent proved taken] (in-agent #(vector {:op :message :agent (:agent %) :body "while proving"}
+                                               "(select-keys (prove) [:results])"
+                                               "(my.agent/messages)"))]
     (is (true? (:ok sent)))
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
@@ -913,7 +913,8 @@
                   " _ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) 'app.big text nil))"
                   " b (seon.root/spawn! sys {:branch (fresh)})]"
                   " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
-        [r] (in-agent [{:op :eval :agent "root" :code code}])
+        ;; a root of its own: it moves main's program, which every later test on a shared root would run
+        [r] (in-agent [{:op :eval :agent "root" :code code}] {:own-root? true})
         [before after phases] (:value r)]
     (is (= [:fork-server-in :reach-graph :index :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
            phases)

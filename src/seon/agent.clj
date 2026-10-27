@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -626,37 +626,25 @@
 
 (declare handle!)
 
-(defn load-tests!
-  "Make the checkout's tests (the files under dirs, read here by the :source performer: the tree
-  is megabytes, more than a frame to root carries) part of this
-  agent's program: their namespaces loaded here and their forms recorded on its branch
-  (seon.source/import-tx), so test-plan finds them and their reach digests. What the test
-  service's prove agent does before it runs (seon.prove). Answers the files loaded, or the
-  :source effect's error."
-  {:malli/schema [:=> [:cat [:sequential :string]] [:or :int :map]]}
-  [dirs]
-  (let [r (fx/read-source {:req {:root (cfg/checkout) :dirs (vec dirs)}})]
-    (if (:value r)
-      (let [files (:value r)]
-        (doseq [[_ _ text] (source/load-order files)] (load-string text))
-        (transact! (source/import-tx (db) files))
-        (count files))
-      r)))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
-  asks, the key the digest of what the run reads (seon.prove/read-digest of this branch's
-  program, as seon.root/prove! takes it of the same head): a session's request and this ask are one run; when it is
+  asks, the key the digest of what the run reads (seon.program/program-digest of this branch's
+  head, as seon.root/prove! takes it): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
   messages wait for the loop. :dead when root is gone (the process then ends). mode :turn (a
-  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request)."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]]}
+  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
+  names, the tests of those namespaces only (none: all it selects)."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]
+                  [:=> [:cat [:enum :turn :judge] [:set :symbol]] :map]]}
   ([] (prove! :turn))
-  ([mode]
+  ([mode] (prove! mode #{}))
+  ([mode names]
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
+    (when (= :dead (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
+                            (seq names) (assoc :names names))))
+      (lib/c-exit 0))
     (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
@@ -759,7 +747,7 @@
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (fn [t] (and (contains? (:process p) t) (not (seq names)) (not (contains? proofs t))))]
+        skip? (proofs/left-out (:selected p) (:process p) (boolean (seq names)) proofs)]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
@@ -780,20 +768,22 @@
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
-  the test service's runs) selects the plan's tests. names (the test service's request: a set of
+  the test service's runs of a branch) selects the plan's tests; mode :main (the test service's
+  run of main, whose prove agent is a branch of main with nothing changed) selects them with no
+  base: every test with no result at its digest, main's own tests among them. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
-  is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
+  is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (:base @state) proofs (heard-main))
+  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has

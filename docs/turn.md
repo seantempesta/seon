@@ -27,7 +27,7 @@ Each turn starts from facts measured now, never remembered: `seon.turn/observe` 
 Tests run three times in a run's life, each on what it needs:
 - **each turn**, in the agent: the task's proofs and the tests the branch changed, in a fork, each test under `:seon.config.agent/test-ticks` (one bound everywhere, per test: a test past it is red, `:seon.test/ticks-spent`, the same in the judge);
 - **the judge**, in root: when the loop ends, root asks the agent's REPL for its test results (`:tests`, the plan's in-process tests under the same per-test bound; each green the turn left at its digest is reused, so the judge runs only what the turn did not, and forks nothing when that is none) and judges the end from them, the writer's diff of the branch and the branch's end (`seon.reconcile/judge-tx`); a process test that is none of the task's proofs never runs in a turn or the judge, and is read as deferred ([merging](merging.md#a-merge-runs-what-the-change-reaches));
-- **the merge**: the writer's merge gate takes the branch only when its contract gaps are none, the same `seon.merge/uncontracted` answer, and the process tests the change reaches run before it merges only when root asked (`my.root/gate!`), else it merges with them unrun ([merging](merging.md#a-merge-runs-what-the-change-reaches)).
+- **the merge**: the writer's merge gate takes the branch only when its contract gaps are none, the same `seon.merge/uncontracted` answer, and the process tests the change reaches run before it merges, on the root's gate checkout, nobody asking (a root with none holds it) ([merging](merging.md#a-merge-runs-what-the-change-reaches)).
 
 ## A merge task's loop
 

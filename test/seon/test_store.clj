@@ -224,7 +224,7 @@
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
 
-(def ^:private shared-roots
+(def ^:private ^{:malli/schema [:=> [:cat :string [:vector :string]] :map]} shared-roots
   "This test process's shared roots, one per [checkout args] and started at the first test that
   asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
   of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
