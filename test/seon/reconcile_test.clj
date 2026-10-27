@@ -748,20 +748,23 @@
           (is (= [{:run "demo/add-merge#1" :task "demo/add-merge"}] (get-in st2' [:flights "demo/add-merge#1" :writeback :members]))
               "a merged member with no files is no member of the write-back: no sha for files it never touched"))
         (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
-        (is (= "the write-back read none of src/app/none.clj on main" (:seon.run/commit-error run')))))))
+        (is (= ["src/app/none.clj"] (:seon.git/files (:seon.run/error run'))) "held as a lost write-back, named by file")
+        (is (nil? (:seon.run/commit-error run')) "and no untyped note beside it")))))
 
 (deftest a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
   ;; the :git effect refused the write-back of a merged run (a locked ref): its run holds a typed error naming the files,
-  ;; quiescence names it, and a later commit of them (my.root/write-back!, or the next merge's) clears it, beside
-  ;; the note of forms that name no file, which stays
+  ;; quiescence names it, and a later commit of them (my.root/write-back!) clears it, beside
+  ;; the note of forms that name no file, which stays; a commit that left a file out (main has no text
+  ;; for it) holds the error again, for that file alone
   (let [note "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
         db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :merged :outcome :green)
                                               [{:seon.run/id "demo/add-merge#1" :seon.run/commit-error note}]))
         members [{:task "demo/add-merge" :run "demo/add-merge#1"}]
         refused (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "cannot lock ref refs/heads/jolt/seon-merges" {:path "/x"}) :seon.fx/at-ms 5)
-        lost (d/db-with db (r/commit-tx db refused members ["src/app/m.clj" "src/app/a.clj"]))
+        lost (d/db-with db (r/commit-tx db refused members ["src/app/m.clj" "src/app/a.clj"] []))
         causes (r/root-causes (r/index lost))
-        fixed (d/db-with lost (r/commit-tx lost {:value {:sha "abc123" :files 2}} members ["src/app/a.clj" "src/app/m.clj"]))
+        fixed (d/db-with lost (r/commit-tx lost {:value {:sha "abc123" :files 2}} members ["src/app/a.clj" "src/app/m.clj"] ["src/app/a.clj" "src/app/m.clj"]))
+        partial (d/db-with lost (r/commit-tx lost {:value {:sha "def456" :files 1}} members ["src/app/a.clj" "src/app/m.clj"] ["src/app/a.clj"]))
         run-of #(task/run % "demo/add-merge#1")]
     (is (= {:seon.error/type :seon.git/commit-failed :seon.error/message "cannot lock ref refs/heads/jolt/seon-merges"
             :seon.git/files ["src/app/a.clj" "src/app/m.clj"]}
@@ -775,7 +778,11 @@
     (is (= "abc123" (:seon.run/commit (run-of fixed))))
     (is (nil? (:seon.run/error (run-of fixed))) "a commit holds them: the error is gone")
     (is (= note (:seon.run/commit-error (run-of fixed))) "and the note of forms that name no file stays: a retry does not replace it")
-    (is (= [] (r/root-causes (r/index fixed))))))
+    (is (= [] (r/root-causes (r/index fixed))))
+    (testing "a commit that left a file out holds the error for that file alone, never silently clearing it"
+      (is (= "def456" (:seon.run/commit (run-of partial))))
+      (is (= ["src/app/m.clj"] (:seon.git/files (:seon.run/error (run-of partial)))))
+      (is (= 1 (count (r/root-causes (r/index partial))))))))
 
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail})))

@@ -496,7 +496,7 @@
                      (disj (downstream idx #{id}) id)))))
 
 (defn lost-write-back
-  "The :seon.git/commit-failed error a merged run a holds (its write-back was refused and no commit
+  "The :seon.git/commit-failed error a merged run holds (its write-back was refused and no commit
   has held its files since), or nil."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [a]
@@ -537,25 +537,28 @@
                   :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
 
 (defn commit-tx
-  "Main's write of the :git effect's answer r for the runs of members, which wrote paths: a sha is
-  :seon.run/commit on each, and clears the :seon.git/commit-failed error an earlier failure left on
-  it (beside any note of forms that name no file, which stays); a failure is that error, with
-  the paths no commit holds, as the run's :seon.run/error (root-causes names it until a commit holds
-  them), and its :effect row (seon.error/asked-tx), closed by the next commit's sha. Nil when r is
-  neither. The reconciler's write-back and my.root/write-back! write it alike."
-  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :map] [:sequential :string]] [:maybe [:vector :any]]]}
-  [db r members paths]
+  "Main's write of the :git effect's answer r for the runs of members, which wanted paths written
+  and gave the effect those in written: a sha is :seon.run/commit on each, clears the
+  :seon.git/commit-failed error an earlier failure left (beside any note of forms that name no
+  file, which stays), and holds a new one for the paths main had no text for (wanted, not written);
+  a failure is that error for every wanted path, as the run's :seon.run/error (root-causes names it
+  until a commit holds the paths), and its :effect row (seon.error/asked-tx), closed by the next
+  commit's sha. Nil when r is neither. The reconciler's write-back and my.root/write-back! write it
+  alike."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :map] [:sequential :string] [:sequential :string]] [:maybe [:vector :any]]]}
+  [db r members paths written]
   (let [sha (get-in r [:value :sha])
-        failed (when (contract/error? r)
-                 (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx (:seon.error/message r) {:seon.git/files (vec (sort paths))}))]
-    (when (or sha failed)
+        failed (fn [msg ps] (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx msg {:seon.git/files (vec (sort ps))}))
+        missing (remove (set written) paths)
+        error (cond (contract/error? r) (failed (:seon.error/message r) paths)
+                    (and sha (seq missing)) (failed (str "main holds no text for " (str/join ", " (sort missing))) missing))]
+    (when (or sha error)
       (err/asked-tx db r :seon.run/commit
                     (vec (mapcat (fn [{:keys [run]}]
-                                   (if sha
-                                     (cons {:seon.run/id run :seon.run/commit sha}
-                                           (when-let [e (:seon.run/error (task/run db run))]
-                                             (when (= :seon.git/commit-failed (:seon.error/type e)) [[:db/retract [:seon.run/id run] :seon.run/error e]])))
-                                     [{:seon.run/id run :seon.run/error failed}]))
+                                   (let [old (:seon.run/error (task/run db run))]
+                                     (cond-> (if sha [{:seon.run/id run :seon.run/commit sha}] [])
+                                       (and sha (= :seon.git/commit-failed (:seon.error/type old))) (conj [:db/retract [:seon.run/id run] :seon.run/error old])
+                                       error (conj {:seon.run/id run :seon.run/error error}))))
                                  members))))))
 
 (defn- unfiled-error
@@ -1017,16 +1020,17 @@
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
-                   ;; paths main holds no text for: no commit, named on each member's run
+                   ;; paths main holds no text for: no commit, held on each member's run as a lost write-back
                    (if (empty? files)
-                     (one (write st aid :done (vec (for [{:keys [run]} members]
-                                                     {:seon.run/id run :seon.run/commit-error (str "the write-back read none of " (str/join ", " paths) " on main")}))))
-                     (one (request st aid :committed
+                     (one (write st aid :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx
+                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
+                                                         members paths [])))
+                     (one (request (assoc-in st [:flights aid :writeback :written] (vec (keys files))) aid :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
       ;; the sha on each merged run; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
-      :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)))]
+      :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
                    (one (write st aid :done tx))
                    (done st)))))
 
