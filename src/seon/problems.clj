@@ -488,7 +488,7 @@
                        [[:var (str v) path] (:form/src form)])
                      (for [a (sort sections)
                            :let [e (:e (first (d/datoms db :avet :seon.section/address a)))
-                                 path (subs a 0 (or (str/index-of a "#") (count a)))]
+                                 path (first (str/split a #"#" 2))]
                            :when (and e (not (old-word-kept path)))]
                        [[:section a path] (:seon.section/text (d/pull db [:seon.section/text] e))])
                      (for [t (sort tasks)
