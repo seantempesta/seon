@@ -666,3 +666,30 @@
     (is (nil? (program/meaning-changes db [{:var/name 'app/f :var/doc "Old words."} {:var/name 'app/g :var/form -1}])) "the same docstring, a body alone: nothing")
     (is (nil? (program/meaning-changes db [{:var/name 'app/new :var/doc "Fresh."}])) "a new var changes nothing a section relied on")
     (is (nil? (program/meaning-changes db [])) "an eval that defines nothing")))
+
+(defn- chain-account
+  "Form i of a chain app.pc/f0..: f i calls f i-1; a test t names the one form it calls."
+  [i body]
+  {:id (str "app.pc/f" i "-" body) :src (str "(defn f" i " [x] " body ")") :ns 'app.pc :ns-form? false
+   :defs [{:var (symbol "app.pc" (str "f" i)) :kind :fn}] :declares #{} :methods [] :impls []
+   :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
+
+(deftest the-tests-reaching-a-var-are-what-its-change-selects
+  ;; root's ruling (audit 2, item 2): (my.agent/tests-reaching 'v) answers from the reach graph by
+  ;; the one reverse walk a change re-folds by (seon.program/reached-by), so its tests are exactly
+  ;; those whose reach digest moves when v changes, the tests prove then runs; nearest first
+  (let [test-acct (fn [t i] {:id (str "app.pc-test/" t) :src (str "(deftest " t " (f" i " 1))") :ns 'app.pc-test :ns-form? false
+                             :defs [{:var (symbol "app.pc-test" t) :kind :test}] :declares #{} :methods [] :impls []
+                             :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
+        db (ts/test-db)
+        db (d/db-with db (vec (concat (mapcat #(program/account-tx db (chain-account % "x") %) (range 10))
+                                      (mapcat (fn [[t i] k] (program/account-tx db (test-acct t i) (+ 10 k))) [["ta" 2] ["tb" 7] ["tc" 9]] (range)))))
+        g (program/reach-graph db nil)
+        in {:env "e" :tree "t"}
+        moved (fn [i] (let [db2 (d/db-with db (program/record-tx db (chain-account i "(dec x)")))
+                            before (program/graph-index g in nil) after (program/graph-index (program/reach-update g db2) in nil)]
+                        (set (for [[t {d :digest}] after :when (not= d (:digest (before t)))] t))))]
+    (doseq [i [2 5 9]]
+      (is (= (moved i) (set (program/tests-reaching g (symbol "app.pc" (str "f" i))))) (str "f" i ": the tests its change selects")))
+    (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
+    (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))
