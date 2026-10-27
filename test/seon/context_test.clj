@@ -4,7 +4,7 @@
   proof is not shown again, a merge task's plan stays its own."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.context :as context] [seon.print :as print]
-            [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
+            [seon.docs-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.docs :as docs] [seon.ctx :as ctx] [seon.render :as render] [seon.render.ui] [seon.web.html]
             [seon.print.select :as select] [clojure.string :as str] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model]))
 
 (defn- ns-fact
@@ -938,7 +938,7 @@
            (:sections v))
         "each at summary depth: its address and its lead's first sentence")
     (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
-    (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
+    (is (str/includes? (:more v) "my.agent/search") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
 
 (deftest related-sections-follow-a-rewritten-plan
@@ -1115,3 +1115,33 @@
         block (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
+
+(deftest search-fuses-exact-text-and-references-and-filters-by-plain-data
+  ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
+  (let [db (d/db-with (seon.docs-test/kinds-db)
+                      [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
+        s (fn ([q] (context/search db q {} nil)) ([q o] (context/search db q o nil)))
+        kind (fn [hits k] (filter #(= k (:kind %)) hits))]
+    (is (= #{:var :section :task :schema} (set (map :kind (s "fusing")))) "every kind by default")
+    (is (= 6 (count (s "fusing"))) "the five texts and g's caller, by its reference")
+    (is (every? #(and (number? (:score %)) (set? (:by %)) (string? (:line %))) (s "fusing")) "plain data: kind, name, score, by, line")
+    (is (= [:section :section] (map :kind (s "fusing" {:kinds #{:section}}))) "kinds focus it")
+    (is (= 3 (count (s "fusing" {:k 2}))) "k bounds it, and a last entry counts what it left")
+    (let [more (last (s "fusing" {:k 2}))]
+      (is (= :more (:kind more)))
+      (is (= 4 (:left more)) "six hits, two shown")
+      (is (= 4 (reduce + (vals (:counts more)))) "per kind")
+      (is (str/includes? (:more more) "{:k 6}") "and the call that returns them"))
+    (is (every? :e (remove #(= :more (:kind %)) (s "fusing"))) "each hit is an entity")
+    (is (= (s "fusing") (s "fusing")) "deterministic")
+    (is (apply >= (map :score (remove #(= :more (:kind %)) (s "fusing")))) "best first")
+    (is (= [] (s "fusing" {:by #{:meaning}})) "no meaning without a vector: nothing")
+    (is (every? #(= #{:text} (:by %)) (s "fusing" {:by #{:text}})))
+    (is (= #{['app/g #{:text}] ['app/caller #{:refs}]} (set (map (juxt :name :by) (kind (s "fusing" {:kinds #{:var}}) :var)))) "the var by its text, its caller by the references")
+    (testing "the references of a var: who calls it"
+      (is (= ['app/caller] (map :name (kind (s 'app/g {:by #{:refs}}) :var))))
+      (is (= #{:refs} (:by (first (s 'app/g {:by #{:refs}}))))))
+    (testing ":ns keeps the vars and tests of a namespace prefix"
+      (is (= #{'app/g 'app/caller} (set (map :name (kind (s "fusing" {:ns "app"}) :var)))))
+      (is (= [] (kind (s "fusing" {:ns "other"}) :var)))
+      (is (seq (kind (s "fusing" {:ns "other"}) :section)) "and leaves the other kinds"))))

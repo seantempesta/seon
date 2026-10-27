@@ -652,6 +652,17 @@
  ;; fused top 5 held 26 plumbing lines of 155 by plain counts and none weighed so, at caps 16, 64
  ;; and 256 alike (R@5 0.343 -> 0.346; seon.context/related-weighs-a-neighbour-by-its-rarity). At
  ;; the bound: at most this many :form/refs datoms read a neighbour.
+ ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
+ ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
+ ;; my.agent/similar took (owner, 2026-10-27: "fix the search so it includes docs ... params to
+ ;; specify what to focus on"). At the bound: the hits past it are not answered; ask a larger :k.
+ :seon.config.render/search 10
+ ;; How much each ranking weighs in my.agent/search's fusion: a hit scores the sum, over the rankings it
+ ;; is in, of the ranking's weight / (:seon.config.vector/rrf-k + its rank). 1.0 each is plain reciprocal
+ ;; rank fusion, as related's. Provenance: none measured for search yet (an embeddings eval of exact
+ ;; text against meaning against references is under way, owner 2026-10-27); change it by a measurement.
+ ;; At 0 a ranking only decides which hits are listed, never their order.
+ :seon.config.render/search-weights {:text 1.0 :meaning 1.0 :refs 1.0}
  :seon.config.render/related-rarity 16
  ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
  ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
