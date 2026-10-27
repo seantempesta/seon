@@ -117,7 +117,12 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
     running 8 go blocks on one channel (design agent-loop section 8): 199 of 200 forks refused,
     and 50 of 50 forced through deadlocked in `S_mutex_acquire`; with the same threads parked and
     quiet, 50 of 50 children exited 0. Parking every thread before a fork does not close the
-    windows reliably.
+    windows reliably. The runtime's process-wide locks are the child's own: a child holds only
+    its definitions, so Jolt registers each one with `define-process-local` (locks.ss) and
+    `jolt-after-fork-child!` makes every one afresh before it takes any (Jolt's
+    `test/chez/fork-held-locks-test.clj`: a parent thread holding every one while the main thread
+    forks; the child hung until its alarm before; 115 locks). A lock inside an object (a channel's, a
+    monitor's, a promise's) belongs to the object, and those are why the rule stands.
   - **Chez's parallel-collector sweeper threads.** Chez starts them at the first collection that
     finds another thread, and keeps them; a child forked from such a process hangs in its first
     multi-threaded collection (sampled in `S_gc_par_entry` -> `run_sweeper`). This one is fixed

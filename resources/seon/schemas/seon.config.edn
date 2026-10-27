@@ -63,7 +63,6 @@
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
-  [:seon.config.source/gate-self {:optional true} :seon.config.source/gate-self]
   [:seon.config.source/dirs :seon.config.source/dirs]
   [:seon.config.source/program-dirs :seon.config.source/program-dirs]
   [:seon.config.source/process-vars :seon.config.source/process-vars]
@@ -136,6 +135,7 @@
   [:seon.config.render/relevance-doc :seon.config.render/relevance-doc]
   [:seon.config.render/relevance-budget :seon.config.render/relevance-budget]
   [:seon.config.render/relevance-half-life :seon.config.render/relevance-half-life]
+  [:seon.config.render/relevance-words :seon.config.render/relevance-words]
   [:seon.config.render/relevance-pool :seon.config.render/relevance-pool]
   [:seon.config.render/relevance-eps :seon.config.render/relevance-eps]
   [:seon.config.render/search :seon.config.render/search]

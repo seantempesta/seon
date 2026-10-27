@@ -74,9 +74,10 @@
                :n "texts the branch holds (forms, sections, task plans and schema entries), a tenth of each holding the word"
                :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
                :growth :linear
-               ;; measured 2026-10-27 with relevance on its first k x related-near hits (seon.context/relevance):
-               ;; 3.38 MB / 621 calls at 100, 8.12 MB / 1,088 at 300, 17.75 MB / 2,312 at 1,000
-               :per-n {:bytes 14000 :calls 1.8}
+               ;; measured 2026-10-28 with search and relevance on the one seon.docs/bm25 (each text's counts a
+               ;; sparse map, bm25's contract checking them): 3.78 MB / 623 calls at 100, 8.70 MB / 1,088 at 300,
+               ;; 19.17 MB / 2,314 at 1,000, 67.68 MB / 7,714 at 4,000 (before the one bm25: 62.71 MB at 4,000)
+               :per-n {:bytes 16000 :calls 1.8}
                :fixed {:bytes 4000000 :calls 600}
                :sizes [100 300 1000 4000]}))
 

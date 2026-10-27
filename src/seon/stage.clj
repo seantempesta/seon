@@ -9,11 +9,11 @@
   a delete). Nothing the agent evaluated is ever evaluated again. Scratch namespaces, the
   eval history and the agent's turn facts never become program."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent] [seon.program :as program]))
 
 (defn stage-tx
   "tx-data making branch db's definitions match this live runtime: each var recorded with a
-  form in a loaded namespace and no longer interned there, and each recorded method its
+  form in a loaded namespace and no longer held there (a deftype's type is held though not interned), and each recorded method its
   multimethod no longer has, stops pointing to its form."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
   [db]
@@ -27,7 +27,7 @@
   (vec (concat
          (for [[dt sym] vars
                :let [in (interns (symbol (namespace sym)))]
-               :when (and in (not (get in (symbol (name sym)))))]
+               :when (and in (not (program/process-var db sym in)))]
            [:db/retract (:e dt) :var/form (:v dt)])
          (for [dt (d/datoms db :aevt :method/form)
                :let [m (d/entity db (:e dt)) v (find-var (:method/multi m))]

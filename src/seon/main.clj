@@ -45,9 +45,11 @@
   (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand."
-  {:malli/schema [:=> [:cat] :any]}
-  []
+  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand.
+  args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
+  :seon.root/started-by)."
+  {:malli/schema [:=> [:cat [:sequential :string]] :any]}
+  [args]
   (let [port (seon.config/value :seon.config.root/server-port)
         _ (when (zero? port)
             (out! "ROOT REFUSED: :seon.config.root/server-port is 0 (no server); bin/worktree --ports writes config/local.edn with this checkout's ports")
@@ -55,7 +57,7 @@
         ;; a scripted provider's script is a test fixture (seon.fixtures, in test/): the
         ;; provider's config says so, and the checkout's source is added before root starts
         _ (when (= :scripted (:kind (seon.config/provider seon.config/config))) (checkout-roots! (checkout)))
-        sys (c/start! {})]
+        sys (c/start! {:started-by (some->> args (partition 2 1) (filter #(= "--started-by" (first %))) last second)})]
     ;; the first cause stops root, once; a signal's hook waits for that stop, then Jolt exits
     (let [cause (promise) stopped (promise)
           ;; stopped is delivered however the stop ends, so a signal's hook waiting on it ends with
@@ -106,6 +108,6 @@
   ;; nothing starts before then.
   (lib/gc-sweepers! 0)
   (case (first (seon.config/without-overrides args))
-    "root" (root-serve)
+    "root" (root-serve (seon.config/without-overrides args))
     "ports" (ports)
     (apply (driver! (checkout)) args)))

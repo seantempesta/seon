@@ -409,17 +409,19 @@
 (defn resume-args
   "The root arguments (bin/root start ARGS) that resume this root's store and main, Seon's
   source at source-root (its tree's own, by default): a restart catches up on main's merges
-  where it boots (seon.program/load-all!)."
+  where it boots (seon.program/load-all!), and the test that started this boot, when one did
+  (:seon.root/started-by): the next generation is still that test's root."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] [:vector :string]] [:=> [:cat :seon.root/sys [:maybe :string]] [:vector :string]]]}
   ([sys] (resume-args sys (get-in sys [:bindings :source :root])))
   ([sys source-root]
-   (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
-         (cond-> [[:seon.config.root/store-path (:store-path sys)]
-                  [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
-                  [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
-                  [:seon.config.source/branch (config/value :seon.config.source/branch)]
-                  [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
-           source-root (conj [:seon.config.source/root source-root])))))
+   (-> (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
+             (cond-> [[:seon.config.root/store-path (:store-path sys)]
+                      [:seon.config.root/main (name (pdb/conn-main (:conn sys)))]
+                      [:seon.config.source/dirs (config/value :seon.config.source/dirs)]
+                      [:seon.config.source/branch (config/value :seon.config.source/branch)]
+                      [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
+               source-root (conj [:seon.config.source/root source-root])))
+       (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))
 
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place

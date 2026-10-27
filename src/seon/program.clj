@@ -42,8 +42,8 @@
   or resolves (as the compiler does) to a var named def... (defn, deftest, defmethod, a
   library's defschema), or to a clojure.core form that changes the namespace's environment
   (ns, require, extend-type ...). An eval whose def sits beside calls, (let [r (f)] (def x r)), is
-  none: it stays the recorded eval, never program a later load runs again (root's ruling,
-  2026-10-27: one ran my.agent/prove at every load of its branch)."
+  none: it stays the recorded eval, never program a later load runs again (root's ruling:
+  one ran my.agent/prove at every load of its branch)."
   {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
   [form nsx]
   (boolean
@@ -220,18 +220,19 @@
                                  (qualified-symbol? x) (vswap! acc update :quoted conj x)
                                  ;; a quoted collection: its names (one quoted-names) and its keywords
                                  ;; (a request it sends, {:op k}, names its op: :ops)
-                                 (coll? x) (vswap! acc #(-> % (update :quoted into (quoted-names x))
-                                                            (update :ops into (keep (fn [m] (when (and (map? m) (keyword? (:op m))) (:op m)))) (tree-seq coll? seq x))
-                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))
+                                 (coll? x) (vswap! acc #(reduce (fn [a v] (cond (qualified-keyword? v) (update a :keywords conj v)
+                                                                                 (and (map? v) (keyword? (:op v))) (update a :ops conj (:op v))
+                                                                                 :else a))
+                                                                (update % :quoted into (quoted-names x)) (tree-seq coll? seq x)))
                                  ;; a string that opens a form is code sent to a REPL (an agent's eval, a
                                  ;; root's): read by the one reader, its delimiters repaired (a str of
                                  ;; fragments), its names are data as a quoted form's are
-                                 (and (string? x) (str/starts-with? (str/triml x) "("))
+                                 (and (string? x) (str/starts-with? x "("))
                                  (let [fs (reader/read-text (:text (reader/forgive x)) 'user)]
                                    (vswap! acc #(-> % (update :quoted into (quoted-names fs))
                                                     (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
          ;; a map built at run time names its op when its :op is a constant keyword ({:op :eval :code (str ...)})
-         :map (when-some [k (some (fn [[kn vn]] (let [v (datum vn)] (when (and (= :op (datum kn)) (keyword? v)) v))) (:pairs n))]
+         :map (when-some [k (some (fn [[kn vn]] (when (and (= :const (:op kn)) (= :op (:val kn))) (let [v (datum vn)] (when (keyword? v) v)))) (:pairs n))]
                 (vswap! acc update :ops conj k))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (let [f (invoked n)]
@@ -794,20 +795,26 @@
 
 (declare schema-changes load-forms!)
 
+(defn process-var
+  "The var this process holds for recorded name s, given the ns-interns of its namespace, or
+  nil. A deftype's type (:var/kind :type) is found by its name: Jolt binds its var without
+  interning it (ns-interns, as Clojure's, lists no type)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :map] [:maybe :any]]}
+  [db s interns]
+  (or (get interns (symbol (name s)))
+      (when (= :type (:var/kind (d/entity db [:var/name s]))) (find-var s))))
+
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
   namespace it holds (the binary's own; test/ is imported but not built in), every var it
   defines bound there? A form imported into a namespace loaded earlier (a test namespace
   loaded at boot, then a re-import adding a deftest) defines a var this process does not
-  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx). A deftype's type (:var/kind
-  :type) is found by its name: Jolt binds its var without interning it (ns-interns, as Clojure's,
-  lists no type)."
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
   [db f]
   (boolean (and (:form/source (d/entity db (:e f)))
                 (when-let [n (find-ns (:ns f))]
-                  (every? (fn [[k s]] (or (not= :var k)
-                                          (some-> (if (= :type (:var/kind (d/entity db [:var/name s]))) (find-var s) (get (ns-interns n) (symbol (name s)))) bound?)))
+                  (every? (fn [[k s]] (or (not= :var k) (some-> (process-var db s (ns-interns n)) bound?)))
                           (:defines f))))))
 
 (defn- requiring
@@ -1149,7 +1156,7 @@
   of a seon.config.* namespace, the config's keys). A form that takes a whole config map (the
   config in force, seon.config/config, or the one root wrote on main, seon.config/from-db) reads
   the keys it names, no more: a key it reads by a value it computes is the daily full run's to
-  catch (owner, 2026-10-27: \"no test digests the whole tree\"; every config key a root's boot
+  catch (owner: \"no test digests the whole tree\"; every config key a root's boot
   took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
   (value, resolve) name no key of their own; every one of their callers names its key, but for
   computed-config-reader?'s. A form baking the schemas (referencing seon.config/baked-schema-forms:
@@ -1170,14 +1177,18 @@
   is not read again), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
   in a test's namespace, reach-step) and the config keys it reads (config-reads), and none of
   the other facts, which no edge, digest or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
-  (es is most of the db's forms), else a seek per entity."
+  (es is most of the db's forms), else a seek per entity. An attribute db does not declare (a merge
+  base cut before it) holds no datoms there, so its forms have none of it."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
   (let [pins (pin-rules (cfg/value :seon.config.source/pin-namespaces))
-        at (fn [a es] (if scan?
+        declared (:schema db)
+        at (fn [a es] (cond
+                        (not (contains? declared a)) {}
+                        scan?
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
-                        (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
+                        :else (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
         id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es) ov (at :form/ops es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))

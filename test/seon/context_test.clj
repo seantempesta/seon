@@ -1023,9 +1023,9 @@
         "a logit's chance: flat past either end, linear between knots"))
   (is (= [0.0 0.0] (#'seon.context/z [3.0 3.0])) "no spread, no evidence")
   (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are")
-  (is (= [] (#'seon.context/bm25 #{"a"} [])) "an empty pool scores nothing")
-  (is (= [0.0 0.0] (#'seon.context/bm25 #{} [{"a" 1} {"b" 2}])) "an empty query scores every text 0")
-  (let [[x y] (#'seon.context/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}])]
+  (is (= [] (seon.docs/bm25 #{"a"} [] [])) "an empty pool scores nothing")
+  (is (= [0.0 0.0] (seon.docs/bm25 #{} [{"a" 1} {"b" 2}] [1 2])) "an empty query scores every text 0")
+  (let [[x y] (seon.docs/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}] [2 2])]
     (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
 
 (deftest the-page-follows-the-work-and-moves-by-its-cuts
@@ -1068,7 +1068,7 @@
           "shown draws every unit"))))
 
 (deftest a-tokens-words-are-its-identifiers-parts
-  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
+  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (seon.docs/terms "seon.vector/near-of fooBar a"))
       "split at what is no letter or digit and at a case change, one-letter parts dropped"))
 
 (deftest related-sections-follow-a-rewritten-plan
@@ -1351,8 +1351,3 @@
     (is (nil? relevance-calls) "no relevance call in the frame")
     (render/dispose-walk! w)))
 
-(deftest the-own-task-is-where-ctx-holds-it-whole
-  ;; a session's runs share their task, held whole under one run only (docs/ctx.md); the newest run is first
-  (let [v {:runs (array-map 2 {:task {:db/id 3}} 9 {:task {:db/id 3 :seon.task/id "t"}} 4 {:task {:db/id 8 :seon.task/id "u"}})}]
-    (is (= [:runs 9 :task] (context/own-task v)) "the newest run's task, where it is whole")
-    (is (nil? (context/own-task {})) "no run, none")))

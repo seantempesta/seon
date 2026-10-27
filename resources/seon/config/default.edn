@@ -307,14 +307,6 @@
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.
  :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
- ;; Unit: a test var, ns/name. The test whose process started this root (a test root's own start,
- ;; seon.test-store/start-root! given it in its env): the merge gate leaves it out of a merge's deferred
- ;; tests, since a test cannot be its own gate (running it on the checkout this root runs would start
- ;; this root again, recursion); the run's deferred-results hold no result for it, never a green.
- ;; Absent (as here): every deferred test is gated. Provenance: root's ruling (c), 2026-10-27, from
- ;; seon.source-test/a-restart-catches-up-and-a-new-generation-resumes, whose loop merges were held
- ;; on the test itself.
- :seon.config.source/gate-self #env SEON_GATE_SELF
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
@@ -830,6 +822,11 @@
  ;; every this many of the agent's later evals. Provenance: the replay above, 1 and 3 ranked alike
  ;; (R@10 0.441 both on the trajectory alone); 1 follows the agent's newest turn. At the bound: none.
  :seon.config.render/relevance-half-life 1.0
+ ;; Unit: evals. How many of the agent's latest evals give their code as the words of the work's focus
+ ;; (seon.context/focus), which the page's text scores take beside its vector. Provenance: the value the
+ ;; focus shipped with (the replay above measured the vector, not this); revisit when text recall is
+ ;; measured on live turns. At the bound: earlier evals' code is not in the words.
+ :seon.config.render/relevance-words 3
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
  ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
  ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing

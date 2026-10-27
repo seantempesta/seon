@@ -23,11 +23,13 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
+- `seon.render/summarized`: a schema's `:seon.render/summary` is a symbol in data, resolved when the value is printed, as `render-of` is for a render.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.cost/bound`, `seon.cost/cases`: a generated estimate names its function (whose contract carries its bound) and its generator as symbols in data.
 - `seon.agent/test-plan`, `seon.agent/judges?`, `seon.proofs/run-tests!`: a task's proofs and the tests a plan selects are symbols in data (reach digests' keys), resolved to their Vars to run, and to read whether each is a deftest of a namespace that merges (`judges?`, which `test-plan` and `my.agent/tests-reaching` share).
-- `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
+- `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`, `seon.program/definition-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
 - `seon.model/scripted`: the scripted provider's `:seon.config.ai/script` names its reply function as data (a test fixture in `test/`, loaded by name; one not found is `:seon.model/no-script`).
+- `seon.repl/equip-ns!`: the clojure.repl helpers an agent's namespace refers are looked up by name (`ns-resolve`) and referred into the namespace an eval ends in, where the agent's REPL carries `*ns*`.
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary: task `seon.main/drivers-leave-src`) is loaded from the checkout's source when a check mode runs, so its `-main` is resolved by name then; the program never names it.
 - `my.agent/asked`, `my.agent/no-var`: a name an agent asks its navigation functions about (`callers`, `callees`, `source`) is read as its REPL reads it, in the agent's namespace (an alias resolved to the var's full name), and one that resolves to nothing is said so (`:my.agent/no-var`, the one answer for a missing name), never answered as no callers.
 - `seon.repl/eval-string`: each response's handle (``result/eN``, named by its eval), the agent REPL's own `*1`, defined by the REPL as it answers.

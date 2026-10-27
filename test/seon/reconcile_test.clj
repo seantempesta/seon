@@ -643,8 +643,8 @@
                          :gate-unread [{:ns 'seon.generation :reason "no :ns/file on the branch"}])]
         (is (str/includes? (:problem (first held)) "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
             (:problem (first held)))))
-    (testing "the test whose process started this root is left out: a test cannot be its own gate (gate-self)"
-      (let [self (assoc gate :seon.config.source/gate-self "seon.root-test/boots")]
+    (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.root/started-by)"
+      (let [self (assoc gate :seon.root/started-by "seon.root-test/boots")]
         (is (= octopus (judged self nil)) "the only deferred test is the root's own: merged, nothing run")
         (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/other]}]
                (judged self nil :deferred ['seon.root-test/boots 'seon.root-test/other]))

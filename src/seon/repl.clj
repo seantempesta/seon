@@ -56,7 +56,7 @@
   agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
   each is free and clojure.repl holds it (an agent's process interns source and pst there,
   seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its
-  own, and left). Done here, at the reader, on purpose (audit cut 8, 2026-10-27): this loop is the one
+  own, and left). Done here, at the reader, on purpose (audit cut 8): this loop is the one
   place that carries *ns* from form to form, so it is the owner of what follows the agent into a new
   one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
   every program namespace at load, which are not the agent's. Answers ns."
@@ -539,6 +539,14 @@
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
   [] (let [w (framed)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
+
+(defn page-hiccup
+  "This agent's page as its model reads it now, from its live walk (seon.context/page-lists): each
+  component run again only where what it read changed, so a turn's page costs what changed (a cold
+  draw, seon.context/page, costs every component). [db page]: the db it framed at, which the request is
+  made on, and {element-id hiccup}, in order."
+  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
+  [] (let [w (framed)] [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 

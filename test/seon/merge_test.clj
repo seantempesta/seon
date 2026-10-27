@@ -206,6 +206,18 @@
     (is (= #{:seon.op/x} (set (map :v (d/datoms (d/db-with onto (into decls [[:db/add 100 :form/ops :seon.op/x]])) :eavt 100 :form/ops))))
         "declared first, the datom lands")))
 
+(deftest a-merge-base-cut-before-an-attribute-diffs-it-as-the-heads
+  ;; found 2026-10-27 through 0.7 (agent a1, merge-main! after the merge above declared :form/ops): the
+  ;; content diff read every attribute either side declares from a base cut before :form/ops, and
+  ;; datahike.db/datoms-diff resolved it against the base only (not defined in current schema)
+  (let [full (empty-db)
+        base (datahike.core/empty-db (into {} (map (fn [[k v]] [k (dissoc v :db/id)])) (dissoc (d/schema full) :form/ops))
+                                     {:schema-flexibility :write})
+        head (d/db-with base (into (pm/attribute-declarations base [{:e 100 :a :form/ops :v :seon.op/x}]) [[:db/add 100 :form/ops :seon.op/x]]))]
+    (is (= [[100 :form/ops :seon.op/x]]
+           (mapv (juxt :e :a :v) (filter #(= :form/ops (:a %)) (#'pm/content-datoms base head #{}))))
+        "the head's datoms of the attribute the base lacks are what moved")))
+
 (deftest a-schema-entry-merges-per-key
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
   ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's
@@ -309,6 +321,11 @@
              (is (empty? (d/datoms after :avet :note/text "a platform-free scratch note")))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
+(deftest changed-vars-are-the-var-keys-of-a-change
+  ;; found red on main (2026-10-27): it read each key [kind x] one level too deep, so any branch
+  ;; that changed something threw "nth not supported on this type: Keyword" in every turn's test plan
+  (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:kind :fn}] [:var 'app/g] [{:kind :fn} nil] [:schema :app/k] [nil {}]})))
+  (is (= #{} (pm/changed-vars {}))))
 (deftest a-merge-carries-the-namespace-of-a-form-it-carries
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
   ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read

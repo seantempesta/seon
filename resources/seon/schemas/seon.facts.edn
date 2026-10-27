@@ -165,6 +165,10 @@
  ;; what its context includes beside its task (seon.context/selected: the wiki sections, functions and schema keys
  ;; its work points to), [name chance] in the order they entered, written by its turn before its request is drawn,
  ;; so the page and the request draw the same units (seon.render.ui/related) and a replay at that commit too
+ ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
+ ;; page's branch views read, written by its turn with what it included, so a cold build draws what the live page does
+ :seon.agent/main-commit :uuid
+ :seon.agent/base-commit :uuid
  :seon.agent/included [:vector [:tuple [:or :string :qualified-symbol :qualified-keyword] number?]]
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
@@ -180,7 +184,8 @@
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/stall {:optional true} :seon.agent/stall]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
-                       [:seon.agent/included {:optional true} :seon.agent/included]]
+                       [:seon.agent/included {:optional true} :seon.agent/included]
+                       [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]
@@ -334,6 +339,7 @@
  ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
+ :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/root-causes)
@@ -388,6 +394,7 @@
  :seon.root/previous-end :seon.root/end
  :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] :seon.db/agent-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
+                          [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]

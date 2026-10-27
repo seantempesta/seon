@@ -217,20 +217,19 @@
       (finally (end-agent!)))))
 
 (deftest the-record-holds-what-the-agent-heard-of-main
-  ;; main's head as the agent last read it and its branch's merge base, from the agent's state
-  ;; (:main, :base): each a commit id and a t beside the environment, written by nothing, and
-  ;; diffed as data, so a render reading them follows main (the merge, tests and divergence views)
+  ;; main's head and the branch's merge base as the agent last heard them are facts its turn writes
+  ;; (:seon.agent/main-commit, :seon.agent/base-commit), never process state merged into the record:
+  ;; a cold build holds them as the live record does (the branch views read them)
   (let [db (seeded 10) m (ts/test-db)]
     (try
       (reset! seon.agent/state {:db db :key k :branch :b})
       (let [c0 @ctx/ctx]
-        (is (not-any? #(contains? c0 %) [:main-commit :main-t :base-commit :base-t]) "nothing heard yet")
         (swap! seon.agent/state assoc :main m :base m)
-        (let [c1 @ctx/ctx]
-          (is (= [(d/commit-id m) (:max-tx m) (d/commit-id m) (:max-tx m)] ((juxt :main-commit :main-t :base-commit :base-t) c1)))
-          (is (= #{[:main-commit] [:main-t] [:base-commit] [:base-t]} (set (keys (ctx/diff c0 c1)))) "each a path that changed, alone")
-          (swap! seon.agent/state assoc :db (:db-after (d/with db (eval-tx 11))))
-          (is (= (d/commit-id m) (:main-commit @ctx/ctx)) "kept as the record is patched")))
+        (is (= c0 @ctx/ctx) "hearing main changes no record")
+        (let [db1 (:db-after (d/with db [{:seon.agent/key k :seon.agent/main-commit (d/commit-id m) :seon.agent/base-commit (d/commit-id m)}]))]
+          (swap! seon.agent/state assoc :db db1)
+          (is (= (d/commit-id m) (:seon.agent/main-commit @ctx/ctx)) "the fact, as the record is patched")
+          (is (= (:seon.agent/main-commit @ctx/ctx) (:seon.agent/main-commit (:tree (ctx/build db1 (seon.db/eid db1 :seon.agent/key k) :b)))) "and as a cold build holds it")))
       (finally (end-agent!)))))
 
 (defn new-eval
@@ -810,7 +809,6 @@
       (doseq [[f t] [[#(swap! ctx/ctx assoc :notes "x") :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :lab.ctx/steps [1 2]) :seon.ctx/invalid]
                      [#(swap! ctx/ctx assoc :t 1) :seon.ctx/basis]
-                     [#(swap! ctx/ctx assoc :main-commit (random-uuid)) :seon.ctx/basis]
                      [#(reset! ctx/ctx nil) :seon.ctx/basis]]]
         (let [[[r same] db'] (step db f)]
           (is (= t (:seon.error/type r)) (pr-str r))

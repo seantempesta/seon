@@ -416,13 +416,31 @@
       :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id x) :rank (if (in? (:seon.task/id x)) 0 2)}])
       :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key x) :rank (if (in? (str (:schema/key x))) 0 2)}]))))
 
-(defn words
-  "The words of text s, lower case: runs of letters and digits, a run split where a lower case letter or
-  a digit meets an upper case one (datomsDiff -> datoms diff), so an identifier (datoms-diff, seon.docs/words,
-  :seon.run/outcome) is its parts. Distinct, in order."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+(defn terms
+  "Text s's terms, its identifier tokens, lower case: s split at every character that is no letter or digit
+  and between a lower and an upper case letter, those of two characters or more. What search and relevance
+  match (`words`, seon.context/relevance's lexical feature), so `seon.vector/near` and `near-of` match the words near and of. One
+  pass over the characters: on 150 of the program's forms a third of the time of a regex split
+  and a sixteenth of its bytes, the same tokens."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
   [s]
-  (vec (distinct (re-seq #"[a-z0-9]+" (str/lower-case (str/replace s #"([a-z0-9])([A-Z])" "$1 $2"))))))
+  (let [s (or s "") n (count s)
+        word (fn [out start end] (if (and (>= start 0) (> (- end start) 1)) (conj! out (str/lower-case (subs s start end))) out))]
+    (loop [i 0 start -1 lower? false out (transient [])]
+      (if (< i n)
+        (let [c (.charAt s i)]
+          (cond (not (Character/isLetterOrDigit c)) (recur (inc i) -1 false (word out start i))
+                ;; a word starts here: after a separator, or at an upper case letter after a lower
+                (or (neg? start) (and lower? (Character/isUpperCase c))) (recur (inc i) i (Character/isLowerCase c) (word out start i))
+                :else (recur (inc i) start (Character/isLowerCase c) out)))
+        (persistent! (word out start n))))))
+
+
+(defn words
+  "The distinct `terms` of text s, in order: an identifier (datoms-diff, datomsDiff, :seon.run/outcome) is
+  its parts; a one-letter part is no word (search counts a word wherever it occurs in a text)."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [s] (vec (distinct (terms s))))
 
 (defn- occurrences
   "How many times word w occurs in lower case text low."
@@ -431,9 +449,26 @@
   (loop [i 0 n 0]
     (if-let [j (str/index-of low w i)] (recur (+ j (count w)) (inc n)) n)))
 
+(defn bm25
+  "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
+  :bm25-k1 and :bm25-b) for query words qs, fs each text's word counts and lens its length (in whatever
+  unit, the same for every text); its idf counted over fs, so the texts scored are their own corpus and no
+  index is read. In fs's order. The one text ranking: search's (`tokens`) and relevance's
+  (seon.context/relevance)."
+  {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
+  [qs fs lens]
+  (let [{k1 :bm25-k1 b :bm25-b} (cfg/value :seon.config.render/relevance-features)
+        n (count fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
+        idf (into {} (for [w qs :let [df (reduce #(if (pos? (get %2 w 0)) (inc %1) %1) 0 fs)]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
+    ;; over each text's own counts: a text holding no query word (most of them, an empty map) allocates nothing
+    (mapv (fn [f len] (reduce-kv (fn [acc w c] (if-let [i (when (pos? c) (idf w))]
+                                                 (+ acc (* i (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg)))))))) acc))
+                                 0.0 f))
+          fs lens)))
+
 (defn tokens
-  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: BM25
-  (k1 1.2, b 0.75) over each text's occurrences of each word of `words`, a hit in its name counting three
+  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: `bm25`
+  over each text's occurrences of each word of `words` (its length in characters), a hit in its name counting three
   times, scored against every text of those kinds, z its score in standard deviations above their mean (every
   text, those holding no word scoring 0). Only the texts with z >= z-min are answered. The line is the
   first holding a word. Cost: one scan of each kind's text attribute (lower-casing each text once) and, per
@@ -444,18 +479,13 @@
         attrs (distinct (keep text-attrs kinds))
         docs (for [a attrs {:keys [e v]} (d/datoms db :aevt a)
                    :let [low (str/lower-case v)
-                         tf (mapv #(occurrences low %) ws)]]
+                         tf (reduce (fn [m w] (let [c (occurrences low w)] (if (pos? c) (assoc m w c) m))) {} ws)]]
                {:a a :e e :v v :low low :tf tf :len (count v)})
         n (count docs)]
     (if (or (empty? ws) (zero? n))
       []
-      (let [avg (/ (reduce + (map :len docs)) (double n))
-            df (mapv (fn [i] (count (filter #(pos? (nth (:tf %) i)) docs))) (range (count ws)))
-            idf (mapv #(Math/log (+ 1.0 (/ (- n % -0.5) (+ % 0.5)))) df)
-            k1 1.2 b 0.75
-            score (fn [d] (reduce + (map (fn [t f] (if (pos? t) (* f (/ (* t (+ k1 1.0)) (+ t (* k1 (+ (- 1.0 b) (* b (/ (:len d) avg))))))) 0.0))
-                                         (:tf d) idf)))
-            scored (for [d docs :when (some pos? (:tf d))] (assoc d :score (score d)))
+      (let [scores (bm25 (set ws) (mapv :tf docs) (mapv :len docs))
+            scored (for [[d sc] (map vector docs scores) :when (seq (:tf d))] (assoc d :score sc))
             sum (reduce + (map :score scored))
             sumsq (reduce + (map #(* (:score %) (:score %)) scored))
             mean (/ sum n)
