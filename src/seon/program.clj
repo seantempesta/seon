@@ -795,20 +795,26 @@
 
 (declare schema-changes load-forms!)
 
+(defn process-var
+  "The var this process holds for recorded name s, given the ns-interns of its namespace, or
+  nil. A deftype's type (:var/kind :type) is found by its name: Jolt binds its var without
+  interning it (ns-interns, as Clojure's, lists no type)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol :map] [:maybe :any]]}
+  [db s interns]
+  (or (get interns (symbol (name s)))
+      (when (= :type (:var/kind (d/entity db [:var/name s]))) (find-var s))))
+
 (defn- held?
   "Does this process already hold form row f compiled: imported from the source tree, in a
   namespace it holds (the binary's own; test/ is imported but not built in), every var it
   defines bound there? A form imported into a namespace loaded earlier (a test namespace
   loaded at boot, then a re-import adding a deftest) defines a var this process does not
-  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx). A deftype's type (:var/kind
-  :type) is found by its name: Jolt binds its var without interning it (ns-interns, as Clojure's,
-  lists no type)."
+  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
   [db f]
   (boolean (and (:form/source (d/entity db (:e f)))
                 (when-let [n (find-ns (:ns f))]
-                  (every? (fn [[k s]] (or (not= :var k)
-                                          (some-> (if (= :type (:var/kind (d/entity db [:var/name s]))) (find-var s) (get (ns-interns n) (symbol (name s)))) bound?)))
+                  (every? (fn [[k s]] (or (not= :var k) (some-> (process-var db s (ns-interns n)) bound?)))
                           (:defines f))))))
 
 (defn- requiring
