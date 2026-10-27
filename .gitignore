@@ -13,3 +13,6 @@ runs/
 /.worktrees/
 /config/worktree-ports
 /config/worktree-ports.lock
+
+# Claude sessions scratch and root orders (never tracked)
+claude_scratch/

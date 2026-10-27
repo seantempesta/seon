@@ -9,7 +9,7 @@
     --store-steps OUT                 the steps bin/check ran green stored at their digests
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
-  (:require [seon.profile :as profile] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
             [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.source :as source] [seon.system :as system]))
 
@@ -123,6 +123,38 @@
     (d/release conn)
     @(d/connect (assoc cfg :branch b)))))
 
+(defn- builder-id
+  "The id of the code that builds a reach graph on db: the digest of the :form/id of every var of
+  seon.program (an index range of the var names, one entity read each), so a change to any of them
+  and the config keys its rows and flags read (pin-namespaces, process-vars, binary-vars), makes a stored graph (reach-graph-of) another builder's."
+  [db]
+  (error/digest (str (str/join " " (sort (for [dt (d/index-range db {:attrid :var/name :start (symbol "seon.program" "") :end (symbol "seon.program" "\uffff")})
+                                               :let [f (:var/form (d/entity db (:e dt)))] :when f]
+                                           (:form/id f))))
+                     ;; and the config the graph's rows and flags are read under
+                     (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
+
+(defn reach-graph-of
+  "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
+  a stored graph decodes in about a sixth of what building one costs, 23M ticks against 146M on
+  Seon's program) brought to db by seon.program/reach-update, which re-folds only what differs,
+  else built (seon.program/reach-graph); stored again when it moved. A stored graph is used
+  only when the code that builds one (builder-id) and the system's data-refs are the ones it was
+  built under; one that does not read is built over: it is regenerable output of the kept store."
+  [db data-refs store]
+  (let [f (io/file store "reach-graph.fasl")
+        id (builder-id db)
+        stored (when (.isFile f)
+                 (let [{:keys [builder graph]} (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))]
+                   (when (and (= id builder) (= data-refs (:data-refs graph))) graph)))
+        g (if stored (program/reach-update stored db) (program/reach-graph db data-refs))]
+    (when (or (nil? stored) (not= (:live g) (:live stored)))
+      (let [tmp (io/file store (str "reach-graph.fasl." (random-uuid)))]
+        (java.nio.file.Files/write (.toPath tmp) ^bytes (fasl/serialize {:builder id :graph (dissoc g :affected)})
+                                   (make-array java.nio.file.OpenOption 0))
+        (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))
+    g))
+
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
   ones among them that reach a process of their own (:process, seon.program/graph-index), its
@@ -135,7 +167,7 @@
         tree (fx/tree-id root)
         db (program-db root store tree)
         in (fx/inputs root config/config (config/checkout) tree)
-        g (program/reach-graph db (:data-refs in))
+        g (reach-graph-of db (:data-refs in) store)
         idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
     {:graph g :inputs in
      :no-test (vec (sort (remove (set (map (comp symbol namespace key) idx)) nss)))
