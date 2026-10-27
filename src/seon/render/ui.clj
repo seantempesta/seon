@@ -882,11 +882,11 @@
 
 (defn divergence-view
   "What the branch's merge carries to main (a component over the db; the base's commit its child):
-  seon.program/divergence, the vars it added, redefined and removed and the schema keys it changed."
+  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
   [:section [:h2 "its merge carries"]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (program/divergence (commit-db db base) db)]])
+   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]])
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
@@ -907,6 +907,15 @@
   (let [run (get-in c [:runs rid])]
     [:section
      (render/html {:schema :seon.run/run-fact} (assoc (relevant :seon.run/run-fact run) :turns-taken (count (:turns run))))]))
+
+(defn own-problems
+  "The open problems of the agent's run (a component over its branch db, seon.problems/own: its run's,
+  its task's failure and the errors raised in its task), by the report's render, the one root's tile
+  draws; nothing when none is open."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{db :seon.db/db} rid]
+  (let [r (problems/own db rid)]
+    (when (seq (:classes r)) [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} r)])))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
@@ -1023,6 +1032,7 @@
                                (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
+      (when rid [#'own-problems {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
       (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]
@@ -1112,11 +1122,12 @@
   [:section (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))])
 
 (defn problems-tile
-  "Main's open problems (a component over the db): seon.problems/health by its render, every class's
-  rows; it runs again when a transaction touches what health read."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
-  [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} (problems/health db))])
+  "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
+  with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!):
+  every class's rows by the report's render. It runs again only when :health changes."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:section [:h2 "problems"] (when-let [h (:health c)] (render/html {:schema :seon.problems/report} (ratom/realize h)))])
 
 (defn runs-tile
   "Main's runs (a component over the db): how many by status and each running one (runs-of)."

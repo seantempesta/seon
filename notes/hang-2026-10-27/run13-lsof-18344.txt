@@ -1,0 +1,26 @@
+COMMAND   PID USER   FD     TYPE             DEVICE SIZE/OFF                NODE NAME
+jolt    18344 sean  cwd      DIR               1,13      832          1130899663 /Users/sean/src/seon-next
+jolt    18344 sean  txt      REG               1,13 30512744          1160657207 /Users/sean/src/seon-next/target/jolt/jolt
+jolt    18344 sean  txt      REG               1,13  4129840 1152921500312609216 /usr/lib/dyld
+jolt    18344 sean  txt      REG               1,13     8192          1164097082 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/lock.mdb
+jolt    18344 sean  txt      REG               1,13     4096          1164097299 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/ids
+jolt    18344 sean  txt      REG               1,13   177504          1130920919 /Users/sean/src/seon-next/target/lib/liblz4.dylib
+jolt    18344 sean  txt      REG               1,13   884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+jolt    18344 sean  txt      REG               1,13   130880          1140801700 /Users/sean/src/seon-next/target/lib/liblmdb.dylib
+jolt    18344 sean  txt      REG               1,13    34656          1148292216 /Users/sean/src/seon-next/target/lib/libprobe.dylib
+jolt    18344 sean  txt      REG               1,13   633920          1130921102 /Users/sean/src/seon-next/target/lib/libzstd.dylib
+jolt    18344 sean  txt      REG               1,13  4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+jolt    18344 sean  txt      REG               1,13 20545536          1164097083 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/data.mdb
+jolt    18344 sean    0r     CHR                3,2      0t0                 336 /dev/null
+jolt    18344 sean    1w     REG               1,13      372          1164093028 /Users/sean/src/seon-next/target/prove/shard-2.log
+jolt    18344 sean    2w     REG               1,13      372          1164093028 /Users/sean/src/seon-next/target/prove/shard-2.log
+jolt    18344 sean    3w     REG               1,13     2054          1164096100 /Users/sean/src/seon-next/target/cache/aot/v0.8.23-139-g67e7bf3e-A43E84-C8CC8105-211719.188FF1C1.111D22.C7EC2563-tr/v1/aot-jobs-18344.edn
+jolt    18344 sean    4u     REG               1,13     8192          1164097082 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/lock.mdb
+jolt    18344 sean    5u     REG               1,13 20545536          1164097083 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/data.mdb
+jolt    18344 sean    6w     REG               1,13 20545536          1164097083 /Users/sean/src/seon-next/target/tmp/program-store-6f730229-5a4e-4092-a2f4-add337e18749/data.mdb
+jolt    18344 sean    7r     CHR               17,1 0t147856                 612 /dev/urandom
+jolt    18344 sean    8u    FIFO                         0t0          1164120263 /Users/sean/src/seon-next/target/tmp/test-starter-18344.fifo
+jolt    18344 sean    9u  KQUEUE                                                 count=0, state=0xa
+jolt    18344 sean   11     PIPE 0xe1e85dc6361f1683    16384                     ->0x57a1d40ee4f5e5ff
+jolt    18344 sean   12u  KQUEUE                                                 count=0, state=0xa
+jolt    18344 sean   13     PIPE 0x19c59aca88e8a97e    16384                     ->0xb24ecb2ef6c3d76f

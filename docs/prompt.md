@@ -14,4 +14,4 @@ A value cut to fit says what it left and gives the form that reads the rest: eva
 
 A reply with prose and no eval call ends your turn, and waits for the user.
 
-`(my.agent/help)` lists the help page's sections; `(my.agent/help "done")` shows one whole.
+Attached from outside, you work through the server's tools instead of the one eval tool, and finish with `seon_done`: `(my.agent/help "from-outside")` says which does what. `(my.agent/help)` lists the help page's sections; `(my.agent/help "done")` shows one whole.

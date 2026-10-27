@@ -116,5 +116,5 @@ The functions an agent has in its own namespaces, by namespace.
 | `my.schema` | `registration`, `forms`, `register!` (on the agent's own branch) |
 | `my.fx` | `call`, `send` (effects through their owner) |
 | `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
-| `my.root` (root's functions) | `create!`, `request!`, `run!`, `cancel!`, `task-files`, `load-tasks!`, `load-docs!`, `problems`, `generation`, `resume-args`, `build!`, `next-generation` |
+| `my.root` (root's functions) | `create!`, `request!`, `run!`, `hold!`, `cancel!`, `task-files`, `load-tasks!`, `load-docs!`, `problems`, `generation`, `resume-args`, `build!`, `next-generation` |
 

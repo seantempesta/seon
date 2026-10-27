@@ -129,6 +129,22 @@
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))
 
+(deftest an-outside-agent-reads-its-context-after-it-defines
+  ;; THE PLAN 0.7: the first real work through the server is an outside agent that attaches,
+  ;; defines something at its branch's REPL and reads its context again. Once its branch holds a
+  ;; change, the read's observe selects tests by what the branch changed (seon.merge/changed-vars):
+  ;; it answered "nth not supported on this type: Keyword" for every agent past its first define
+  (let [[before defined after status] (at/in-agent (fn [{:keys [agent ns]}]
+                                                     [{:op :context :agent agent}
+                                                      (str "(ns " ns ") (defn answer [] 42)")
+                                                      {:op :context :agent agent}
+                                                      "(my.task/status)"]))]
+    (is (clojure.string/starts-with? (:context before) "# You are a Seon agent") (str "the read before any change: " (pr-str before)))
+    (is (not (:ex defined)) (pr-str (:ex defined)))
+    (is (clojure.string/starts-with? (str (:context after)) "# You are a Seon agent") (pr-str after))
+    (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
+    (is (not (contract/error? (:value status))) (pr-str (:value status)))))
+
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
@@ -164,7 +180,7 @@
                         (str "(let [ms (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) " (str "agent." agent "/c0") " (datahike.api/commit-id (seon.agent/db))) t (:content (first ms))]"
                              " {:path (clojure.string/includes? t \":seon.task/plan]\") :old (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
                              " :new (clojure.string/includes? t " (pr-str (pr-str plan)) ") :handle (clojure.string/includes? t \"result/e\")"
-                             " :record (clojure.string/includes? t \":seon.eval/record\") :agent-id (clojure.string/includes? t \":seon.agent/id\") :tokens (seon.context/messages-tokens ms)})")
+                             " :record (clojure.string/includes? t \":seon.eval/record\") :agent-id (clojure.string/includes? t \":seon.agent/id\") :tokens (seon.context/messages-tokens [{:role \"user\" :content (subs t (clojure.string/index-of t \":ctx\"))}])})")
                         {:op :context :agent agent}]))]
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
@@ -172,11 +188,10 @@
     (is (true? (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (= {:path true :old true :new true :handle true :record false :agent-id false} (dissoc (:value told) :tokens)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value, each eval by its handle, never its record")
-    ;; measured 224 and 225 tokens (630 when an eval was told whole): about 130 the task's page part, its
-    ;; hiccup redrawn with the plan, and 90 the :ctx diff, five evals by their handles and the plan's
-    ;; old and new value; each change told once, as data and as html (the test's task names, a
-    ;; fresh namespace each run, move it by a token or two: bound at 230)
-    (is (>= 230 (:tokens (:value told))) "a swap! is told in what it changed")
+    ;; the :ctx part of the message, which is what the diff owns: about 90 tokens (630 when an eval was
+    ;; told whole), four evals by their handles and the plan's old and new value. The page part beside
+    ;; it is the task's render redrawn with the new plan (a whole task's instructions among it)
+    (is (>= 100 (:tokens (:value told))) "a swap! is told in what it changed")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
     (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")

@@ -480,7 +480,7 @@
   status; the reconciler's index answers the same from its own facts (seon.reconcile/task-state)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
   [db te]
-  (boolean (some #(finished (:seon.run/status (d/pull db [:seon.run/status] (:e %))))
+  (boolean (some #(finished (:v (first (d/datoms db :eavt (:e %) :seon.run/status))))
                  (d/datoms db :avet :seon.run/task te))))
 
 (defn running
