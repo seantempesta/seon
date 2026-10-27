@@ -230,9 +230,11 @@
                             ;; the row refused too: the answer says so, never as if written
                             (cond-> r (contract/error? w) (assoc :unrecorded-row (:seon.error/message w))))
                           {:recorded (:datoms r) :t (:t r)})))}
-   :results {:doc "The results main holds at digests (seon.proofs/stored-results): {:results {digest {:pass :fail :error :failures :flaky}}}, a digest with none left out: what a run reuses instead of running."
-             :args {:digests {:type "array" :items {:type "string"}}} :required ["digests"]
-             :answer (fn [sys _ req] {:results (proofs/stored-results @(:conn sys) (vec (:digests req)))})}
+   :results {:doc "The results main holds at digests (seon.proofs/stored-results): {:results {digest {:pass :fail :error :failures :flaky}}}, a digest with none left out: what a run reuses instead of running; and, for the tests named, each one's newest measured ms (:ms {test ms}, seon.proofs/last-ms): what orders a run's shards."
+             :args {:digests {:type "array" :items {:type "string"}} :tests {:type "array" :items {:type "string"}}} :required ["digests"]
+             :answer (fn [sys _ req] (let [db @(:conn sys)]
+                                       (cond-> {:results (proofs/stored-results db (vec (:digests req)))}
+                                         (seq (:tests req)) (assoc :ms (proofs/last-ms db (mapv symbol (:tests req)))))))}
    :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"}} :required ["agent"]
           :answer (fn [sys ag _]
