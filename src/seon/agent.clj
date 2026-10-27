@@ -1079,7 +1079,9 @@
           _ (mark! :misaligned)]
      ;; a resumed branch whose program does not load runs main's for what failed: its errors
      ;; go to root with its hello (recorded problems), never dropped (T5b: a stub ran silently)
-     (reset! state (cond-> {:id id :key (or session (key-of db0 id)) :branch branch :task task :run run :fd fd :conn c :db @store-conn
+     ;; its key as root named it in its boot (seon.root's :spawn), never pulled from main here: that
+     ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
+     (reset! state (cond-> {:id id :key session :branch branch :task task :run run :fd fd :conn c :db @store-conn
                    :base base :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent

@@ -379,8 +379,9 @@
                  (>= (count (:agents st)) (cfg/value :seon.config.root/max-agents)) (reply! st o p (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)}))
                  :else (let [[st aid fd] (start-agent st opts)
                              branch (get-in st [:agents aid :branch])]
-                         (step/out! o :to-writer (cond-> {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}}
-                                          (:key opts) (assoc :key (:key opts))))
+                         ;; the agent's key named here, in root's boot: the child reads none from main
+                         (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :run (:run opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
+                                                  :key (or (:key opts) (task/agent-key (:boot st) aid))})
                          ;; answered at its hello (set-agent's :ready), or the end it meets first
                          (assoc-in st [::spawning aid] p))))
       :clone (let [parent (:parent m)]
