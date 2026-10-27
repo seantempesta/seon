@@ -590,8 +590,9 @@
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
   that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
-  changed, an eval of the agent's by its handle and a turn by its id wherever one joined or went}, the empty ones left out; with no
-  c0, the page whole, {:page page}.
+  changed}, the empty ones left out; in the diff the agent's own records, which its conversation
+  already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
+  {:page page}.
   Printed whole as one user message: the page and each change told once."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
@@ -605,9 +606,7 @@
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
                   p0 (page db0 r0) p1 (page db1 r1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
-                  ;; the agent's own records, which its conversation already shows, are told by
-                  ;; what reads them: an eval by its handle, result/<its id> (seon.repl/record!), a
-                  ;; turn by its id; a path under one is told as any path
+                  ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
                   told #(cond (not (map? %)) %
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
@@ -655,7 +654,7 @@
   [a {:keys [db basis help help-ref printed]}]
   (let [e (:db/id a)
         model? (= :model (:origin basis))
-        since (:tx printed)
+        since (when model? (:tx printed))
         ;; each model turn's page at the commit its request was made on (a turn records itself
         ;; before its request; a read with none recorded, db's), drawn only when printed-run has not
         ;; printed it (a delay)
