@@ -905,7 +905,7 @@
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
-               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (program/changed-vars) and the sections that differ; candidates only through the rule"
+               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
                :fixed {:ticks 800000 :bytes 3800000 :calls 24}

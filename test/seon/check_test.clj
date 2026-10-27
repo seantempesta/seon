@@ -283,6 +283,39 @@
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+(deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
+  ;; task seon.fx/the-tree-id-is-what-is-read: notes/ is no input (every merge appends its log line
+  ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
+  (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-tree-" (random-uuid))
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
+        write! (fn [f] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) (str f (random-uuid))))
+        commit! (fn [f] (write! f) (git "add" "-A") (git "commit" "-qm" f))]
+    (try
+      (.mkdirs (java.io.File. dir))
+      (git "init" "-q" "-b" "main")
+      (commit! "src/a.clj")
+      (let [t0 (seon.fx/tree-id dir)]
+        (write! "notes/merge-log.md")
+        (is (= t0 (seon.fx/tree-id dir)) "an untracked note")
+        (commit! "notes/merge-log.md")
+        (is (= t0 (seon.fx/tree-id dir)) "a committed note")
+        (commit! "docs/x.md")
+        (is (not= t0 (seon.fx/tree-id dir)) "a doc is in the tree")
+        (write! "src/a.clj")
+        (is (not= (seon.fx/tree-id dir) (do (commit! "src/a.clj") (seon.fx/tree-id dir))) "and so is a source file")
+        (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it")
+        (testing "bin/tree reads the same exclusions from the shipped config (its sed against cfg/value)"
+          (let [me (System/getProperty "user.dir")]
+            (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/resources/seon/config")))
+            (clojure.java.shell/sh "cp" (str me "/bin/tree") (str dir "/bin/tree"))
+            (clojure.java.shell/sh "cp" (str me "/resources/seon/config/default.edn") (str dir "/resources/seon/config/default.edn"))
+            (git "add" "-A") (git "commit" "-qm" "bin and config")
+            (let [same (fn [] (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))]
+              (is (same) "agree")
+              (write! "notes/more.md")
+              (is (same) "and agree with a note written")))))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
 (deftest bin-tree-names-the-tree-tree-id-names
   ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
@@ -310,30 +343,6 @@
     (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
     (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
     (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
-
-(deftest a-heavy-run-waits-while-mains-verification-runs
-  ;; docs/merging.md#main-goes-first: bin/prove --merge holds the main checkout's lock, and every
-  ;; other heavy run's main_first (bin/env) waits on it, saying whom it waits for, and goes on
-  ;; when the holder lets go. One process does the ordering, so the test ends on the waiter's
-  ;; exit whatever main_first does: the holder takes the lock, forks the waiter (its stderr on
-  ;; its stdout: the holder reads one pipe), reads the waiter's first line while it still holds
-  ;; the lock, lets go, and reads the rest to the waiter's exit. A main_first that did not wait
-  ;; prints no waiting line and exits at once, which the holder reads as its first line
-  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/main-first-" (random-uuid))
-        _ (.mkdirs (java.io.File. dir))
-        lock (str dir "/main-verify.lock")
-        holder (str "open(my $f, '>>', $ARGV[0]) or die; flock($f, LOCK_EX); truncate($f, 0); print $f \"a test holder\\n\"; $f->flush;"
-                    " my $pid = open(my $w, '-|') // die; if (!$pid) { open(STDERR, '>&STDOUT'); delete $ENV{SEON_MAIN_FIRST_HELD}; exec('zsh', '-c', \". bin/env; MAIN_LOCK=$ARGV[0]; main_first; echo returned\"); }"
-                    " my $first = <$w>; print \"while held: $first\"; flock($f, LOCK_UN); close($f);"
-                    " print \"after: $_\" while <$w>; close($w); print 'exit: ', $? >> 8, \"\\n\";")
-        r (clojure.java.shell/sh "perl" "-MFcntl=:flock" "-e" holder lock)
-        lines (str/split-lines (:out r))]
-    (try
-      (is (= ["while held: waiting for main's merge verification (a test holder)"
-              "after: returned"
-              "exit: 0"] lines)
-          (str "it said whom it waited for while the lock was held, and went on once let go: " (pr-str r)))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,

@@ -2,11 +2,10 @@
 # bin/update   bring the standing root up to date with main, from the main tree, in one go:
 #   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
 #      the write-back tree that config/local.edn's :seon.config.source/root names) into main;
-#   2. fast-forward jolt/merges to main, so the standing root's source tree is main's;
-#   3. move both trees' submodules to main's pins (bin/worktree --sync for the write-back tree);
-#   4. build (bin/build: each step skips what is up to date);
-#   5. restart the standing root on its store (bin/root stop, start): it boots on main's build and
-#      imports its source tree (docs/source.md).
+#   2. move both trees' submodules to main's pins (bin/worktree --sync for the write-back tree);
+#   3. build (bin/build: each step skips what is up to date);
+#   4. restart the standing root on its store (bin/root stop, start): it boots on main's build and
+#      imports its source tree (docs/source.md), first fast-forwarding it to main (seon.fx/read-source).
 # Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
@@ -29,10 +28,11 @@ if git rev-parse -q --verify jolt/merges >/dev/null; then
     git merge --no-ff -q jolt/merges -m "Merge jolt/merges: the standing root's merges ($n commits)" || fail "merging jolt/merges into main"
     print "merged $n commits of jolt/merges into main"
   fi
+fi
+if [[ -d $MERGES ]]; then
+  # the standing root's boot fast-forwards jolt/merges to main (seon.fx/read-source), after the merge above
   git -C "$MERGES" diff --quiet || fail "$MERGES has uncommitted changes"
-  git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding jolt/merges to main"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
-  print "jolt/merges at $(git -C "$MERGES" log --oneline -1 | cut -c1-60)"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }

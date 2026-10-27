@@ -9,7 +9,7 @@
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
             [seon.db :as pdb] [seon.cost :as cost]
-            [seon.fx :as fx]
+            [seon.fx :as fx] [seon.contract :as contract]
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
@@ -709,6 +709,107 @@
                :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [10 100 1000]}))
+
+(deftest the-source-tree-follows-main
+  ;; task seon.fx/the-source-tree-follows-main: the write-back tree (a worktree on its own branch)
+  ;; is brought to the main checkout's branch by the :source read itself. Behind main: fast-forwarded,
+  ;; and the read holds main's new file. Holding a commit main lacks: read as it is, and the answer
+  ;; is a :seon.fx/io-error naming both shas and both counts that still carries the read.
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-" (random-uuid))) (.mkdirs)))
+        co (str tmp "/main") wb (str tmp "/merges")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
+        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
+    (try
+      (.mkdirs (java.io.File. (str co "/src")))
+      (git co "init" "-q" "-b" "main")
+      (commit! co "a.clj" "(ns a)")
+      (git co "worktree" "add" "-q" "-b" "merges" wb)
+      (testing "at main: nothing to follow"
+        (is (= ["src/a.clj"] (keys (:value (read)))))
+        (is (not (contract/error? (read)))))
+      (testing "behind main: fast-forwarded, main's file is read"
+        (let [main (commit! co "b.clj" "(ns b)") r (read)]
+          (is (not (contract/error? r)) (pr-str r))
+          (is (= ["src/a.clj" "src/b.clj"] (keys (:value r))))
+          (is (= main (git wb "rev-parse" "HEAD")) "the write-back branch stands at main")))
+      (testing "a fast-forward git refuses (a dirty tree): imported as it is, git's words recorded"
+        (let [main (commit! co "a.clj" "(ns a2)") _ (spit (str wb "/src/a.clj") "(ns dirty)") r (read)]
+          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+          (is (re-find (re-pattern (str "could not follow main \\(at " main)) (:seon.error/message r)) (:seon.error/message r))
+          (is (= "(ns dirty)" (get-in r [:value "src/a.clj"])) "the read goes on, as the tree is")
+          (git wb "checkout" "--" "src/a.clj")
+          (is (not= main (git wb "rev-parse" "HEAD")) "unmoved")
+          (is (not (contract/error? (read))))
+          (is (= main (git wb "rev-parse" "HEAD")) "the clean tree follows")))
+      (testing "a read of named paths, behind main: the fast-forward moved other files, so the tree is read whole"
+        (commit! co "e.clj" "(ns e)")
+        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
+          (is (contains? (:value r) "src/e.clj") (pr-str (keys (:value r))))
+          (is (nil? (:paths r)) "and answers no :paths: root refreshes nothing by names")))
+      (testing "at main, the named paths are read by name"
+        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
+          (is (= ["src/a.clj"] (keys (:value r))))
+          (is (= #{"src/a.clj"} (:paths r)))))
+      (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
+        (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
+          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+          (is (= ["src/a.clj" "src/b.clj" "src/c.clj" "src/e.clj"] (keys (:value r))) "the read goes on")
+          (is (= [theirs main 1 1] ((juxt :source :main :ahead :behind) r)))
+          (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
+      (finally (sh/sh "rm" "-rf" tmp)))))
+
+(deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
+  ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
+  ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
+  ;; branch (the write-back tree). A commit to the clone's main that defines a var reaches main's
+  ;; program through the :source load's own function (seon.root/import-source!, which the watch
+  ;; calls on the ref's move: that the watch fires is seon.watch-test's proof), with no step of the
+  ;; owner's between: the write-back branch is fast-forwarded and the var's entity is there. A root
+  ;; killed and started again on the same store holds it too (the boot's import), and a commit the
+  ;; write-back tree holds that main lacks is a recorded :effect problem naming both shas.
+  (let [dir (scratch-dir "follow")
+        main (str dir "/main") wb (str dir "/wb")
+        git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                             (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        probe! (fn [d n] (let [f (str d "/src/seon/follow_probe_" n ".clj")]
+                           (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
+                           (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+               :env {"SEON_RUN_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
+        args ["--set" (str ":seon.config.source/root=" (pr-str wb))
+              "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
+        root (atom nil)
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (ts/value-of (:response a)))))
+        has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.follow-probe-" n "/probe))")))
+        import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
+    (try
+      (is (zero? (:exit (sh/sh "git" "clone" "-q" "--local" here main))))
+      ;; the built libraries, probe library and binary are this checkout's: the clone's target/ is its
+      (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
+      (git main "worktree" "add" "-q" "-b" "write-back" wb)
+      (reset! root (ts/start-root! (assoc root0 :args args)))
+      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
+      (is (false? (has-var? 1)) "before the commit main's program lacks the probe")
+      (let [c1 (probe! main 1) r (ask import)]
+        (is (= c1 (git wb "rev-parse" "HEAD")) "the write-back branch was fast-forwarded to main by the read")
+        (is (= {:commit c1} r) (pr-str r))
+        (is (true? (has-var? 1)) "main's program holds the var, while root runs"))
+      (ts/kill-root! @root)
+      (let [c2 (probe! main 2)]
+        (reset! root (ts/start-root! (assoc root0 :args args)))
+        (is (some? (:port @root)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
+        (is (= c2 (git wb "rev-parse" "HEAD")) "the boot's import fast-forwarded it")
+        (is (true? (has-var? 2)) "and main's program holds the var committed while root was down"))
+      (let [theirs (probe! wb 3) ours (probe! main 4) r (ask import)]
+        (is (= theirs (git wb "rev-parse" "HEAD")) "a tree holding a commit main lacks is not moved")
+        (is (re-find (re-pattern (str theirs ".*" ours)) (str (:error r))) (str "the gap names both shas: " (pr-str r)))
+        (is (true? (has-var? 3)) "and is imported as it is"))
+      (finally
+        (when @root (ts/stop-root! @root))
+        (sh/sh "rm" "-rf" dir)))))
 
 (defn tree-of
   "read-source's request for one changed file in a tree of n source files (a new directory under

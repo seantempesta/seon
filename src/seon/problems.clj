@@ -411,9 +411,10 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]
-                                                             [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]}
-  [base head]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]]}
+  ([base head] (caused-split base head (pm/delta-changes base head #{})))
+  ([base head ch]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
         changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
@@ -429,7 +430,7 @@
         changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
                                             (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
-        moved (program/changed-vars base head)
+        moved (pm/changed-vars ch)
         rows (fn [db state forms-of]
                (concat (map #(assoc % :class :dead-citation) (dead-citations db {} (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
@@ -440,12 +441,15 @@
           made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
           messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
       {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
-       :rows (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) made)))})))
+       :rows (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) made)))}))))
 
 (defn caused
-  "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
-  [base head] (into (sorted-set) (:caused (caused-split base head))))
+  "The derived problems the branch at head has that base had not that refuse its done
+  (`caused-split`'s :caused), with the branch's changes since base ch when its caller holds them."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:set :string]]]}
+  ([base head] (into (sorted-set) (:caused (caused-split base head))))
+  ([base head ch] (into (sorted-set) (:caused (caused-split base head ch)))))
 
 ;; ---- runs ------------------------------------------------------------------------
 

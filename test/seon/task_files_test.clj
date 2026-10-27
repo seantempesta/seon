@@ -89,20 +89,24 @@
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
     (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
 
-(deftest a-file-task-reaches-main-through-its-merge-task
-  ;; task seon.task/a-file-task-reaches-main: a work task loaded from its task file is
-  ;; followed by its merge task, as seon.template/with-merge gives e2e's tasks, so a done
-  ;; task's change reaches main (v1: a single task is followed by a merge task)
+(deftest a-file-task-merges-itself
+  ;; task seon.reconcile/a-work-task-merges-itself-through-the-one-gate: a task loaded from a
+  ;; task file is one :whole task (seon.template/request), so no merge task is written and a
+  ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
         _ (spit (java.io.File. dir "demo.edn") file-a)
         load! (fn [db] (d/db-with db (task/load-tx db (root/task-files (str dir)))))
-        db (load! (empty-db))
-        merge-of (fn [db id] (d/q '[:find ?m . :in $ ?w :where [?t :seon.task/id ?w] [?mt :seon.task/needs ?t] [?mt :seon.task/kind :merge] [?mt :seon.task/id ?m]] db id))]
-    (is (some? (merge-of db "demo/parse")) "parse's merge task needs parse")
-    (is (some? (merge-of db "demo/index")) "and index's")
-    (is (= #{"demo/parse-merge"} (:seon.task/needs (task/task db "demo/index"))) "a need on a work task is a need on its merge")
+        db (load! (empty-db))]
+    (is (= :whole (:seon.task/kind (task/task db "demo/parse"))) "parse works and merges itself")
+    (is (nil? (task/task db "demo/parse-merge")) "and has no merge task")
+    (is (= #{"demo/parse"} (:seon.task/needs (task/task db "demo/index"))) "a need stays on the task")
     (is (= [] (task/load-tx db (root/task-files (str dir)))) "an unchanged file writes nothing")
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
-    (let [db (load! db)]
-      (is (= :cancelled (:seon.task/execution (task/task db "demo/index-merge"))) "a removed work task cancels its merge task")
-      (is (= :held (:seon.task/execution (task/task db "demo/parse-merge")))))))
+    (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
+
+(deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
+  ;; every shipped declaration is one :whole task, none a merge task
+  (let [ds (mapcat val (root/task-files))]
+    (is (seq ds))
+    (is (every? #(= :whole (:seon.task/kind %)) ds))
+    (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))

@@ -236,23 +236,30 @@
   (delay (let [f (fn [] nil)]
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
-(def repeats
-  "How many measured calls a measure takes after its warm one; each dimension's minimum over
-  them. A count, never a time: repeats until 20 ms of CPU time took more samples of a fast call
-  and fewer under load, so the minimum a counted dimension reported moved with the machine
-  (task seon.cost/ticks-are-exact). Three: a quiet process counts one call's ticks within a few
-  (seon.source-test's transact row, 406,355-406,362 over 40 samples), and a whole 1,000-tick
-  timer quantum lands on about one sample in 40, which the minimum of three drops."
-  3)
-
 (defn measure
-  "f on args, measured: one warm call, then repeats calls; each dimension's minimum, less what
-  measuring itself costs."
+  "f on args, measured at its steady state: calls until `:seon.config.proofs/cost-settled` calls
+  after the one that allocated the fewest bytes so far allocate no fewer; each dimension's minimum over
+  all of them (bytes are the steady state's; ticks and calls their least, which noise only adds
+  to), less what measuring itself costs. A call allocates more on its first calls (Jolt compiles
+  what it finds hot, caches fill): one warm call left a proof measuring that, with the settled
+  bytes 1,536 to 3,776 B over and runs of 8 equal calls on the way down, so a bound near the
+  estimate went red or green by the draw (task seon.cost/a-call-allocates-the-same-bytes-each-time).
+  A count of calls, never a time. A call that has not settled after
+  `:seon.config.proofs/cost-max-samples` calls is a :seon.cost/unsettled error, thrown: its bytes
+  are not a number to judge."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
-  (once f args)
-  (let [b @baseline
-        best (reduce (fn [best _] (let [m (once f args)] (if best (merge-with min best m) m))) nil (range repeats))]
+  (let [need (config/value :seon.config.proofs/cost-settled)
+        cap (config/value :seon.config.proofs/cost-max-samples)
+        b @baseline
+        best (loop [n 1 best (once f args) low-at 1]
+               (cond (>= (- n low-at) need) best
+                     (>= n cap) (throw (ex-info (str "a call allocated fewer bytes than its least for " (- n low-at) " calls only in " n " calls (cost-settled " need ")")
+                                                (contract/error :seon.cost/unsettled #'seon.cost/measure
+                                                                (str "the call's bytes did not settle in " n " calls: its least so far " (long (:bytes best)) " B was last lowered at call " low-at)
+                                                                {:calls n :least (long (:bytes best))})))
+                     :else (let [m (once f args) n (inc n)]
+                             (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))]
     (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))))
 
 (declare units)

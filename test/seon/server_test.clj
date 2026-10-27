@@ -143,28 +143,41 @@
   ;; the owner, 2026-10-27: "I want the ctx atom to be a mirror of the agents context that we are
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
-  ;; function), and the change is on its branch, in its next @ctx, on its page, and told as the
-  ;; next turn's diff between the two commits (seon.context/world, what a model turn is sent:
-  ;; an outside agent's own context reads are each whole)
+  ;; function), and the change is on its branch, in its next @ctx, on its page, and told as its
+  ;; next read's diff (seon.context/world): the plan's path with its old and new value, each eval
+  ;; it made by its handle, which its own message shows
   (let [plan "Work: f0 returns its input."
-        [first-turn _ swapped page elsewhere on-branch told]
-        (at/in-agent [{:op :context :agent "a1"}
-                      "(def c0 (datahike.api/commit-id (seon.agent/db)))"
-                      (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
-                           " (get-in @ctx [:runs rid :task :seon.task/plan]))")
-                      "(pr-str (seon.repl/render-ctx-hiccup))"
-                      ;; from any namespace, the record by its qualified name (a value the printer
-                      ;; would show as an earlier eval's handle is compared here instead)
-                      (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan]))")
-                      {:op :eval :agent "root"
-                       :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch \"demo/t\")))"
-                                  " [:seon.task/id \"demo/t\"]))")}
-                      (str "(let [c1 (datahike.api/commit-id (seon.agent/db)) t (:content (first (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) agent.a1/c0 c1)))]"
-                           " [(clojure.string/includes? t \":seon.task/plan]\") (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
-                           " (clojure.string/includes? t " (pr-str (pr-str plan)) ")])")])]
+        [first-turn _ swapped page elsewhere on-branch told next-turn]
+        (at/in-agent (fn [{:keys [agent task]}]
+                       [{:op :context :agent agent}
+                        "(def c0 (datahike.api/commit-id (seon.agent/db)))"
+                        (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
+                             " (get-in @ctx [:runs rid :task :seon.task/plan]))")
+                        "(pr-str (seon.repl/render-ctx-hiccup))"
+                        ;; from any namespace, the record by its qualified name (a value the printer
+                        ;; would show as an earlier eval's handle is compared here instead)
+                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan]))")
+                        {:op :eval :agent "root"
+                         :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
+                                    " [:seon.task/id " (pr-str task) "]))")}
+                        ;; what the next read tells of the swap!, between the commit before it and now
+                        (str "(let [ms (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) " (str "agent." agent "/c0") " (datahike.api/commit-id (seon.agent/db))) t (:content (first ms))]"
+                             " {:path (clojure.string/includes? t \":seon.task/plan]\") :old (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
+                             " :new (clojure.string/includes? t " (pr-str (pr-str plan)) ") :handle (clojure.string/includes? t \"result/e\")"
+                             " :record (clojure.string/includes? t \":seon.eval/record\") :agent-id (clojure.string/includes? t \":seon.agent/id\") :tokens (seon.context/messages-tokens ms)})")
+                        {:op :context :agent agent}]))]
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
     (is (true? (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
-    (is (= [true true true] (:value told)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value")))
+    (is (= {:path true :old true :new true :handle true :record false :agent-id false} (dissoc (:value told) :tokens)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value, each eval by its handle, never its record")
+    ;; measured 224 and 225 tokens (630 when an eval was told whole): about 130 the task's page part, its
+    ;; hiccup redrawn with the plan, and 90 the :ctx diff, five evals by their handles and the plan's
+    ;; old and new value; each change told once, as data and as html (the test's task names, a
+    ;; fresh namespace each run, move it by a token or two: bound at 230)
+    (is (>= 230 (:tokens (:value told))) "a swap! is told in what it changed")
+    (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
+    (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
+    (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
+    (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))

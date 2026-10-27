@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.program :as program] [clojure.edn]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.program :as program] [clojure.edn] [clojure.walk :as walk]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -378,8 +378,8 @@
       ;; since the merge base is merged in at the green (seon.turn/work!), so it is shown, never a reason
       merge (assoc :merge (assoc merge :ready (and (empty? reasons) (empty? (:conflicts merge)))))
       ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
-      ;; branch changed), those the judge runs at the run's end, the process tests run only
-      ;; when root asks (DECISIONS, Process tests are not automatic); a run its bound ended leaves
+      ;; branch changed), those the judge runs at the run's end, the process tests run at the
+      ;; judge's merge gate on a checkout (seon.reconcile's :gate); a run its bound ended leaves
       ;; the rest unknown, never red
       tests (assoc :tests (cond-> tests
                             (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
@@ -590,7 +590,9 @@
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
   that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
-  changed}, the empty ones left out; with no c0, the page whole, {:page page}.
+  changed}, the empty ones left out; in the diff the agent's own records, which its conversation
+  already shows, are told by what reads them: an eval by its handle, a turn by its id; with no c0, the page whole,
+  {:page page}.
   Printed whole as one user message: the page and each change told once."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]
@@ -604,18 +606,25 @@
             (let [db0 (at c0) r0 (ctx/build db0 a branch) r1 (ctx/advance r0 db0 db1 branch)
                   p0 (page db0 r0) p1 (page db1 r1)
                   dp (into (array-map) (for [k (distinct (concat (keys p0) (keys p1))) :when (not= (get p0 k) (get p1 k))] [k (get p1 k)]))
-                  dc (into (sorted-map-by #(compare (str %1) (str %2))) (ctx/diff r0 r1))]
+                  ;; an eval's handle is result/<its id> (seon.repl/record!); a path under one is told as any path
+                  told #(cond (not (map? %)) %
+                              (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
+                              (:seon.turn/id %) (:seon.turn/id %)
+                              :else %)
+                  dc (into (sorted-map-by #(compare (str %1) (str %2)))
+                           (for [[p ov] (ctx/diff r0 r1)] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 
 (defn- turn-pages
-  "The model turns of agent entity a's session on db, oldest first, each [tx commit]: the
-  transaction that recorded it, and the commit its request was made on, after its record (so its
-  page holds what it observed), as the page ref it sent names; the newest, recorded and not sent yet,
-  the request now being made on db. A turn that sent nothing was never asked."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int?] [:vector [:tuple :int :any]]]}
-  [db a]
-  (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a :where [?r :seon.run/agent ?a] [?t :seon.turn/run ?r] [?t :seon.turn/origin :model ?tx]] db a))
+  "The turns of agent entity a's session on db made by origin (:model or :outside), oldest
+  first, each [tx commit]: the transaction that recorded it, and the commit its request was made
+  on, after its record (so its page holds what it observed), as the page ref it sent names; the
+  newest, recorded and not sent yet, the request now being made on db. A turn that sent nothing
+  was never asked."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :keyword] [:vector [:tuple :int :any]]]}
+  [db a origin]
+  (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a ?o :where [?r :seon.run/agent ?a] [?t :seon.turn/run ?r] [?t :seon.turn/origin ?o ?tx]] db a origin))
         newest (second (last ts))]
     (vec (keep (fn [[tx t]]
                  (if-let [c (some (fn [ref] (when (= :page (first ref)) (nth ref 3))) (rseq (vec (:seon.turn/sent (d/pull db [:seon.turn/sent] t)))))]
@@ -634,7 +643,8 @@
   session's first request reads the page whole and each later one what changed, each change told
   once, and every request is the one before and what was added. How many earlier parts the budget
   left out goes just after the system prompt. An outside agent's read (origin :outside): the
-  system prompt and the page whole. Answers {:messages
+  system prompt and the page, whole at its first read and after it what changed since the read
+  before. Answers {:messages
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
   records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
   as of t; [:eval id] (with its fold); [:line id], an eval sent collapsed; [:message id]; [:page a
@@ -644,14 +654,19 @@
   [a {:keys [db basis help help-ref printed]}]
   (let [e (:db/id a)
         model? (= :model (:origin basis))
-        since (:tx printed)
+        since (when model? (:tx printed))
         ;; each model turn's page at the commit its request was made on (a turn records itself
         ;; before its request; a read with none recorded, db's), drawn only when printed-run has not
         ;; printed it (a delay)
-        ts (or (not-empty (if model? (turn-pages db e) [])) [[(:max-tx db) (d/commit-id db)]])
+        ;; an outside read is recorded after its request, so it is the newest, on db; it tells
+        ;; what changed since the read before it (the whole page at the first)
+        ts (if model?
+             (or (not-empty (turn-pages db e :model)) [[(:max-tx db) (d/commit-id db)]])
+             (conj (turn-pages db e :outside) [(:max-tx db) (d/commit-id db)]))
         pages (for [[[tx c] prev] (map vector ts (cons nil (map second ts)))
                     :when (or (nil? since) (>= tx since))]
                 [[:page [e prev c]] (delay (world db e prev c)) nil tx])
+        pages (if model? pages [(last pages)])
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
         cache (printed-run items (when model? printed))
