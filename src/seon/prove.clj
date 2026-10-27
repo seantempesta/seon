@@ -168,7 +168,8 @@
         :spawn (if (contract/error? r)
                  (finish st r)
                  (let [st (assoc-in st [:running :runner] (:id r))
-                       [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
+                       ;; mode :main: the plan with no base, since main's own tests did not move from the main it forked
+                       [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode :main} (:names run) (assoc :names (:names run))))]
                    [(assoc-in st [:running :stage] :tests) [m]]))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]
