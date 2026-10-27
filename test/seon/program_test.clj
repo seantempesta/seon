@@ -506,9 +506,51 @@
         process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
         reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
     (is (seq process) "there are process tests")
-    (is (= process reaching) "exactly the tests that start a process reach the code the agent they start runs")
+    (is (every? reaching process) "every test that starts a process reaches the code the agent it starts runs")
+    (is (every? #(get (:defs g) %) (cfg/value :seon.config.source/process-entry)) "and every configured entry var is in the program: a renamed one drops its edge in silence")
     (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
     (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")))
+
+(deftest an-entry-var-redefined-moves-what-starts-a-process-by-an-update-too
+  ;; the edge from a form using a process var to the entry vars (:seon.config.source/process-entry):
+  ;; an update after the entry var is redefined, added or removed agrees with a rebuild
+  (let [in {:env "e" :tree "t" :config {}}
+        with-main (fn [body] (-> (record (empty-db) 'user "(ns seon.main)" 'seon.main (str "(defn -main [] " body ")"))
+                                 (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
+                                         'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
+                                         'app.pt-pe-test "(deftest pure-test (is (= 1 1)))")))
+        db0 (-> (empty-db) (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
+                                   'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
+                                   'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"))
+        db1 (with-main "1") db2 (with-main "2")
+        dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
+        rebuilt (fn [db] (dg (program/reach-graph db nil)))
+        g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]
+    (is (= (rebuilt db1) (dg g1)) "an entry var added: the update agrees with a rebuild")
+    (is (= (rebuilt db2) (dg g2)) "redefined: the same")
+    (is (= (rebuilt db0) (dg (program/reach-update g2 db0))) "removed: the same")
+    (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test that starts a process moves with the entry var")
+    (is (= ((dg g1) 'app.pt-pe-test/pure-test) ((dg g2) 'app.pt-pe-test/pure-test)) "a pure test does not")))
+
+(deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
+  ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
+  ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
+  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on)
+  ;; and by every test that reads files or runs a process; the runtime's pins stay every test's
+  (let [here (System/getProperty "user.dir")
+        in (fx/inputs here)
+        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        a (update-vals (program/graph-index g in nil) :digest)
+        all-tests (set (keys a))
+        moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
+                        (set (for [[t d] a :when (not= d (b t))] t))))]
+    (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
+    (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
+    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's are not: they are in :env")
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto]]
+      (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
+      (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
+    (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and

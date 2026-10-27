@@ -1081,6 +1081,27 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
+(def input-class-namespaces
+  "The namespaces of the :config entries that are a class of files rather than a config key
+  (seon.fx/inputs): :seon.env/* (env-class-readers) and :seon.pin/* (pin-reads). A test that
+  reads files or runs a process takes every one (graph-index)."
+  #{"seon.env" "seon.pin"})
+
+(defn- pin-rules
+  "pins (:seon.config.source/pin-namespaces: prefix -> submodules) as [prefix prefix. [:seon.pin/NAME ...]]
+  rows, matched against a namespace by = and starts-with?."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [pins]
+  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv #(keyword "seon.pin" (last (str/split % #"/"))) ms)])))
+
+(defn- pin-reads
+  "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
+  (pin-rules): a namespace is a prefix or under it. A library used through interop or a :require
+  with no var reference is not seen: the daily full run is the net."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:vector :any]] [:set :qualified-keyword]]}
+  [refs rules]
+  (into #{} (for [r refs :let [n (namespace r)] [p p. ks] rules :when (or (= n p) (str/starts-with? n p.)) k ks] k)))
+
 (defn config-reads
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
   of a seon.config.* namespace, the config's keys), or :all when it takes a whole config map
@@ -1092,9 +1113,9 @@
   declaration, data its class holds, and reads none. Beside the keys, the file classes it reads
   (env-class-readers): the :seon.env/* entries of :config. A test's digest takes the values of
   the keys and classes its reach reads (graph-index), so a key no test reads moves no digest."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol]] [:or [:= :all] [:set :qualified-keyword]]]}
-  [keywords refs nsym]
-  (let [classes (into #{} (keep env-class-readers) refs)]
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol] [:vector :any]] [:or [:= :all] [:set :qualified-keyword]]]}
+  [keywords refs nsym pins]
+  (let [classes (into (pin-reads refs pins) (keep env-class-readers) refs)]
     (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
           (refs 'seon.config/baked-schema-forms) classes
           :else (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
@@ -1108,7 +1129,8 @@
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
-  (let [at (fn [a es] (if scan?
+  (let [pins (pin-rules (cfg/value :seon.config.source/pin-namespaces))
+        at (fn [a es] (if scan?
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
@@ -1124,7 +1146,7 @@
            {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
             :defines (into #{} (keep key-of) (dv e))
             :keywords (set (kv e))
-            :config (config-reads (set (kv e)) refs nsym)}))))
+            :config (config-reads (set (kv e)) refs nsym pins)}))))
 
 (defn reached-by
   "The forms that reach forms ids through a reach graph's reverse edges rev ({form [form ...]}),
@@ -1202,7 +1224,7 @@
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
                         (vec (concat (remove test-ids (keep var-form (named f)))
-                                     (when (or (proc (:id f)) (bin (:id f))) entry-ids)
+                                     (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
                                      (filter rows (:sedges f))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
@@ -1312,7 +1334,7 @@
                        kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))
                        ;; a reader of files or a process (the tree, a root, the binary) can read any class
                        kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
-                             (into kvs (filter (fn [[ck]] (= "seon.env" (namespace ck)))) config)
+                             (into kvs (filter (fn [[ck]] (input-class-namespaces (namespace ck)))) config)
                              kvs)]
                    {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))

@@ -65,6 +65,7 @@
   [:seon.config.source/program-dirs :seon.config.source/program-dirs]
   [:seon.config.source/process-vars :seon.config.source/process-vars]
   [:seon.config.source/process-entry :seon.config.source/process-entry]
+  [:seon.config.source/pin-namespaces :seon.config.source/pin-namespaces]
   [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/main :seon.config.source/main]
