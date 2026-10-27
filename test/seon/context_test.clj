@@ -909,7 +909,9 @@
         ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
         ;; held before the task cites them: a name in a namespace the program does not hold is not cited
         db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
+        ;; every item scored is shown (its cut 0), so these tests read relevance's whole order
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan
+                                              :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
@@ -927,19 +929,54 @@
   (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")
         rel (context/related db te)
         v (context/related-view db rel)]
-    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
-        "the sections nearest first, the section the plan cites left out")
+    ;; ranked by relevance: the words the plan shares with a section (here "is", in its cited
+    ;; section's address and in what-the-work-is-likely...) weigh beside meaning
+    (is (= ["docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" "docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"] (:sections rel))
+        "the sections it most likely needs first, by meaning, its words and references, the section the plan cites left out")
+    (is (every? #(< 0 % 1) (vals (:relevance rel))) "each shown with its chance")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
     (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
-    (is (= [["demo/g: Gets it." [:demo/thing]]] (:functions v))
-        "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
-    (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
-            "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
+    (is (= [[(str "demo/g " (Math/round (* 100.0 ((:relevance rel) 'demo/g))) "%: Gets it.") [:demo/thing]]] (:functions v))
+        "a function a line: its name, its chance, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
+    (is (= (mapv #(str % " " (Math/round (* 100.0 ((:relevance rel) %))) "%: Section " ({"docs/vector.md#the-model" 0 "docs/vector.md#the-pyramid" 2
+                                                                                              "docs/vector.md#fused-with-the-call-graph" 3
+                                                                                              "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" 4} %)
+                        " says one thing.")
+                 (:sections rel))
            (:sections v))
-        "each at summary depth: its address and its lead's first sentence")
+        "each below doc depth a line: its address, its chance and its lead's first sentence")
+    (is (= {:counts {:sections 1} :all "(my.task/related 0): every item scored, with its chance"}
+           (:hidden (context/related-view db (assoc rel :hidden {:sections 1}))))
+        "what the cut hid is counted, with the form that lists it")
+    (is (= ["docs/vector.md#the-model 30%: Section 0 says one thing. And more."]
+           (:sections (context/related-view db {:sections ["docs/vector.md#the-model"] :relevance {"docs/vector.md#the-model" 0.3} :doc #{"docs/vector.md#the-model"}})))
+        "one at doc depth: its whole lead")
     (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
     (is (str/includes? (:more v) "my.agent/related") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
+
+(deftest relevance-is-a-chance-that-follows-the-context
+  ;; seon.context/relevance (docs/vector.md#relevance): each item near a context scored as a chance,
+  ;; best first; the touched items left out, and what is near them lifted (zt)
+  (let [[db te] (sections-near "Make the page say one thing.")
+        qv (vector/vector-of db te)
+        sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
+        score (fn [touched] (into {} (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds touched :touched touched}
+                                                                  #{:section} (constantly true)))))
+        cold (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds #{} :touched #{}} #{:section} (constantly true)))]
+    (is (= 5 (count cold)) "every section near it scored")
+    (is (every? (fn [[_ p]] (<= 0.0 p 1.0)) cold) "each a chance")
+    (is (apply >= (map second cold)) "best first")
+    (is (= (sec "the-model") (ffirst cold)) "the nearest first, all else equal")
+    (let [warm (score #{(sec "what-the-work-is-likely-to-need-as-an-eval")}) cold (into {} cold)
+          gap (fn [m] (- (m (sec "fused-with-the-call-graph")) (m (sec "the-model"))))]
+      (is (not (contains? warm (sec "what-the-work-is-likely-to-need-as-an-eval"))) "a touched item is not offered again")
+      (is (> (gap warm) (gap cold))
+          "the section nearest the touched one gains on the one farthest from it"))))
+
+(deftest a-tokens-words-are-its-identifiers-parts
+  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
+      "split at what is no letter or digit and at a case change, one-letter parts dropped"))
 
 (deftest related-sections-follow-a-rewritten-plan
   ;; related is a render over the plan's vectors (seon.context/related): the plan rewritten and
@@ -949,8 +986,11 @@
         _ (is (= "docs/vector.md#the-model" (first (:sections (context/related db te)))))
         db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
         t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
-        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))]
-    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (context/related db te)))) "the sections follow it: the one nearest the new plan first")
+        before (:relevance (context/related db te))
+        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
+        after (:relevance (context/related db te))
+        nearest "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
+    (is (> (after nearest) (before nearest)) "the sections follow it: the one nearest the new plan more likely needed")
     (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
           se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
           s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
@@ -1054,24 +1094,26 @@
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
-    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
-            "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
-           (:sections rel))
-        "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
+    (is (= ['demo/k 'demo/g] (:functions rel)) "the caller of the cited var (no vector: the graph alone finds it) beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
+    (is (= "docs/vector.md#the-pyramid-c" (first (:sections rel))) "the section naming the cited var (no vector) first")
+    (is (= #{"docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"}
+           (set (rest (:sections rel))))
+        "then the nearest by meaning and words; the cited section left out")
     (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")
     ;; task seon.context/related-weighs-a-neighbour-by-its-rarity: h calls demo/plumb, which twenty
     ;; forms name, and demo/rare, which only h names; by plain counts the two tie and the name put
     ;; plumbing first
     (let [db (d/db-with db (into [{:db/id "h" :form/id "demo/h" :form/refs #{'demo/plumb 'demo/rare}}
-                                  {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
-                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
-      (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
-          "a neighbour few forms name before one every form names")
+                                  {:db/id "pf" :form/id "demo/plumb" :form/src "(defn plumb [])"} {:db/id "pv" :var/name 'demo/plumb :var/kind :fn :var/form "pf"}
+                                  {:db/id "rf" :form/id "demo/rare" :form/src "(defn rare [])"} {:db/id "rv" :var/name 'demo/rare :var/kind :fn :var/form "rf"}]
+                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))
+          fs (:functions (context/related db te))]
+      (is (let [i (.indexOf fs 'demo/rare) j (.indexOf fs 'demo/plumb)] (and (<= 0 i) (or (neg? j) (< i j))))
+          (str "a neighbour few forms name before one every form names (a link weighs by its rarity): " (pr-str fs)))
       ;; a namespace with no file yet: what the agent wrote at its REPL, its new work, shown
       (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
                               {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
-        (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
+        (is (some #{'agent.app/z} (:functions (context/related db te))) "a caller in a namespace with no file is shown")))))
 
 (deftest a-prose-requests-functions-come-from-its-nearest-and-their-neighbours
   ;; task seon.context/a-prose-request-finds-its-functions: a plan citing no defined var (a user's

@@ -76,16 +76,19 @@
     (is (= [] (vector/near (ts/test-db) a 3)) "no vectors: no rows")))
 
 (deftest a-text-is-embedded-once
-  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}
+  ;; each document titled as the model was trained (docs/vector.md#relevance): a form by its var's
+  ;; name, a section by its heading
+  (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"} {:var/name 'x/g :var/form "f"}
                                      {:db/id "s" :seon.section/address "p.md#a" :seon.section/heading "a" :seon.section/text "old"}])
         due (vector/due db "m")
-        mine (filterv #(#{"title: none | text: (defn g [])" "title: none | text: old"} (second %)) due)
+        mine (filterv #(#{"title: x/g | text: (defn g [])" "title: a | text: old"} (second %)) due)
         [f s] (map first mine)
         db (d/db-with db (embedded mine (vectors 3 2 2 768) "m"))]
     (is (and f s) "a form and a section with no vector are due, as the model reads them")
     (is (not-any? (comp #{f s} first) (vector/due db "m")) "embedded, they are not due again")
     (let [db (d/db-with db [[:db/add s :seon.section/text "new"]])]
-      (is (= [[s "title: none | text: new"]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m")))) "a changed text is due again, and only it"))
+      (is (= [[s (vector/document (:seon.section/heading (d/entity db s)) "new")]] (mapv pop (filterv (comp #{f s} first) (vector/due db "m"))))
+          "a changed text is due again, and only it, titled by its heading as the db holds it"))
     (let [[_ _ t] (first (filter (comp #{s} first) mine))
           db (d/db-with db [[:db/add s :seon.section/text "changed while its round was out"]])
           db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) [10] "m"))]
@@ -230,7 +233,7 @@
         main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) [4] "m"))
         branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/src "(defn h [])"}])
         [n db asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
-    (is (= [[:embed ["task: code retrieval | query: the plan rewritten" "title: none | text: (defn h [])"]]] asked)
+    (is (= [[:embed ["task: search result | query: the plan rewritten" "title: none | text: (defn h [])"]]] asked)
         "one request for what the branch wrote: the rewritten plan, as a search asks, and its new form")
     (is (= 2 n))
     (is (= (:tx (first (d/datoms db :eavt e :seon.task/plan))) (:v (first (d/datoms db :eavt e :seon.vector/text-t))))

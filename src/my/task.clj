@@ -61,13 +61,16 @@
 
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the
-  wiki sections, program functions and schema keys nearest it by its references and by meaning,
-  :seon.config.render/related of each (seon.context/related, a render over the plan's vectors),
-  each a line at summary depth with the forms that read one whole and search further
-  (seon.context/related-view). (my.agent/related \"words\" k) refines it by any text."
-  {:malli/schema [:=> [:cat] :map]}
-  []
+  wiki sections, program functions and schema keys it most likely needs, by meaning, words and
+  references (seon.context/related, a render over the plan's vectors), :seon.config.render/related
+  of each at :seon.config.render/relevance-summary or more, each a line with its chance and the
+  forms that read one whole and search further (seon.context/related-view). Given min, the cut is
+  min instead (0: every item scored; nil: the configured cut). (my.agent/related \"words\" k) refines it by any text."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe number?]] :map]]}
+  ([] (related nil))
+  ([min]
   (let [db (agent/db)]
-    (if-let [r (some->> (current) :seon.task/id (pdb/eid db :seon.task/id) (context/related db))]
+    (if-let [r (when-let [te (some->> (current) :seon.task/id (pdb/eid db :seon.task/id))]
+                 (context/related db te (cond-> {} min (assoc :min min))))]
       (or (context/related-view db r) {:nothing "nothing nearer the plan than what it cites"})
-      {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"})))
+      {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"}))))
