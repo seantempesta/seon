@@ -306,7 +306,7 @@
                    " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
                    " ;; the merges tree\n"
                    " :seon.config.source/root \".worktrees/merges\"}\n"))
-      (let [r (clojure.java.shell/sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
+      (let [r (ts/binary-sh "env" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT" (str root "/bin/ports") f)
             text (slurp f)]
         (is (= 0 (:exit r)) (:err r))
         (is (= "7920 7921" (str/trim (:out r))) "it boots, on the ports the file held")

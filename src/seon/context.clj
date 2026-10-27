@@ -180,12 +180,12 @@
         all Long/MAX_VALUE]
     (cond
       (zero? k) nil
-      (nil? (some->> te (vector/vector-of db))) {:not-embedded "this plan has no vector yet: (my.agent/similar \"text\") searches by any text"}
+      (nil? (some->> te (vector/vector-of db))) {:not-embedded "this plan has no vector yet: (my.agent/search \"text\") searches by any text"}
       :else {:nearest (into [] (comp (mapcat (fn [[f _]] (map :var/name (:var/_form (d/entity db f)))))
                                      (remove named) (filter function?) (distinct) (take k)
                                      (map (fn [s] (str s (some->> (:var/doc (d/entity db [:var/name s])) ref/lead-sentence (str ": "))))))
                             (vector/near db te all {:of :form/id :shortlist all :fine-dims all}))
-             :more "(my.agent/similar 'ns/f) or (my.agent/similar \"text\"): more by meaning"})))
+             :more "(my.agent/search 'ns/f) or (my.agent/search \"text\"): more, by meaning, exact words and references"})))
 
 (defn- related-count
   "How many of each kind task entity te's related part shows: :seon.config.render/related through the
@@ -265,6 +265,135 @@
                    [kind (into [] (comp (remove (cited kind)) (remove nil?) (filter (if (= kind :functions) function? any?)) (take k))
                                (vector/rrf [(graph kind) (meaning kind)]))]))))))
 
+(def search-kinds
+  "What my.agent/search finds: a function (:var), a :test, a wiki :section, a :task, a :schema key."
+  #{:var :test :section :task :schema})
+
+(defn- hit-of
+  "Entity e as the hits it is, each [kind name]: the vars (or tests) of a form, a section's address, a
+  task's id, a schema key; the kinds asked only."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:set :keyword]] [:vector [:tuple :keyword :any]]]}
+  [db e kinds]
+  (let [x (d/entity db e)]
+    (cond (:form/id x) (vec (for [v (:var/_form x) :let [kind (if (= :test (:var/kind v)) :test :var)] :when (kinds kind)] [kind (:var/name v)]))
+          (:seon.section/address x) (if (kinds :section) [[:section (:seon.section/address x)]] [])
+          (:seon.task/id x) (if (kinds :task) [[:task (:seon.task/id x)]] [])
+          (:schema/key x) (if (kinds :schema) [[:schema (:schema/key x)]] [])
+          :else [])))
+
+(def ^:private near-attr {:var :form/id :test :form/id :section :seon.section/address :task :seon.task/id :schema :schema/key})
+
+(defn- kind-of
+  "Var v's search kind: :test for a test, else :var."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :keyword]}
+  [db v] (if (= :test (:var/kind (d/entity db [:var/name v]))) :test :var))
+
+(defn- entity-of
+  "The entity that hit [kind name] is on db, or nil: the var, the section, the task or the schema entry."
+  {:malli/schema [:=> [:cat :seon.host/db [:tuple :keyword :any]] [:maybe :int]]}
+  [db [kind n]]
+  (case kind
+    (:var :test) (pdb/eid db :var/name n)
+    :section (pdb/eid db :seon.section/address n)
+    :task (pdb/eid db :seon.task/id n)
+    :schema (pdb/eid db :schema/key n)))
+
+(defn- relevance
+  "The relevance of a score z standard deviations above its query's mean: linear between the
+  [z precision] pairs of table, 0 below the first, the last's past it."
+  {:malli/schema [:=> [:cat [:vector [:tuple :double :double]] :double] :double]}
+  [table z]
+  (let [[z0 p0] (first table) [zn pn] (last table)]
+    (cond (< z z0) 0.0
+          (>= z zn) pn
+          :else (let [[[za pa] [zb pb]] (first (filter (fn [[_ [zb _]]] (<= z zb)) (map vector table (rest table))))]
+                  (+ pa (* (- pb pa) (/ (- z za) (- zb za))))))))
+
+(defn- names-in
+  "The names q holds that name something on db, as seeds of the references: q itself when it is a var's
+  symbol or a keyword; in a text, each qualified symbol that names a var and each qualified keyword."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol :qualified-keyword]] [:vector :any]]}
+  [db q]
+  (cond (keyword? q) [q]
+        (symbol? q) (if (d/entity db [:var/name q]) [q] [])
+        :else (vec (distinct (concat (for [m (re-seq #"[a-z][a-z0-9.*+!?<>=-]*/[a-z0-9.*+!?<>=-]+" q)
+                                       :let [sym (symbol m)] :when (d/entity db [:var/name sym])]
+                                   sym)
+                                     (for [m (re-seq #":[a-z][a-z0-9.-]*/[a-z0-9.-]+" q)] (keyword (subs m 1))))))))
+
+(defn search
+  "What on db is the best match for q (a text; a var's name, whose neighbours it also finds by who
+  calls it, whom it calls and the sections naming it; or a schema key, whose readers and writers it
+  finds), as a vector of hits best first, each {:kind :name :e :score :by :relevance :line :at}:
+  :kind one of search-kinds, :name the var, section address, task id or schema key, :e its entity,
+  :score the weighted reciprocal-rank score of seon.vector/rrf-scores over the rankings below
+  (:seon.config.render/search-weights), :by the set of them it is in (:text :meaning :refs),
+  :relevance (a text hit only, for now) its BM25 z-score through :seon.config.render/search-relevance,
+  :line the line of its text holding a word of q and :at its number. The rankings: the text (seon.docs/tokens:
+  BM25 over q's identifier-split words, kept at z >= :seon.config.render/search-token-z), meaning
+  (seon.vector/near from qv, the query's vector or an entity with one; none when qv is nil) and the
+  references (the callers, callees and naming sections of the names in q: its var, its key, the
+  qualified names and keywords of a text; never of the text hits). Equal scores order by name. A hit
+  with a known relevance below :min is left out. When hits are left out by :k or :min, a last entry
+  {:kind :more :left n :counts {kind n} :more \"...\"} says how many per kind and the call that returns
+  them. opts, all optional: :kinds (a set of search-kinds; #{:var :section} by default: tests, tasks and
+  schema keys on request), :by (a set of :text :meaning :refs, all), :ns (a prefix: only vars and tests
+  whose namespace starts with it), :k (:seon.config.render/search), :min (:seon.config.render/search-min).
+  Plain data, so a caller filters it by Clojure."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol :qualified-keyword]
+                       [:map [:kinds {:optional true} [:set :keyword]] [:by {:optional true} [:set :keyword]]
+                        [:ns {:optional true} :string] [:k {:optional true} pos-int?] [:min {:optional true} :double]]
+                       [:maybe [:or :int [:vector number?]]]]
+                  [:vector [:map [:kind :keyword]]]]}
+  [db q {:keys [kinds by k] prefix :ns minimum :min :as opts} qv]
+  (let [kinds (or kinds #{:var :section})
+        by (or by #{:text :meaning :refs})
+        k (or k (cfg/value :seon.config.render/search))
+        minimum (or minimum (cfg/value :seon.config.render/search-min))
+        weights (cfg/value :seon.config.render/search-weights)
+        table (cfg/value :seon.config.render/search-relevance)
+        text (str q)
+        in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
+        toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (docs/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
+        known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:line :at :z])])) toks)
+        n (* k (cfg/value :seon.config.render/related-near))
+        ;; one ranking by meaning: each kind's nearest (near takes one attribute), merged by cosine, which
+        ;; one query's scores share
+        meaning (if (and (by :meaning) qv)
+                  (into [] (comp (mapcat (fn [[e _]] (hit-of db e kinds))) (filter in-ns?) (distinct))
+                        (sort-by (comp - second) (mapcat (fn [attr] (vector/near db qv n {:of attr})) (sort (distinct (map near-attr kinds))))))
+                  [])
+        seeds (names-in db q)
+        refs (if (by :refs)
+               (into [] (comp (filter in-ns?) (filter (comp kinds first)) (distinct))
+                     (concat (for [s seeds :when (symbol? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
+                             (for [s seeds :when (symbol? s) c (map :var (callees db s)) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])
+                             (for [s seeds :when (symbol? s) e (d/q '[:find [?e ...] :in $ ?n :where [?e :seon.section/names ?n]] db s) :when (kinds :section)]
+                               [:section (:seon.section/address (d/entity db e))])
+                             ;; a schema key: the functions whose code or contract name it
+                             (for [s seeds :when (keyword? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
+               [])
+        rankings (select-keys {:text (mapv (juxt :kind :name) toks) :meaning meaning :refs refs} (seq by))
+        scores (vector/rrf-scores (vec (vals rankings)) (vec (map weights (keys rankings))))
+        in (fn [h] (into #{} (keep (fn [[m r]] (when (some #{h} r) m))) rankings))
+        first-line (fn [[kind n]] (case kind
+                                    (:var :test) (or (some-> (d/entity db [:var/name n]) :var/doc ref/lead-sentence) "")
+                                    :section (or (some-> (d/entity db [:seon.section/address n]) :seon.section/lead) "")
+                                    :task (or (some-> (d/entity db [:seon.task/id n]) :seon.task/plan (str/split #"\n") first) "")
+                                    ""))
+        ranked (sort-by (juxt (comp - val) (comp str key)) scores)
+        rel (fn [h] (some->> (get-in known [h :z]) (relevance table)))
+        kept (remove (fn [[h _]] (let [r (rel h)] (and r (< r minimum)))) ranked)
+        shown (take k kept)
+        left (concat (drop k kept) (filter (fn [[h _]] (let [r (rel h)] (and r (< r minimum)))) ranked))]
+    (cond-> (mapv (fn [[h s]] (let [l (first-line h) r (rel h)]
+                                (merge (cond-> {:kind (first h) :name (second h) :e (entity-of db h) :score s :by (in h)}
+                                         (seq l) (assoc :line l) r (assoc :relevance r))
+                                       (select-keys (known h) [:line :at]))))
+                  shown)
+      (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
+                        :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
+
 (defn related-view
   "What `related` answers, each a line at summary depth: a section its address and its lead's
   first sentence (seon.docs/view; its heading when it has no lead), a function its name and its
@@ -291,7 +420,7 @@
                                             functions))
     (seq schemas) (assoc :schemas schemas)
     true (assoc :read "(:seon.ref/text (my.agent/help \"docs/page.md#anchor\")): one section's text whole; (source ns/f) a function; (my.schema/forms :ns/key) a schema's form"
-                :more "(my.agent/related \"your words\" 10): sections by any text; (my.agent/similar \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it"))))
+                :more "(my.agent/search \"your words\" {:kinds #{:section}}): sections by any text; (my.agent/search \"your words\"): functions and tasks too; (my.agent/callers 'ns/f) or (my.agent/callers :ns/key): who calls it, who operates on it"))))
 
 (declare cited)
 

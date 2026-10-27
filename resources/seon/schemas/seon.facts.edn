@@ -208,7 +208,9 @@
  ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
  ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
  :seon.task/cause [:map [:stall [:map [:agent :keyword] [:run :seon.run/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
-                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]
+                                 ;; the api's open asks ([rid kind agent]) and the test service's state (seon.prove/state-view) when it stalled
+                                 [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]

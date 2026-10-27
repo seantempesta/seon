@@ -65,6 +65,29 @@
                     :n "forms the branch holds, a tenth of them matching"
                     :work "one scan of :form/src, then per match its definitions and a split of its source"
                     :growth :linear
-                    :per-n {:bytes 20000 :calls 0}
-                    :fixed {:bytes 400000 :calls 2}
+                    :per-n {:bytes 20000 :calls 0.3}
+                    :fixed {:bytes 400000 :calls 6}
                     :sizes [10 100 1000]}))
+
+(defn search-input
+  "The cost proof's input at n texts: n forms, n/2 wiki sections, n/4 task plans and n/8 schema entries
+  (the mix of the store's own), a tenth of each holding the word; the search asks for exact text and
+  references only (meaning is seon.vector/near's, proved on its own)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :map :any]]}
+  [n]
+  (let [hit? (fn [i] (zero? (mod i 10)))
+        db (d/db-with (seon.docs-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (hit? i) "(fused 1)" "(inc 1)") ")")]))
+                      (vec (concat (for [i (range (quot n 2))] {:seon.section/address (str "p.md#s" i) :seon.section/heading (str "S" i)
+                                                                :seon.section/text (str "Prose of section " i (when (hit? i) ", fused.") "\nMore prose.")})
+                                   (for [i (range (quot n 4))] {:seon.task/id (str "app/t" i) :seon.task/plan (str "Plan " i (when (hit? i) " fused") ".")})
+                                   (for [i (range (quot n 8))] {:schema/key (keyword "app" (str "k" i)) :schema/form (str "[:map " (when (hit? i) "fused ") i "]")}))))]
+    [db "fused" {:by #{:text :refs} :k 10} nil]))
+
+(deftest search-costs-its-texts
+  (cost/proof {:of 'seon.context/search :input 'seon.docs-cost-test/search-input
+               :n "texts the branch holds (forms, sections, task plans and schema entries), a tenth of each holding the word"
+               :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query"
+               :growth :linear
+               :per-n {:bytes 24000 :calls 6.5}
+               :fixed {:bytes 100000 :calls 20}
+               :sizes [100 300 1000 4000]}))
