@@ -482,11 +482,16 @@
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id)
-                                     run (task/run-id id (inc (count (get-in idx [:by-task id]))))]]
+                                     run (task/run-id id (inc (count (get-in idx [:by-task id]))))
+                                     ;; a run a root restart lost was ended by nobody: an outside agent's
+                                     ;; (attach) is the outside agent's again, not the task's own model
+                                     newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
+                                     env (cond-> (desired-env t)
+                                           (and (= :lost (:seon.run/status newest)) (outside? (:seon.run/env newest))) (assoc :model "outside"))]]
                  ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
-                   {:op :wake :task id :env (desired-env t) :run run :agent (:seon.run/agent p)}
-                   {:op :spawn :task id :env (desired-env t) :run run}))]
+                   {:op :wake :task id :env env :run run :agent (:seon.run/agent p)}
+                   {:op :spawn :task id :env env :run run}))]
     (vec (concat reaps kills judged gates octopus spawns))))
 
 ;; ---- held for root, and the root causes at quiescence -----------------------------------

@@ -123,6 +123,11 @@
     (is (= [] (actions-for db)) "nor when the task's model changes: the run is the outside agent's"))
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :killed :model "outside")))]
     (is (= [(spawn "x" 2 :model "m1")] (actions-for db)) "its next run is the task's own model, not outside"))
+  ;; agent-repl, 2026-10-27: a root restart (bin/update) lost an attached run, and its next run took
+  ;; the task's own model, none configured: it ended "no model provider" and held the task. A run a
+  ;; restart lost was ended by nobody, so its successor is the outside agent's again
+  (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :lost :model "outside")))]
+    (is (= [(spawn "x" 2 :model "outside")] (actions-for db)) "a lost outside run's next run is outside"))
   (testing "root cannot take back a task that is done: merged work keeps :running"
     (let [db (db-of [(decl "z")] :extra (run "z" 1 :merged :outcome :green :results {(t "z") :pass}))
           {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
