@@ -99,11 +99,11 @@
       (seq not-lost) (assoc :not-lost not-lost))))
 
 (defn gate!
-  "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a
-  root, the binary: never run automatically, DECISIONS, Process tests are not automatic) run on
-  the gate
-  checkout (:seon.config.source/gate-checkout). Before the merge task's run is judged,
-  its deferred tests run before it merges and a red holds it (:seon.task/gate?). A run
+  "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
+  gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges
+  with nobody asking (seon.reconcile's :gate), so the :seon.task/gate? this sets is no longer
+  read; it stays until THE PLAN step 0.7 has exercised the gate (task
+  seon.proofs/prove-is-the-one-runner). A run
   that already merged unasked (its open :unrun problem) has them run now, through the
   :tests effect on the merges branch's head, which holds its change; their results are
   recorded on it (:seon.run/deferred-results), which closes the problem when each passed.

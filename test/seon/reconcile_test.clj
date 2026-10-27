@@ -564,14 +564,14 @@
            (actions-for (db-req (concat (run "a" 1 :done) (run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass})))))
         "and the merge task's green run is the merge")))
 
-(deftest a-merge-with-deferred-tests-is-gated-only-when-root-asks
-  ;; root's rulings (2026-10-22/23) and the owner's (2026-10-23: process tests never run
-  ;; automatically): with root's go on the task (my.root/gate!, :seon.task/gate?) the process
-  ;; tests a branch's change reaches run before its merge, on a worktree of the root's declared
-  ;; gate checkout, and gate it like proofs: unrun, the member is gated first (alone); all
-  ;; passing, it merges; a red, or a run that could not run them (:error), is refused as a red
-  ;; proof is, never hidden. Unasked, or with no gate checkout declared, it merges with them
-  ;; unrun (an open problem until they run)
+(deftest a-merge-with-deferred-tests-is-gated-with-nobody-asking
+  ;; the owner's ruling (2026-10-27: process tests the change reaches run automatically at the
+  ;; judge; it replaces 2026-10-23's "never automatically" for merges): the process tests a
+  ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
+  ;; checkout, with no my.root/gate! and no :seon.task/gate?, and gate it like proofs: unrun, the
+  ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
+  ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
+  ;; (a root with no source), it is held, saying so: never merged with them unrun
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
         asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
         judged (fn [root go & kv] (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
@@ -585,8 +585,13 @@
     (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :fail}))))
     (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
     (is (str/includes? (:problem (first (judged gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
-    (is (= octopus (judged gate nil)) "unasked: it merges, the deferred tests unrun")
-    (is (= octopus (judged nil asked)) "no gate checkout declared: it merges, the deferred tests unrun")))
+    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate nil))
+        "nobody asked: gated all the same")
+    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail})))
+        "and a branch that breaks a process test is not merged, with no gate! called")
+    (let [held (judged nil asked)]
+      (is (= [:hold] (map :op held)) "no checkout to run them on: held, never merged with them unrun")
+      (is (str/includes? (:problem (first held)) "no checkout to run them on") (pr-str held)))))
 
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,

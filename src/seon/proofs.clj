@@ -188,6 +188,15 @@
                    :let [r (read (result-path dir dg false))]]
                [dg (verdict dg g (when (and r (not (green? r))) r))]))))
 
+(defn status-at
+  "The verdict dir holds at digest dg, as a status: :pass (a green, not flaky), :fail (a red:
+  flaky, or a red alone, which verdicts reads as no result to rerun), or nil (none)."
+  {:malli/schema [:=> [:cat :string :string] [:maybe [:enum :pass :fail]]]}
+  [dir dg]
+  (let [v (get (verdicts dir [dg]) dg)]
+    (cond (and v (green? v)) :pass
+          (or v (.isFile (java.io.File. ^String (result-path dir dg false)))) :fail)))
+
 (defn stored-results
   "{digest result} of the results db holds at digests (:seon.proof/ facts, which the test service
   records, seon.prove/result-tx): one AVET seek per digest, and one seek of its status's history
@@ -230,6 +239,17 @@
   (vec (for [[k r] ran :when (and (:digest r) (not (:flaky r)) (not (:unreported r)))
              :let [w (write! (result-file dir r))] :when (:seon.error/type w)]
          {:key k :message (:seon.error/message w)})))
+
+(defn left-out
+  "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a
+  process of their own: a root, an agent, a fork, the binary; a shell call is none:
+  seon.program/reach-index's :process?), but none when the run asks for them (asked?: it names
+  their namespaces, or it is a merge's verification) and never one of proofs (DECISIONS, Process
+  tests are not automatic). The one filter bin/test's plan (test-runner/plan-of) and an agent's
+  (seon.agent/run-selection) apply."
+  {:malli/schema [:=> [:cat [:sequential :any] [:set :any] :boolean [:set :any]] [:set :any]]}
+  [ks process asked? proofs]
+  (if asked? #{} (into #{} (filter #(and (contains? process %) (not (contains? proofs %)))) ks)))
 
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},

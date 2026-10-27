@@ -403,6 +403,13 @@
   touch to move the reach graph (seon.fork-server's :fork)."
   #{"form" "var" "ns" "method" "impl" "schema" "schema.file" "db" "db.install" "db.type" "db.cardinality" "db.unique"})
 
+(defn moves-program?
+  "Whether a commit's resolved ops change the program (an attribute of attr-namespaces): what
+  moves the reach graph a fork hands its agent (seon.fork-server) and starts a run of main's
+  tests (seon.prove)."
+  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  [ops] (boolean (some (fn [[_ _ a]] (and (keyword? a) (attr-namespaces (namespace a)))) ops)))
+
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
   [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
