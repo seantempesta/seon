@@ -3,10 +3,15 @@
 # a first commit) with every changed and untracked unignored file added, in an index of its own
 # (the repository's index untouched). bin/build records it beside the binary (target/seon.tree);
 # bin/check compares it with that record before it runs the binary. seon.fx/tree-id computes the
-# same in Clojure. Prints nothing and exits 1 when git cannot name it.
+# same in Clojure. Top-level paths :seon.config.source/tree-excludes names (notes/: no read and no
+# build reads them) are left out, read from the shipped resources/seon/config/default.edn.
+# Prints nothing and exits 1 when git cannot name it.
 ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
+CFG=$(dirname "$0")/../resources/seon/config/default.edn
+EX=(); [[ -f $CFG ]] && EX=($(sed -nE 's#^ :seon\.config\.source/tree-excludes \[(.*)\].*#\1#p' "$CFG" | tr -d '"'))
 idx=$(mktemp -u)
 trap 'rm -f "$idx"' EXIT
 if git -C "$ROOT" rev-parse --verify --quiet HEAD > /dev/null; then GIT_INDEX_FILE=$idx git -C "$ROOT" read-tree HEAD || exit 1; fi
-GIT_INDEX_FILE=$idx git -C "$ROOT" add -A || exit 1
+(( $#EX )) && { GIT_INDEX_FILE=$idx git -C "$ROOT" rm -r --cached -q --ignore-unmatch -- $EX || exit 1 }
+GIT_INDEX_FILE=$idx git -C "$ROOT" add -A -- . ${^EX/#/:(exclude)} || exit 1
 GIT_INDEX_FILE=$idx git -C "$ROOT" write-tree
