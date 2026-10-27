@@ -182,6 +182,19 @@
                  :when r]
              [dg r])))
 
+(defn last-ms
+  "{test ms} of tests: each one's newest recorded :seon.proof/ms, over every digest it ran at (one
+  AVET seek a test, :seon.proof/test indexed): what orders a run's deal of tests into shards, never
+  what a test proves. A test with no result is left out."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]}
+  [db tests]
+  (into {} (for [t (distinct tests)
+                 :let [ms (->> (d/datoms db :avet :seon.proof/test t)
+                               (keep #(first (d/datoms db :eavt (:e %) :seon.proof/ms)))
+                               (sort-by :tx) last :v)]
+                 :when ms]
+             [t ms])))
+
 (defn status-of
   "The status a result ({:pass :fail :error}) records: :error when an assertion errored, :fail when one
   failed, else :pass."

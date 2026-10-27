@@ -79,9 +79,8 @@ setup() {
     mkdir -p "$WT/target/home/.jolt"
     for e in "$MAIN"/target/*(N); do
       if [[ ${e:t} == prove ]]; then
-        # prove's runs are logs of the main tree's runs, not this worktree's; only the measured ms
-        # that order a run's shards (test-runner's ms-dir) are the checkout's to start from
-        [[ -d $e/ms ]] && { mkdir -p "$WT/target/prove"; cp -cR "$e/ms" "$WT/target/prove/" }
+        # prove's runs are logs of the main tree's runs, not this worktree's: none is cloned
+        :
       else
         [[ ${e:t} == (runs|check|tmp|cache|home) ]] || cp -cR "$e" "$WT/target/"
       fi
