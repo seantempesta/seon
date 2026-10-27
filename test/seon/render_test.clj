@@ -1108,15 +1108,6 @@
     (is (re-find #"<details[^>]* open" opened) (str "opened: drawn open, its value with it: " opened))
     (is (> (count opened) (count closed)))))
 
-(deftest the-walk-is-called-only-where-slice-5-says
-  ;; root, 2026-10-26: the unit walk (seon.render/walk) laid out root's page, a task's and /walk/<eid> until
-  ;; every page was its parts (task seon.render/every-page-is-its-parts), which emptied this list: the walk
-  ;; is gone, and nothing calls it
-  (is (nil? (resolve 'seon.render/walk)) "the walk is not defined")
-  (is (nil? (find-ns 'seon.render.system)) "nor root's second layout")
-  (let [forms (seon.program/live-forms (src-program))]
-    (is (= [] (vec (sites forms #{'seon.render/walk} (constantly true)))) "the walk's callers: none")))
-
 (deftest a-dead-agents-page-renders-and-never-waits
   ;; root, 2026-10-26: no page waits on a process. A running agent's page is drawn from its branch until
   ;; its process answers with its parts; one whose process ended, or whose ask was answered with why,

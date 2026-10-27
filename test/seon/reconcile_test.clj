@@ -351,6 +351,20 @@
       (is (= {:op :kill :id :a1 :ended true} (:req (first outs))) "its agent is stopped")
       (is (some #(= "demo/a#1" (:seon.run/id %)) (get-in (second outs) [:req :req :tx-data])) "and its end judged from that one answer"))))
 
+(deftest a-run-is-judged-with-how-far-behind-main-its-branch-was
+  ;; the wiring of gap 7: the writer's :theirs reaches the run as :seon.run/behind, and the done rule says so
+  (let [db (db-of [(decl "a")] :extra (run "a" 1 :running))
+        flight {:act {:run "demo/a#1" :task "demo/a" :env {:branch :demo/a}} :agent :a1}
+        st {:db db :boot "boot-1" :rid 0 :pending {} :flights {"demo/a#1" (assoc flight :step :diffed :results {})}}
+        diff (fn [theirs] {:ok true :db db :base db :base-t (:max-tx db) :ours [] :theirs theirs :conflicts 0 :unmerged [] :uncontracted [] :caused [] :vars #{}})
+        end-of (fn [theirs] (let [[_ outs] (#'r/advance st "demo/a#1" :diffed (diff theirs))]
+                              (some #(when (= "demo/a#1" (:seon.run/id %)) %) (get-in (second outs) [:req :req :tx-data]))))]
+    (is (= 4 (:seon.run/behind (end-of 4))) "behind by 4 keys")
+    (is (not (contains? (end-of 0) :seon.run/behind)) "not behind, nothing recorded")
+    (let [ended (d/db-with db [[:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :running :ended] {:seon.run/id "demo/a#1" :seon.run/outcome :green :seon.run/behind 4}])
+          verdict (first (filter #(= :verdict (:op %)) (actions-for ended)))]
+      (is (= {:reason :behind :behind 4} (first (:reasons verdict))) "the verdict told to the session leads with how far behind it was"))))
+
 (deftest a-refused-diff-ends-the-run-with-its-cause
   ;; the writer refuses to diff the branch: the run is not judged on facts nobody
   ;; measured (no changed keys, no gaps); its agent is stopped and the run ends with the
@@ -604,28 +618,23 @@
   ;; the owner's ruling (2026-10-27: process tests the change reaches run automatically at the
   ;; judge; it replaces 2026-10-23's "never automatically" for merges): the process tests a
   ;; branch's change reaches run before its merge, on a worktree of the root's declared gate
-  ;; checkout, with no my.root/gate! and no :seon.task/gate?, and gate it like proofs: unrun, the
+  ;; checkout, with no one asking for it, and gate it like proofs: unrun, the
   ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
   ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
   ;; (a root with no source), it is held, saying so: never merged with them unrun
   (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        asked {:seon.task/id "demo/a-merge" :seon.task/gate? true}
         judged (fn [root go & kv] (actions-for (mdb [(decl "a")] :extra (concat (run "a" 1 :done)
                                                                              (apply run "a-merge" 1 :ended :outcome :green :results {(t "a") :pass}
                                                                                     :deferred ['seon.root-test/boots] kv)
                                                                              (when go [go])
                                                                              (when root [root])))))
         octopus [{:op :octopus-merge :run "demo/a-merge#1" :members [{:run "demo/a-merge#1" :task "demo/a-merge"}]}]]
-    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate asked)))
-    (is (= octopus (judged gate asked :deferred-results {'seon.root-test/boots :pass})))
-    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :fail}))))
-    (is (= [:hold] (map :op (judged gate asked :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
-    (is (str/includes? (:problem (first (judged gate asked :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
-    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate nil))
-        "nobody asked: gated all the same")
-    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail})))
-        "and a branch that breaks a process test is not merged, with no gate! called")
-    (let [held (judged nil asked)]
+    (is (= [{:op :gate :run "demo/a-merge#1" :task "demo/a-merge" :tests ['seon.root-test/boots]}] (judged gate nil)))
+    (is (= octopus (judged gate nil :deferred-results {'seon.root-test/boots :pass})))
+    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :fail}))))
+    (is (= [:hold] (map :op (judged gate nil :deferred-results {'seon.root-test/boots :error}))) "a run that could not run them is no pass")
+    (is (str/includes? (:problem (first (judged gate nil :deferred-results {'seon.root-test/boots :fail}))) "seon.root-test/boots"))
+    (let [held (judged nil nil)]
       (is (= [:hold] (map :op held)) "no checkout to run them on: held, never merged with them unrun")
       (is (str/includes? (:problem (first held)) "no checkout to run them on") (pr-str held)))))
 
@@ -688,6 +697,42 @@
   (testing "root's merge found main moved: the merge task's next run is a new agent; no catch-up"
     (let [db (mdb [(decl "a")] :extra (concat (run "a" 1 :done) (run "a-merge" 1 :behind :outcome :green)))]
       (is (= [(mspawn "a-merge" 2)] (actions-for db))))))
+
+(deftest a-merge-behind-again-and-again-is-held-for-root
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind run is green, so max-merge-turns
+  ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
+  ;; behind runs of one merge task the next behind answer holds the task for root with the evidence
+  (let [cap (cfg/value :seon.config.merge/max-behind)
+        answer (fn [prior]
+                 (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done)
+                                                             (mapcat #(run "add-merge" % :behind :outcome :green) (range 1 (inc prior)))
+                                                             (run "add-merge" (inc prior) :ended :outcome :green :results {(t "add") :pass})))
+                       [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+                       asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
+                       behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s) since the branch's merge base: merge main into the branch first" {:tx 9 :behind 2})
+                       [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [behind]}})
+                       tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
+                       db' (d/db-with db tx)]
+                   [(task/task db' "demo/add-merge") (task/run db' (str "demo/add-merge#" (inc prior)))]))]
+    (let [[tk run'] (answer (dec cap))]
+      (is (= :running (:seon.task/execution tk)) "under the bound, behind runs again")
+      (is (= :behind (:seon.run/status run'))))
+    (let [[tk run'] (answer cap)]
+      (is (= :held (:seon.task/execution tk)) "past it, the task is held for root")
+      (is (re-find #"behind" (:reason (:seon.task/failure tk))))
+      (is (= :closed (:seon.run/status run')))
+      (is (= :seon.merge/behind (:seon.error/type (:seon.run/error run'))) "with the writer's evidence"))))
+
+(deftest a-branch-behind-main-is-told-so-first
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
+  ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the run
+  ;; records how far behind it was judged
+  (let [in {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :behind 3}]
+    (is (= [{:reason :behind :behind 3} {:reason :proof-unknown :symbol 'p/a}] (r/done-explain in)) "behind leads")
+    (is (= "behind 3; proof-unknown p/a" (r/explain-text (r/done-explain in))))
+    (is (= [{:reason :proof-unknown :symbol 'p/a}] (r/done-explain (dissoc in :behind))) "a branch not behind is judged as before"))
+  (is (= 3 (:seon.run/behind (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 3} 5 5))) "the end records it")
+  (is (not (contains? (task/end-members {:outcome :green :results {} :uncontracted #{} :behind 0} 5 5) :seon.run/behind)) "none behind records nothing"))
 
 (deftest design-may-leave-its-proofs-red
   ;; a design step's work is the plan: done only when the plan differs from the one it began with

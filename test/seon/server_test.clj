@@ -166,6 +166,26 @@
     (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))))
 
+(deftest an-outside-agents-repl-answers-plainly
+  ;; THE PLAN 0.7's first attempt (2026-10-27) found four things in an outside agent's REPL: a
+  ;; missed help address answered the whole help page (10k characters), (source ..) of a name that
+  ;; is no var failed inside its own contract, and after (in-ns 'my.task) the next eval had no
+  ;; source, as clojure.repl's names stay referred at a REPL that switches namespaces
+  (let [[miss no-ns not-a-name a-class switched sourced] (at/in-agent ["(my.agent/help \"a-section-that-is-not-there\")"
+                                                                      "(source 'no.such.ns/missing-var)"
+                                                                      "(source :kw)"
+                                                                      "(source 'java.lang.String)"
+                                                                      "(in-ns 'my.task)"
+                                                                      "(source my.agent/help)"])]
+    (is (< (count (:text miss)) 1500) "a missed help address names what it did not find, not the help page")
+    (is (= #{:no-section :nearest :read-one} (set (keys (:value miss)))))
+    (doseq [[what r] [["no such namespace" no-ns] ["not a name" not-a-name] ["a class" a-class]]]
+      (is (nil? (:ex r)) (str "source of " what " answers, it does not fail: " (pr-str (:ex r)))))
+    (is (clojure.string/includes? (str (:text no-ns)) "names no namespace") "a plain no-such-var answer")
+    (is (clojure.string/includes? (str (:text not-a-name)) "Source not found") "and a name that is none")
+    (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
+    (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
+
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
@@ -217,3 +237,22 @@
     (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
+
+(deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
+  ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
+  ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
+  ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
+  ;; process's exact counts (seon.profile/measure!), the page draws the contracted calls of seon.context/page
+  (let [[reads]
+        (at/in-agent (fn [{:keys []}]
+                       [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
+                             " m (fn [] (let [v (volatile! nil)]"
+                             "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
+                             "           {:ticks (:ticks @v) :bytes (:bytes @v)"
+                             "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
+                             "  (vec (repeatedly 5 m)))")]))
+        later (rest (:value reads))]
+    (is (= 5 (count (:value reads))))
+    (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
+    (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
+    (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))

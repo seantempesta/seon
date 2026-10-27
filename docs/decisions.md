@@ -20,6 +20,30 @@ Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tes
 ### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
 Worktrees run plain `bin/prove` and report ready; the merge session merges a batch and runs one `bin/build` and one `bin/prove --merge`, because per-branch fast-forwards after a branch's own `--merge` are about N² process-test runs. Stated: AGENTS §3, docs/merging.md#a-branch-proves-its-in-process-tests-mains-batch-runs-the-process-tests-once.
 
+### A known problem keeps its branch out; an unknown one takes its test out (owner, 2026-10-27)
+"don't merge if we know there's a problem unless it's like this test which indicates we don't know what to fix and everyone is likely fine while we work on this separately. Just remove the test temporarily if we need to." A red a branch caused keeps that branch out of the batch; a red with an unknown cause the batch did not make takes its test out, in a commit naming the task that owns it with the evidence, and the owner puts it back with the fix. Stated: docs/merging.md.
+
+### No test digests the whole tree; the daily full run is the net (owner, 2026-10-27)
+"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry; the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
+
+### A lock-free system (owner, 2026-10-27)
+"I want a lock free system. This worktrees hack is temporary." No lock orders heavy runs; load stays down by not running the same work twice. Stated: AGENTS §2, docs/merging.md.
+
+### The wiki is the one home; every function, schema entry and test cites its section (owner, 2026-10-27)
+"we should be using the wiki for everything so it gets better because that's what agents are pulling into their context … This means don't duplicate what's in the wiki." A docstring says what its var is and cites the section for the mechanism; a missing citation is shown to the agent (an attention class), never a refusal of its work. Claude sessions' scratch is claude_scratch/, never system docs. Stated: AGENTS §7.
+
+### Test results are a few facts through one writer (owner, 2026-10-27)
+"one writer for sure"; "never 300k new records per test run, in the database, just the essentials." Results go to the standing root's writer; a reused test writes nothing; per-function cost is an aggregate written when it moves; a run's detail is one value out of line. Stated: docs/proofs.md once tests-are-facts merges.
+
+### An eval records; what is derived for the agent is a render (owner, 2026-10-27)
+"I want the eval system to stay rock solid and for it to be focused on executing code and instrumenting it … Info that is derived and made for the agent or the user should go into the hiccup", and of seon.turn/observe: "you shouldn't be marking if something has been observed you just record the data". The turn's derived reads are views over facts, an eval's tests never block its loop, and observe goes. Stated: docs/render.md, docs/turn.md as each merges.
+
+### A relevance % means "worth reading" (owner, 2026-10-27)
+"I really need a ranking ideally with relevancy % that we can do cutoffs for … showing everything isn't working"; "I want accuracy more than speed." seon.context/relevance is calibrated on judged useful/noise labels; the render's related part and search cut on it. Stated: docs/vector.md.
+
+### What a Claude session sees through MCP is what a model is sent (owner, 2026-10-27)
+"making the results match the agents context we are generating. I want them to see all the errors and problems and for us to fix them at their source not patch things." One producer for the model's turn messages and the seon MCP answers. Stated: docs/agent.md once it merges.
+
 ### Unused is not dead (owner, 2026-10-27)
 "Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
 
@@ -32,8 +56,6 @@ Asked which default tonight's runs use, the owner chose one whole task over desi
 "How about the same $30 budget overnight. Only use paid runs though when we legitimately have solved the known problems with our context. Garbage in = garabage out and don't waste money if it's clearly got problems fix the problems. And not in a patch and hack the reds to green. But understand the scope of the real problem and we solve it at the root". A paid run starts only after a free audit of each request's context (`seon_context`, read by a reviewer that has not seen the work) finds none of the known problems (notes/known-context-problems-2026-10-26.md on jolt/work-text-and-requests); a problem found is fixed at its producer. A wait is never capped by a timer: paid runs wait on the hang fixes. Stated in: docs/plan.md (Now).
 ### Correctness and stability first, then efficiency to a stated bound; no regression without a reason (owner, 2026-10-26 night)
 "dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (Every change earns its place).
-### Main's merge verification goes first, as a fact (owner, 2026-10-26 night)
-Asked whether main's verification goes first, the owner chose "main first, as a fact": while main's verification runs, a worktree's heavy run waits on it, a dependency the tool reads (a lock main's run holds), never a rule to remember and never a timer. Stated in: AGENTS.md §2 (Heavy runs); the tool on its way (full-run-reds).
 ### The agent's view is the render of ctx; "page" names a wiki page only (owner, 2026-10-26 night)
 "Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: jolt/render-walk and build 4; AGENTS.md §7a once both merge.
 ### The render of ctx never repeats what an eval shows (owner, 2026-10-26 night)

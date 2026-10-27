@@ -1,0 +1,7 @@
+;; Seon's own source, read into the program (seon.source, docs/source.md).
+{;; a source file the running image cannot analyze (a form names a var the image holds as private, or not
+ ;; at all: the image is an older generation than the tree): the files the import was asked for, and the
+ ;; analyzer's words. Recorded as a :platform error on main (seon.root/platform-tx); the import changes
+ ;; nothing and records no digest, so the next batch tries again; bin/update brings the image up to date.
+ :seon.source/unanalyzable [:and :seon.error/base [:map [:seon.error/type [:= :seon.source/unanalyzable]]
+                                                     [:files [:vector :string]]]]}
