@@ -124,8 +124,8 @@
      :n "tasks on main"
      :work "the index moved by the one status datom (seon.reconcile/index over the watched datoms that differ), never one step per task"
      :growth :constant
-     :per-n {:calls 40 :bytes 2000000}
-     :sizes [50 200 800]}))
+     :per-n {:calls 4 :bytes 16000000}
+     :sizes [25 50 100]}))
 
 (defn agent-of
   "The input of size n: the test store's seed with root, its agent a1 and n evaluations of a1 (one
