@@ -151,10 +151,8 @@
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view :root}))
           ;; what root reads: its page's other face, as an agent's /debug is
           (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
-          ;; every page is an entity's (seon.render/walk): an agent's by its id in root's boot, any
-          ;; entity's by its id
+          ;; an agent's page, the render of its ctx, by its id in root's boot
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (subs uri 7))}))
-          (and (= m :get) (re-matches #"/walk/\d+" uri)) (html-response (ask! ch {:op :page :view (view-of (subs uri 6))}))
           ;; a page's list end scrolled into view: its next rows
           (and (= m :post) (= uri "/more")) (do (a/>!! ch {:op :more :view (view-of (get q "view"))}) {:status 204 :headers {}})
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open

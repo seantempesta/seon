@@ -31,44 +31,15 @@
                     [:unit {:optional true} [:maybe :string]]
                     ;; an eval row's cuts opened on the page, each its continuation form as EDN text (seon.web/open-form read it)
                     [:opened {:optional true} [:set :string]]]
- ;; ---- the walk (seon.render/walk): an entity and its units one hop away, the default view of any entity ----
- ;; a schema whose values are prose ({:seon.render/prose true}: a plan, a message, a reply) renders as markdown
- ;; what a node is: an entity, or a value of the walked entity; what a citation reached
- ;; (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
+ ;; what a citation reached (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
  :seon.render/kind [:enum :entity :value :var :namespace :task :section :file :unresolved]
- ;; an entity schema's units whose entities are part of its page (a schema property): their units
- ;; are walked one hop more and join the page's (an agent's run: its task, turns and messages)
- :seon.render/parts [:vector :keyword]
- :seon.render/value :any
- ;; the schema of a node's value: its entity schema, or a value's attribute (absent: no entity schema names it)
+ ;; the schema a value is drawn by: its entity schema, or a value's attribute
  :seon.render/schema :qualified-keyword
- :seon.render/eid pos-int?
- :seon.render/attr :keyword
- ;; where a node came from: the entity and the attribute that reached it
- :seon.render/from [:map [:seon.render/eid :seon.render/eid] [:seon.render/attr :seon.render/attr]]
- ;; the transaction of the datom that linked a neighbour to the entity walked: the order it was written
- :seon.render/tx pos-int?
- ;; the db a node was read from: its index in the dbs a page reads (main 0, an agent's branch 1)
- :seon.render/db nat-int?
- ;; an entity, or a value of the walked entity (a unit that is no entity: its schema its attribute)
- ;; a row a page does not show, listed from its ref's index alone (seon.render/one's limit): counted, never read
- :seon.render/listed :boolean
- :seon.render/node [:map [:seon.render/kind :seon.render/kind] [:seon.render/value :seon.render/value] [:seon.render/listed {:optional true} :boolean]
-                     [:seon.render/schema {:optional true} :seon.render/schema] [:seon.render/eid :seon.render/eid]
-                     [:seon.render/from {:optional true} :seon.render/from] [:seon.render/tx {:optional true} :seon.render/tx]
-                     [:seon.render/db {:optional true} :seon.render/db]]
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
  ;; part (seon.render/render-ctx)
  :seon.render/proofs [:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]
- ;; root's page's tile of main's problems (seon.render.proc/page-value): the report, by its own view,
- ;; with the ids of the classes its tab opened (:open, the /open toggle's): only those render their rows
- :seon.render/problems [:and :seon.problems/report [:map [:open [:set :string]]]]
- ;; root's page's tile of main's runs (seon.render.ui/root): how many by status, and each running one
+ ;; root's page's tile of main's runs (seon.render.ui/runs-tile): how many by status, and each running one
  :seon.render/runs [:map {:seon.render/html seon.render.ui/runs} [:by-status [:map-of :keyword nat-int?]] [:running [:vector :map]]]
- :seon.render/root :seon.render/node
- :seon.render/nodes [:vector :seon.render/node]
- :seon.render/walk [:map [:seon.render/root :seon.render/root] [:seon.render/nodes :seon.render/nodes]]
- :seon.render/no-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-entity]] [:seon.render/eid :seon.render/eid]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
@@ -78,15 +49,13 @@
  ;; write them): its page is this error, recorded as a platform problem; :seon.error/in the function it threw in
  :seon.render/view-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/view-defect]] [:view :string]
                                                     [:seon.error/in {:optional true} :symbol] [:class {:optional true} :string]]]
- ;; ---- what root's context reads: the whole system as one value ----
- ;; the api's view (agents, writer, fork server, store, boot, root errors) joined with every
- ;; proc's health, main's tasks and runs, the series and the events, as root's context reads it
- ;; (seon.render.system); the page is root's entity's (seon.render/walk), not this value's.
- :seon.render/system [:map
-                      [:agents :map] [:health :map] [:writer :map] [:fork-server :map]
-                      [:main :map] [:tasks :map] [:runs :map] [:events [:vector :any]]]
- ;; ---- the parts of a page (seon.render.ui/page): each unit's input, its render declared here ----
- ;; (a unit names its input's schema, never a render function: docs/render.md#the-page-is-units)
+ ;; ---- root's process: its own data beside its db pull (seon.render.proc/process-value) ----
+ ;; the writer's, fork server's and store's numbers, each proc's defects and the newest events,
+ ;; part of root's ctx (:process), drawn by seon.render.ui/process-tile; never written
+ :seon.render/process [:map [:writer [:maybe :map]] [:fork-server [:maybe :map]] [:store {:optional true} [:maybe :map]] [:root-errors-total :int]
+                       [:health :map] [:events [:vector :any]]]
+ ;; ---- the parts of a page (seon.render.ui/page-chrome): each unit's input, its render declared here ----
+ ;; (a unit names its input's schema, never a render function: docs/render.md#the-page)
  ;; the entity a page is of, its main pane
  ;; a model turn's request as it recorded it, for the debug page (seon.render.proc/debug-value):
  ;; what the turn added beside the records that made it, what it shares, its whole request when open, its usage or error
@@ -97,8 +66,6 @@
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
- ;; one tile of its column that is a value, not an entity (an entity's tile is a component: seon.render.ui/component)
- :seon.render/page-tile [:and {:seon.render/html seon.render.ui/tile} :seon.render/node]
  ;; an agent's page: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
  :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; root's page: its ctx as components (seon.render.ui/root-ctx, drawn by root's walk), which a branch may override

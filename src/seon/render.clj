@@ -356,42 +356,45 @@
   {:malli/schema [:=> [:cat :map [:vector :any]] :int]}
   [w k] (let [c (get @(:cache w) k)] (hash (into [(:rev c)] (map #(tree-rev w %)) (:children c)))))
 
-(defn placed-units
-  "Walk w's render as the units root's render proc lays out (seon.render.proc/agent-view): each
-  component placed directly in a container of the root's output (an element with an id: its list),
-  in order, {:id :container :rev :html}: its element id, its container's selector, its revision
-  with its children's (moved only when its output, or one below it, changed) and its html (seon.web.html, its children's resolved)."
-  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:rev :int] [:html :string]]]]}
+(defn- placed
+  "Walk w's components placed directly in a container of the root's output (an element with an id:
+  its list), in order, [[sel k]]: its container's selector and its key. The one prewalk of the
+  root that placed-units and placed-hiccup read."
+  {:malli/schema [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]}
   [w]
-  (let [root (get @(:cache w) @(:out w))
-        found (volatile! [])]
+  (let [found (volatile! [])]
     (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
                                     (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)))]
                                       (vswap! found conj [(str "#" (:id (second x))) (second m)])))
                             x)
-                          (:out root))
-    (vec (for [[sel k] @found :let [c (get @(:cache w) k)]]
-           (let [r (tree-rev w k)
-                 ;; its html written once a revision (a render of 15 units re-written each frame cost
-                 ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
-                 html (if (= r (:unit-rev c)) (:unit-html c)
-                          (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
-             {:id (:id c) :container sel :rev r :html html})))))
+                          (:out (get @(:cache w) @(:out w))))
+    @found))
+
+(defn placed-units
+  "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): each
+  component placed in a container of the root's output (placed), {:id :container :rev :html}: its
+  element id, its container's selector, its revision with its children's (moved only when its
+  output, or one below it, changed) and its html (seon.web.html, its children's resolved)."
+  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:rev :int] [:html :string]]]]}
+  [w]
+  (vec (for [[sel k] (placed w) :let [c (get @(:cache w) k)]]
+         (let [r (tree-rev w k)
+               ;; its html written once a revision (a render of 15 units re-written each frame cost
+               ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
+               html (if (= r (:unit-rev c)) (:unit-html c)
+                        (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
+           {:id (:id c) :container sel :rev r :html html}))))
 
 (defn placed-hiccup
   "Walk w's components placed in the root's list with element id sel (\"#p-task\"), in order, as
   [[id hiccup]]: each one's output with its children's resolved, exactly as its render returned it
-  (a call of the printer kept as the call: the model reads the data)."
-  {:malli/schema [:=> [:cat :map :string] [:vector [:tuple :string :any]]]}
+  (a call of the printer kept as the call: the model reads the data). Given sels, the components
+  of each, in their order, from one prewalk."
+  {:malli/schema [:=> [:cat :map [:or :string [:sequential :string]]] [:vector [:tuple :string :any]]]}
   [w sel]
-  (let [root (get @(:cache w) @(:out w))
-        found (volatile! [])]
-    (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (= sel (str "#" (:id (second x)))))
-                                    (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)))]
-                                      (vswap! found conj (second m))))
-                            x)
-                          (:out root))
-    (vec (for [k @found] [(:id (get @(:cache w) k)) (resolved w k)]))))
+  (let [sels (if (string? sel) [sel] sel)
+        by (group-by first (placed w))]
+    (vec (for [s sels [_ k] (get by s)] [(:id (get @(:cache w) k)) (resolved w k)]))))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
@@ -415,7 +418,7 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [w] (when-let [k @(:out w)] (unmount! w k)) nil)
 
-;; ---- the walk: an entity and the units its schema declares (docs/render.md#the-walk) ----
+;; ---- entity schemas and patterns (docs/ctx.md#the-pattern) ----
 
 (def entity-schemas
   "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names, to that
@@ -484,110 +487,3 @@
        {:star? (boolean (some #{'*} p))
         :attrs (into (into #{} (filter keyword?) p) (keep #(when (:rev? %) (:by %))) joins)
         :joins joins}))))
-
-(def ^:private units-by-schema
-  "{entity-schema [attribute]}: each entity schema's joins as the attributes they read, in pull's
-  syntax (a leading _ the reverse ref), read once from the registry by pattern (as
-  entity-schemas is derived)."
-  (into {} (for [[s _] contract/forms
-                 :let [p (:seon.ctx/pattern (contract/properties s))]
-                 :when (and p (:seon.db/attributes (contract/properties s)))]
-             [s (mapv (fn [j] (if (:rev? j) (keyword (namespace (:attr j)) (str "_" (name (:attr j)))) (:attr j)))
-                      (:joins (pattern p #{s})))])))
-
-(defn units
-  "Entity schema s's joins as the attributes they read, in pull's syntax (a leading _ the reverse
-  ref): the joins of the pattern it declares (:seon.ctx/pattern, read by pattern), [] with none."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :keyword]]}
-  [s] (get units-by-schema s []))
-
-(defn- relevant
-  "Entity value m of schema, as a walk shows it: only the attributes its schema declares
-  relevant (:seon.render/keys) when it declares them, else every one it holds. What is not
-  relevant is never pulled into a view (DECISIONS, The context is data, made relevant at its
-  producer; renders do not turn it into prose)."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] :map] :map]}
-  [schema m]
-  (if-let [ks (some-> schema contract/properties :seon.render/keys)] (select-keys m ks) m))
-
-(defn- one
-  "Entity eid on db as a page lists it: its node (its relevant attributes, less its units) and one
-  node per join its entity schema's pattern declares (units: pull's attributes, a leading _ the
-  reverse ref), one hop: a neighbour entity ({:kind :entity :eid}, its relevant attributes as
-  :value, and :tx, the transaction of the datom that links it: the order it was written) or the
-  entity's own value of a non-ref unit ({:kind :value}), each saying the attribute it came by
-  (:from); nil when db holds none of it. With limit (a page's rows shown), a unit reached by a
-  reverse ref (its rows) is pulled whole only for its newest limit entities; the older are listed
-  from the ref's index alone (:seon.render/listed: their entity, transaction and unit's schema,
-  nothing read of them), so a page counts them and costs the rows it shows."
-  {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe pos-int?]] [:maybe [:tuple :seon.render/node [:vector :seon.render/node]]]]}
-  [db eid limit]
-  (when-let [own (d/pull db '[*] eid)]
-    (let [schema (entity-schema own nil)
-          units (units schema)
-          ref? (fn [a] (or (not= a (forward a)) (dbu/ref? db a)))
-          ;; each ref unit's linking datoms, with the transaction that wrote each, newest first: a
-          ;; reverse ref's from its index (one read for every row: a ref is in :avet)
-          linked (fn [a] (let [f (forward a)]
-                           (if (= a f)
-                             (map (juxt :v :tx) (d/datoms db :eavt eid a))
-                             (sort-by (comp - second) (map (juxt :e :tx) (d/datoms db :avet f eid))))))
-          from (fn [a] {:seon.render/eid eid :seon.render/attr a})]
-      [(cond-> {:seon.render/kind :entity :seon.render/value (relevant schema (apply dissoc own units)) :seon.render/eid eid}
-         schema (assoc :seon.render/schema schema))
-       (into [] (mapcat (fn [a]
-                          (if (ref? a)
-                            (let [fa (forward a) unit-schema (get entity-schemas fa) forward? (= a fa)]
-                              (for [[i [e tx]] (map-indexed vector (linked a))]
-                                (if (or (nil? limit) forward? (< i limit) (nil? unit-schema))
-                                  (let [m (d/pull db '[*] e) s (entity-schema m fa)]
-                                    (cond-> {:seon.render/kind :entity :seon.render/value (relevant s (dissoc m :db/id)) :seon.render/eid e
-                                             :seon.render/from (from a) :seon.render/tx tx}
-                                      s (assoc :seon.render/schema s)))
-                                  ;; a row not shown: listed from the index alone, never read
-                                  {:seon.render/kind :entity :seon.render/value {} :seon.render/eid e
-                                   :seon.render/from (from a) :seon.render/tx tx :seon.render/schema unit-schema :seon.render/listed true})))
-                            (when (contains? own a)
-                              [{:seon.render/kind :value :seon.render/value (get own a) :seon.render/schema a :seon.render/eid eid :seon.render/from (from a)}]))))
-             units)])))
-
-(defn walk
-  "Entity eid as a page lists it, on dbs (main first, then the branch that records what main does
-  not: an agent's): the default view of any entity (docs/render.md#the-walk). Its node from the
-  first db holding it (what root observed of an agent on main wins over a branch's older copy);
-  the nodes of its units one hop (one), and of each unit its schema names a part
-  (:seon.render/parts: an agent's run) one hop more, each entity once, from the first db holding
-  it, newest first by the transaction that linked it (transactions are issued store-wide, so they
-  order entities across branches; an id does not: a content id is a hash). Each node says the
-  db it came from (:seon.render/db, its index in dbs). No db holding it: :seon.render/no-entity.
-  opts :limit, the rows a page shows: each unit's older rows read without their data values (`one`)."
-  {:malli/schema [:function [:=> [:cat [:vector :seon.host/db] pos-int?] [:or :seon.render/walk :seon.render/no-entity]]
-                  [:=> [:cat [:vector :seon.host/db] pos-int? [:map [:limit {:optional true} pos-int?]]] [:or :seon.render/walk :seon.render/no-entity]]]}
-  ([dbs eid] (walk dbs eid {}))
-  ([dbs eid {:keys [limit]}]
-  (let [;; each db's walk of e; a listed row carries the db that linked it (nothing else names it)
-        walks (fn [e] (keep-indexed (fn [i db] (when-let [[r ns] (one db e limit)]
-                                                 [r (mapv #(cond-> % (:seon.render/listed %) (assoc :seon.render/db i)) ns) i]))
-                                    dbs))
-        ws (walks eid)
-        ;; the first db holding entity e: one index read a db
-        held (fn [e] (first (keep-indexed (fn [i db] (when (seq (d/datoms db :eavt e)) i)) dbs)))]
-    (if-let [[root _ i] (first ws)]
-      (let [parts (set (:seon.render/parts (contract/properties (:seon.render/schema root))))
-            near (mapcat second ws)
-            nodes (concat near
-                          (for [nd near :when (and (= :entity (:seon.render/kind nd)) (parts (get-in nd [:seon.render/from :seon.render/attr])))
-                                [_ subs] (walks (:seon.render/eid nd)) sub subs :when (not= eid (:seon.render/eid sub))]
-                            sub))
-            ;; a listed row is the db's that linked it (nothing of it read), the rest the first db holding it
-            first-db (fn [nd] (cond (:seon.render/listed nd) (:seon.render/db nd)
-                                    (= :entity (:seon.render/kind nd)) (or (held (:seon.render/eid nd)) i)
-                                    :else i))
-            key-of (fn [nd] (if (= :entity (:seon.render/kind nd)) (:seon.render/eid nd) [(:seon.render/eid nd) (get-in nd [:seon.render/from :seon.render/attr])]))]
-        {:seon.render/root (assoc root :seon.render/db i)
-         :seon.render/nodes (->> (vals (reduce (fn [m nd] (let [k (key-of nd)] (if (contains? m k) m (assoc m k (assoc nd :seon.render/db (first-db nd)))))) {} nodes))
-                                 ;; each node's key made once (sort-by would make it once per comparison)
-                                 (map (fn [nd] [[(- (:seon.render/tx nd 0)) (get-in nd [:seon.render/from :seon.render/attr])] nd]))
-                                 (sort-by first)
-                                 (mapv second))})
-      (contract/error :seon.render/no-entity #'seon.render/walk (str "no entity " eid " on these dbs") {:seon.render/eid eid})))))

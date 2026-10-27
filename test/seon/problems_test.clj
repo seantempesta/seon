@@ -193,7 +193,7 @@
         (is (= [] (writes o)))))))
 
 (deftest root-records-what-went-wrong-in-an-agent
-  ;; the one producer of what is wrong (seon.render.system/problems reads only what is recorded):
+  ;; the one producer of what is wrong (root's problems tile, seon.render.ui/problems-tile, reads only what is recorded):
   ;; root records a red run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}

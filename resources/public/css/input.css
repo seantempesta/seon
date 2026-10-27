@@ -142,4 +142,13 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-eval[open] > summary { border-bottom: 1px solid var(--color-base-800); border-radius: 8px 8px 0 0; }
 .seon-eval > :not(summary) { margin: 0.6rem 0.7rem; }
 .seon-eval > div { border-left: 0; padding-left: 0; }
+/* an eval's collapsed line (seon.render.ui/eval-item; the 2026-10-24 mockup's "▸ (form) · 12 ms"):
+   the prose above, then its code's first line, its time and its handle */
+.seon-eval > summary { flex-wrap: wrap; }
+.seon-eval > summary::before { content: "▸"; color: var(--color-text-500); }
+.seon-eval[open] > summary::before { content: "▾"; color: var(--color-signal); }
+.seon-eval > summary > .seon-prose { flex-basis: 100%; order: -1; }
+.seon-form { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-200); }
+.seon-ms { font-size: 0.7rem; color: var(--color-text-500); font-variant-numeric: tabular-nums; }
+.seon-handle { font-size: 0.7rem; color: var(--color-eval); }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }
