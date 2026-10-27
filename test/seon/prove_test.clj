@@ -45,23 +45,21 @@
           (is (= [4] (waiters-answered o)))
           (is (empty? (filter :req o))))))))
 
-(deftest a-commit-that-moves-mains-program-proves-main
-  ;; task seon.proofs/main-is-proved-in-a-fork: a run of main started only when someone asked (a
-  ;; session's seon_prove, root's gate), so an agent forked from main found none of main's results.
-  ;; The writer's commit notice is a request: one that moves the program runs main, keyed by its
-  ;; program's digest, with no waiter; a data commit runs nothing; a session asking for the same
-  ;; key joins that run
+(deftest a-commit-starts-no-run-of-main-unless-the-config-says-so
+  ;; task seon.proofs/main-is-proved-in-a-fork: the writer's commit notice records main's t and, with
+  ;; :seon.config.proofs/prove-main-on-commit (off by default: the run of all of main's tests dies
+  ;; in its child), a commit that moves the program starts a run of main (the process test below,
+  ;; main-is-proved-at-each-program-commit-...). Off, neither a data commit nor a program commit
+  ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
-        [st o] (feed (prove/prove-proc {}) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]])
-        _ (is (empty? o) "a data commit runs nothing")
-        [st o] (feed st [[:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
-    (is (= 1 (count (asks o :spawn))) "a program commit: one run of main, by a prove agent forked from main")
-    (is (= (prove/run-key :main dg nil :main) (:key (:running st))) "keyed by main's program digest")
-    (is (empty? (waiters-answered o)) "nobody waits on it")
-    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :t 6 :digest dg :mode :main}]])
-          [_ all] (run-through st (into o o2) test-run-answer)]
-      (is (empty? (asks o2 :spawn)) "a session asking for the same key joins it")
+        [st o] (feed (prove/prove-proc {}) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
+                                            [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
+    (is (empty? o) "no run from either commit")
+    (is (= 6 (:main-t st)))
+    (let [[st o2] (feed st [[:req {:rid 7 :branch :main :digest dg :mode :main}]])
+          [_ all] (run-through st o2 test-run-answer)]
+      (is (= 1 (count (asks o2 :spawn))) "a session's request runs main")
       (is (= [7] (waiters-answered all)) "and is answered once, at its end")
       (is (= 1 (count (asks all :write))) "its results written once, as facts on main"))))
 
@@ -204,7 +202,7 @@
                     "  (c/kill! sys id)"
                     "  (:text r))")
         [a b c] (at/in-agent [{:op :eval :agent "root" :code booted} {:op :eval :agent "root" :code gained} {:op :eval :agent "root" :code forked}]
-                             {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true})
+                             {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true :sets [":seon.config.proofs/prove-main-on-commit=true"]})
         a' (some-> (:value a) clojure.edn/read-string)
         b' (some-> (:value b) clojure.edn/read-string)
         c' (some-> (:value c) clojure.edn/read-string :value)]
