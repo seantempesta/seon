@@ -303,7 +303,7 @@
   (let [[db a b] (errored 20) c (ctx/build db a b)
         errs (:errors (:task (val (first (:runs (:tree c))))))]
     (is (= #{"boom 18" "boom 16" "boom 14" "boom 12" "boom 10"} (set (map :seon.error/message (vals errs)))) "the newest errors raised in the task: five of its ten")
-    (is (every? #(= #{:db/id :seon.error/signature :seon.error/class :seon.error/type :seon.error/message :seon.error/count :seon.error/last-ms} (set (keys %))) (vals errs)) "each a few attributes, not the example's whole map"))
+    (is (every? #(= #{:db/id :seon.error/signature :seon.error/class :seon.error/type :seon.error/message :seon.error/count :seon.error/first-ms :seon.error/last-ms :seon.error/last-task} (set (keys %))) (vals errs)) "each a few attributes (what the scorer reads, docs/ctx.md), not the example's whole map"))
   (cost/proof
     {:of 'seon.ctx/build :input 'seon.ctx-test/errored
      :n "recorded errors in the store, half of them last raised in the agent's task"
