@@ -129,7 +129,7 @@
    (fn [cfg conn]
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
            k (task/agent-key "b1" :a3)]
-       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
+       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
        (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f}])
        (d/transact conn (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
@@ -164,7 +164,7 @@
 (deftest an-agents-live-state-is-facts-on-its-entity
   ;; what root observes of an agent is recorded on the agent's entity: a member no longer true
   ;; is retracted, and an id that starts again in a later boot is another agent
-  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1"}])
+  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
         db1 (d/db-with db0 (task/agent-tx "b1" :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
         db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :running nil}))
         db3 (d/db-with db2 (task/agent-tx "b2" :a3 {:status :spawning}))
@@ -178,7 +178,7 @@
 
 (deftest a-new-boot-leaves-the-earlier-boots-agents
   ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
-  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx "b1" :a1 {:status :idle})))
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}] (task/agent-tx "b1" :a1 {:status :idle})))
         db2 (d/db-with db (into (task/boot-tx "b2" 4) (task/earlier-agents-tx db)))
         db3 (d/db-with db2 (task/agent-tx "b2" :a1 {:status :spawning}))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
@@ -218,3 +218,16 @@
     (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [(decl "Make t true.")]))
           after (d/db-with db (task/member-tx (task/task db "demo/t") :seon.task/proofs conj ['demo-test/t-test]))]
       (is (= #{'demo-test/t-test} (set (:seon.task/proofs (task/task after "demo/t")))) "written, the task holds it"))))
+
+(deftest a-root-before-its-first-boot-is-no-entity-value
+  ;; a store an earlier build left (seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote):
+  ;; root's entity holds a quiescent fact and no boot, so (task/root db) is nil, and
+  ;; entity-value answered [:root nil] against its own contract: the reconciler's step read it as
+  ;; a :platform defect on every resume. Before its boot root is no value the index holds.
+  (let [db (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}])
+        e (:db/id (d/entity db [:seon.root/id :root]))]
+    (is (nil? (task/root db)))
+    (is (nil? (task/entity-value db e)))
+    (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])]
+      (is (= :root (first (task/entity-value booted e))))
+      (is (= "b1" (:boot (second (task/entity-value booted e))))))))
