@@ -178,16 +178,21 @@
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
 (defn- await-op!
-  "Wait for {:op op :k k} from root; anything else waits in :pending for the loop."
-  {:malli/schema [:=> [:cat :keyword :int] :seon.wire/seon-msg]}
-  [op k]
-  (loop []
-    (let [m (recv-raw!)]
-      (cond
-        (= m :dead) (lib/c-exit 0)
-        (and (= op (:op m)) (= k (:k m))) m
-        (arrived! m) (recur)
-        :else (do (swap! state update :pending conj m) (recur))))))
+  "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
+  in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, and
+  anything else waits in :pending for the loop. The process ends when root is gone."
+  {:malli/schema [:function [:=> [:cat :keyword :int] :seon.wire/seon-msg]
+                  [:=> [:cat :keyword :int [:maybe :keyword]] :seon.wire/seon-msg]]}
+  ([op k] (await-op! op k nil))
+  ([op k in-place]
+   (loop []
+     (let [m (recv-raw!)]
+       (cond
+         (= m :dead) (lib/c-exit 0)
+         (and (= op (:op m)) (= k (:k m))) m
+         (arrived! m) (recur)
+         (and in-place (= in-place (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
+         :else (do (swap! state update :pending conj m) (recur)))))))
 
 
 (defn mem-mb
@@ -632,19 +637,6 @@
         (count files))
       r)))
 
-(defn- await-reply!
-  "Wait for root's answer k to this agent's ask (a :reply on the api's route back to its proc):
-  root's :tests request arriving meanwhile is taken here (its test service may need this agent to
-  run them); other messages wait for the loop. The process ends when root is gone."
-  {:malli/schema [:=> [:cat :int] :any]}
-  [k]
-  (loop []
-    (let [m (recv-raw!)]
-      (cond (= m :dead) (lib/c-exit 0)
-            (and (= :reply (:op m)) (= k (:k m))) (:result m)
-            (= :tests (:op m)) (do (doseq [r (handle! m)] (send! r)) (recur))
-            :else (do (swap! state update :pending conj m) (recur))))))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
@@ -659,7 +651,7 @@
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
-    (await-reply! k))))
+    (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
   "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test

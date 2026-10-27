@@ -184,17 +184,19 @@
   (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,
   imported only when it reads otherwise; none when root follows no source). Answers each
   loader's answer and :opened, the derived problems the loads made true (seon.problems/caused
-  of main before and after)."
-  {:malli/schema [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]}
-  [sys ks]
+  of main before and after). With changed (source-changes) the source loads only those files."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]
+                  [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]] [:maybe [:set :string]]] [:map [:loaded :map] [:opened [:set :string]]]]]}
+  ([sys ks] (load-kinds! sys ks nil))
+  ([sys ks changed]
   (let [before @(:conn sys)
         source (get-in sys [:bindings :source])
         loaded (into {} (for [k (sort ks) :when (or (not= :source k) source)]
                           [k (case k
                                :docs (load-docs! sys)
                                :tasks (load-tasks! sys)
-                               :source (root/import-source! sys source))]))]
-    {:loaded loaded :opened (problems/caused before @(:conn sys))}))
+                               :source (root/import-source! sys source changed))]))]
+    {:loaded loaded :opened (problems/caused before @(:conn sys))})))
 
 (defn load-errors
   "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
@@ -243,6 +245,17 @@
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
             {} batch)))
 
+(defn source-changes
+  "The source files a watcher's batch changed, as relative paths under checkout co, when the batch
+  made root load the source by files alone: every record that makes the source load is a changed
+  path under a source dir. nil when any is a rescan, a moved root or the branch's own ref moving
+  (a commit, a merge): the whole tree is then read. Cost: the batch."
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
+  [co refs own batch]
+  (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
+    (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)))) source))
+      (into #{} (map (fn [[_ path]] (subs path (inc (count co))))) source))))
+
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
   (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
@@ -282,9 +295,9 @@
         ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
         ;; one written after a newer one would undo it, and its event is spent)
         one (Object.)
-        load! (fn [ks]
+        load! (fn [ks changed]
                 (locking one
-                  (let [r (load-kinds! sys ks)]
+                  (let [r (load-kinds! sys ks changed)]
                     (doseq [e (load-errors (:loaded r))]
                       @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
                     r)))
@@ -292,18 +305,19 @@
                         (fn [batch]
                           (let [why (watch-loads co refs own batch)
                                 ks (set (keys why))
+                                changed (when (contains? ks :source) (source-changes co refs own batch))
                                 rescan (last (filter (comp #{:rescan :root} first) batch))]
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
                             (when (seq ks)
                               ;; the problems the load made true, the last kept in the fact
-                              (let [{:keys [opened]} (load! ks)]
+                              (let [{:keys [opened]} (load! ks changed)]
                                 @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
                         died)]
     (if (contract/error? w)
-      (do (died w) (load! #{:tasks}) w)
-      (do @(fact fresh) (load! #{:tasks}) w))))
+      (do (died w) (load! #{:tasks} nil) w)
+      (do @(fact fresh) (load! #{:tasks} nil) w))))
 
 (defn union
   "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union
