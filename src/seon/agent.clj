@@ -485,12 +485,16 @@
 (defn test-report
   "One clojure.test report as the run keeps it: its type, test var and message; a failing
   assertion's expected and actual printed by the one printer under :part; a cost proof's
-  rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent
+  rows and verdict (seon.cost/proof's :actual, a generated case's arguments left to the message
+  that prints them) kept as data under :cost (session W2's agent
   page renders them; the judge persists them on the run); a typed error's :seon.error/type,
   :ticks and :budget (a test past its tick budget)."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
-  (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
+  ;; a generated case's arguments (a row's :args) stay out: they may be any value, which prints
+  ;; as no EDN (#error {\n, #'v) and splits the line the test child streams (run-tests-forked);
+  ;; the proof's message names each case over its bound by its arguments, printed
+  (let [cost (when (map? (:actual m)) (update (select-keys (:actual m) [:rows :verdict]) :rows #(some->> % (mapv (fn [r] (dissoc r :args))))))]
     ;; clojure.test's is takes any message and prints it; the run keeps it as that text
     (cond-> {:type (:type m) :var var :message (let [msg (:message m)] (cond-> msg (not (or (nil? msg) (string? msg))) (print/text (:part print/budgets))))}
       (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
