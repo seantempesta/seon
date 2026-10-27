@@ -48,6 +48,11 @@
  ;; running, or cancelled; the held ids of the same call are released
  :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
                                              [:execution [:maybe [:enum :held :running :cancelled]]]]]
+ ;; my.root/write-back! of a run that lost no write-back (or does not exist), of a root with no source tree,
+ ;; or of files main holds no text for: nothing to write
+ :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]
+ :seon.root/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-root]] [:runs [:vector :string]]]]
+ :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]
