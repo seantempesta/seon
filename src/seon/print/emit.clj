@@ -180,7 +180,7 @@
     (case (:seon.print/face node)
       ;; the common rows build their op here (text-op's shape), one call fewer per leaf
       :seon.print/nil {:op :text :text "nil" :seon.print/class :seon.print/nil}
-      ;; a handle (result/e12) links to its eval's row on the page (the eval-e12 id of seon.render.ui/chat-part's row)
+      ;; a handle (result/e12) links to its eval's row on the page (the eval-e12 id of seon.render.ui/eval-item's row)
       :seon.print/symbol
       (let [text (or (:seon.print/text node) (literal value))]
         (if (= "result" (namespace value))

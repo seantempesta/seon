@@ -97,9 +97,10 @@
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however
   it ended; what a test starts runs under bin/held, which ends it then (task
-  seon.check/a-test-root-names-its-store-and-main). Removed when the process ends or is
-  terminated (a shutdown hook); a SIGKILLed one's is reclaimed by the next process's first use
-  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo.
+  seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
+  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
+  never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
+  (shared-roots), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
   (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
@@ -107,7 +108,6 @@
            (sh/sh "bin/held" "--reclaim" dir)
            (sh/sh "rm" "-f" path)
            (sh/sh "mkfifo" path)
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.delete (java.io.File. path)))))
            [path (java.io.RandomAccessFile. path "rw")])))
 
 (defn binary-sh
@@ -223,3 +223,27 @@
         log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
+
+(def ^:private shared-roots
+  "This test process's shared roots, one per [checkout args] and started at the first test that
+  asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
+  of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
+  its own of the process store, stopped and its main dropped when the process ends (a shutdown
+  hook)."
+  (memoize
+    (fn [checkout args]
+      (let [main (str "shard-" (random-uuid))
+            store (process-store checkout)
+            root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
+                                                   (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+        root))))
+
+(defn shared-root!
+  "The root this test process shares among its tests for root arguments args (shared-roots):
+  start-root!'s answer, started at the first call. A test sharing it works on branches of its
+  main and deletes them when it ends (seon.agent-test/in-agent); a test whose subject is a root's
+  life (boot, stop, kill, a generation) or main itself starts a root of its own."
+  {:malli/schema [:=> [:cat [:sequential :string]] :map]}
+  [args] (shared-roots (.getCanonicalPath (java.io.File. ".")) (vec args)))

@@ -328,8 +328,11 @@
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
  ;; test starts the binary: seon.test-store/binary-sh.
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
- ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
- :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
+ ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
+ ;; bin/env names a worktree's own, jolt/seon-merges-<worktree>, in SEON_SOURCE_BRANCH (task
+ ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1).
+ :seon.config.source/branch #or [#env SEON_SOURCE_BRANCH "jolt/seon-merges"]
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
  ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
  ;; 2026-10-23). At the bound: n/a.
@@ -707,8 +710,8 @@
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.
  :seon.config.render/value-budget 600
- ;; Unit: tokens of root's context, the system's value printed (seon.render.system/system-data,
- ;; seon.render.proc); past it the printer names the later sections it left. Provenance: render.ai's
+ ;; Unit: tokens of root's context, its page's hiccup printed (seon.render.proc/pass: the render
+ ;; of root's ctx, /root/debug and /context.txt); past it the printer names what it left. Provenance: render.ai's
  ;; and the render proc's 700.
  :seon.config.render/root-context-budget 700
  ;; Unit: tokens of a message or reason shown in one line (root's context, a page's tile or row,
@@ -724,7 +727,7 @@
  :seon.config.render.list/stream 60
  ;; Unit: rows (an evaluation, or a turn with its evaluations). A page renders this many of its
  ;; list at first, newest first, and this many more each time its last row scrolls into view
- ;; (seon.render.ui/page); the rest are counted, never rendered until looked at. Provenance: the
+ ;; (seon.render.proc/debug-value); the rest are counted, never rendered until looked at. Provenance: the
  ;; render proc's HISTORY-CAP 100, then 20 when only what is on screen is rendered (a screen
  ;; holds about 10 rows).
  :seon.config.render.list/history 20

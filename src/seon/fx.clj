@@ -52,7 +52,7 @@
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
 
-(declare inputs)
+(declare inputs tree-id)
 
 (defn- git-run
   "git in dir with args, under the environment variables env adds ({name value}), fed in when given:
@@ -120,28 +120,39 @@
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
   HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
   absent when root is no git repository (git answers none).
+  With :paths (relative paths, the files a watcher saw change) only those files, each nil when
+  it is gone, and none of the others read: the cost of what changed.
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
-  inputs only for a binary built from this very tree.
-  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
+  inputs only for a binary built from this very tree. In a git repository also :tree, the id
+  of the whole tree as it is on disk (tree-id: git's own index makes it the cost of what
+  changed), which stands for every file's content.
+  Answers {:value {path text} :commit sha :tree id :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree]} :req}]
+  [{{:keys [root dirs binary-tree paths]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
-          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))]
-      (cond-> {:value (into (sorted-map)
-                        (for [d dirs
-                              f (file-seq (java.io.File. (str base "/" d)))
-                              :let [p (.getCanonicalPath ^java.io.File f)]
-                              :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
-                          [(subs p (inc (count base))) (slurp f)]))}
+          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
+          inputs (when (and binary-tree head) (inputs base))]
+      (cond-> {:value (if paths
+                        (into (sorted-map)
+                              (for [p paths :when (source? p) :let [f (java.io.File. (str base "/" p))]]
+                                [p (when (.isFile f) (slurp f))]))
+                        (into (sorted-map)
+                              (for [d dirs
+                                    f (file-seq (java.io.File. (str base "/" d)))
+                                    :let [p (.getCanonicalPath ^java.io.File f)]
+                                    :when (and (.isFile ^java.io.File f) (source? p))]
+                                [(subs p (inc (count base))) (slurp f)])))}
         head (assoc :commit head
-                                    :pins (into {}
-                                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
-                                                  [p sha])))
-        (and binary-tree head) (assoc :inputs (inputs base)
-                           :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
+                    :tree (or (:tree inputs) (tree-id base))
+                    :pins (into {}
+                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
+                                  [p sha])))
+        inputs (assoc :inputs inputs
+                      :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
@@ -156,17 +167,19 @@
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
-  --config layers its command line names, the #env values, the profile), as text: the
-  checkout's own path
-  written as <checkout>, and the keys that say where a process runs left out (their schemas'
-  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
-  checkout's and each root's own by design, while :tree covers the source's content). What a
-  result depends on that git does not see, so an agent's root and a checkout on one tree key
-  their results alike (docs/merging.md)."
-  {:malli/schema [:=> [:cat :map :string] :string]}
+  --config layers its command line names, the #env values, the profile), as {key text}: each
+  value with the checkout's own path written as <checkout>, and the keys that say where a
+  process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
+  source tree and results directory: each checkout's and each root's own by design, while
+  :tree covers the source's content). What a result depends on that git does not see: a
+  test's digest takes the keys its reach reads (seon.program/config-reads), so an agent's
+  root and a checkout on one tree key their results alike, and a key no test reads moves
+  none (docs/merging.md)."
+  {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
-               checkout "<checkout>"))
+  ;; a plain map: the store encodes no sorted one, and the digest sorts its keys (seon.program/graph-index)
+  (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+                       [k (str/replace (sedn/encode v) checkout "<checkout>")])))
 
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration at p names
@@ -252,8 +265,9 @@
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
   (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
-  Jolt's included, and
-  the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
+  Jolt's included, and the per-test tick bound every verdict is a function of,
+  :seon.config.agent/test-ticks) :config (the config in force, config-input: each test's digest
+  takes the keys it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
@@ -266,7 +280,8 @@
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
+      :env (err/digest (str/join "\n" (concat entries [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
+      :config (config-input cfg checkout)
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit

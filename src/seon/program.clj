@@ -1059,6 +1059,22 @@
      seon.web/handler ;; web/public, in :env
      seon.proofs/verdicts}) ;; the results directory, outside the tree, by digest
 
+(def config-key-readers
+  "The vars that read a config key named in data rather than in their own code: a form defining
+  one reads every config key a schema entry's form names (schema-config-keys), so a test reaching
+  it takes those keys' values (config-reads names the rest). seon.render/pattern reads a join's
+  :limit (config/value lim), a key a schema entry's :seon.ctx/pattern names (seon.facts.edn's
+  :limit :seon.config.ctx/window). A reader not named here is missed: its key moves no digest."
+  '#{seon.render/pattern})
+
+(defn- schema-config-keys
+  "The config keys schema entries' forms (schemas: {key text}) name as data, the entries
+  declaring config keys (seon.config.*) left out: what a config-key-reader can read."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
+  [schemas]
+  (let [config? #(some-> (namespace %) (str/starts-with? "seon.config."))]
+    (into #{} (comp (remove (comp config? key)) (mapcat #(names (sedn/decode (val %)))) (filter config?)) schemas)))
+
 (defn- tree-reading?
   "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"
   {:malli/schema [:=> [:cat :map] :boolean]}
@@ -1083,10 +1099,26 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
+(defn config-reads
+  "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
+  of a seon.config.* namespace, the config's keys), or :all when it takes a whole config map
+  from outside seon.config: the config in force (seon.config/config) or the one root wrote on
+  main (seon.config/from-db), whose keys its caller reads as it likes ((get c k)). seon.config's
+  own readers (value, resolve) name no key of their own; every one of their callers names its
+  key, but for config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
+  seon.config/schema-forms, its one form, which holds nothing else) names every key as its
+  declaration, data :env holds, and reads none. A test's digest takes the values of the keys its reach reads (graph-index), so a key
+  no test reads moves no digest."
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol]] [:or [:= :all] [:set :qualified-keyword]]]}
+  [keywords refs nsym]
+  (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
+        (refs 'seon.config/baked-schema-forms) #{}
+        :else (into #{} (filter #(str/starts-with? (namespace %) "seon.config.")) keywords)))
+
 (defn- reach-rows
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
   :form/id with its occurrence (form-id's #k) left off: the hash of its namespace and text, which
-  is not read again), :ns, :defines and :refs, and none of the other facts, which no edge, digest
+  is not read again), :ns, :defines, :refs and the config keys it reads (config-reads), and none of the other facts, which no edge, digest
   or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
@@ -1095,7 +1127,7 @@
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
-        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es)
+        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
         key-of (merge ;; definition-key's order: the earlier kind wins
@@ -1103,9 +1135,10 @@
                  (update-vals (at :impl/key ds) (fn [[v]] (into [:impl] (sedn/decode v))))
                  (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
                  (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
-    (vec (for [e es :let [[i] (id e)]]
-           {:id i :own (str/replace i #"#\d+$" "") :ns (first (nn (first (nsv e)))) :refs (set (rv e))
-            :defines (into #{} (keep key-of) (dv e))}))))
+    (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
+           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs
+            :defines (into #{} (keep key-of) (dv e))
+            :config (config-reads (set (kv e)) refs nsym)}))))
 
 (defn reached-by
   "The forms that reach forms ids through a reach graph's reverse edges rev ({form [form ...]}),
@@ -1144,6 +1177,9 @@
         step (fn [m k ids] (update m k #(into (into [] (remove drop-ids) %) ids)))
         by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
                                 (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
+        ;; a config-key-reader reads the config keys schema entries name (config-key-readers)
+        added (for [f added] (cond-> f (and (set? (:config f)) (some (fn [[k s]] (and (= :var k) (config-key-readers s))) (:defines f)))
+                                   (update :config into (:schema-config g))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
         defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
         var-form #(peek (get defs %))
@@ -1194,7 +1230,15 @@
                                           any (fn [k fs] (boolean (or (some fs c) (some #(get-in fl [% k]) kids))))]
                                       [(reduce #(assoc! %1 %2 n) comp-of c)
                                        (assoc! cd n (error/digest (str (str/join " " (sort (map own c))) "|" (str/join " " (sort (map cd kids))))))
-                                       (assoc! fl n {:reads (any :reads reads) :proc (any :proc proc) :bin (any :bin bin)})
+                                       (assoc! fl n {:reads (any :reads reads) :proc (any :proc proc) :bin (any :bin bin)
+                                                    ;; the config keys it and what it reaches read, its largest
+                                                    ;; kid's set grown by the rest
+                                                    :config (let [own (map (comp :config rows) c)
+                                                                  ks (keep #(get-in fl [% :config]) kids)]
+                                                              (if (or (some #{:all} own) (some #{:all} ks))
+                                                                :all
+                                                                (let [[k & more] (sort-by (comp - count) ks)]
+                                                                  (-> (or k #{}) (into cat own) (into cat more)))))})
                                        (inc n)]))
                                   [(transient (apply dissoc old-comp gone-ids))
                                    (transient (apply dissoc (:cd g) olds))
@@ -1219,7 +1263,7 @@
         live (live-ids db)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
                  :reads #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
-                 :data-refs data-refs :schemas schemas :live live}
+                 :data-refs data-refs :schemas schemas :schema-config (schema-config-keys schemas) :live live}
                 db []
                 (into (reach-rows db (set (vals live)) true)
                       (for [[k text] schemas]
@@ -1242,15 +1286,20 @@
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
   roots, {key [var ...]}): a key's digest is of its name, :env, :tree when what it reaches
-  reads the tree, and its starting forms' components' digests (its forms and their
-  namespaces' plain forms); :process? and :binary?, whether one of those components uses a
+  reads the tree, its starting forms' components' digests (its forms and their
+  namespaces' plain forms) and the values in inputs' :config of the config keys those
+  components read (config-reads: every key's when one reads the config map); :process? and :binary?, whether one of those components uses a
   process or a binary var. A root naming a var with no form in g gets none."
   {:malli/schema [:=> [:cat :map :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]}
-  [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree]} roots]
+  [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree config]} roots]
   (let [var-form #(peek (get defs %))
         answer (fn [k ids]
-                 (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))]
-                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(:reads (flags %)) cs) tree) (sort (map cd cs))))
+                 (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
+                       ks (map #(:config (flags %)) cs)
+                       ;; the values of the config keys its reach reads (config-reads), every key's for one reading the map
+                       kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))]
+                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(:reads (flags %)) cs) tree)
+                                                 (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
                     :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
