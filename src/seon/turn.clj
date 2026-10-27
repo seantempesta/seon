@@ -93,19 +93,9 @@
         ;; the functions the branch defines without a contract (seon.merge/uncontracted): what root's judge and the merge gate ask
         unc (set (pm/uncontracted ch))
         unmerged (branch/unmerged)
-        {:keys [caused attention]} (problems/caused-split (:base @agent/state) db ch)
+        caused (:caused (problems/caused-split (:base @agent/state) db ch))
         t (task/task db id)]
-    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :attention attention :task t
-     ;; a task that merges itself sees, every turn, whether main moved under it and whether
-     ;; merging main would conflict (seon.agent/merge-readiness), so it ends when it can merge
-     :merge (when (task/merges? (:seon.task/kind t)) (agent/merge-readiness))
-     :will-merge (pm/divergence ch)
-     ;; root's ruling (a): what this turn ran, what the judge will run, what the merge runs
-     :tests (when-not (contract/error? test-run)
-              (let [results (proofs/results test-run)
-                    unfinished (count (remove #(contains? results %) (:selected test-run)))]
-                (cond-> {:this-turn (count (:selected test-run)) :at-judge (:at-judge test-run) :when-asked (count (:deferred test-run))}
-                  (pos? unfinished) (assoc :unfinished unfinished))))
+    {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task t
      :reasons (r/done-explain (assoc (r/done-input (index! db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
                                                    (if (contract/error? test-run) #{} (set (:deferred test-run))))
                                      :caused (set caused)))}))
