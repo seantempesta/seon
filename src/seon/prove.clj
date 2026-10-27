@@ -108,13 +108,44 @@
   [st req waiters]
   (let [run (assoc req :waiters waiters)
         st (assoc st :running run)
-        full? (= :full (:mode req))
-        [st m] (cond
-                 ;; the daily full run: bin/test --all in a worktree of git's main, an OS child (the :tests effect)
-                 full? (step/ask st [:prove :answers] [:full (:key req)] {:op :fx :kind :tests :req {:all? true}})
-                 (:agent req) (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
-                 :else (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
-    [(assoc-in st [:running :stage] (cond full? :full (:agent req) :tests :else :spawn)) [m]]))
+        [st m] (if (:agent req)
+                 (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
+                 (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
+    [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
+
+;; ---- the daily full run: a lane of its own ------------------------------------------------
+
+(defn- full-request
+  "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
+  main, an OS child (the :tests effect), in a lane of its own, so it never holds the run slot an
+  agent's turn waits on (a full run takes most of an hour, and can stall: measured 2026-10-27, its
+  first one stalled in a process test). The same day's request again joins it or is answered by
+  it; another day's while one runs is a :platform problem naming the one that has not ended.
+  Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st req]
+  (let [cur (:full st)]
+    (cond
+      (and cur (= (:key cur) (:key req))) [st []]
+      cur [st [{:op :problem :class :platform
+                :error (contract/error :seon.prove/full-run-running #'seon.prove/full-request
+                                       (str "the full run " (:key req) " was asked while " (:key cur) " has not ended") {:running (:key cur)})}]]
+      (= (:key req) (:full-done st)) [st []]
+      :else (let [[st m] (step/ask st [:prove :answers] [:full (:key req)] {:op :fx :kind :tests :req {:all? true}})]
+              [(assoc st :full req) [m]]))))
+
+(defn- full-answered
+  "The full lane's chain: the effect's answer, its statuses written on main (full-run-tx: a red test
+  becomes a :test-red row), the lane free. A failed effect or write is a :platform problem."
+  {:malli/schema [:=> [:cat :map :keyword :any] [:tuple :map [:vector :map]]]}
+  [st step r]
+  (let [run (:full st)]
+    (cond
+      (contract/error? r) [(dissoc st :full) [{:op :problem :class :platform :error r}]]
+      (= :full step) (let [[st w] (step/ask st [:prove :answers] [:full-recorded (:key run)]
+                                            {:op :write :req {:op :tx :branch :db :tx-data (full-run-tx run (:value r))}})]
+                       [st [w]])
+      :else [(-> st (dissoc :full) (assoc :full-done (:key run))) []])))
 
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
@@ -161,6 +192,8 @@
         k (slot req)
         done (get-in st [:done k])]
     (cond
+      ;; the daily full run, in its own lane
+      (= :full mode) (full-request st req)
       (same? (:running st) req) [(update-in st [:running :waiters] into rids) []]
       (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] into rids) []]
       ;; asked again after its run, nothing it reads changed
@@ -183,6 +216,7 @@
   (let [run (:running st)]
     (cond
       (= :killed step) [st []]
+      (#{:full :full-recorded} step) (if (= key (:key (:full st))) (full-answered st step r) [(update st :stale (fnil inc 0)) []])
       (not= key (:key run)) [(update st :stale (fnil inc 0)) []]
       :else
       (case step
@@ -192,16 +226,6 @@
                  (let [st (assoc-in st [:running :runner] (:id r))
                        [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
                    [(assoc-in st [:running :stage] :tests) [m]]))
-        ;; the full run's effect answered: its statuses recorded on main, red tests become :test-red rows
-        :full (if (contract/error? r)
-                (finish st r)
-                (let [v (:value r)
-                      counts (frequencies (vals (:results v)))
-                      st (assoc-in st [:running :answer]
-                                   {:pass (:pass counts 0) :fail (:fail counts 0) :error (:error counts 0) :ms (:ms v) :log (:log v)
-                                    :red (vec (sort-by str (keep (fn [[t s]] (when (not= :pass s) t)) (:results v))))})
-                      [st w] (step/ask st [:prove :answers] [:recorded key] {:op :write :req {:op :tx :branch :db :tx-data (full-run-tx run v)}})]
-                  [(assoc-in st [:running :stage] :recording) [w]]))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]
                  (if (contract/error? r)
@@ -212,7 +236,7 @@
         :recorded (finish st
                           (if (contract/error? r)
                             r
-                            (assoc (:answer run) :key key :red (or (:red (:answer run)) (vec (sort-by str (keys (proofs/failures (:answer run))))))))))))) 
+                            (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
 
 (defn- state-view
   "What the service holds, as data: the running run's key, stage and runner, how many wait on it,
@@ -237,7 +261,7 @@
   ([] {:params {} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
-       :ping-map-fn (fn [st] {:running (some-> st :running :key) :waiting (count (:waiters (:running st))) :next (count (:next st))
+       :ping-map-fn (fn [st] {:running (some-> st :running :key) :full (some-> st :full :key) :waiting (count (:waiters (:running st))) :next (count (:next st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([_args] {:rid 0 :pending {} :next {} :done {}})
   ([st _tr] st)

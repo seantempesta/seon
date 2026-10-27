@@ -560,7 +560,12 @@
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         results (cfg/value :seon.config.source/test-results-dir)
-        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
+        ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
+        ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
+        ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
+        ;; a test of the root's working tree that main does not hold, and its shard died at once)
+        clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
+               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_SOURCE_BRANCH"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
@@ -568,16 +573,23 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        ;; the tree's shards store into this root's results directory, named to them, so the
-        ;; verdicts read below are the ones its run wrote
-        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)]
-                                     (if all? full-run-command (test-command (sort (distinct (map (comp symbol namespace) tests)))))
-                                     [:dir dir]))
-              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
-              tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)]
-          (spit log (str (:out r) (:err r)))
-          {:value (cond-> {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}
-                    all? (assoc :digests (select-keys (:digests plan) tests)))})
+        ;; the full run runs every process test, so the binary is built from this tree first: the
+        ;; worktree's target/ is a clone of another tree's, and its binary that tree's (measured
+        ;; 2026-10-27: the first daily run's process tests ran on a stale one, red for that alone)
+        (let [b (when all? (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])))]
+          (if (and b (not (zero? (:exit b))))
+            (do (spit log (str (:out b) (:err b)))
+                (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
+            ;; the tree's shards store into this root's results directory, named to them, so the
+            ;; verdicts read below are the ones its run wrote
+            (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)]
+                                         (if all? full-run-command (test-command (sort (distinct (map (comp symbol namespace) tests)))))
+                                         [:dir dir]))
+                  plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
+                  tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)]
+              (spit log (str (:out r) (:err r)))
+              {:value (cond-> {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}
+                        all? (assoc :digests (select-keys (:digests plan) tests)))})))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
