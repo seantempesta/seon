@@ -755,7 +755,7 @@
       (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
         (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
           (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
-          (is (= ["src/a.clj" "src/b.clj" "src/c.clj"] (keys (:value r))) "the read goes on")
+          (is (= ["src/a.clj" "src/b.clj" "src/c.clj" "src/e.clj"] (keys (:value r))) "the read goes on")
           (is (= [theirs main 1 1] ((juxt :source :main :ahead :behind) r)))
           (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
       (finally (sh/sh "rm" "-rf" tmp)))))
