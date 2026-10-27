@@ -60,6 +60,8 @@
 (defc kq-watch "e13_kq_watch" [:int :int] :long)
 (defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
 
+;; blocking: the fork server's one wait, on a process with no fibers to run; a fiber's wait reads
+;; kq-poll after its park instead (docs/failure-points.md#physics-who-may-run-threads)
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
 (defc kq-poll "e13_kq_poll" [:int] :long)
 

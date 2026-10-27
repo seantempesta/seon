@@ -61,7 +61,8 @@ long e13_kq_watch_fd(int kq, int fd) {
 // What kq holds now, never waiting (a zero timeout): the pid of a watched child that exited, 0
 // when fd's input is there, -3 when nothing is (a fiber's park on kq ended for a ready that was
 // stale, so it parks again: seon.lib/wait-fd-or-exit), -1 on an error. Its caller parks in the
-// io poller, never here: a main carrier blocked in a kevent runs none of its process's fibers.
+// io poller, never here: a main carrier blocked in a kevent runs none of its process's fibers
+// (docs/failure-points.md#physics-who-may-run-threads).
 long e13_kq_poll(int kq) {
   struct kevent ev;
   struct timespec zero = {0, 0};
