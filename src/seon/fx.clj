@@ -121,7 +121,8 @@
   ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
   either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
   {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
-  when base holds commits main lacks. git's failure throws its words (read-source answers it)."
+  when base holds commits main lacks, or {:main :source :refused git's words} when the fast-forward
+  is refused (a dirty tree): read-source records either and imports the tree as it is."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [base co]
   (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base))
@@ -130,7 +131,8 @@
         source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
     (when (and branch (not= main source))
       (if (zero? (:exit (git-run {} base ["merge-base" "--is-ancestor" "HEAD" main] nil)))
-        (do (git! {} base ["merge" "--ff-only" "-q" main] nil) nil)
+        (let [r (git-run {} base ["merge" "--ff-only" "-q" main] nil)]
+          (when-not (zero? (:exit r)) {:main main :source source :refused (str/trim (str (:err r)))}))
         {:main main :source source
          :ahead (parse-long (git! {} base ["rev-list" "--count" (str main "..HEAD")] nil))
          :behind (parse-long (git! {} base ["rev-list" "--count" (str "HEAD.." main)] nil))}))))
@@ -154,7 +156,7 @@
     (let [base (.getCanonicalPath (java.io.File. ^String root))
           gap (when follow (follow-main base follow))
           head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
-          read (cond-> {:value (into (sorted-map)
+          src-read (cond-> {:value (into (sorted-map)
                                  (for [d dirs
                                        f (file-seq (java.io.File. (str base "/" d)))
                                        :let [p (.getCanonicalPath ^java.io.File f)]
@@ -169,11 +171,14 @@
                                                :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f))))))]
       (if gap
         (merge (error #'seon.fx/read-source :seon.fx/io-error
-                      (str "the source tree " root " holds " (:ahead gap) " commits main lacks (it is at " (:source gap)
-                           ", main at " (:main gap) ", which holds " (:behind gap) " it lacks): imported as it is")
+                      (if (:refused gap)
+                        (str "the source tree " root " (at " (:source gap) ") could not follow main (at " (:main gap) "): "
+                             (:refused gap) ": imported as it is")
+                        (str "the source tree " root " holds " (:ahead gap) " commits main lacks (it is at " (:source gap)
+                             ", main at " (:main gap) ", which holds " (:behind gap) " it lacks): imported as it is"))
                       (assoc gap :path root))
-               read)
-        read))
+               src-read)
+        src-read))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?

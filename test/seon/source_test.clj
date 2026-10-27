@@ -734,6 +734,15 @@
           (is (not (contract/error? r)) (pr-str r))
           (is (= ["src/a.clj" "src/b.clj"] (keys (:value r))))
           (is (= main (git wb "rev-parse" "HEAD")) "the write-back branch stands at main")))
+      (testing "a fast-forward git refuses (a dirty tree): imported as it is, git's words recorded"
+        (let [main (commit! co "a.clj" "(ns a2)") _ (spit (str wb "/src/a.clj") "(ns dirty)") r (read)]
+          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+          (is (re-find (re-pattern (str "could not follow main \\(at " main)) (:seon.error/message r)) (:seon.error/message r))
+          (is (= "(ns dirty)" (get-in r [:value "src/a.clj"])) "the read goes on, as the tree is")
+          (git wb "checkout" "--" "src/a.clj")
+          (is (not= main (git wb "rev-parse" "HEAD")) "unmoved")
+          (is (not (contract/error? (read))))
+          (is (= main (git wb "rev-parse" "HEAD")) "the clean tree follows")))
       (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
         (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
           (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
