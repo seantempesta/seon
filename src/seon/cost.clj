@@ -236,23 +236,24 @@
   (delay (let [f (fn [] nil)]
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
-(def repeats
-  "How many measured calls a measure takes after its warm one; each dimension's minimum over
-  them. A count, never a time: repeats until 20 ms of CPU time took more samples of a fast call
-  and fewer under load, so the minimum a counted dimension reported moved with the machine
-  (task seon.cost/ticks-are-exact). Three: a quiet process counts one call's ticks within a few
-  (seon.source-test's transact row, 406,355-406,362 over 40 samples), and a whole 1,000-tick
-  timer quantum lands on about one sample in 40, which the minimum of three drops."
-  3)
-
 (defn measure
-  "f on args, measured: one warm call, then repeats calls; each dimension's minimum, less what
-  measuring itself costs."
+  "f on args, measured at its steady state: calls until `:seon.config.proofs/cost-settled` calls in
+  a row allocate no fewer bytes than the least so far (or `:seon.config.proofs/cost-max-samples`
+  calls were made); each dimension's minimum over all of them, less what measuring itself costs. A
+  call allocates more on its first calls (Jolt compiles what it finds hot, caches fill): one warm
+  call left a proof measuring that, with the settled bytes 1,536 to 3,776 B over and runs of 8 equal
+  calls on the way down, so a bound near the estimate went red or green by the draw (task
+  seon.cost/a-call-allocates-the-same-bytes-each-time). A count of calls, never a time."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
-  (once f args)
-  (let [b @baseline
-        best (reduce (fn [best _] (let [m (once f args)] (if best (merge-with min best m) m))) nil (range repeats))]
+  (let [need (config/value :seon.config.proofs/cost-settled)
+        cap (config/value :seon.config.proofs/cost-max-samples)
+        b @baseline
+        best (loop [n 1 best (once f args) low-at 1]
+               (if (or (> (- n low-at) need) (>= n cap))
+                 best
+                 (let [m (once f args) n (inc n)]
+                   (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))]
     (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))))
 
 (declare units)

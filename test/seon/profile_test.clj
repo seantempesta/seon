@@ -149,6 +149,24 @@
         beside (try (seon.cost/measure f []) (finally (end-threads! busy)))]
     (is (<= (:bytes beside) (* 1.25 (max 1.0 (:bytes alone)))) (str "alone " alone ", beside " beside))))
 
+(deftest a-measure-is-the-call-at-its-steady-state
+  ;; task seon.cost/a-call-allocates-the-same-bytes-each-time: a call allocates more on its first calls
+  ;; (seon.merge/delta-three-way: 3,776 2,752 1,536 3,584 B over its settled bytes, down to 320 by the
+  ;; 14th); the measure is the settled call's, never one the warm-up is still in
+  (let [calls (atom 0)
+        f (fn [calls] (fn [] (swap! calls inc) (count (vec (range (if (< @calls 10) 3000 100))))))
+        warming (seon.cost/measure (f calls) [])
+        steady (seon.cost/measure (f (atom 100)) [])]
+    (is (< 10 @calls) "the measure went on past the warm-up")
+    (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
+
+(deftest a-measure-is-one-number-beside-another-thread
+  ;; the same call measured ten times while another thread allocates reads one byte count
+  (let [f (fn [] (reduce + (map leaf (range 1000))))
+        busy (allocating-thread)
+        counts (try (vec (repeatedly 10 #(:bytes (seon.cost/measure f [])))) (finally (end-threads! busy)))]
+    (is (= 1 (count (distinct counts))) (str "bytes " (sort counts)))))
+
 (deftest a-measures-time-is-what-its-thread-does
   ;; land review: a proof's ns is its thread's CPU (seon.profile/cpu-ns), so a call is timed by
   ;; what it does, never by how long it waits: a call that sleeps 20 ms (a wait, as on a

@@ -401,6 +401,18 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: calls in a row. A cost proof's measure calls the function until this many in a row allocate
+ ;; no fewer bytes than the least so far (its steady state: the first calls allocate more as Jolt
+ ;; compiles what is hot and caches fill; measured 2026-10-27, seon.merge/delta-three-way at n=300:
+ ;; 3,776 2,752 1,536 3,584, 2,752 x8, 1,536, then 320 B over the base, call after call: a run of 8
+ ;; equal calls is not the end, so the count is twice that). Provenance: worktree session
+ ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
+ :seon.config.proofs/cost-settled 16
+ ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
+ ;; (a function that never settles: another thread's collection landing in most calls). Provenance:
+ ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14 and this is 16 more.
+ ;; At the bound: the minimum of the last cost-settled calls is the measure.
+ :seon.config.proofs/cost-max-samples 60
  ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
  ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
  ;; a-contract-carries-its-cost-bound 2026-10-26 (test.check's sample sizes, 0 to 100). At the bound:

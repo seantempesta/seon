@@ -81,6 +81,8 @@
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/case-sizes :seon.config.proofs/case-sizes]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
+  [:seon.config.proofs/cost-settled :seon.config.proofs/cost-settled]
+  [:seon.config.proofs/cost-max-samples :seon.config.proofs/cost-max-samples]
   [:seon.config.proofs/tick-quantum :seon.config.proofs/tick-quantum]
   [:seon.config.proofs/seeds :seon.config.proofs/seeds]
   ;; effects and the model
