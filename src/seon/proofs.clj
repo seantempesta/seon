@@ -19,6 +19,12 @@
     (let [s (str/replace v #"^#'" "")]
       (when (str/includes? s "/") (symbol s)))))
 
+(defn latest-status
+  "Test t's last result on main as db holds it (its :seon.proof/latest's status, which only main's
+  runs write, so a branch holds main's as of its base), or :none when main holds none."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :keyword]}
+  [db t] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str t)])) :none))
+
 (defn red?
   "Is test run t red: any failing or erroring assertion (a run's or a tests event's counts)?"
   {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}

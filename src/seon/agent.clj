@@ -523,6 +523,13 @@
         (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
         v))))
 
+(defn judges?
+  "Whether test var t judges a branch, as the test plan selects (test-plan): a deftest (:test) of a
+  namespace that is not scratch (seon.program/scratch-ns?: user, or ^:scratch), which never merges."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
+        (boolean (and (:test m) (not (program/scratch-ns? (:ns m)))))))
+
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
   (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\"} and
@@ -538,7 +545,8 @@
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
   updated to db (seon.program/reach-update), or db's own with no base; reused while db is the very
   value it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
-  key lookup (a one-form update is 20-45 ms)."
+  key lookup; a new db value is base's graph updated again, at the cost of what the branch changed
+  from base (20-45 ms for one form). Holds that one db value while it is the newest asked."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
   [db base in]
   (let [{w-db :db g :graph w-in :inputs} (:branch-graph @state)]
@@ -581,8 +589,6 @@
   [db base proofs]
   (let [[shared in] (test-inputs db)
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
-        judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
-                          (and (:test m) (not (program/scratch-ns? (:ns m))))))
         b (when base (base-graph base in))
         g (branch-graph db base in)
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))

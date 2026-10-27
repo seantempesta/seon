@@ -16,7 +16,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -959,7 +959,7 @@
           ;; (forms written in one transaction tie on it: their names break the tie, so the cut is fixed)
           tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
                      (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
-          status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
+          status #(proofs/latest-status db %)]
       (cond-> {:source (print/code (str (get-in cv [:form :form/src])))
                ;; the direct tests only: every test whose reach includes v is the agent's to ask
                :reaching (list 'my.agent/tests-reaching (list 'quote v))}
