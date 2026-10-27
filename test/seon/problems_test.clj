@@ -956,7 +956,7 @@
                ;; observed-input says): 4.9M ticks, 13.6 MB, 61 calls at 10 (it was 2.4M, 5.8 MB with the one
                ;; :eavt diff, which also reads every datom the branch writes besides the program)
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               :fixed {:ticks 4500000 :bytes 12000000 :calls 64}
+               :fixed {:ticks 4700000 :bytes 14500000 :calls 67}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------

@@ -152,7 +152,7 @@
        ;; messages: thousands in a long run) and every embedding main wrote since the fork (22,000
        ;; datoms, 313M ticks), which the ranges never touch
        :per-n {:ticks 34000.0 :bytes 100000.0}
-       :fixed {:ticks 1100000.0 :bytes 3900000.0 :calls 56}
+       :fixed {:ticks 1100000.0 :bytes 4400000.0 :calls 59}
        :sizes divergence-sizes})
     (cost/proof
       {:of 'seon.agent/branch-changes :input 'seon.program-cost-test/on-disk-diverged-of
