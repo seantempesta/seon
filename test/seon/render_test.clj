@@ -1158,7 +1158,7 @@
   (let [n (namespace v)]
     [{:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str "src/" (str/replace n "-" "_") ".clj")}
      {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
-     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v)}]))
+     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
 
 (deftest the-merge-views-draw-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
