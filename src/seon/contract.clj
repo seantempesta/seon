@@ -277,10 +277,35 @@
         (if (instance? Throwable s)
           (error :seon.contract/invalid #'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
                  {:seon.contract/var (symbol v)})
-          (let [w (wrap (symbol v) s @v)]
+          (let [raw @v w (wrap (symbol v) s raw)]
             (alter-var-root v (constantly w))
-            (alter-meta! v assoc ::wrapper w)
+            (alter-meta! v assoc ::wrapper w ::raw raw)
             :armed))))))
+
+(defn disarm!
+  "Put var v's raw root back, the one arm! wrapped: answers :disarmed, or :unchanged when v's root is
+  not its own wrapper (never armed, or redefined since) or arm! kept no raw root for it: a definition
+  holds its checked function from the start (see \"contracts at definition\" above) and has none.
+  arm! arms it again."
+  {:malli/schema [:=> [:cat :seon.host/var] [:enum :disarmed :unchanged]]}
+  [v]
+  (if (and (armed? v) (contains? (meta v) ::raw))
+    (do (alter-var-root v (constantly (::raw (meta v))))
+        (alter-meta! v dissoc ::wrapper ::raw)
+        :disarmed)
+    :unchanged))
+
+(defn unarmed
+  "thunk's value, called with every armed var of the process disarmed (disarm!) and armed again after,
+  exactly those, whatever thunk does. A cost proof that measures a function's own work, unarmed,
+  measures the raw roots wherever it runs: in a root or an agent every contracted function is armed
+  (+30% on the printer's proofs), in bin/test none is
+  (docs/cost.md#the-measure)."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [thunk]
+  (let [armed (vec (for [n (all-ns) v (vals (ns-interns n)) :when (armed? v)] v))]
+    (run! disarm! armed)
+    (try (thunk) (finally (run! arm! armed)))))
 
 (defn function-var?
   "Is v a var holding a function that needs a contract: not a macro, a test, a dynamic
