@@ -1266,8 +1266,10 @@
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
-  roots, {key [var ...]}): a key's digest is of its name, :env, :tree when what it reaches
-  reads the tree, its starting forms' components' digests (its forms and their
+  roots, {key [var ...]}): a key's digest is of its name, :env, :tree when it is a root (a
+  check step) and what it reaches reads the tree (a test never takes the tree: it is digested by
+  what it reaches, a file it reads or a binary it runs not in its reach is the full run's to
+  catch, bin/test --all, docs/merging.md), its starting forms' components' digests (its forms and their
   namespaces' plain forms) and the values in inputs' :config of the config keys those
   components read (config-reads: every key's when one reads the config map); :process? and :binary?, whether one of those components uses a
   process or a binary var. A root naming a var with no form in g gets none."
@@ -1279,7 +1281,7 @@
                        ks (map #(:config (flags %)) cs)
                        ;; the values of the config keys its reach reads (config-reads), every key's for one reading the map
                        kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))]
-                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(:reads (flags %)) cs) tree)
+                   {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
                     :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
     (if roots
