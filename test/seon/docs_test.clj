@@ -110,7 +110,7 @@
 
 (deftest every-section-of-the-wiki-has-a-lead
   ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
-  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  ;; real wiki as main holds it (notes/archive/dogfood/docs-audit.md found 54 of 364 without)
   (let [db0 (empty-db)
         db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
     (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")
@@ -252,7 +252,7 @@
         r (seon.docs/baseline-reads db plan answer)]
     (testing "a var defined by a form of a head defining-ids knows is found at that commit, never absent"
       ;; this db holds no app.m0/f0 today, so what the section described of it (its meaning at the
-      ;; commit) is not today's: :changed (the string sentinel "changed" passed a string? check here)
+      ;; commit) is not today's: :changed
       (is (= :changed (get-in r ["docs/p.md#a" :read 'app.m0/f0])))
       (is (nil? (:unread (r "docs/p.md#a")))))
     (testing "a var the old file mentions but no known head defines is unread, never absent"
@@ -293,6 +293,9 @@
   ;; and by the health step on every branch); this reads what it does not hold: bin/, the root pages, the
   ;; native and web files, resources other than the task files (their plans are in the store) and the comment
   ;; lines of source
+  ;; (a red proof of this test writes a file under the checkout that git does not track, and a result is kept
+  ;; by the tracked tree's digest: prove it red in a tree of its own, then change this test, so the red is not
+  ;; kept at the digest the green tree has, seon.proofs/flaky)
   (let [root (config/checkout)
         words (seon.problems/old-word-spellings (slurp (str root "/AGENTS.md")))
         text? (fn [^String p] (or (str/starts-with? p "bin/") (re-find #"\.(clj|edn|md|html|js|css|c|h)$" p)))

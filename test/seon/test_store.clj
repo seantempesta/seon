@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [seon.lib] [seon.program :as program] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -14,23 +14,38 @@
            (let [conn (d/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
            cfg)))
 
+(defn program-schema-digest
+  "The digest (8 hex digits) of the declarations in `decls` (seon.db/schema's form) of the attributes
+  that hold the program (seon.program/attr-namespaces): what the test runner's program store is named
+  by, so a change to any other attribute (a run's, a task's, a config key) keeps the store and its
+  imported program, where the whole schema's digest (seon.db/schema-digest) made a full import."
+  {:malli/schema [:=> [:cat [:sequential :map]] :string]}
+  [decls]
+  (subs (clojure.string/replace (str (hasch/uuid (filterv #(some-> (:db/ident %) namespace program/attr-namespaces) decls))) "-" "") 0 8))
+
+(def kept-program-digest
+  "program-schema-digest of this process's schema."
+  (program-schema-digest pdb/schema))
+
 (defn kept-store!
-  "The path of the kept store of regenerable output at base for this schema,
-  base-<seon.db/schema-digest> (the test runner's program store, the process tests' store); a
-  store at base made with another schema (base itself, or base-<8 hex digits> but this one) is
-  removed: it is output, made again from its inputs, never a record, so a changed schema makes a
-  new store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema).
-  Nothing is made here; the caller opens it."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [base]
-  (let [f (java.io.File. ^String base)
-        dir (.getParentFile f)
-        stem (.getName f)
-        keyed (str stem "-" pdb/schema-digest)
-        old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
-    (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-      (sh/sh "rm" "-rf" (str dir "/" n)))
-    (str dir "/" keyed)))
+  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's,
+  seon.db/schema-digest, unless given: the program store passes kept-program-digest),
+  base-<digest> (the test runner's program store, the process tests' store); a store at base made
+  with another digest (base itself, or base-<8 hex digits> but this one) is removed: it is output, made
+  again from its inputs, never a record, so a changed schema makes a new store, nothing migrated or
+  refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here; the caller
+  opens it."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
+  ([base] (kept-store! base pdb/schema-digest))
+  ([base digest]
+   (let [f (java.io.File. ^String base)
+         dir (.getParentFile f)
+         stem (.getName f)
+         keyed (str stem "-" digest)
+         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+       (sh/sh "rm" "-rf" (str dir "/" n)))
+     (str dir "/" keyed))))
 
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
@@ -100,7 +115,7 @@
   seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
   (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
   never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
-  (shared-roots), whose bin/held then refused to run (the roots outlived their shards).
+  (start-shared-root!), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
   (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
@@ -224,26 +239,34 @@
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
 
-(def ^:private ^{:malli/schema [:=> [:cat :string [:vector :string]] :map]} shared-roots
-  "This test process's shared roots, one per [checkout args] and started at the first test that
-  asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
-  of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
-  its own of the process store, stopped and its main dropped when the process ends (a shutdown
-  hook)."
-  (memoize
-    (fn [checkout args]
-      (let [main (str "shard-" (random-uuid))
-            store (process-store checkout)
-            root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
-        (.addShutdownHook (Runtime/getRuntime)
-                          (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
-                                                   (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
-        root))))
+(defonce ^:private shared-roots
+  ;; this test process's shared roots by [checkout args] (shared-root!): data, not a function
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- start-shared-root!
+  "A root for this test process to share among its tests (shared-root!) on checkout with root
+  arguments args, on a main of its own of the process store; stopped and its main dropped when
+  the process ends (a shutdown hook)."
+  {:malli/schema [:=> [:cat :string [:vector :string]] :map]}
+  [checkout args]
+  (let [main (str "shard-" (random-uuid))
+        store (process-store checkout)
+        root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
+                                               (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+    root))
 
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args (shared-roots):
-  start-root!'s answer, started at the first call. A test sharing it works on branches of its
-  main and deletes them when it ends (seon.agent-test/in-agent); a test whose subject is a root's
-  life (boot, stop, kill, a generation) or main itself starts a root of its own."
+  "The root this test process shares among its tests for root arguments args: started at the
+  first call for them (start-shared-root!), then the same one: a root boots once per shard, not
+  once per test (the boot was most of an in-agent test; an attach on a running root costs
+  milliseconds). A test sharing it works on branches of its main and deletes them when it ends
+  (seon.agent-test/in-agent); a test whose subject is a root's life (boot, stop, kill, a
+  generation) or main itself starts a root of its own."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]}
-  [args] (shared-roots (.getCanonicalPath (java.io.File. ".")) (vec args)))
+  [args]
+  (let [k [(.getCanonicalPath (java.io.File. ".")) (vec args)]
+        ;; a start that is not run unless it is the one put: two callers at once share one root
+        d (delay (start-shared-root! (first k) (second k)))]
+    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))

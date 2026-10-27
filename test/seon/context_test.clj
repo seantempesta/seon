@@ -279,7 +279,7 @@
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
-  ;; into one assistant message (notes/design-agent-view-2026-10-24.md §3, the request is a render)
+  ;; into one assistant message (notes/archive/design-agent-view-2026-10-24.md §3, the request is a render)
   (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
@@ -342,7 +342,7 @@
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
   ;; task cites, or the task's plan, changed: the page is read whole at the session's first turn
-  ;; and as what changed of it at each later one, by part key (notes/one-derivation-design-rev42.md
+  ;; and as what changed of it at each later one, by part key (notes/archive/one-derivation-design-rev42.md
   ;; §7), each re-derived from the branch at that turn's commit
   (ts/test-branch!
     (fn [_ conn]
@@ -479,7 +479,7 @@
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
-  ;; own messages (seon.context/eval-messages; notes/design-agent-view-2026-10-24.md §3)
+  ;; own messages (seon.context/eval-messages; notes/archive/design-agent-view-2026-10-24.md §3)
   (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
@@ -513,12 +513,17 @@
   ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
   (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})
+        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/unwritten-test}] :turn 1 :max-turns 4})
         r (first (:refused b))]
     (is (= :proof-unknown (:reason r)))
-    (is (= 'demo-test/f-test (:test r)))
-    (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
-    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
+    (is (= 'demo-test/unwritten-test (:test r)))
+    (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
+    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r)))
+  ;; a proof written but with no result was offered the same template, which overwrites it
+  ;; (the fixture's program defines demo-test/f-test)
+  (let [db (db-with-program)
+        r (first (:refused (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})))]
+    (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
@@ -730,7 +735,7 @@
         (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
 
 (deftest the-request-is-a-conversation-of-evals-and-the-page
-  ;; notes/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
+  ;; notes/archive/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and at each model
   ;; turn the page: whole at the first, what changed of it after (a turn taken moves the status
   ;; alone); the prefix stays byte-identical
@@ -1115,6 +1120,34 @@
         block (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
+
+(deftest a-read-draws-one-page-when-it-holds-the-one-before
+  ;; the owner, 2026-10-27 ("these ops seem wildly high for both memory usage and ticks"): a later
+  ;; read told what changed since the read before by drawing that read's page again, beside its own:
+  ;; two pages of 35M ticks and 109 MB each on Seon's own tasks, to diff them. seon.context/world takes
+  ;; the earlier page from the one printed-run kept (`pages`, {commit page}), so a read draws one, and
+  ;; tells the same
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (program-facts '[[demo/g "(defn g \"Halves.\" [x] (/ x 2))" []] [demo-test/f-test "(deftest f-test (is (= 1 (g 2))))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1"}}])
+      (let [c0 (d/commit-id @conn)
+            _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan "Make ```demo/g``` exact, and say so."}])
+            db1 @conn
+            c1 (d/commit-id db1)
+            a (pdb/eid db1 :seon.agent/key "b/a1")
+            pages-called (fn [f] (seon.profile/begin!)
+                           (let [r (f)] [r (some #(when (= 'seon.context/page (:var %)) (:calls %)) (seon.profile/touched))]))
+            [whole drawn-whole] (pages-called #(context/world db1 a c0 c1))
+            p0 (context/page (d/commit-as-db db1 c0) (ctx/build (d/commit-as-db db1 c0) a :b))
+            [held drawn-held] (pages-called #(context/world db1 a c0 c1 {c0 p0}))]
+        (is (= 2 drawn-whole) "without the earlier page, both are drawn")
+        (is (= 1 drawn-held) "with it, only the page being told is drawn")
+        (is (= (map :content whole) (map :content held)) "and the read tells the same")
+        (is (= {:commit c1 :page (:page (meta whole))} (select-keys (meta held) [:commit :page])) "and hands on the page it drew, for the next read")
+        (is (some? (:page (meta held))) "which holds the page")))))
 
 (deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters

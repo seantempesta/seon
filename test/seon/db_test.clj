@@ -214,6 +214,26 @@
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-read-after-release-is-a-typed-error
+  ;; task seon.db/a-read-after-release-is-a-typed-error: a db value reads its nodes lazily from
+  ;; its store's LMDB env, and the last release closes the env (the process holds few: macOS
+  ;; gives each env SysV semaphores, kern.sysv.semume 10). A read after it was an invalid memory
+  ;; reference that killed the process; it answers :lmdb-env-closed naming the store, and the
+  ;; value is read before its last release. A store on disk of this test's own, the last
+  ;; resort; removed at the end
+  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
+            _ (d/transact conn {:tx-data [{:note/text "kept"}] :tx-meta (pdb/tx-meta :db)})
+            db @conn]
+        (d/release conn true)
+        (is (= {:type :lmdb-env-closed :path path}
+               (try (count (d/datoms db :eavt)) :read
+                    (catch Throwable e (some #(when (= :lmdb-env-closed (:type (ex-data %))) (ex-data %))
+                                             (take-while some? (iterate ex-cause e))))))
+            "the read after the last release answers the typed error naming the store"))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
 (deftest a-create-that-fails-leaves-no-store
   ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
   ;; after its env had made data.mdb, and the path then held a file with no database that no open
@@ -558,8 +578,8 @@
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
   ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
-  ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms,
-  ;; test/seon/bench_commit.clj), so <= 32 KB per commit above its values. So n turns
+  ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms),
+  ;; so <= 32 KB per commit above its values. So n turns
   ;; committed one by one (an agent commits each turn) cost what the same turns cost in
   ;; one commit plus n paths. Measured 2026-10-22: a turn with an 8 KB context, committed
   ;; per turn, wrote ~15x the one commit, because every commit rewrites the whole tail leaf
@@ -645,7 +665,7 @@
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
 (deftest content-ids-cost-the-writes-the-model-says
-  ;; content eids scatter a commit's new identities over the indexes (notes/content-eids-2026-10-23.md
+  ;; content eids scatter a commit's new identities over the indexes (the content-eids pricing study, 2026-10-23, not kept
   ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
   ;; 2 new identities, 2.3-5.1x at 10), red when steeper. Measured 2026-10-23 at 110k datoms:
   ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
