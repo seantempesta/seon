@@ -89,8 +89,10 @@
   functions: its key is the tree's digest (step-digests). health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
-  dead, which no function's reach shows, and the same tree against another base is another answer."
-  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  dead, which no function's reach shows, and the same tree against another base is another answer.
+  forks (bin/forks: the forks' own suites on Jolt) runs no function: its key is :env alone, so a
+  pin bump selects it and a change to Seon's .clj program does not."
+  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "forks" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -103,8 +105,8 @@
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
-  and lmdb-sem (each a binary of its own)."
-  #{"laws" "lmdb-kill" "lmdb-sem"})
+  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit)."
+  #{"laws" "lmdb-kill" "lmdb-sem" "forks"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step

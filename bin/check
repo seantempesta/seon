@@ -171,6 +171,8 @@ u-lmdb-sem() {
   step lmdb-sem "" "$ROOT/target/lmdb-sem" "$OUT/lmdb-sem"
   is-green lmdb-sem && rm -rf "$OUT/lmdb-sem"
 }
+# forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
+u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
 u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" run health }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
 u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
@@ -267,7 +269,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill lmdb-sem health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill lmdb-sem forks health contracts test-inputs mg-check fx config system mcp threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
