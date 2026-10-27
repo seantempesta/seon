@@ -160,6 +160,61 @@
     (when (:seon.error/type r) (throw (ex-info (str "write failed: " (:seon.error/message r)) r)))
     r))
 
+(defn- main-tree
+  "The main tree's path (git's common dir's parent), whichever checkout this runs in."
+  []
+  (.getCanonicalPath (.getParentFile (io/file (str/trim (:out (sh/sh "git" "-C" (str (config/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))))))
+
+(defn- ask-root
+  "One request m to the standing root's server (:seon.config.proofs/results-port, bin/ask: one line,
+  one reply line): its answer as data, or {:error ...} naming why none came (no port, refused, the
+  connection closed), each a failure point a caller reports."
+  [m]
+  (let [port (config/value :seon.config.proofs/results-port)]
+    (if (zero? port)
+      {:error :no-results-port}
+      (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (sedn/encode m) "\n"))]
+        (if (str/blank? out) {:error :no-answer} (edn/read-string {:default tagged-literal} out))))))
+
+(defn- unrecorded?
+  "Did the standing root not record a :record request's answer r?"
+  [r] (or (:error r) (:seon.error/type r)))
+
+(defn- keep-unsent!
+  "Request m, which no root recorded, kept in :seon.config.proofs/unsent-dir for the next run to
+  send (send-unsent!), and said so. Answers the file's path."
+  [m why]
+  (let [path (str (config/value :seon.config.proofs/unsent-dir) "/" (random-uuid) ".edn")]
+    (write! path (str (sedn/encode m) "\n"))
+    (println (str "NOT RECORDED: the standing root (port " (config/value :seon.config.proofs/results-port) ") took no results ("
+                  (pr-str why) "); kept in " path " for the next run to send"))
+    path))
+
+(defn- send-unsent!
+  "Each request no root recorded (keep-unsent!'s files), sent to the standing root now; a file the
+  root recorded is removed, one it did not stays. Answers how many stay."
+  []
+  (let [dir (io/file (config/value :seon.config.proofs/unsent-dir))
+        fs (sort (filter #(str/ends-with? (.getName %) ".edn") (or (seq (.listFiles dir)) [])))]
+    (count (for [f fs :let [r (ask-root (edn/read-string (slurp f)))]
+                 :when (or (unrecorded? r) (not (.delete f)))]
+             f))))
+
+(defn- record-run!
+  "The results ran ({key result}) of run ({:id :tree}) and their failures sent to the standing
+  root's main (its :record op: seon.proofs/record!, the one writer), :main? when this checkout is
+  the main tree; kept to send later when no root answered (keep-unsent!). Answers the refused
+  ([{:key :message}]: the root answered an error, so they run again), empty when recorded or kept."
+  [run ran failures]
+  (let [m {:op :record :run run :ran ran :failures failures :main? (= (.getCanonicalPath (io/file (config/checkout))) (main-tree))}
+        r (ask-root m)]
+    (cond
+      ;; no root took them: kept to send, not lost, so the run is not red for it
+      (:error r) (do (keep-unsent! m (:error r)) [])
+      ;; the root refused them: red, and they run again
+      (:seon.error/type r) [{:key :all :message (:seon.error/message r)}]
+      :else [])))
+
 (def ^:private ms-dir
   "Where each test's last measured ms is kept, one file per test (written by the shard that ran
   it: no two shards write one file): this checkout's own, what orders its next run's deal."
@@ -248,10 +303,7 @@
           same? (= tree before (fx/tree-id (System/getProperty "user.dir")))
           ;; one commit of the shard's results, their failures and each test's function costs
           unstored (when same?
-                     (let [r (proofs/record! (config/value :seon.config.proofs/results-store)
-                                             (proofs/results-tx {:id (str "bin/test " tree " " (.getName (io/file file))) :tree tree}
-                                                                ran (proofs/failures {:reports @reports})))]
-                       (when (:seon.error/type r) [{:key :all :message (:seon.error/message r)}])))
+                     (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} ran (proofs/failures {:reports @reports})))
           _ (.mkdirs (io/file ms-dir))
           _ (doseq [[t r] ran] (write! (str ms-dir "/" t) (str (:ms r))))
           red (count (remove proofs/green? (vals ran)))]
@@ -282,9 +334,13 @@
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)
         all-cand (merge (when tests? digests) steps)
-        cand (apply dissoc all-cand (proofs/left-out (keys all-cand) process (boolean (or named? merge?)) #{}))
-        ;; the results at cand's digests, by one seek each in the results store
-        found (proofs/stored-results (proofs/results-db) (vec (vals cand)))
+        cand (apply dissoc all-cand (proofs/left-out (vec (keys all-cand)) process (boolean (or named? merge?)) #{}))
+        ;; the results main holds at cand's digests, from the standing root (none reachable: none, said)
+        asked (ask-root {:op :results :digests (vec (distinct (vals cand)))})
+        found (if (:results asked) (:results asked)
+                  (do (println (str "prove: no results read from the standing root (port " (config/value :seon.config.proofs/results-port) "): "
+                                    (pr-str (or (:error asked) (:seon.error/message asked))) "; nothing is reused"))
+                      {}))
         {:keys [run reused]} (proofs/plan nil cand (if (true? all?) {} found) #{})
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
@@ -305,7 +361,9 @@
   (if-let [bad (refused-names names)]
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
-        dir (config/value :seon.config.proofs/results-store)
+        dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
+        unsent (send-unsent!)
+        _ (when (pos? unsent) (println (str "prove: " unsent " runs' results still unsent in " (config/value :seon.config.proofs/unsent-dir))))
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store)))
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
@@ -374,39 +432,12 @@
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
-                     (let [r (proofs/record! (config/value :seon.config.proofs/results-store)
-                                             (proofs/results-tx {:id (str "bin/prove steps " tree) :tree tree}
-                                                                (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
-                       (when (:seon.error/type r) [{:key :all :message (:seon.error/message r)}])))]
+                     (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
+                                  (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
     (if (and (empty? red) (empty? unstored)) 0 1)))
-
-(defn- import-results!
-  "The results directory dir's results (the files bin/test wrote before the results store: <digest>.edn
-  greens, <digest>.red.edn reds) recorded in the results store, a commit per
-  :seon.config.proofs/import-batch files: every green, and a red whose digest also holds a green
-  (recorded after it, so the digest's history holds both: flaky). A red alone was no result (it
-  ran again), so it is left out. Once, when the store replaced the directory; the directory is
-  then the owner's to remove. Answers the exit status."
-  [dir]
-  (let [store (config/value :seon.config.proofs/results-store)
-        names (vec (sort (.list (io/file dir))))
-        greens (filterv #(re-matches #"[0-9a-f]+\.edn" %) names)
-        green-dg (set (map #(subs % 0 (- (count %) 4)) greens))
-        reds (filterv #(when-let [[_ dg] (re-matches #"([0-9a-f]+)\.red\.edn" %)] (green-dg dg)) names)
-        read #(edn/read-string (slurp (io/file dir %)))
-        t0 (profile/now-ns)
-        refused (volatile! 0)]
-    (doseq [part (partition-all (config/value :seon.config.proofs/import-batch) (concat greens reds))]
-      (let [ran (into {} (for [f part :let [r (read f)] :when (:digest r)] [(or (:test r) (:step r)) (dissoc r :failures)]))
-            fails (into {} (for [f part :let [r (read f)] :when (seq (:failures r))] [(or (:test r) (:step r)) (:failures r)]))
-            r (proofs/record! store (proofs/results-tx {:id (str "import " dir)} ran fails))]
-        (when (:seon.error/type r) (vswap! refused inc) (println "UNRECORDED" (:seon.error/message r)))))
-    (println (str "import: " (count greens) " greens, " (count reds) " reds of digests also green, from " dir " into " store
-                  " in " (quot (- (profile/now-ns) t0) 1000000) " ms, " @refused " commits refused"))
-    (if (zero? @refused) 0 1)))
 
 (defn -main [& args]
   (let [[flag & more] args]
@@ -416,5 +447,4 @@
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
-        "--store-steps" (store-steps! (first more))
-        "--import-results" (import-results! (first more))))))
+        "--store-steps" (store-steps! (first more))))))

@@ -2,13 +2,13 @@
   "Proofs: what a change must run, and what a run proved. prove's selection (task
   seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md#a-merge-runs-what-the-change-reaches):
   a key (a test var, or a bin/check step of check-steps) runs only when no green result is
-  recorded at its reach digest (seon.program/reach-digests) in the one results store every
-  checkout shares (record!, results-db); bin/prove, bin/test, bin/check without a run size and an agent's test run all
+  recorded at its reach digest (seon.program/reach-digests) on main, where every
+  checkout's results land, the standing root's main (record!, stored-results); bin/prove, bin/test, bin/check without a run size and an agent's test run all
   select with plan. And the results of a clojure.test run's report data (the agent's
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.db :as pdb]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
             [clojure.edn :as edn] [datahike.api :as d] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -156,28 +156,25 @@
         :else (or green red)))
 
 (defn stored-results
-  "{digest result} of the results db holds at digests (:seon.proof/ facts, which the test service
-  records, seon.prove/result-tx): one AVET seek per digest, and one seek of its status's history
-  (Datahike's, :seon.config.store/keep-history?): every verdict the digest ever had. A green is
-  {:digest :pass 1 :fail 0 :error 0}; a red is its status
+  "{digest result} of the results db holds at digests (:seon.proof/ facts, results-tx's): one AVET
+  seek and one EAVT seek per digest. A green is {:digest :pass 1 :fail 0 :error 0}; a red is its status
   counted once, with the failures it recorded (:failures [{:type :message :expected :actual}]); a
-  digest that was both is flaky (a store with :seon.config.store/keep-history? off keeps one
-  status, so it finds none). A test's verdict is a function of its digest (one per-test tick
-  bound everywhere), so a red is reused as a green is."
+  digest recorded both green (:seon.proof/green) and red (:seon.proof/red) is flaky, whichever came
+  last. A test's verdict is a function of its digest (one per-test tick bound everywhere), so a red
+  is reused as a green is."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :string :map]]}
   [db digests]
-  (let [hist (d/history db)]
-    (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
-                   :when e
-                   :let [seen (into #{} (comp (filter :added) (map :v) (filter #{:pass :fail :error})) (d/datoms hist :eavt e :seon.proof/status))
-                         {s :seon.proof/status fs :seon.proof/failures} (d/pull db [:seon.proof/status :seon.proof/failures] e)
-                         red-s (if (#{:fail :error} s) s (some #{:fail :error} seen))
-                         green (when (seen :pass) {:digest dg :pass 1 :fail 0 :error 0})
-                         red (when red-s {:digest dg :pass 0 :fail (if (= :fail red-s) 1 0) :error (if (= :error red-s) 1 0)
-                                          :failures (vec (remove :flaky fs))})
-                         r (verdict dg green red)]
-                   :when r]
-               [dg r]))))
+  (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
+                 :when e
+                 ;; the entity's datoms, one EAVT seek (a pull costs several times it)
+                 :let [{g :seon.proof/green red-s :seon.proof/red fs :seon.proof/failures}
+                       (into {} (comp (filter #(#{:seon.proof/green :seon.proof/red :seon.proof/failures} (:a %))) (map (juxt :a :v))) (d/datoms db :eavt e))
+                       green (when g {:digest dg :pass 1 :fail 0 :error 0})
+                       red (when red-s {:digest dg :pass 0 :fail (if (= :fail red-s) 1 0) :error (if (= :error red-s) 1 0)
+                                        :failures (vec (remove :flaky fs))})
+                       r (verdict dg green red)]
+                 :when r]
+             [dg r])))
 
 (defn status-of
   "The status a result ({:pass :fail :error}) records: :error when an assertion errored, :fail when one
@@ -185,69 +182,160 @@
   {:malli/schema [:=> [:cat :map] [:enum :pass :fail :error]]}
   [r] (cond (pos? (:error r 0)) :error (pos? (:fail r 0)) :fail :else :pass))
 
-(defn fn-rows
-  "The :seon.proof.fn/ facts of test t's run at digest dg, one per contracted function it called
-  (fns: seon.profile/touched's rows), keyed by digest and var."
-  {:malli/schema [:=> [:cat :string :qualified-symbol [:sequential :seon.profile/fn-cost]] [:vector :map]]}
-  [dg t fns]
-  (mapv (fn [{:keys [var calls ticks self-ticks bytes self-bytes]}]
-          {:seon.proof.fn/key (str dg " " var) :seon.proof.fn/digest dg :seon.proof.fn/var var :seon.proof.fn/test t
-           :seon.proof.fn/calls calls :seon.proof.fn/ticks ticks :seon.proof.fn/self-ticks self-ticks
-           :seon.proof.fn/bytes bytes :seon.proof.fn/self-bytes self-bytes})
-        fns))
+(defn detail
+  "What each contracted function cost each test of ran ({key result}, a result's :fns:
+  seon.profile/touched's rows), as one value: {test {var [calls ticks self-ticks bytes self-bytes]}}.
+  A run's one out-of-line value (:seon.proof.run/detail), never a datom a row."
+  {:malli/schema [:=> [:cat [:map-of :any :map]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]}
+  [ran]
+  (into {} (for [[_ r] ran :when (and (:test r) (seq (:fns r)))]
+             [(:test r) (into {} (for [{:keys [var calls ticks self-ticks bytes self-bytes]} (:fns r)] [var [calls ticks self-ticks bytes self-bytes]]))])))
+
+(defn per-call
+  "Each function's cost per call over the tests of a detail (detail's shape): {var {:calls n :ticks
+  :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]] [:map-of :qualified-symbol :map]]}
+  [detail]
+  (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
+    (into {} (for [[v [calls ticks self-ticks bytes self-bytes]] sums :when (pos? calls)]
+               [v {:calls calls :ticks (quot ticks calls) :self-ticks (quot self-ticks calls) :bytes (quot bytes calls) :self-bytes (quot self-bytes calls)}]))))
+
+(defn- moved?
+  "Has measure x moved from y by more than the noise ratio (:seon.config.proofs/fn-noise)?"
+  {:malli/schema [:=> [:cat :int [:maybe :int] number?] :boolean]}
+  [x y noise] (or (nil? y) (> (Math/abs (double (- x y))) (* noise (max 1 (Math/abs (double y)))))))
+
+(defn fn-tx
+  "The function facts a run of main's tree leaves (run id, its detail): one :seon.proof.fn/ entity a
+  function, its cost per call (per-call) and the run that measured it, written only for a function
+  db holds none of, or whose self ticks or bytes per call moved past :seon.config.proofs/fn-noise:
+  facts change only when a value changes."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]] [:vector :map]]}
+  [db run detail]
+  (let [noise (cfg/value :seon.config.proofs/fn-noise)]
+    (vec (for [[v {:keys [calls ticks self-ticks bytes self-bytes]}] (per-call detail)
+               :let [e (:e (first (d/datoms db :avet :seon.proof.fn/var v)))
+                     old (when e (into {} (map (juxt :a :v)) (d/datoms db :eavt e)))]
+               :when (or (nil? e) (moved? self-ticks (:seon.proof.fn/self-ticks old) noise) (moved? self-bytes (:seon.proof.fn/self-bytes old) noise))]
+           {:seon.proof.fn/var v :seon.proof.fn/calls calls :seon.proof.fn/ticks ticks :seon.proof.fn/self-ticks self-ticks
+            :seon.proof.fn/bytes bytes :seon.proof.fn/self-bytes self-bytes :seon.proof.fn/run run}))))
 
 (defn results-tx
   "The facts that record ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes
   :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change}): one
-  :seon.proof/ result per digest, with failures ({key [assertion]}, seon.proofs/failures) and the
-  function rows of each test (fn-rows). A flaky result (judged, not run) and an :unreported one
-  (its namespace threw before it reported: no verdict of its own) record nothing, as no result with
-  no :digest does."
-  {:malli/schema [:=> [:cat [:map [:id :string]] [:map-of :any :map] [:map-of :any :any]] [:vector :map]]}
+  :seon.proof/ result per digest that ran, with failures ({key [assertion]}, seon.proofs/failures),
+  and the run's entity, holding its detail (what each test's functions cost: detail, one value).
+  A flaky result (judged, not run) and an :unreported one (its namespace threw before it reported:
+  no verdict of its own) record nothing, as no result with no :digest does; a reused one is never
+  in ran. When nothing ran, nothing at all."
+  {:malli/schema [:=> [:cat [:map [:id :string] [:tree {:optional true} :string] [:branch {:optional true} [:or :keyword :string]]
+                              [:t {:optional true} :int] [:change {:optional true} :map]]
+                       [:map-of :any [:map [:digest {:optional true} :string] [:test {:optional true} :qualified-symbol] [:step {:optional true} :string]
+                                      [:pass {:optional true} nat-int?] [:fail {:optional true} nat-int?] [:error {:optional true} nat-int?]
+                                      [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
+                                      [:fns {:optional true} [:sequential :seon.profile/fn-cost]]]]
+                       [:map-of :any [:sequential :map]]]
+                  [:vector :map]]}
   [run ran failures]
   (let [where (cond-> {:seon.proof/run (:id run)}
                 (:tree run) (assoc :seon.proof/tree (:tree run))
                 (:branch run) (assoc :seon.proof/branch (name (:branch run)))
                 (:t run) (assoc :seon.proof/t (:t run))
-                (:change run) (assoc :seon.proof/change (:change run)))]
-    (vec (mapcat (fn [[k r]]
-                   (when (and (:digest r) (not (:flaky r)) (not (:unreported r)))
-                     (let [dg (:digest r) t (:test r)]
-                       (cons (cond-> (assoc where :seon.proof/digest dg :seon.proof/status (status-of r))
-                               t (assoc :seon.proof/test t)
-                               (:step r) (assoc :seon.proof/step (:step r))
-                               (:ms r) (assoc :seon.proof/ms (long (:ms r)))
-                               (:ticks r) (assoc :seon.proof/ticks (:ticks r))
-                               (:bytes r) (assoc :seon.proof/bytes (:bytes r))
-                               (seq (failures k)) (assoc :seon.proof/failures (vec (failures k))))
-                             (when (and t (seq (:fns r))) (fn-rows dg t (:fns r)))))))
-                 ran))))
+                (:change run) (assoc :seon.proof/change (:change run)))
+        ran (into {} (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r))))) ran)
+        dt (detail ran)]
+    ;; nothing ran (every key reused): nothing to write
+    (into (if (empty? ran) [] [(cond-> {:seon.proof.run/id (:id run)}
+             (:tree run) (assoc :seon.proof.run/tree (:tree run))
+             (:branch run) (assoc :seon.proof.run/branch (name (:branch run)))
+             (:t run) (assoc :seon.proof.run/t (:t run))
+             (seq dt) (assoc :seon.proof.run/detail dt))])
+          (for [[k r] ran :let [dg (:digest r) t (:test r)]]
+            (cond-> (assoc where :seon.proof/digest dg :seon.proof/status (status-of r)
+                           ;; what this digest was ever judged: green and red both is flaky (stored-results)
+                           (if (green? r) :seon.proof/green :seon.proof/red) (if (green? r) true (status-of r)))
+              t (assoc :seon.proof/test t)
+              (:step r) (assoc :seon.proof/step (:step r))
+              (:ms r) (assoc :seon.proof/ms (long (:ms r)))
+              (:ticks r) (assoc :seon.proof/ticks (:ticks r))
+              (:bytes r) (assoc :seon.proof/bytes (:bytes r))
+              (seq (failures k)) (assoc :seon.proof/failures (vec (failures k))))))))
 
-(defn results-conn
-  "The connection to :db of the results store at path (:seon.config.proofs/results-store), made
-  when missing (seon.db/open!: whole or not at all) and its schema installed as it grows. Held for
-  the process (Datahike's registry keeps one per store; a db value read from it is valid only while
-  it is open), never released."
-  {:malli/schema [:=> [:cat :string] :seon.host/conn]}
-  [path] (:conn (pdb/open! :lmdb path 0 :db)))
-
-(defn results-db
-  "The results store's db as the store holds it now (path: default :seon.config.proofs/results-store):
-  its :db head read from the store (d/branch-as-db), so another process's commits are in it."
-  {:malli/schema [:function [:=> [:cat] :seon.host/db] [:=> [:cat :string] :seon.host/db]]}
-  ([] (results-db (cfg/value :seon.config.proofs/results-store)))
-  ([path] (d/branch-as-db (results-conn path) :db)))
+(defn record-tx
+  "The facts req's results leave on main ({:run :ran :failures :main?}, results-tx's arguments; :main?
+  a run of main's tree, whose functions' costs are kept, fn-tx), db being main now: one transaction."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:map [:run :map] [:ran :map] [:failures {:optional true} :map] [:main? {:optional true} :boolean]]] [:vector :map]]}
+  [db {:keys [run ran failures main?]}]
+  (let [tx (results-tx run ran (or failures {}))
+        dt (:seon.proof.run/detail (first tx))]
+    (cond-> tx (and main? dt) (into (fn-tx db (:id run) dt)))))
 
 (defn record!
-  "tx-data (results-tx's) committed to the results store at path, one commit: the one writer of
-  results, whoever ran them (a bin/test shard, bin/prove's steps, root's test service). Answers
-  the commit's db, or the declared :seon.proofs/unrecorded error with the store's message: its
-  results are not kept, so they run again."
-  {:malli/schema [:=> [:cat :string [:vector :map]] [:or :seon.host/db :seon.error/base]]}
-  [path tx-data]
-  (try (:db-after (d/transact (results-conn path) {:tx-data tx-data}))
-       (catch Throwable e
-         (contract/error :seon.proofs/unrecorded #'record! (str "results not recorded at " path ": " (ex-message e)) {:path path}))))
+  "The one writer of results: req's facts (record-tx) committed on main by (write! tx-data), root's
+  writer, db being main now. Whoever ran them asks root: the test service through root's api (its
+  proc writes record-tx's facts), bin/test and bin/prove through the server's :record op. Answers
+  write!'s answer, or the declared :seon.proofs/unrecorded with its message: those results are not
+  kept, so they run again."
+  {:malli/schema [:=> [:cat :seon.host/fn [:maybe :seon.host/db] :map] :any]}
+  [write! db req]
+  (let [r (write! (record-tx db req))]
+    (if (contract/error? r)
+      (contract/error :seon.proofs/unrecorded #'record! (str "results not recorded: " (:seon.error/message r)) {})
+      r)))
+
+;; ---- what the results answer ------------------------------------------------------------
+
+(defn fns
+  "Every contracted function main's runs measured, its cost per call as the newest run that moved it
+  recorded ({:var :calls :ticks :self-ticks :bytes :self-bytes :run}): one AEVT scan of the functions."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector :map]]}
+  [db]
+  (vec (for [dt (d/datoms db :aevt :seon.proof.fn/var)]
+         (into {} (map (fn [x] [(keyword (name (:a x))) (:v x)])) (d/datoms db :eavt (:e dt))))))
+
+(defn slowest
+  "The k contracted functions that cost most per call, by the measure by (:self-ticks unless given:
+  the work done in the function itself; :self-bytes the memory), costliest first (fns)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db nat-int?] [:vector :map]] [:=> [:cat :seon.host/db nat-int? :keyword] [:vector :map]]]}
+  ([db k] (slowest db k :self-ticks))
+  ([db k by] (vec (take k (sort-by (juxt (comp - by) (comp str :var)) (fns db))))))
+
+(defn details
+  "What each test at digests spent in each function, as the run that recorded its result at that
+  digest measured it: {test {var [calls ticks self-ticks bytes self-bytes]}}, read from those runs'
+  details (one value each, a few runs for a tree)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]}
+  [db digests]
+  (let [res (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))] :when e]
+              (into {} (map (juxt :a :v)) (d/datoms db :eavt e)))
+        runs (into {} (for [id (distinct (keep :seon.proof/run res)) :let [e (:e (first (d/datoms db :avet :seon.proof.run/id id)))] :when e]
+                        [id (:v (first (d/datoms db :eavt e :seon.proof.run/detail)))]))]
+    (into {} (for [r res :let [t (:seon.proof/test r) d (get-in runs [(:seon.proof/run r) t])] :when (and t d)] [t d]))))
+
+(defn exercising
+  "The tests at digests (a tree's) that called contracted function v, and how much ({:test :calls
+  :ticks :self-ticks :bytes :self-bytes}), most ticks first (details)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol [:sequential :string]] [:vector :map]]}
+  [db v digests]
+  (vec (sort-by (juxt (comp - :ticks) (comp str :test))
+                (for [[t fs] (details db digests) :let [row (fs v)] :when row
+                      :let [[calls ticks self-ticks bytes self-bytes] row]]
+                  {:test t :calls calls :ticks ticks :self-ticks self-ticks :bytes bytes :self-bytes self-bytes}))))
+
+(defn slower
+  "What costs more per call in detail (a run's, or a tree's: details) than main's runs last recorded
+  (fns): each function whose self ticks or self bytes per call grew past :seon.config.proofs/fn-noise,
+  {:var :by :before :after :ratio}, the largest ratio first. A function main never measured is new,
+  not slower."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]] [:vector :map]]}
+  [db detail]
+  (let [main (into {} (map (juxt :var identity)) (fns db))
+        noise (cfg/value :seon.config.proofs/fn-noise)]
+    (vec (sort-by (juxt (comp - :ratio) (comp str :var))
+                  (for [[v now] (per-call detail) by [:self-ticks :self-bytes]
+                        :let [x (by now) y (get-in main [v by])]
+                        :when (and y (pos? y) (> x (* (+ 1 noise) y)))]
+                    {:var v :by by :before y :after x :ratio (double (/ x y))})))))
 
 (defn left-out
   "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a

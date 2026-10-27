@@ -7,7 +7,7 @@
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs]
+            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
 
@@ -327,7 +327,7 @@
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (str "(seon.proofs/results @(seon.root/run-tests! sys :" (:agent %) "))")})
-                          {:dirs ["src" "test"] :proofs #{proof}})]
+                          {:dirs ["src" "test"] :proofs #{proof} :own-root? true})]
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
@@ -358,16 +358,18 @@
   ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
-  ;; against the main it forked from, and each green goes to the shared results directory (a
-  ;; fresh one here, so nothing an earlier run stored is reused) through root's :file owner,
+  ;; against the main it forked from, and each green is a fact on the booted root's main (a root
+  ;; of its own here, so nothing an earlier run recorded is reused),
   ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
   ;; unchanged branch reruns nothing and answers the same results
-  (let [dir (str (System/getProperty "user.dir") "/target/tmp/reach-" (random-uuid))
+  (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:ran r) (:reused r)])")
         own "(select-keys (prove) [:results :ran :reused])"
-        stored "(count (filter #(.endsWith (.getName %) \".edn\") (.listFiles (java.io.File. (seon.config/value :seon.config.source/test-results-dir)))))"
+        digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
+        ;; how many of the two tests' results root's main holds, at the digests bin/test gives them
+        stored (str "(count (seon.proofs/stored-results @(:conn sys) " (pr-str [(digests proof) (digests reached)]) "))")
         [_ inputs first-run files judged second-run]
         (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                    {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
@@ -375,11 +377,10 @@
                    {:op :eval :agent "root" :code stored}
                    {:op :eval :agent "root" :code (run (:agent %))}
                    own)
-                  {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
-    (sh/sh "rm" "-rf" dir)
+                  {:dirs ["src" "test"] :proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (:value files)) "and stores both through root's :file owner, in the results directory")
+    (is (= 2 (:value files)) "and both are facts on root's main")
     (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
     (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (:value second-run)) "and so does the agent's next run")))
 
@@ -389,8 +390,7 @@
   ;; the second red in one run and green alone); the turn's greens are stored at their digests,
   ;; so the judge after it (the plan's tests, the same here: both are the run's proofs) runs
   ;; nothing and forks no child
-  (let [dir (str (System/getProperty "user.dir") "/target/tmp/one-bound-" (random-uuid))
-        [_ budget turn judge]
+  (let [[_ budget turn judge]
         ;; top-level forms, each recorded, so each test has a digest its green is stored at
         (in-agent ["(ns bound-test (:require [clojure.test :refer [deftest is]]))
                    (defn work {:malli/schema [:=> [:cat] :int]} [] (reduce + (range 300000)))
@@ -399,8 +399,7 @@
                    "(do (def budget (long (* 3/2 (:ticks (get (seon.proofs/run-tests! '[bound-test/a] {} (fn [_]) nil) 'bound-test/a))))) budget)"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :turn)] [(seon.proofs/results r) (:ran r) (some? (:pid r))])"
                    "(let [r (seon.agent/run-tests-forked budget #{'bound-test/a 'bound-test/b} :judge)] [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r))])"]
-                  {:dirs ["src" "test"] :proofs #{} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
-    (sh/sh "rm" "-rf" dir)
+                  {:dirs ["src" "test"] :proofs #{}})]
     (is (pos-int? (:value budget)) (pr-str budget))
     (is (= ['{bound-test/a :pass bound-test/b :pass} 2 true] (:value turn))
         (str "the turn runs both, each within its own budget: green " (pr-str turn)))
@@ -428,24 +427,26 @@
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one store, keyed by
-  ;; the same digests. The checkout stores p1 green; an agent on the same tree reuses it and
-  ;; runs p2, storing it; the checkout's plan then reuses the agent's p2
+  ;; the same digests, now the facts on root's main. The checkout records p1 green there; an
+  ;; agent on the same tree reuses it and runs p2, which is then a fact on main too, so the
+  ;; checkout's plan reuses the agent's p2
   (let [here (System/getProperty "user.dir")
-        dir (str here "/target/tmp/one-store-" (random-uuid))
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
-        _ (.mkdirs (java.io.File. ^String dir))
-        ;; the checkout's green for p1, as bin/test stores one (a run nested in this test's run
-        ;; would report through it)
-        unstored (proofs/store-verdicts! #(fx/write-file {:req %}) dir {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}})
-        stored (proofs/verdicts dir [(digests p1)])
-        [r] (in-agent ["(select-keys (prove) [:results :ran :reused])"]
-                      ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                      {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})
-        checkout (proofs/plan nil (select-keys digests [p2]) (proofs/verdicts dir [(digests p2)]) #{})]
-    (sh/sh "rm" "-rf" dir)
-    (is (and (empty? unstored) (seq stored)) "the checkout stored its green for p1")
+        ;; the checkout's green for p1, as root's writer records one (a run nested in this test's
+        ;; run would report through it)
+        record (str "(let [r (seon.proofs/record! (fn [tx] (datahike.api/transact (:conn sys) {:tx-data tx})) @(:conn sys) "
+                    (pr-str {:run {:id "agent-test"} :ran {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}}}) ")] (some? (:db-after r)))")
+        [_ recorded r after]
+        (in-agent ["nil"
+                   {:op :eval :agent "root" :code record}
+                   "(select-keys (prove) [:results :ran :reused])"
+                   {:op :eval :agent "root" :code (str "(seon.proofs/stored-results @(:conn sys) " (pr-str [(digests p2)]) ")")}]
+                  ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :own-root? true})
+        checkout (proofs/plan nil (select-keys digests [p2]) (:value after) #{})]
+    (is (true? (:value recorded)) "the checkout recorded its green for p1 on root's main")
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
     (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
