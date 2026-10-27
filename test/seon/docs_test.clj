@@ -110,7 +110,7 @@
 
 (deftest every-section-of-the-wiki-has-a-lead
   ;; docs/README.md: every section leads with one sentence that stands alone; the list is read from the
-  ;; real wiki as main holds it (notes/dogfood/docs-audit.md found 54 of 364 without)
+  ;; real wiki as main holds it (notes/archive/dogfood/docs-audit.md found 54 of 364 without)
   (let [db0 (empty-db)
         db (d/db-with db0 (docs/load-dir-tx db0 (config/checkout) "docs"))]
     (is (< 300 (count (d/datoms db :aevt :seon.section/address))) "the real wiki is read")

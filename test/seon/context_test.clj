@@ -279,7 +279,7 @@
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
-  ;; into one assistant message (notes/design-agent-view-2026-10-24.md §3, the request is a render)
+  ;; into one assistant message (notes/archive/design-agent-view-2026-10-24.md §3, the request is a render)
   (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
@@ -342,7 +342,7 @@
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
   ;; task cites, or the task's plan, changed: the page is read whole at the session's first turn
-  ;; and as what changed of it at each later one, by part key (notes/one-derivation-design-rev42.md
+  ;; and as what changed of it at each later one, by part key (notes/archive/one-derivation-design-rev42.md
   ;; §7), each re-derived from the branch at that turn's commit
   (ts/test-branch!
     (fn [_ conn]
@@ -506,7 +506,7 @@
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
-  ;; own messages (seon.context/eval-messages; notes/design-agent-view-2026-10-24.md §3)
+  ;; own messages (seon.context/eval-messages; notes/archive/design-agent-view-2026-10-24.md §3)
   (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
@@ -769,7 +769,7 @@
         (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
 
 (deftest the-request-is-a-conversation-of-evals-and-the-page
-  ;; notes/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
+  ;; notes/archive/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and at each model
   ;; turn the page: whole at the first, what changed of it after (a turn taken moves the status
   ;; alone); the prefix stays byte-identical

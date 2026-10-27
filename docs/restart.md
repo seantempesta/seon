@@ -8,7 +8,7 @@ What survives a restart on a fresh account: git, the disk and the repo's docs.
 
 - Git: `main`, every `jolt/*` and `claude/*` branch, and the forks on GitHub (``seantempesta/<lib>``). Every pin of main resolves there.
 - The disk: each worktree (`.worktrees/<name>`), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
-- The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/root/` (root's notes, with its old memories in `notes/root/memory/`).
+- The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/archive/` (the working papers whose facts the wiki now holds, kept as evidence). The rules root's old memories held are in AGENTS.md §8 and §9.
 
 Nothing else does: no Claude session, its sidebar group, a running agent or a queued message.
 
@@ -16,7 +16,7 @@ Nothing else does: no Claude session, its sidebar group, a running agent or a qu
 
 Start the root session in the main folder itself (`~/src/seon-next`; from any worktree it is `git rev-parse --path-format=absolute --git-common-dir`, minus `/.git`), not in an app-made worktree. Root edits main's docs and owns the merges, and an app worktree's hook blocks writes outside it. Worktree sessions get their worktree from `bin/worktree NAME`, not from the app.
 
-1. Read AGENTS.md whole, then `docs/plan.md`, `docs/decisions.md`, this page, and the tail of `notes/merge-log.md`.
+1. Read AGENTS.md whole, then `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand: the owner's direction changed several times, so read every entry of the last two days), this page, and the tail of `notes/merge-log.md`. The newest `notes/root-handoff-*.md` is the owner-facing detail of the day before; what it held that outlives the day is below.
 2. Look at the state, without changing anything:
    - `git log --oneline -20`;
    - `uptime`;
@@ -26,6 +26,15 @@ Start the root session in the main folder itself (`~/src/seon-next`; from any wo
 3. Read each live branch's handoff note: `git show BRANCH:notes/handoff-NAME.md`.
 4. Write the owner a five-line state summary.
 5. Start the sessions again, one per live branch below, in that branch's worktree, each briefed with its handoff note and AGENTS §3. Start one merge session in the main tree, briefed with AGENTS §3's merge paragraph and the queue. File them in one sidebar group, and use the model AGENTS §2 names for the task.
+
+## What a resuming root checks
+
+A root resuming on the same account looks at the state once, in this order, then writes the owner five lines ([AGENTS](../AGENTS.md) §2): `git log --oneline --first-parent -15`, `uptime`, `bin/root status`, the sessions list, and the newest entries of `notes/merge-log.md`. Then the checks the earlier roots' mistakes taught:
+- **After every merge, restart root with `bin/update`**, never `bin/root stop/start`, until the source tree follows main (task `seon.fx/the-source-tree-follows-main`): the standing root imports main's program from the checkout `:seon.config.source/root` names, which only `bin/update` moves. Check `(seon.generation/generation)` and that a just-merged var's entity is on root's main.
+- **A merge is `bin/prove --merge`, never a list of tests named by hand** ([merging](merging.md#a-merge-runs-what-the-change-reaches)); read every red it names before keeping or reverting. One red comes and goes, a three-way merge's allocation (task `seon.cost/a-call-allocates-the-same-bytes-each-time`), and a digest both green and red is marked `:flaky`.
+- **Main's verification goes first**: a worktree's heavy run waits on main's lock; no load-average gate stands in for it.
+- **Ask when a ruling reads two ways**, and ask the session, not only `git status`, before removing a worktree a live session may use.
+- **Paid model runs** wait on a free audit of each request's context that finds none of its known problems ([model](model.md#paid-runs)).
 
 ## Live branches
 
@@ -39,12 +48,12 @@ The cutover is done (2026-10-23): `~/src/seon-next` is the repo, its main is nex
 
 ## Restarting root on the same account
 
-The sessions keep running: a new root does not restart them. They were started by the old root, so they are not linked to the new one: find them with list_sessions (group seon-jolt), message them by id, and read a session's state with list_events or by asking. The old root's working notes are in `notes/root/`, its memories in `notes/root/memory/`.
+The sessions keep running: a new root does not restart them. They were started by the old root, so they are not linked to the new one: find them with list_sessions (group seon-jolt), message them by id, and read a session's state with list_events or by asking. What the old root learned is in the wiki, [plan](plan.md) and [decisions](decisions.md), not in its notes.
 
 ```
 You are root for Seon on Jolt, taking over from an earlier root on the same account. Work in ~/src/seon-next.
 
-Read first, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, the tail of notes/merge-log.md, and notes/audit-2026-10-24.md and notes/perf-2026-10-24.md (yesterday's review: what was overbuilt, what regressed, what's slow). The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them.
+Read first, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, the tail of notes/merge-log.md, and notes/perf-2026-10-24.md (yesterday's review: what regressed, what's slow). The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them.
 
 Yesterday's lessons. Run the work this way from the start:
 

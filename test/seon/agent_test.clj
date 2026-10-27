@@ -1121,7 +1121,7 @@
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
   ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
-  ;; (notes/design-agent-view-2026-10-24.md §7)
+  ;; (notes/archive/design-agent-view-2026-10-24.md §7)
   (let [names (volatile! nil)
         [_ end turn on-main] (in-agent (fn [{:keys [agent task ns run] :as n}]
                                          (vreset! names n)
@@ -1143,7 +1143,7 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, notes/design-agent-view-2026-10-24.md
+    ;; the prose comes in the eval call (its first argument, notes/archive/design-agent-view-2026-10-24.md
     ;; section 1), so the reply's own text is empty and the prose is the eval's
     (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))

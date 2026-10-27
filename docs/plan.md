@@ -4,7 +4,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 ## Now (2026-10-27, morning)
 
-Pins (docs/forks.md): Chez fa6a4c73; Jolt 07d9655d; Datahike cc614f4e; LMDB 15420ce; http-client e866277d. Paid model runs: $30 approved by the owner, spent only after a free audit of each request's context finds none of its known problems; two audits ran and neither was clean, so nothing is spent. The sessions that did the night's work have ended; their state is in the task files, notes/root-handoff-2026-10-27.md and notes/session-state-2026-10-27/.
+Pins (docs/forks.md): Chez fa6a4c73; Jolt 07d9655d; Datahike cc614f4e; LMDB 15420ce; http-client e866277d. Paid model runs: $30 approved by the owner, spent only after a free audit of each request's context finds none of its known problems; two audits ran and neither was clean, so nothing is spent. The sessions that did the night's work have ended; their state is in the task files, docs/restart.md#what-a-resuming-root-checks and notes/archive/session-state-2026-10-27/.
 
 **Where it stands.** Main is green under `bin/prove --merge` (MERGE OK at c2336a6a75: every test and check step, process tests included; nothing left out), with one known intermittent red, merge-cost's three-way proof (a 96-byte runtime variance; task held), which the flaky rule now marks :flaky. Main goes first through one lock. After a merge, restart root with `bin/update` (never `bin/root stop/start`) until jolt/the-source-tree-follows-main merges: the standing root imports main's program from .worktrees/merges, which only bin/update moves.
 
