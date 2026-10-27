@@ -330,8 +330,7 @@
   calls it, whom it calls and the sections naming it; or a schema key, whose readers and writers it
   finds), as a vector of hits best first, each {:kind :name :e :score :by :relevance :line :at}:
   :kind one of search-kinds, :name the var, section address, task id or schema key, :e its entity,
-  :score the weighted reciprocal-rank score of seon.vector/rrf-scores over the rankings below
-  (:seon.config.render/search-weights), :by the set of them it is in (:text :meaning :refs),
+  :score the reciprocal-rank score of seon.vector/rrf-scores over the rankings below, :by the set of them it is in (:text :meaning :refs),
   :relevance (a text hit only, for now) its BM25 z-score through :seon.config.render/search-relevance,
   :line the line of its text holding a word of q and :at its number. The rankings: the text (seon.docs/tokens:
   BM25 over q's identifier-split words, kept at z >= :seon.config.render/search-token-z), meaning
@@ -354,7 +353,6 @@
         by (or by #{:text :meaning :refs})
         k (or k (cfg/value :seon.config.render/search))
         minimum (or minimum (cfg/value :seon.config.render/search-min))
-        weights (cfg/value :seon.config.render/search-weights)
         table (cfg/value :seon.config.render/search-relevance)
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
@@ -378,7 +376,7 @@
                              (for [s seeds :when (keyword? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
                [])
         rankings (select-keys {:text (mapv (juxt :kind :name) toks) :meaning meaning :refs refs} (seq by))
-        scores (vector/rrf-scores (vec (vals rankings)) (vec (map weights (keys rankings))))
+        scores (vector/rrf-scores (vec (vals rankings)))
         in (fn [h] (into #{} (keep (fn [[m r]] (when (some #{h} r) m))) rankings))
         first-line (fn [[kind n]] (case kind
                                     (:var :test) (or (some-> (d/entity db [:var/name n]) :var/doc ref/lead-sentence) "")

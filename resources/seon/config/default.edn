@@ -744,12 +744,6 @@
  ;; my.agent/similar took (owner, 2026-10-27: "fix the search so it includes docs ... params to
  ;; specify what to focus on"). At the bound: the hits past it are not answered; ask a larger :k.
  :seon.config.render/search 10
- ;; How much each ranking weighs in my.agent/search's fusion: a hit scores the sum, over the rankings it
- ;; is in, of the ranking's weight / (:seon.config.vector/rrf-k + its rank). 1.0 each is plain reciprocal
- ;; rank fusion, as related's. Provenance: none measured for search yet (an embeddings eval of exact
- ;; text against meaning against references is under way, owner 2026-10-27); change it by a measurement.
- ;; At 0 a ranking only decides which hits are listed, never their order.
- :seon.config.render/search-weights {:text 1.0 :meaning 1.0 :refs 1.0}
  ;; Unit: standard deviations. my.agent/search keeps a text hit (BM25 over the query's identifier-split
  ;; words) only when its score is this many standard deviations above the mean of every text's score for
  ;; that query. Provenance: embeddings lab, 2026-10-27 (20 hand-checked queries; scratchpad

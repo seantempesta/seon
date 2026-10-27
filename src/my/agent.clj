@@ -11,7 +11,7 @@
     (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
                               text, its meaning and its references: [{:kind :name :score :by :line} ...]
     (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
-    (grep "text")             the program vars whose recorded definition's text holds it (exact text only)
+    (grep "text")             the program vars whose recorded definition's text holds it (the search's text half)
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (related "text" k)        the k wiki sections nearest the text, a line each, and how to read one:
@@ -219,10 +219,10 @@
      (cond-> test-run (not (contract/error? test-run)) (assoc :results (proofs/results test-run))))))
 
 (defn grep
-  "The program vars whose recorded definition on this branch holds the string s, best first, each
-  {:var :line} (seon.docs/grep): a var whose name holds it, then one whose docstring does, then the rest."
-  {:malli/schema [:=> [:cat :string] [:vector [:map [:var :qualified-symbol] [:line :string]]]]}
-  [s] (docs/grep (agent/db) s))
+  "The program vars and tests whose recorded definition holds the words of s, best first: the text half of
+  (search s {:by #{:text} :kinds #{:var :test}}), one hit each ({:kind :name :e :score :by :line :at})."
+  {:malli/schema [:=> [:cat :string] [:or [:vector :map] :map]]}
+  [s] (search s {:by #{:text} :kinds #{:var :test}}))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
