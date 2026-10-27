@@ -741,3 +741,54 @@
           (is (= [theirs main 1 1] ((juxt :source :main :ahead :behind) r)))
           (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
       (finally (sh/sh "rm" "-rf" tmp)))))
+
+(deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
+  ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
+  ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
+  ;; branch (the write-back tree). A commit to the clone's main that defines a var reaches main's
+  ;; program through the :source load's own function (seon.root/import-source!, which the watch
+  ;; calls on the ref's move: that the watch fires is seon.watch-test's proof), with no step of the
+  ;; owner's between: the write-back branch is fast-forwarded and the var's entity is there. A root
+  ;; killed and started again on the same store holds it too (the boot's import), and a commit the
+  ;; write-back tree holds that main lacks is a recorded :effect problem naming both shas.
+  (let [dir (scratch-dir "follow")
+        main (str dir "/main") wb (str dir "/wb")
+        git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                             (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        probe! (fn [d n] (let [f (str d "/src/seon/follow_probe_" n ".clj")]
+                           (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
+                           (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+               :env {"SEON_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
+        args ["--set" (str ":seon.config.source/root=" (pr-str wb))
+              "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
+        root (atom nil)
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (ts/value-of (:response a)))))
+        has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.follow-probe-" n "/probe))")))
+        import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
+    (try
+      (is (zero? (:exit (sh/sh "git" "clone" "-q" "--local" here main))))
+      ;; the built libraries, probe library and binary are this checkout's: the clone's target/ is its
+      (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
+      (git main "worktree" "add" "-q" "-b" "write-back" wb)
+      (reset! root (ts/start-root! (assoc root0 :args args)))
+      (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
+      (is (false? (has-var? 1)) "before the commit main's program lacks the probe")
+      (let [c1 (probe! main 1) r (ask import)]
+        (is (= c1 (git wb "rev-parse" "HEAD")) "the write-back branch was fast-forwarded to main by the read")
+        (is (= {:commit c1} r) (pr-str r))
+        (is (true? (has-var? 1)) "main's program holds the var, while root runs"))
+      (ts/kill-root! @root)
+      (let [c2 (probe! main 2)]
+        (reset! root (ts/start-root! (assoc root0 :args args)))
+        (is (some? (:port @root)) (str "restarted: " (slurp (str dir "/runs/root.log"))))
+        (is (= c2 (git wb "rev-parse" "HEAD")) "the boot's import fast-forwarded it")
+        (is (true? (has-var? 2)) "and main's program holds the var committed while root was down"))
+      (let [theirs (probe! wb 3) ours (probe! main 4) r (ask import)]
+        (is (= theirs (git wb "rev-parse" "HEAD")) "a tree holding a commit main lacks is not moved")
+        (is (re-find (re-pattern (str theirs ".*" ours)) (str (:error r))) (str "the gap names both shas: " (pr-str r)))
+        (is (true? (has-var? 3)) "and is imported as it is"))
+      (finally
+        (when @root (ts/stop-root! @root))
+        (sh/sh "rm" "-rf" dir)))))
