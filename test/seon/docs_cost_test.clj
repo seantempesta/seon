@@ -79,3 +79,26 @@
                :per-n {:bytes 14000 :calls 1.8}
                :fixed {:bytes 4000000 :calls 600}
                :sizes [100 300 1000 4000]}))
+
+(defn citing-input
+  "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n]
+  (let [db (ts/test-db)
+        pages (into {} (for [p (range (max 1 (quot n 10)))]
+                         [(str "demo/p" p ".md")
+                          (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
+                                 (for [s (range 1 11)] (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f1` does.\n")))]))]
+    [(d/db-with db (docs/load-tx db "demo" pages)) 'app.m0/f1]))
+
+;; See docs/references.md#the-wiki-in-the-store
+(deftest a-cited-var-finds-its-sections-by-the-names-sections-hold
+  (cost/proof
+    {:of 'seon.docs/citing-sections :input 'seon.docs-cost-test/citing-input
+     :n "wiki sections citing the var (all of them)"
+     :work "one pass over the sections' cited names (:seon.section/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
+     :growth :linear
+     ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
+     :per-n {:ticks 4000 :bytes 19000 :calls 0}
+     :fixed {:ticks 20000 :bytes 300000 :calls 1}
+     :sizes [100 300 1000]}))
