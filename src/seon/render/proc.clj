@@ -328,7 +328,7 @@
           (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
 
 (defn- process!
-  "St with root's process value p (root's ruling, 2026-10-27, option a: the writer's, the fork
+  "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
   server's and the store's numbers, each proc's defects and the event stream are root's own data,
   part of root's ctx beside its db pull, never written) in root's walk: when it differs from what
   the walk holds, assoc'd into root's ctx and framed, so the one component that reads it runs again."

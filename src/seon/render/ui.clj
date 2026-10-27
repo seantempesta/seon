@@ -738,9 +738,10 @@
   {:malli/schema [:=> [:cat :map :int] [:maybe :map]]}
   [c rid]
   (let [t (get-in c [:runs rid :task])]
-    (if (or (nil? t) (contains? t :seon.task/id))
+    ;; a stub is {:db/id e} alone (seon.ctx's)
+    (if (not= [:db/id] (keys t))
       t
-      (some (fn [[_ r]] (let [x (:task r)] (when (and (= (:db/id t) (:db/id x)) (contains? x :seon.task/id)) x))) (:runs c)))))
+      (some (fn [[_ r]] (let [x (:task r)] (when (and (= (:db/id t) (:db/id x)) (not= [:db/id] (keys x))) x))) (:runs c)))))
 
 (defn task-data
   "The task its run works (a component over ctx and the db): its id, kind and execution from ctx,

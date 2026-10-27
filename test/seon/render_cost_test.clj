@@ -108,7 +108,7 @@
   main one agent status later (one of the four status and running commits an eval makes)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
-  (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}})))
+  (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
         db0 (d/db-with db0 [{:db/id "a" :seon.agent/id :a1 :seon.agent/status :idle}])
         st (#'seon.render.proc/main-info {} db0)
         db1 (d/db-with db0 [[:db/add (:db/id (d/entity db0 [:seon.agent/id :a1])) :seon.agent/status :busy]])]
