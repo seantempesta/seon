@@ -890,15 +890,12 @@
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
-  seon.context/related over the db, the vars the branch changed since its base its touched items,
-  as seon.context/related-view lines it (each with its chance, at the depth it earns, with the
-  forms that read more), what (my.task/related)
+  seon.context/related over the db as seon.context/related-view lines it (each with its chance, at
+  the depth it earns, with the forms that read more), what (my.task/related)
   answers, as a call of the one printer; a line saying so when there is nothing yet."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  ;; the vars the branch changed are its touched items (seon.context/relevance's zt and its seeds)
-  (let [touched (if-let [b (:base-commit c)] (pm/changed-vars (pm/delta-changes (commit-db db b) db #{})) #{})
-        r (some->> (context/related db (get-in c [:runs rid :task :db/id]) {:touched touched}) (context/related-view db))]
+  (let [r (some->> (context/related db (get-in c [:runs rid :task :db/id])) (context/related-view db))]
     [:section [:h2 "related"]
      (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
 

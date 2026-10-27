@@ -111,14 +111,34 @@
 (deftest a-push-reads-what-its-threshold-reaches
   (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/ring-of
                :n "forms in the reference graph"
-               :work (str "a local push (Andersen, Chung and Lang 2006): each push keeps at least 0.15 eps of the "
-                          "one unit of mass, so at most 1/(0.15 eps) pushes, each one node's neighbours read once: "
+               :work (str "a local push (Andersen, Chung and Lang 2006): each push keeps at least alpha eps of the "
+                          "one unit of mass, so at most 1/(alpha eps) pushes, each node's neighbours read once: "
                           "flat in the store's size")
                :growth :constant
-               ;; measured 2026-10-27: 22 calls and 3.20 MB at 50 (the ring's first pushes, each its
-               ;; neighbours read once)
-               :fixed {:calls 22 :bytes 3300000}
+               ;; measured 2026-10-27: 46 calls and 5.23 MB at 50, 48 and 5.45 MB at 200: the ring's first pushes, each node's
+               ;; degree counted once (bounded, `degree`) and its neighbours read once
+               :fixed {:calls 48 :bytes 5600000}
                :sizes [50 200 1000]}))
+
+(defn hub-of
+  "seon.context/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
+  h (as a function calls seon.contract/checked): the push's mass reaches h's form, whose callers are
+  read to :hub (seon.config.render/relevance-features), so it is never read whole."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  [n]
+  (let [db (d/db-with (ts/test-db) (into [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h"}
+                                          {:db/id "s" :form/id "demo/s" :form/src "(defn s [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/s :var/form "s"}]
+                                         (for [i (range n)] {:form/id (str "demo/u" i) :form/src "(h)" :form/refs #{'demo/h}})))]
+    [db {} #{(pdb/eid db :form/id "demo/s")} 0.001]))
+
+(deftest a-push-counts-a-hub-and-reads-it-not
+  (cost/proof {:of 'seon.context/pushed :input 'seon.context-cost-test/hub-of
+               :n "forms naming the hub its seed calls"
+               :work (str "the seed pushed, the hub read to :hub (64 datoms a read) and found past it, so it "
+                          "is not pushed and the rest of its callers are never read: flat in them")
+               :growth :constant
+               :fixed {:calls 10 :bytes 1000000}
+               :sizes [200 500 1000]}))
 
 (defn kept-of
   "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third

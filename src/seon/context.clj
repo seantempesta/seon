@@ -193,21 +193,26 @@
   (let [t (d/pull db [:seon.task/model] te)]
     (cfg/value :seon.config.render/related {:task t :model (:seon.task/model t)})))
 
-(defn- by-frequency
-  "xs best first by how often each occurs, the name breaking a tie."
-  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
-  [xs] (mapv peek (sort (map (fn [[x n]] [(- n) (str x) x]) (frequencies xs)))))
-
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
 (defn tokens
   "Text s's identifier tokens, lower case: s split at every character that is no letter or digit
   and between a lower and an upper case letter, those of two characters or more. What relevance's
-  lexical feature matches, so `seon.vector/near` and `near-of` match the words near and of."
+  lexical feature matches, so `seon.vector/near` and `near-of` match the words near and of. One
+  pass over the characters: on 150 of the program's forms a third of the time of a regex split
+  and a sixteenth of its bytes, the same tokens."
   {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
   [s]
-  (into [] (comp (map str/lower-case) (filter #(> (count %) 1)))
-        (str/split (str/replace (or s "") #"([a-z])([A-Z])" "$1 $2") #"[^a-zA-Z0-9]+")))
+  (let [s (or s "") n (count s)
+        word (fn [out start end] (if (and (>= start 0) (> (- end start) 1)) (conj! out (str/lower-case (subs s start end))) out))]
+    (loop [i 0 start -1 lower? false out (transient [])]
+      (if (< i n)
+        (let [c (.charAt s i)]
+          (cond (not (Character/isLetterOrDigit c)) (recur (inc i) -1 false (word out start i))
+                ;; a word starts here: after a separator, or at an upper case letter after a lower
+                (or (neg? start) (and lower? (Character/isUpperCase c))) (recur (inc i) i (Character/isLowerCase c) (word out start i))
+                :else (recur (inc i) start (Character/isLowerCase c) out)))
+        (persistent! (word out start n))))))
 
 (defn- item-text
   "Entity e's text as relevance's lexical feature reads it: its name twice (a var's, a section's
@@ -215,22 +220,24 @@
   {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
   [db e]
   (let [x (d/entity db e)
-        [n t] (cond (:form/id x) [(some-> (:var/_form x) first :var/name str) (:form/src x)]
+        [n t] (cond (:form/id x) [(some->> (:var/_form x) (map :var/name) sort first str) (:form/src x)]
                     (:seon.section/address x) [(str (:seon.section/address x) " " (:seon.section/heading x)) (:seon.section/text x)]
                     (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
                     :else ["" ""])]
     (str n " " n " " t)))
 
 (defn- bm25
-  "Each text's BM25 score (k1 1.2, b 0.75; Robertson and Zaragoza 2009) for the query's distinct
-  tokens qs, fs each text's token frequencies; its idf counted over fs, so the texts scored are
-  their own corpus and no index of the store is read. In fs's order."
+  "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
+  :bm25-k1 and :bm25-b) for the query's distinct tokens qs, fs each text's token frequencies; its idf
+  counted over fs, so the texts scored are their own corpus and no index of the store is read. In
+  fs's order."
   {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]]] [:vector number?]]}
   [qs fs]
-  (let [n (count fs) lens (mapv #(reduce + 0 (vals %)) fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
+  (let [{k1 :bm25-k1 b :bm25-b} (cfg/value :seon.config.render/relevance-features)
+        n (count fs) lens (mapv #(reduce + 0 (vals %)) fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
         idf (into {} (for [w qs :let [df (count (filter #(contains? % w) fs))]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
     (mapv (fn [f len] (reduce + 0.0 (for [w qs :let [c (get f w)] :when c]
-                                      (* (idf w) (/ (* c 2.2) (+ c (* 1.2 (+ 0.25 (* 0.75 (/ len avg))))))))))
+                                      (* (idf w) (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg))))))))))
           fs lens)))
 
 (defn- section-names
@@ -244,64 +251,77 @@
   the vars it calls or names, the schema entries of the keys it names, the forms calling or naming
   its vars and the sections naming them (names, `section-names`); a section's the forms of the
   vars it names, the sections it references or is referenced by, its parent and its children; a
-  schema entry's the forms naming its key."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] :int] [:set :int]]}
-  [db names e]
+  schema entry's the forms naming its key. Each read of who names it takes at most cap datoms, so a
+  var every form names (seon.contract/checked) costs cap, not its hundreds of callers."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] :int pos-int?] [:set :int]]}
+  [db names e cap]
   (let [x (d/entity db e)
         form-of #(some-> (d/entity db [:var/name %]) :var/form :db/id)]
     (disj (into #{} (remove nil?)
                 (cond (:form/id x) (concat (map form-of (concat (:form/refs x) (:form/quoted x)))
                                            (map #(pdb/eid db :schema/key %) (:form/keywords x))
-                                           (for [v (:var/_form x) a [:form/refs :form/quoted] d (d/datoms db :avet a (:var/name v))] (:e d))
-                                           (for [v (:var/_form x) s (names (:var/name v))] s))
+                                           (for [v (:var/_form x) a [:form/refs :form/quoted] d (take cap (d/datoms db :avet a (:var/name v)))] (:e d))
+                                           (for [v (:var/_form x) s (take cap (names (:var/name v)))] s))
                       (:seon.section/address x) (concat (map form-of (:seon.section/names x))
                                                         (map :db/id (:seon.section/references x))
                                                         (map :db/id (:seon.section/_references x))
                                                         (some-> (:seon.section/parent x) :db/id vector)
                                                         (map :db/id (:seon.section/_parent x)))
-                      (:schema/key x) (map :e (d/datoms db :avet :form/keywords (:schema/key x)))
+                      (:schema/key x) (map :e (take cap (d/datoms db :avet :form/keywords (:schema/key x))))
                       :else []))
           e)))
 
 (defn- degree
-  "How many neighbours entity e has in the reference graph (`neighbours`), counted to cap: what it
-  names and the sections naming its vars whole (a form's own attributes, a section's), the forms
-  naming it each read by bounded-count, so a var every form names costs cap datoms."
+  "How many neighbours entity e has in the reference graph (`neighbours`), counted to cap by seeks
+  of its datoms (no reference resolved; a form's or key's entity never made): what a form names,
+  its vars' callers and the sections naming them; a section's names, links, linkers and children;
+  a key's readers.
+  Each read stops at cap, so a var every form names costs cap datoms."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] :int pos-int?] nat-int?]}
   [db names e cap]
-  (let [x (d/entity db e)]
+  (let [n #(bounded-count cap (d/datoms db %1 %2 %3))
+        k (fn [a] (n :eavt e a))]
     (min cap
-         (cond (:form/id x) (+ (count (:form/refs x)) (count (:form/quoted x)) (count (:form/keywords x))
-                               (reduce + 0 (for [v (:var/_form x)]
-                                             (+ (count (names (:var/name v)))
-                                                (bounded-count cap (d/datoms db :avet :form/refs (:var/name v)))
-                                                (bounded-count cap (d/datoms db :avet :form/quoted (:var/name v)))))))
-               (:seon.section/address x) (+ (count (:seon.section/names x)) (count (:seon.section/references x))
-                                            (count (:seon.section/_references x)) (count (:seon.section/_parent x)))
-               (:schema/key x) (bounded-count cap (d/datoms db :avet :form/keywords (:schema/key x)))
-               :else 0))))
+         (cond (seq (d/datoms db :eavt e :form/id))
+               (+ (k :form/refs) (k :form/quoted) (k :form/keywords)
+                  (reduce + 0 (for [v (d/datoms db :avet :var/form e) :let [nm (:v (first (d/datoms db :eavt (:e v) :var/name)))]]
+                                (+ (count (names nm)) (n :avet :form/refs nm) (n :avet :form/quoted nm)))))
+               (seq (d/datoms db :eavt e :seon.section/address))
+               (let [x (d/entity db e)]
+                 (+ (k :seon.section/names) (k :seon.section/references) (count (:seon.section/_references x)) (count (:seon.section/_parent x))))
+               :else (if-let [key (:v (first (d/datoms db :eavt e :schema/key)))] (n :avet :form/keywords key) 0)))))
 
 (defn- pushed
   "Personalized PageRank from seeds over the reference graph (`neighbours`), by local push
   (Andersen, Chung and Lang 2006): a node holding at least eps of residual mass per neighbour keeps
-  a 0.15 share of it and passes the rest to its neighbours evenly. {e rank}. Cost: each push keeps
-  at least 0.15 eps of the one unit of mass, so at most 1/(0.15 eps) pushes, whatever the store's
-  size, each one node's neighbours read once (a node is read when its residual first reaches eps)."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] [:set :int] number?] [:map-of :int number?]]}
+  an :alpha share of it (:seon.config.render/relevance-features) and passes the rest to its
+  neighbours evenly; a hub, a node of :hub neighbours or more, never pushes (as at eps 1e-3 none but
+  a lone seed could: on the 57 held-out plans a :hub of 64 ranked exactly as no bound). {:rank {e
+  rank} :degree {e degree}}, :degree every node's degree it counted (to :hub), so a caller counts
+  none twice. Cost: each push keeps at least alpha eps of the one unit of mass, so at most
+  1/(alpha eps) pushes; a node's degree is counted when its residual first reaches eps (`degree`:
+  seeks, at most :hub datoms a read) and its neighbours read only when it pushes: flat in the
+  store's size."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] [:set :int] number?]
+                  [:map [:rank [:map-of :int number?]] [:degree [:map-of :int nat-int?]]]]}
   [db names seeds eps]
-  (let [alpha 0.15]
-    (loop [p {} r (zipmap seeds (repeat (/ 1.0 (max 1 (count seeds))))) queue (vec seeds) nbs {}]
+  (let [{:keys [alpha hub]} (cfg/value :seon.config.render/relevance-features)]
+    ;; queued: the nodes in the queue, each once; ds: each node's degree, counted once; nbs: a
+    ;; pushing node's neighbours, read once
+    (loop [p {} r (zipmap seeds (repeat (/ 1.0 (max 1 (count seeds))))) queue (vec seeds) queued (set seeds) ds {} nbs {}]
       (if-let [u (peek queue)]
-        (let [queue (pop queue)
-              ns (or (nbs u) (neighbours db names u))
-              nbs (assoc nbs u ns)
-              ru (get r u 0.0)]
-          (if (or (empty? ns) (< ru (* eps (count ns))))
-            (recur p r queue nbs)
-            (let [share (/ (* (- 1 alpha) ru) (count ns))
-                  r (reduce (fn [r v] (update r v (fnil + 0.0) share)) (assoc r u 0.0) ns)]
-              (recur (update p u (fnil + 0.0) (* alpha ru)) r (into queue (filter #(>= (get r %) eps)) ns) nbs))))
-        p))))
+        (let [queue (pop queue) queued (disj queued u)
+              ru (get r u 0.0)
+              du (or (ds u) (degree db names u hub))
+              ds (assoc ds u du)]
+          (if (or (>= du hub) (zero? du) (< ru (* eps du)))
+            (recur p r queue queued ds nbs)
+            (let [ns (or (nbs u) (neighbours db names u hub))
+                  share (/ (* (- 1 alpha) ru) (max 1 (count ns)))
+                  r (reduce (fn [r v] (update r v (fnil + 0.0) share)) (assoc r u 0.0) ns)
+                  more (filterv #(and (>= (get r %) eps) (not (queued %))) ns)]
+              (recur (update p u (fnil + 0.0) (* alpha ru)) r (into queue more) (into queued more) ds (assoc nbs u ns)))))
+        {:rank p :degree ds}))))
 
 (def relevance-kinds
   "Each kind relevance ranks, the attribute its entities have."
@@ -334,11 +354,13 @@
   or changed, the sections it cites, the schema entries it names), :touched those of them it
   worked on (changed or read). For each kind of kinds (relevance-kinds) the pool is the
   :seon.config.render/relevance-pool nearest by meaning (seon.vector/near) and the seeds'
-  neighbourhood (`pushed` at :seon.config.render/relevance-eps), keep? (of kind and entity) true;
+  neighbourhood (each seed's first neighbours by each read, and those `pushed` at
+  :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
   cosine with qv, zb its BM25 for the text's tokens, zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
-  17/(1 + its degree to 16)) and ppr log(1 + 10^4 its rank); the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
+  (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
+  :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
   tasks' plans held out: functions 0.427 at 5 against the rank fusion's 0.367, sections 0.798
   against 0.651. Answers {kind [[e p] ...]}, best first, the touched items left out (a caller leaves out
   what its page already shows)."
@@ -347,11 +369,14 @@
                   [:map-of :keyword [:vector [:tuple :int number?]]]]}
   [db {:keys [qv text seeds touched]} kinds keep?]
   (let [names (section-names db)
-        rank (if (seq seeds) (pushed db names seeds (cfg/value :seon.config.render/relevance-eps)) {})
-        ;; a link to a seed weighs by the item's rarity, 17/(1 + its degree to 16), so what every form
+        {rank :rank counted :degree} (if (seq seeds) (pushed db names seeds (cfg/value :seon.config.render/relevance-eps)) {:rank {} :degree {}})
+        ;; a link to a seed weighs by the item's rarity, (1 + cap)/(1 + its degree to cap), so what every form
         ;; names (seon.contract/checked, seon.db/eid) weighs little: 20 to 1 plumbing lines of 570
-        links (frequencies (mapcat #(neighbours db names %) seeds))
-        rare (fn [e] (/ 17.0 (inc (degree db names e 16))))
+        cap (cfg/value :seon.config.render/relevance-pool)
+        links (frequencies (mapcat #(neighbours db names % cap) seeds))
+        {:keys [rarity-cap ppr-scale]} (cfg/value :seon.config.render/relevance-features)
+        ;; its degree as the push counted it, else counted to the cap
+        rare (fn [e] (/ (inc rarity-cap) (inc (min rarity-cap (or (counted e) (degree db names e rarity-cap))))))
         weights (cfg/value :seon.config.render/relevance-weights)
         knots (cfg/value :seon.config.render/relevance-calibration)
         qs (set (tokens text))
@@ -360,7 +385,7 @@
                      (when (seq vs)
                        (let [s (apply mapv + vs) n (Math/sqrt (reduce + 0.0 (map #(* % %) s)))]
                          (when (pos? n) (mapv #(/ % n) s))))))
-        near (fn [attr] (if qv (map first (vector/near db qv (cfg/value :seon.config.render/relevance-pool) {:of attr})) []))]
+        near (fn [attr] (if qv (map first (vector/near db qv cap {:of attr})) []))]
     (into {} (for [kind kinds
                    :let [attr (relevance-kinds kind)
                          of-kind? #(seq (d/datoms db :eavt % attr))
@@ -375,7 +400,7 @@
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)
                                                 (* (:g1 w) (Math/log (+ 1.0 (* (get links e 0) (if (links e) (rare e) 0.0)))))
-                                                (* (:ppr w) (Math/log (+ 1.0 (* 1e4 (get rank e 0.0))))))]
+                                                (* (:ppr w) (Math/log (+ 1.0 (* ppr-scale (get rank e 0.0))))))]
                                        [(- (percent (knots kind) l)) (- l) e]))
                                    pool zc zb zt)
                               sort (mapv (fn [[p _ e]] [e (- p)])))))]))))
@@ -394,20 +419,21 @@
   {:sections [address] :functions [sym] :schemas [key] :relevance {name p} :doc #{name}
   :hidden {kind n}}, :doc those at :seon.config.render/relevance-doc or more, what the plan cites left out (the task's
   data shows it); nil when the count is 0 (none shown) or the plan has no vector yet. opts: :touched
-  the vars the branch changed, :min a cut below the configured one (0 lists every item scored).
+  the vars the branch changed, :cut a cut in place of the configured one, which then lists every
+  item at or above it, uncounted (0: every item scored).
   Unlike before relevance, nothing below the cut fills the count: the owner, 2026-10-27 (\"expose more
   of it but not if it's not related\")."
   {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]
-                  [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:min {:optional true} number?]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
+                  [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:cut {:optional true} number?]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]]}
   ([db te] (related db te {}))
-  ([db te {:keys [touched min] :or {touched #{}}}]
+  ([db te {:keys [touched cut] :or {touched #{}}}]
    (let [k (related-count db te)
          qv (vector/vector-of db te)]
      (when (and (pos? k) qv)
        (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary] te)
-             depth {:summary (or min (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
+             depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
                     :doc (cfg/value :seon.config.render/relevance-doc)}
              {:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
              cites (ref/references db plan)
@@ -443,7 +469,8 @@
                                [kind (into [] (comp (mapcat (fn [[e p]] (map #(vector % p) ((name-of kind) e))))
                                                     (remove (comp (cited kind) first)) (distinct))
                                            es)]))
-             shown (into {} (for [[kind xs] ranked] [kind (into [] (comp (filter #(>= (second %) (:summary depth))) (take k)) xs)]))]
+             ;; a cut asked for lists all it keeps: (my.task/related 0) is every item scored
+             shown (into {} (for [[kind xs] ranked] [kind (into [] (comp (filter #(>= (second %) (:summary depth))) (if cut identity (take k))) xs)]))]
          {:sections (mapv first (shown :section)) :functions (mapv first (shown :function)) :schemas (mapv first (shown :schema))
           :relevance (into {} (mapcat val) shown)
           :doc (into #{} (comp (mapcat val) (filter #(>= (second %) (:doc depth))) (map first)) shown)
@@ -468,7 +495,7 @@
                            [:schemas {:optional true} [:vector [:or :qualified-keyword [:tuple :qualified-keyword :string]]]]
                            [:hidden {:optional true} [:map [:counts [:map-of :keyword pos-int?]] [:all :string]]] [:read :string] [:more :string]]]]}
   [db {:keys [sections functions schemas relevance doc hidden]}]
-  (when (or (seq sections) (seq functions) (seq schemas))
+  (when (or (seq sections) (seq functions) (seq schemas) (seq hidden))
    (let [pct (fn [x] (if-let [p (get relevance x)] (str " " (Math/round (* 100.0 (double p))) "%") ""))
          doc? (fn [x] (contains? (or doc #{}) x))]
     (cond-> {}

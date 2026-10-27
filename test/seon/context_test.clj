@@ -974,6 +974,31 @@
       (is (> (gap warm) (gap cold))
           "the section nearest the touched one gains on the one farthest from it"))))
 
+(deftest a-cut-lists-past-the-count-and-a-hidden-count-is-shown
+  ;; (my.task/related 0) is every item scored: a cut asked for lifts the count; and what the cut hid
+  ;; is shown even when nothing passed it
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        db (d/db-with db (vec (for [i (range 3)] {:seon.section/address (str "docs/vector.md#more-" i) :seon.section/heading (str "M" i)
+                                                  :seon.section/lead "More. Still." :seon.section/text "More. Still."})))
+        db (d/db-with db (vector/tx-data (vec (for [i (range 3)] (pdb/eid db :seon.section/address (str "docs/vector.md#more-" i))))
+                                         (repeat 3 1) (for [i (range 3)] (dir 1.0 (* 0.2 (inc i)))) (repeat 3 10) "m"))]
+    (is (= 5 (count (:sections (context/related db te)))) "the count, :seon.config.render/related")
+    (is (= 8 (count (:sections (context/related db te {:cut 0.0})))) "a cut asked for: every section scored")
+    (is (= {:counts {:sections 8} :all "(my.task/related 0): every item scored, with its chance"}
+           (:hidden (context/related-view db {:sections [] :functions [] :schemas [] :hidden {:sections 8}})))
+        "all hidden: the count is shown, not nothing")))
+
+(deftest relevances-parts-at-their-bounds
+  (let [knots [[-2.0 0.0] [0.0 0.1] [2.0 0.5]]]
+    (is (= [0.0 0.0 0.05 0.1 0.5 0.5] (mapv #(#'seon.context/percent knots %) [-9.0 -2.0 -1.0 0.0 2.0 9.0]))
+        "a logit's chance: flat past either end, linear between knots"))
+  (is (= [0.0 0.0] (#'seon.context/z [3.0 3.0])) "no spread, no evidence")
+  (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are")
+  (is (= [] (#'seon.context/bm25 #{"a"} [])) "an empty pool scores nothing")
+  (is (= [0.0 0.0] (#'seon.context/bm25 #{} [{"a" 1} {"b" 2}])) "an empty query scores every text 0")
+  (let [[x y] (#'seon.context/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}])]
+    (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
+
 (deftest a-tokens-words-are-its-identifiers-parts
   (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
       "split at what is no letter or digit and at a case change, one-letter parts dropped"))
@@ -1107,9 +1132,10 @@
                                   {:db/id "pf" :form/id "demo/plumb" :form/src "(defn plumb [])"} {:db/id "pv" :var/name 'demo/plumb :var/kind :fn :var/form "pf"}
                                   {:db/id "rf" :form/id "demo/rare" :form/src "(defn rare [])"} {:db/id "rv" :var/name 'demo/rare :var/kind :fn :var/form "rf"}]
                                  (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))
-          fs (:functions (context/related db te))]
-      (is (let [i (.indexOf fs 'demo/rare) j (.indexOf fs 'demo/plumb)] (and (<= 0 i) (or (neg? j) (< i j))))
-          (str "a neighbour few forms name before one every form names (a link weighs by its rarity): " (pr-str fs)))
+          p (:relevance (context/related db te {:cut 0.0}))]
+      ;; both link the cited h once; weighed alike they would tie
+      (is (> (p 'demo/rare) (* 1.5 (p 'demo/plumb)))
+          (str "a neighbour few forms name before one twenty forms name (a link weighs by its rarity): " (pr-str (select-keys p ['demo/rare 'demo/plumb]))))
       ;; a namespace with no file yet: what the agent wrote at its REPL, its new work, shown
       (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
                               {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]

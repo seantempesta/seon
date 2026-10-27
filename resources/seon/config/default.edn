@@ -649,19 +649,34 @@
  ;; Relevance (seon.context/relevance, docs/vector.md#relevance): a logistic over five features of
  ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25
  ;; for the query's words, zt its cosine with the touched items' mean vector (each a z-score over
- ;; the pool), g1 log(1 + the seeds it neighbours x 17/(1 + its degree, to 16)), ppr log(1 + 10^4
- ;; its personalized PageRank from the seeds). Weighing a link by its rarity took plumbing
+ ;; the pool), g1 log(1 + the seeds it neighbours x its rarity), ppr log(1 + scale x its
+ ;; personalized PageRank from the seeds), the constants :seon.config.render/relevance-features. Weighing a link by its rarity took plumbing
  ;; (seon.contract/checked, seon.db/eid ...) from 20 to 1 of 570 function lines at the same recall. Provenance: fitted (scikit-learn, L2 C=1) on 220 merges' commit subjects as queries
  ;; and what each merge changed as the relevant items, cold and with three of them touched;
- ;; judged on 57 merged tasks' plans held out (the relevance-lab worktree, 2026-10-27). At the
- ;; bound: none; a kind with no weights is not ranked.
+ ;; judged on 57 merged tasks' plans held out (the relevance-lab worktree, 2026-10-27). They hold
+ ;; only with :seon.config.render/relevance-features as fitted: change one, fit them again
+ ;; (notes/relevance-lab/). At the bound: none; each kind's set is required.
  :seon.config.render/relevance-weights {:function {:zc 0.382 :zb 0.568 :zt 0.267 :g1 1.527 :ppr 0.112 :intercept -3.881}
                                         :section {:zc 0.162 :zb 0.816 :zt 0.101 :g1 0.690 :ppr 0.255 :intercept -4.100}
                                         :schema {:zc 0.517 :zb 0.318 :zt 0.332 :g1 0.382 :ppr 0.435 :intercept -4.991}}
+ ;; The constants relevance's features were fitted with (seon.context/relevance): :alpha the share a
+ ;; PageRank push keeps (the field's 0.15, Andersen, Chung and Lang 2006); :bm25-k1 and :bm25-b
+ ;; BM25's saturation and length normalization (the field's 1.2 and 0.75, Robertson and Zaragoza
+ ;; 2009); :rarity-cap the degree a link's rarity, (1 + cap)/(1 + degree), counts to (16, as the
+ ;; rank fusion's measured cap was: no plumbing lines at 16, 64 and 256 alike), which is also the most
+ ;; datoms that count reads; :ppr-scale the rank's scale inside its log (10^4: a rank of 1e-4, a
+ ;; seed's typical neighbour, reads log 2); :hub the degree from which a node never pushes and is
+ ;; never read whole (64 ranked the 57 held-out plans exactly as no bound, while the bound keeps a
+ ;; push from counting seon.contract/checked's thousands of callers: each datom read costs ~1.4 KB
+ ;; here). Provenance: the weights were fitted with these; no others were measured but :hub's.
+ ;; At the bound: none; each is required.
+ :seon.config.render/relevance-features {:alpha 0.15 :bm25-k1 1.2 :bm25-b 0.75 :rarity-cap 16 :ppr-scale 10000.0 :hub 64}
  ;; Unit: [logit chance] knots a kind, read piecewise linearly. What a relevance logit means: the
  ;; chance the work changes the item, an isotonic fit on the 57 held-out plans (cold and warm), so a
  ;; cutoff on it keeps what it says. It understates what the work needs: the truth was what each
- ;; merge changed, not what its worker read. At the bound: a logit past either end reads its end's chance.
+ ;; merge changed, not what its worker read; and it was fitted on the plans its recall was judged
+ ;; on, so it is optimistic until runs' reads refit it. At the bound: a logit past either end reads
+ ;; its end's chance.
  :seon.config.render/relevance-calibration {:function [[-6.51 0.0] [-3.83 0.011] [-2.78 0.026] [-1.12 0.056] [-0.07 0.115] [1.32 0.333] [3.81 0.433]]
                                             :section [[-6.16 0.0] [-3.80 0.012] [-2.81 0.023] [-2.45 0.056] [-1.92 0.138] [-1.19 0.245] [-0.69 0.333] [-0.40 0.538] [4.65 1.0]]
                                             :schema [[-8.67 0.0] [-4.49 0.013] [-3.79 0.027] [-2.93 0.067] [-1.84 0.19] [-1.52 0.303] [0.29 0.5] [1.00 0.5]]}
@@ -678,13 +693,15 @@
  ;; is shown at doc depth.
  :seon.config.render/relevance-doc 0.2
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
- ;; (seon.vector/near), beside the seeds and their neighbourhood. Provenance: 100, 200 and 400
- ;; ranked alike on the held-out plans (functions R@5 0.433 / 0.436 / 0.451, sections 0.764 / 0.766
- ;; / 0.766); the pool's texts are tokenized each call, so the smallest. At the bound: an item past
- ;; it and outside the seeds' neighbourhood is never scored.
+ ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
+ ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing
+ ;; seon.config/value would pool its hundreds of callers). Provenance: 100, 200 and 400 ranked
+ ;; alike on the held-out plans (functions R@5 0.433 / 0.436 / 0.451, sections 0.764 / 0.766 /
+ ;; 0.766); the pool's texts are tokenized each call, so the smallest. At the bound: an item past
+ ;; it and outside the seeds' first neighbours is never scored.
  :seon.config.render/relevance-pool 100
  ;; Unit: residual mass per neighbour. The local push's threshold for relevance's personalized
- ;; PageRank (seon.context/pushed): at most 1/(0.15 x this) pushes, whatever the store's size.
+ ;; PageRank (seon.context/pushed): at most 1/(alpha x this) pushes, whatever the store's size.
  ;; Provenance: 1e-3 pushed 37 nodes a plan and ranked as well as 1e-4 (376 nodes; functions R@5 0.434
  ;; and 0.430 on the held-out plans). At the bound: a node holding less than this per neighbour is not pushed.
  :seon.config.render/relevance-eps 0.001
