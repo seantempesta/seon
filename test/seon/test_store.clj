@@ -226,8 +226,8 @@
 
 (def ^:private shared-roots
   "This test process's shared roots, one per [checkout args] and started at the first test that
-  asks for it (shared-root!): a root boots once per shard, not once per test (9.5 s of a 15 s
-  in-agent test was the boot, 2026-10-27; an attach on a running root is 66 ms). Each on a main of
+  asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
+  of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
   its own of the process store, stopped and its main dropped when the process ends (a shutdown
   hook)."
   (memoize

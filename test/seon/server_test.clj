@@ -7,15 +7,16 @@
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the
   ;; agents' REPL path, so its response is an agent's: the one printer, a result handle, the
   ;; error map, *1 kept between requests
-  (let [[a-ret a-err r-ret r-err r-star]
+  (let [[a-ret a-err r-ret r-err r-star own]
         (at/in-agent #(vector "{:a 1}" "(/ 1 0)"
                               {:op :eval :agent "root" :code "{:a 1}"} {:op :eval :agent "root" :code "(/ 1 0)"}
-                              {:op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" (:agent %) ")")}))]
+                              {:op :eval :agent "root" :code (str "(:pid (get (:agents (c/state sys)) :" (:agent %) "))")}
+                              "(seon.lib/c-getpid)"))]
     (is (= {:a 1} (:value a-ret) (:value r-ret)) "a value replies alike")
     (is (qualified-symbol? (:handle r-ret)) "root's value has its result handle, as an agent's does")
     (is (= (select-keys (:ex a-err) [:seon.error/type :seon.error/message]) (select-keys (:ex r-err) [:seon.error/type :seon.error/message]))
         "an error replies alike")
-    (is (true? (:value r-star)) "`sys` is this root: it holds the attached agent")))
+    (is (and (int? (:value own)) (= (:value own) (:value r-star))) "`sys` is this root: the agent it holds is the one answering")))
 
 (deftest a-server-refused-answer-is-the-one-error-map
   ;; task seon.render/one-owner-per-view-path (B2): the server refuses as root does, with the

@@ -89,23 +89,25 @@
 
 (deftest agent-tests-in-one-process-share-its-root
   ;; task seon.test-store/an-agent-test-shares-its-shards-root: a root booted per in-agent test
-  ;; was 9.5 s of its 15 (2026-10-27); the tests of one process now share one root, each with an
+  ;; was most of its time; the tests of one process now share one root, each with an
   ;; agent and a task of its own, and what one made is gone when it ends. The root runs the
   ;; checkout's own source (its source fact names it), so a test sees the code it is run on
   (let [ask (fn [names] [{:op :eval :agent "root"
                           :code (str "[(seon.lib/c-getpid)"
                                      " (:root (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"
-                                     " (vec (sort (map name (datahike.api/branches (:conn sys)))))]")}
+                                     " (vec (sort (map name (datahike.api/branches (:conn sys)))))"
+                                     " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))]")}
                          "(:seon.task/id (my.task/current))"])
         first-names (volatile! nil)
         [a] (at/in-agent (fn [n] (vreset! first-names n) (ask n)))
         [b task] (at/in-agent ask)
         [pid-a source _] (:value a)
-        [pid-b _ branches] (:value b)]
+        [pid-b _ branches agents] (:value b)]
     (is (int? pid-a) (pr-str a))
     (is (= pid-a pid-b) "one root answered both tests")
     (is (= (.getCanonicalPath (java.io.File. ".")) source) "it runs the checkout's source")
     (is (not= (:task @first-names) (:value task)) "each test has a task of its own")
     (is (re-find #"^t[0-9a-f]{8}/t$" (str (:value task))) (pr-str task))
+    (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))
     (is (not-any? #(re-find (re-pattern (str "task-" (:ns @first-names) "-")) %) branches)
         (str "the first test's branches are gone: " branches))))

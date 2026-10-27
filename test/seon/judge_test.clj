@@ -62,11 +62,12 @@
   ;; root's ruling (2026-10-23): the :seon.judge fact is the record; a pass asks the model only
   ;; for a request it holds none for, and a cost it cannot price ends the pass (unknown, never 0).
   ;; The scripted model reports no cache split, so its first move is scored (in the agent the
-  ;; pass spawns), written, and stops the pass; the second pass reads it back and calls nothing
+  ;; pass spawns), written, and stops the pass; the second pass reads it back and calls nothing.
+  ;; Counted as what this test's passes wrote: the shard's main holds earlier tests' facts
   (let [[r] (at/in-agent #(vector {:op :eval :agent "root"
-                                   :code (str "(let [a (my.root/first-moves! sys [" (pr-str (:task %)) "]) b (my.root/first-moves! sys [" (pr-str (:task %)) "])]"
+                                   :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) a (my.root/first-moves! sys [" (pr-str (:task %)) "]) b (my.root/first-moves! sys [" (pr-str (:task %)) "])]"
                                               " [(get-in a [:error :seon.error/type]) (mapv :reused? (:rows a)) (boolean? (:acted (first (:rows a))))"
-                                              " (mapv :reused? (:rows b)) (:usd b) (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest))])")}))]
+                                              " (mapv :reused? (:rows b)) (:usd b) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) n0)])")}))]
     (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r)) (pr-str r))))
 
 (deftest a-pass-stops-at-its-bound
@@ -75,7 +76,7 @@
         [r] (at/in-agent (fn [{:keys [task] :as n}]
                            (vreset! names n)
                            [{:op :eval :agent "root"
-                             :code (str "(let [a (my.root/first-moves! sys [" (pr-str task) "])]"
-                                        " [(:rows a) (:stopped a) (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped))])")}])
+                             :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) a (my.root/first-moves! sys [" (pr-str task) "])]"
+                                        " [(:rows a) (:stopped a) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/stopped)) n0)])")}])
                          {:sets [":seon.config.ai/judge-pass-usd=0.0"]})]
     (is (= [[] {:usd 0.0 :bound 0.0 :left [(:task @names)]} 1] (:value r)) (pr-str r))))
