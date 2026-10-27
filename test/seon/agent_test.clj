@@ -541,7 +541,7 @@
   ;; task failed on its branch, hands the run back (seon_done), and root, at the
   ;; run's end, holds the task as :failed and reports it among the problems
   (let [names (volatile! nil)
-        [_ f _ _ seen] (in-agent (fn [{:keys [agent task] :as n}]
+        [_ f _ done seen] (in-agent (fn [{:keys [agent task] :as n}]
                                    (vreset! names n)
                                    [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} "(:reason (my.task/fail! \"the premise is refuted\" '(= 1 2)))"
                                     before-done {:op :done :agent agent}
@@ -550,6 +550,8 @@
                                                 " [(seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
                                                 " (select-keys (first (filter #(= " (pr-str task) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows]))) [:task :reason :counterexample :open?])])")}]))]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
+    ;; and the run says so itself: a failed run is never reported :green
+    (is (= [:failed "the premise is refuted"] ((juxt :outcome :reason) done)) (pr-str done))
     (is (= [:failed {:task (:task @names) :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
            (:value seen)))))
 
