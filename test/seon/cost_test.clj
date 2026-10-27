@@ -3,7 +3,8 @@
   to end on real functions, red when the body does more than the work needs."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.config]
-            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.cost :as cost] [seon.profile :as profile] [datahike.api :as d] [seon.db :as pdb] [clojure.edn :as edn] [clojure.string :as str]
+            [seon.agent :as agent] [seon.edn :as sedn]))
 
 ;; ---- the judge ------------------------------------------------------------------------
 
@@ -239,6 +240,21 @@
     (when seon.contract/on?
       (is (every? #(== (get-in % [:measured :calls]) (get-in % [:expected :calls])) rows) "calls are exact: the bound's count"))
     (is (:ok? verdict) (cost/explain generated rows verdict))))
+
+(deftest a-cost-reports-line-reads-back-whole
+  ;; task seon.agent/a-test-childs-line-always-reads: a test child streams each test's reports to
+  ;; its agent as one printed line (seon.agent/run-tests-forked). A generated case's row kept its
+  ;; arguments as data, and an argument that is not EDN (an exception prints as #error {\n ...)
+  ;; split the line, so the agent's read met EOF and the agent died (0.7's seon_done, exit 70).
+  ;; The report keeps what crosses as text: the case's arguments are in the proof's message
+  (let [{:keys [rows verdict]} (cost/run generated)
+        rows (mapv #(assoc % :args [(ex-info "an argument that is no EDN" {:a 1}) #'clojure.core/inc]) rows)
+        rep (agent/test-report {:type :fail :message (cost/explain generated rows verdict) :actual {:rows rows :verdict verdict}}
+                               "#'seon.cost-test/t")
+        line (sedn/encode {:seon.test/ended "#'seon.cost-test/t" :reports [rep]})]
+    (is (:cost rep) "the proof's rows and verdict are kept as data")
+    (is (not (str/includes? line "\n")) "the line is one line")
+    (is (= [rep] (:reports (sedn/decode line))) "and it reads back whole")))
 
 (deftest a-scan-inside-the-loop-is-red-under-the-bound
   (let [e (assoc generated :of 'seon.cost-test/rescanning-bounded)
