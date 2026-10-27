@@ -523,6 +523,19 @@
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
+(defn- path
+  "The shortest chain of forms (as the vars each defines, or its id) from var a's form (or the
+  form of id a) to var b's in reach graph g, or nil."
+  [{:keys [adj defs rows]} a b]
+  (let [to (peek (get defs b)) start (if (string? a) a (peek (get defs a)))
+        show (fn [id] (or (first (keep (fn [[k s]] (when (= :var k) s)) (:defines (rows id)))) id))]
+    (loop [fr [start] from {start nil}]
+      (when (seq fr)
+        (if (contains? from to)
+          (mapv show (reverse (take-while some? (iterate from to))))
+          (let [st (for [id fr w (adj id) :when (not (contains? from w))] [w id])]
+            (recur (vec (distinct (map first st))) (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from st))))))))
+
 (deftest a-test-that-starts-a-process-reaches-the-program-it-runs
   ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
   ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
@@ -542,34 +555,47 @@
     (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")
     ;; owner, 2026-10-27 ("no tests should include all of src"): the entry was seon.main/-main, a
     ;; root's whole boot (1,512 vars), so a change anywhere in it deferred every process test to the
-    ;; merge. The entry is what the process runs for the test (the server's ops, the agent's turn)
-    ;; (this test names the var, quoted: an edge in a test's namespace, so it is left out)
-    (let [boot (remove #{'seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs}
-                       (filter process (program/tests-reaching g 'seon.generation/generation)))
-          ops (set (program/tests-reaching g 'seon.server/ops))]
+    ;; merge. The entry is what the process runs for the test: the agent's turn, and of the server's
+    ;; answers (seon.server/op-answer) only the methods of the ops the test sends
+    (let [method (fn [op] (first (for [id (get (:methods g) 'seon.server/op-answer)
+                                       :when (contains? (:defines ((:rows g) id)) [:method 'seon.server/op-answer (pr-str op)])]
+                                   id)))
+          tests-of (fn [ids] (set (for [id ids [k s] (:defines ((:rows g) id)) :when (and (= :var k) ((:tests g) s))] s)))
+          driving (fn [op] (tests-of (program/reached-by (:rev g) [(method op)])))
+          done (driving :done) evals (driving :eval)]
       (is (get (:defs g) 'seon.generation/generation) "the boot's var is in the program")
-      (is (empty? boot) (str "a change to a root's boot alone reaches no process test: " (count boot) " do, " (vec (take 5 boot))))
-      (is (every? ops process) "every process test reaches the server's ops"))))
+      ;; a test reaching it by its own code (seon.source-test's restart calls seon.e2e/loop-turn!) still does
+      (is (empty? (keep #(path g % 'seon.generation/generation) (cons 'seon.turn/work! (get (:methods g) 'seon.server/op-answer))))
+          "what a process runs for a test (the turn, each op's answer) does not reach a root's boot")
+      (is (< (count (filter process (program/tests-reaching g 'seon.generation/generation))) 5) "so a change to it alone defers almost no process test")
+      (is (and (method :done) (method :eval)) "each op is a method of its own")
+      (is (done 'seon.server-test/done-answers-the-judges-reasons) "a test that sends :done reaches the :done method")
+      (is (and (process 'seon.server-test/an-agent-reads-its-task-running) (not (done 'seon.server-test/an-agent-reads-its-task-running)))
+          "a process test that sends no :done does not")
+      (is (< 0 (count done) (count process)) (str (count done) " of " (count process) " process tests send :done"))
+      (is (evals 'seon.server-test/an-agent-reads-its-task-running) "every in-agent test sends :eval (in-agent does) and reaches its method"))))
 
-(deftest an-entry-var-redefined-moves-what-starts-a-process-by-an-update-too
-  ;; the edge from a form using a process var to the entry vars (:seon.config.source/process-entry):
-  ;; an update after the entry var is redefined, added or removed agrees with a rebuild
+(deftest a-var-an-eval-string-names-moves-the-test-that-sends-it
+  ;; root, 2026-10-27: code a test sends a process as a string (in-agent's evals) is read by the one
+  ;; reader at analysis (seon.program/unit-account), its names an edge in a test's namespace as a
+  ;; quoted form's are; a string of fragments (str "(f " x ")") reads once its delimiters are
+  ;; repaired. An update after the named var is redefined, added or removed agrees with a rebuild
   (let [in {:env "e" :tree "t" :config {}}
-        with-entry (fn [body] (-> (record (empty-db) 'user "(ns seon.server)" 'seon.server (str "(def ops {:agents (fn [] " body ")})"))
-                                 (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
-                                         'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
-                                         'app.pt-pe-test "(deftest pure-test (is (= 1 1)))")))
-        db0 (-> (empty-db) (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
-                                   'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
-                                   'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"))
-        db1 (with-entry "1") db2 (with-entry "2")
+        tests ['user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
+               'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! \"(app.pt-pe/f 1)\"))))"
+               'app.pt-pe-test "(deftest built-test (is (= 1 (seon.lib/fork! (str \"(app.pt-pe/g \" 1 \")\")))))"
+               'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"]
+        with-f (fn [body] (apply record (record (empty-db) 'user "(ns app.pt-pe)" 'app.pt-pe (str "(defn f [x] " body ")") 'app.pt-pe (str "(defn g [x] " body ")")) tests))
+        db0 (apply record (empty-db) tests)
+        db1 (with-f "1") db2 (with-f "2")
         dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
         rebuilt (fn [db] (dg (program/reach-graph db nil)))
         g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]
-    (is (= (rebuilt db1) (dg g1)) "an entry var added: the update agrees with a rebuild")
+    (is (= (rebuilt db1) (dg g1)) "the named var added: the update agrees with a rebuild")
     (is (= (rebuilt db2) (dg g2)) "redefined: the same")
     (is (= (rebuilt db0) (dg (program/reach-update g2 db0))) "removed: the same")
-    (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test that starts a process moves with the entry var")
+    (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test whose eval string names the var moves with it")
+    (is (not= ((dg g1) 'app.pt-pe-test/built-test) ((dg g2) 'app.pt-pe-test/built-test)) "and so does one whose string is built from fragments")
     (is (= ((dg g1) 'app.pt-pe-test/pure-test) ((dg g2) 'app.pt-pe-test/pure-test)) "a pure test does not")))
 
 (deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
