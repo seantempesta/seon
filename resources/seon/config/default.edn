@@ -413,8 +413,8 @@
  :seon.config.proofs/cost-settled 16
  ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
  ;; (a function that never settles: another thread's collection landing in most calls). Provenance:
- ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14 and this is 16 more.
- ;; At the bound: the minimum of the last cost-settled calls is the measure.
+ ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14, so 30 calls settle it and this is twice that.
+ ;; At the bound: the measure throws :seon.cost/unsettled (a proof on it is red, never judged on bytes that did not settle).
  :seon.config.proofs/cost-max-samples 60
  ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
  ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session

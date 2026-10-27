@@ -160,6 +160,16 @@
     (is (< 10 @calls) "the measure went on past the warm-up")
     (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
 
+(deftest a-measure-that-never-settles-is-an-error-not-a-number
+  ;; a call allocating fewer bytes every time never reaches a steady state: the measure stops at its cap
+  ;; and says so, rather than answering the last call's bytes as the cost
+  (let [calls (atom 0)
+        cap (seon.config/value :seon.config.proofs/cost-max-samples)
+        e (try (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) []) nil
+               (catch Throwable t (ex-data t)))]
+    (is (= :seon.cost/unsettled (:seon.error/type e)))
+    (is (= cap @calls (:calls e)) "it stopped at its cap")))
+
 (deftest a-measure-is-one-number-beside-another-thread
   ;; the same call measured ten times while another thread allocates reads one byte count
   (let [f (fn [] (reduce + (map leaf (range 1000))))
