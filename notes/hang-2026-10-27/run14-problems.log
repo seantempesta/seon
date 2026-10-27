@@ -1,0 +1,525 @@
+jolt fiber dump: 30 live fibers of 121 held, on thread 0
+fiber 0: parked, carrier 4, parked on alt-handler, wait state none, 50452 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 1: parked, carrier 3, parked on alt-handler, wait state none, 4030 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (jolt-invoke1 (var-cell-deref _kc$1262) out)
+  3 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (a form of 19506 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 2: parked, carrier 2, parked on nothing, wait state none, 24049 ticks
+  0 ?
+  1 rd-fill! [jolt.socket.native/c-recv clojure.core/integer?] (jv$jolt.io-poller/wait-ready fd _kc$648)
+  2 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (jv$jolt.async.remote/rd-fill! fd st pump)
+  3 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (a form of 10106 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 3: parked, carrier 1, parked on alt-handler, wait state none, 50578 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 4: parked, carrier 0, parked on alt-handler, wait state none, 3062 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (jolt-invoke1 (var-cell-deref _kc$1262) out)
+  3 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (a form of 19506 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 5: parked, carrier 17, parked on nothing, wait state none, 22780 ticks
+  0 ?
+  1 rd-fill! [jolt.socket.native/c-recv clojure.core/integer?] (jv$jolt.io-poller/wait-ready fd _kc$648)
+  2 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (jv$jolt.async.remote/rd-fill! fd st pump)
+  3 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (a form of 10106 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 6: parked, carrier 7, parked on alt-handler, wait state none, 48113 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.agent-proc/agent-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 7: parked, carrier 6, parked on alt-handler, wait state none, 1416 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (jolt-invoke1 (var-cell-deref _kc$1262) out)
+  3 ? [clojure.core.async/close! clojure.core/seq? clojure.core/deref clojure.core.async/__port clojure.core.async/__poll! konserve.jolt.fasl/encode jolt.socket.native/c-send clojure.core.async/<!!] (a form of 19506 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 8: parked, carrier 5, parked on nothing, wait state none, 21240 ticks
+  0 ?
+  1 rd-fill! [jolt.socket.native/c-recv clojure.core/integer?] (jv$jolt.io-poller/wait-ready fd _kc$648)
+  2 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (jv$jolt.async.remote/rd-fill! fd st pump)
+  3 ? [konserve.jolt.fasl/decode clojure.core.async/>!! clojure.core/seq? clojure.core.async/close!] (a form of 10106 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 jolt-fiber-resume*
+  8 jolt-fiber-run
+  9 jolt-fiber-drain!
+  10 jolt-fiber-carrier-loop
+  11 dynamic-wind
+  12 ?
+  13 dynamic-wind
+  14 invoke
+fiber 9: parked, carrier 4, parked on alt-handler, wait state none, 96 ticks
+  a CPS step: the procedure ?
+fiber 10: parked, carrier 3, parked on alt-handler, wait state none, 168 ticks
+  a CPS step: the procedure ?
+fiber 11: parked, carrier 2, parked on alt-handler, wait state none, 634 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 12: parked, carrier 1, parked on alt-handler, wait state none, 31722 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.web/web-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.web/web-proc clojure.core/str clojure.core.async/<!! seon.web/stats clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 13: parked, carrier 0, parked on alt-handler, wait state none, 6061 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 14: parked, carrier 17, parked on alt-handler, wait state none, 631 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 15: parked, carrier 16, parked on alt-handler, wait state none, 633 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 16: parked, carrier 15, parked on alt-handler, wait state none, 632 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 17: parked, carrier 14, parked on alt-handler, wait state none, 633 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 18: parked, carrier 13, parked on alt-handler, wait state none, 469415 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fork-server/fork-server-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fork-server/fork-server-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 19: parked, carrier 12, parked on alt-handler, wait state none, 630 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 20: parked, carrier 11, parked on alt-handler, wait state none, 4486358 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.reconcile/reconciler-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.reconcile/reconciler-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 21: parked, carrier 10, parked on alt-handler, wait state none, 32136024 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.vector/vectors-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.vector/vectors-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 22: parked, carrier 9, parked on alt-handler, wait state none, 631 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 23: parked, carrier 8, parked on alt-handler, wait state none, 634 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 24: parked, carrier 7, parked on alt-handler, wait state none, 4035214 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.root/api-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.root/api-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 25: parked, carrier 6, parked on alt-handler, wait state none, 10420 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 26: parked, carrier 5, parked on alt-handler, wait state none, 135600 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.prove/prove-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.prove/prove-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 27: parked, carrier 4, parked on alt-handler, wait state none, 630 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 do-alts* (jolt-invoke3 _a$2139 _a$2140 _a$2141 _a$2142)
+  4 ? [clojure.core.async/>!! seon.fx/owner-proc clojure.core/str clojure.core.async/<!!] (jv$clojure.core.async/alts!! read-chans _kc$4195 #t)
+  5 jfn$clojure.core.async.flow.impl/proc$6 [seon.fx/owner-proc clojure.core/str clojure.core.async/<!! clojure.core.async/>!!] (a form of 13897 chars)
+  6 dynamic-wind
+  7 future-task-run!
+  8 ?
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 28: parked, carrier 3, parked on alt-handler, wait state none, 22024 ticks
+  a CPS step: the procedure ?
+fiber 29: parked, carrier 2, parked on alt-handler, wait state none, 6064 ticks
+  a CPS step: the procedure ?

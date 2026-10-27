@@ -92,7 +92,7 @@
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
         ;; while main@1 runs: 200 requests on one branch (the burst), then one on another
         [st more] (feed st (concat (for [i (range 200)] (req (+ 100 i) :agent-3 (+ 10 i) :a3)) [(req 500 :agent-5 3 :a5)]))]
-    (is (empty? more) "nothing starts while a run is in flight")
+    (is (empty? (filter :req more)) "nothing starts while a run is in flight")
     (is (= #{[:agent-3 nil :judge] [:agent-5 nil :judge]} (set (keys (:next st)))) "one pending change per branch")
     (is (= 209 (get-in st [:next [:agent-3 nil :judge] :t])) "the latest of the burst")
     (is (= 200 (count (get-in st [:next [:agent-3 nil :judge] :waiters]))) "the replaced requests' askers follow the latest")
@@ -294,7 +294,7 @@
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
         names (fn [rid ns] [:req {:rid rid :branch :main :t 2 :digest "d2" :names ns}])
         [st more] (feed st [(names 2 '#{a.x-test}) (names 3 '#{a.y-test}) (names 4 '#{a.x-test})])]
-    (is (empty? more))
+    (is (empty? (filter :req more)) "nothing starts")
     (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")
     (is (= #{2 4} (get-in st [:next [:main '#{a.x-test} :judge] :waiters])) "the same slot joins")
     (is (= #{3} (get-in st [:next [:main '#{a.y-test} :judge] :waiters])) "the other keeps its own")
@@ -350,3 +350,62 @@
         [st _] (feed st [[:answers {:tag 99 :r {}}]])]
     (is (= 1 (:stale st)))
     (is (= 1 (:stale-answers ((:ping-map-fn (prove/prove-proc)) st))))))
+
+(defn- lcg
+  "The next of a linear congruential sequence from x (a pure function: the test draws no randomness)."
+  [x] (mod (+ (* x 6364136223846793005) 1442695040888963407) 9223372036854775807))
+
+(defn- model-run
+  "A service driven through steps pseudo-random events from seed: a request (a branch of main, b1
+  or b2, a digest of three, an asker agent for a branch) or the api answering one of the asks still
+  open (a success or an :seon.root/ended error, as an agent ending answers). Then every ask left is
+  answered with a success, until none. Answers [final-state rids-asked answers-seen]."
+  [seed steps]
+  (loop [i 0 x seed st (prove/prove-proc {}) open [] asked [] answers []]
+    (let [x (lcg x) pick (quot (mod x 1000003) 7)]
+      (if (< i steps)
+        (if (or (empty? open) (even? (quot (mod x 100003) 3)))
+          ;; a request
+          (let [rid (inc (count asked)) branch ([:main :b1 :b2] (mod pick 3)) t (inc (mod (quot pick 3) 3))
+                [st o] (feed st [(req rid branch t (when-not (= :main branch) ({:b1 :a1 :b2 :a2} branch)))])]
+            (recur (inc i) x st (into open (filter :req o)) (conj asked rid) (into answers (waiters-answered o))))
+          ;; the api answers one open ask
+          (let [m (open (mod pick (count open))) op (get-in m [:req :op])
+                r (if (zero? (mod (quot pick 5) 3))
+                    (seon.contract/error :seon.root/ended #'seon.prove/prove-proc "the agent ended" {:agent :a1})
+                    (case op :spawn {:id :p1} :tests test-run-answer :write {:ok true :t 6} :kill {:killed :p1}))
+                [st o] (feed st [(answer-of m r)])]
+            (recur (inc i) x st (into (vec (remove #(= m %) open)) (filter :req o)) asked (into answers (waiters-answered o)))))
+        ;; drain: the api answers what is left with successes
+        (loop [st st open open answers answers n 0]
+          (if (and (seq open) (< n 200))
+            (let [m (first open) op (get-in m [:req :op])
+                  [st o] (feed st [(answer-of m (case op :spawn {:id :p1} :tests test-run-answer :write {:ok true :t 6} :kill {:killed :p1}))])]
+              (recur st (into (subvec open 1) (filter :req o)) (into answers (waiters-answered o)) (inc n)))
+            [st asked answers]))))))
+
+(deftest every-request-is-answered-once-whatever-order-the-api-answers-in
+  ;; a Claude session's or an agent's turn waits on the service for ever if one request it took is
+  ;; never answered (three hangs: an agent parked in seon.agent/prove! for the answer to its :prove).
+  ;; 300 interleavings of requests and answers, errors among them: each request answered exactly once
+  ;; and the service idle at the end
+  (doseq [seed (range 1 301)]
+    (let [[st asked answers] (model-run seed 14)]
+      (is (= (sort asked) (sort answers)) (str "seed " seed ": each request answered, once: asked " (vec asked) " answered " (vec (sort answers))))
+      (is (and (nil? (:running st)) (empty? (:next st))) (str "seed " seed ": the service ends idle: " (pr-str (select-keys st [:running :next])))))))
+
+(deftest the-service-reports-what-it-holds-when-that-changes
+  ;; a hang in a run's chain is read from what the service holds (seon.root keeps it for a stall's
+  ;; evidence): the running key and stage, who waits, and the api's asks it has open
+  (let [state-of (fn [outs] (:r (last (filter #(= :prove-state (:op %)) outs))))
+        [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5) (req 2 :main 5)])
+        s1 (state-of outs)]
+    (is (= {:running "main@d5" :stage :spawn :waiting 2 :next 0} (select-keys s1 [:running :stage :waiting :next])))
+    (is (= [[:spawn "main@d5"]] (:open s1)) "the ask it waits on")
+    (let [spawn (first (asks outs :spawn))
+          [st o] (feed st [(answer-of spawn {:id :p1})])
+          s2 (state-of o)]
+      (is (= [:tests [[:tests "main@d5"]] :p1] [(:stage s2) (:open s2) (:runner s2)]) "the spawn answered: the tests ask is the one open")
+      (testing "a message that changes nothing it holds reports nothing"
+        (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
+          (is (empty? (filter #(= :prove-state (:op %)) o2))))))))

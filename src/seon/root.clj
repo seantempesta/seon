@@ -236,7 +236,10 @@
   (let [{:keys [run pid]} (get-in st [:view :agents id])
         db (some-> (:conn st) deref)]
     (if (and run db (not (:writer-closed st)))
-      (let [decl (tpl/stall id run (assoc s :pid pid))
+      (let [decl (tpl/stall id run (assoc s :pid pid
+                                          ;; the api's open asks and the test service's state when it stalled: where a chain waits
+                                          :api {:open (vec (sort (for [[rid {:keys [kind agent]}] (:pending st)] [rid kind agent])))
+                                                :prove (::prove st)}))
             tx (when-not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl)))
                  (task/create-tx db [decl]))]
         (cond (nil? tx) st
@@ -545,6 +548,8 @@
     (case (:op m)
       ;; the test service answered a waiter (seon.prove)
       :prove-answer (deliver-rid st o (:rid m) (:r m))
+      ;; what the test service holds, kept as it changes: a stall's evidence names it (stall-task)
+      :prove-state (assoc st ::prove (:r m))
       :status (set-agent st o (:agent m) (:set m))
       :stat (case (:k m)
               :noise (view! st update :stats assoc :noise (:v m) :noise-ordered (:ordered m) :noise-first-bad (:bad m))
