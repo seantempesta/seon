@@ -115,7 +115,7 @@
                  (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
     [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
 
-;; ---- the daily full run: a lane of its own ------------------------------------------------
+;; ---- the daily full run: a run of its own ------------------------------------------------
 
 (defn- full-request
   "The daily full run (the cron proc's request, :full mode): bin/test --all in a worktree of git's
@@ -197,7 +197,7 @@
         k (slot req)
         done (get-in st [:done k])]
     (cond
-      ;; the daily full run, in its own lane
+      ;; the daily full run, a run of its own
       (= :full mode) (full-request st req)
       (same? (:running st) req) [(update-in st [:running :waiters] into rids) []]
       (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] into rids) []]

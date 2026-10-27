@@ -142,7 +142,7 @@
 
 (deftest the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
   ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
-  ;; cron proc's request (no asker) runs in a lane of its own (a full run takes most of an hour and
+  ;; cron proc's request (no asker) runs apart (a full run takes most of an hour and
   ;; can stall: an agent's turn never waits on it); its executor is the :tests effect (bin/test --all
   ;; in a worktree of main, an OS child), its answer recorded as the facts every run leaves, on main,
   ;; so a red test is a :test-red row
