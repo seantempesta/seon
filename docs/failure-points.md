@@ -160,7 +160,12 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
     park, as `recv!` does). A wait on another process parks through the I/O poller instead:
     the agent's wait for its test child's lines, the whole test run, is
     ```seon.sock/line-reader```'s `jolt.io-poller/wait-ready`
-    (```seon.lib-test/a-wait-for-a-line-parks-the-fiber```; a `poll(2)` held every fiber);
+    (```seon.lib-test/a-wait-for-a-line-parks-the-fiber```; a `poll(2)` held every fiber).
+    The poller's ready is a hint, as for any non-blocking read: a stale one, left by the wait
+    before, ends the next park at once, so what follows a park never blocks. The test child's
+    exit is read from its kqueue with no wait (```seon.lib/wait-fd-or-exit```), and a read that
+    finds nothing goes back to the poller's park. A blocking `kevent` there stopped the agent's own answer to its test child for
+    good (2026-10-28, ```seon.agent-test/a-test-childs-read-lets-the-agents-other-fibers-run```);
   - the loop wakes on root's signals (SIGUSR1, SIGIO) through kqueue
     (`jolt.io-poller/wake-on-signals!`), so an agent's wait is never "stuck": with nothing
     queued and nothing awaited it waits for root;
