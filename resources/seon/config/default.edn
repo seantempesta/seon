@@ -822,6 +822,11 @@
  ;; every this many of the agent's later evals. Provenance: the replay above, 1 and 3 ranked alike
  ;; (R@10 0.441 both on the trajectory alone); 1 follows the agent's newest turn. At the bound: none.
  :seon.config.render/relevance-half-life 1.0
+ ;; Unit: evals. How many of the agent's latest evals give their code as the words of the work's focus
+ ;; (seon.context/focus), which the page's text scores take beside its vector. Provenance: the value the
+ ;; focus shipped with (the replay above measured the vector, not this); revisit when text recall is
+ ;; measured on live turns. At the bound: earlier evals' code is not in the words.
+ :seon.config.render/relevance-words 3
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
  ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
  ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing

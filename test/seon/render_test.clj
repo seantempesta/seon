@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems]))
+            [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -1257,3 +1257,20 @@
                      (set (for [[f n] r1 :when (not= n (r0 f))] f)))
                   "main moving redraws the view of main (a whole task merges itself), and none of the base's")))
           (finally (r/dispose-walk! w)))))))
+
+(deftest a-prove-is-drawn-on-its-eval-red-and-died
+  ;; docs/agent.md#done: a prove answers one line (my.agent/prove-summary) and what it found is drawn on
+  ;; its eval from its value (seon.render.ui/proved): a red names its test and first failing assertion,
+  ;; a test whose child died is listed as died and never as red
+  (let [run {:pass 3 :fail 1 :error 0 :ran 3 :reused 1 :deferred []
+             :reports [{:type :pass :var "#'app.okt/ok-test"}
+                       {:type :fail :var "#'app.okt/bad-test" :message "the sum" :expected "(= 3 (+ 1 1))" :actual "(not (= 3 2))"}
+                       {:type :error :var "#'app.okt/gone-test" :exit 137 :message "child died"}]
+             :proofs {'app.okt/ok-test :pass 'app.okt/bad-test :fail}}
+        html (h/html (ui/proved {} run))]
+    (is (= "red: ran 3, deferred 0 (to the judge), reused 1, died 1" (my.agent/prove-summary run)))
+    (is (= #{'app.okt/gone-test} (seon.proofs/died run)))
+    (is (str/includes? html "app.okt/bad-test") "the red test is named")
+    (is (str/includes? html "the sum") "with its first failing assertion")
+    (is (str/includes? html "died: ") "the dead child is listed")
+    (is (not (str/includes? html "child died")) "and not drawn as a red's failure")))

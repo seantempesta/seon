@@ -40,3 +40,5 @@ Every limit, bound or default is a config key (AGENTS §5). A number left in src
 - `seon.cost/tick-allowance`, `seon.cost/steeper-by`, `seon.cost/ratchet`, `seon.cost/growth-share`: the cost judge's own definitions of a proof's tolerance, which task `seon.cost/cost-tolerances-are-derived` derives from measurement instead ([cost](cost.md)).
 - `seon.cost/min-points`: three, the fewest sizes a cost proof measures, because a growth is judged on a curve and two points always make a line. A definition of a growth judgement, not a tolerance; a proof the cap leaves fewer is refused ([cost](cost.md)).
 - `seon.error/digest`: its 8 bytes are the 16 hex digits its contract and `:seon.error/signature`'s schema state, the identity's width, not a bound.
+- `seon.cron/day-ms`: a day's length in milliseconds, a unit of the calendar the cron proc reads a time of day against, not a bound.
+- `seon.fx/run-tests`: the three lines of the runner's output that an error names beside its log path, when the runner made no plan; the log holds the rest, and the error says where.

@@ -351,22 +351,32 @@
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
 
-(deftest a-named-prove-counts-for-status-and-the-judge-and-answers-its-verdict
+(deftest a-named-prove-counts-for-status-and-the-judge-and-answers-one-line
   ;; the blind agent (root, 2026-10-27): a prove naming its proofs (171 green) left both proofs
   ;; :proof-unknown in my.task/status and at the judge, and a bare prove answered 25k chars. A proof's
   ;; result counts whichever call measured it, and the answer prints its verdict
-  (let [[_ _ _ proved status done]
+  (let [[_ _ _ proved status drawn done]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
                         "(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
                         "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
                         "(my.agent/prove #{'app.okt/ok-test})"
                         "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
+                        ;; the prove's eval as recorded: its value, data, under the schema the page draws it by
+                        "(let [r (some (fn [[r]] (when (= \"(my.agent/prove #{'app.okt/ok-test})\" (:code r)) r)) (datahike.api/q '[:find ?r :where [_ :seon.eval/record ?r]] (seon.agent/db)))
+                               v (seon.ratom/realize (get-in r [:response :value]))]
+                           [(:schema r) (:proofs v) (seon.web.html/html (seon.render.ui/proved {} v))])"
                         {:op :done :agent agent}]))]
-    (is (clojure.string/includes? (:text proved) ":verdict :green") (:text proved))
-    (is (clojure.string/includes? (:text proved) "app.okt/ok-test :pass") "each proof's status")
-    (is (< (count (:text proved)) 1000) (str "the answer is its verdict, not the run: " (count (:text proved)) " chars"))
+    ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
+    ;; found is drawn on its eval, from its value (seon.render.ui/proved)
+    (is (clojure.string/includes? (:text proved) "green: ran ") (:text proved))
+    (is (< (count (:text proved)) 300) (str "the answer is its handle and one line: " (count (:text proved)) " chars"))
     (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
+    (let [[k proofs html] (:value drawn)]
+      (is (= :seon.test/proved k) (str "the eval's record names the value's render schema: " (pr-str drawn)))
+      (is (= :pass (get proofs 'app.okt/ok-test)) "the value is the run, stored as data")
+      (is (and (string? html) (clojure.string/includes? html "green: ran ") (clojure.string/includes? html "app.okt/ok-test"))
+          (str "drawn on the eval: the line, then each proof's status: " html)))
     ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
     (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))
 

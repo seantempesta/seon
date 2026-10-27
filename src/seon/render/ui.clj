@@ -987,12 +987,30 @@
   [{c :seon.ctx/ctx} rid eid]
   [:li (render/html {:schema :seon.message/fact} (dissoc (ratom/realize (get-in c [:runs rid :messages eid])) :db/id :seon.message/to))])
 
+(defn proved
+  "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
+  the eval's value): its one line (the schema's summary, my.agent/prove-summary), then each proof's
+  status, each red test's first failing assertion by the one printer, and each test whose child died."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ r]
+  (let [failures (proofs/failures r)
+        died (into (sorted-set-by #(compare (str %1) (str %2))) (proofs/died r))]
+    [:section [:h2 "prove"]
+     [:p (str (:value (render/summarized (with-meta r {:seon.render/schema :seon.test/proved}))))]
+     (when (seq (:proofs r))
+       [:ul (for [[p s] (sort-by (comp str key) (:proofs r))] [:li [:code (str p)] " " (name s)])])
+     (for [[t fs] (sort-by (comp str key) failures) :when (not (died t))]
+       [:div [:p [:code (str t)]] (render/html {} (first fs))])
+     (when (seq died) [:p "died: " (for [t died] [:code (str t) " "])])]))
+
 (defn eval-tile
-  "An eval whose value has a render of its own (a component over ctx): that value, by it."
+  "An eval whose value has a render of its own (a component over ctx): that value, by it (its own,
+  or the schema its record names: seon.repl/record-details)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
-  [:section
-   (render/html {} (ratom/realize (get-in c [:evals eid :seon.eval/record :response :value])))])
+  (let [r (get-in c [:evals eid :seon.eval/record])]
+    [:section
+     (render/html (if-let [k (:schema r)] {:schema k} {}) (ratom/realize (get-in r [:response :value])))]))
 
 (defn render-ctx
   "The render of an agent's ctx, its layout (the declared html render of :seon.render/render-ctx,
@@ -1039,7 +1057,7 @@
      [:ol {:id "c-rows"}
       (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]
      [:aside {:id "p-tiles"}
-      (for [[id e] evals :let [v (get-in e [:seon.eval/record :response :value])] :when (and (some? v) (render/render-of (ratom/realize v) nil))]
+      (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
 
 (defn agent

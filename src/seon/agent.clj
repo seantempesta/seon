@@ -687,6 +687,19 @@
         (assoc :digests cd :graph g :removed removed
                :process (into (program/process-tests idx) removed-process))))))
 
+(defn stored-results
+  "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
+  result as the test service recorded it, its :failures among it), for each with a result at that
+  digest (the test service's facts and the shared results directory, on this branch and on main as
+  last heard: test-plan's :reused), whichever run recorded it (a named prove, a bare one, a turn's,
+  root's judge); a test with none is left out (unknown). Cost: the test plan's walk (its digests),
+  once per call."
+  {:malli/schema [:=> [:cat [:maybe [:set :qualified-symbol]]] [:map-of :qualified-symbol :map]]}
+  [tests]
+  (if (empty? tests)
+    {}
+    (select-keys (:reused (test-plan (db) (:base @state) (set tests) (heard-main))) tests)))
+
 (declare handle!)
 
 (defn prove!
