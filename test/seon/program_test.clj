@@ -471,13 +471,31 @@
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       ;; and a test that reads files or runs a process takes every class
       (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
-    ;; the schema registry (seon.config/baked-schema-forms) is behind every contract: nearly every test
-    ;; reads it until a test reaches only the entries it uses (the floor of this class)
-    (is (< (* 3 (count all-tests)) (* 4 (count (moved :seon.env/schemas)))) "most tests take the schemas class")
+    ;; the tests that look a schema up by a key they compute (seon.program/schema-readers: seon.db/schema
+    ;; derives the store's attributes from every entity schema) take the schemas class: the floor of a
+    ;; schema edit, until those readers declare the entries they use
+    (is (< 0 (count (moved :seon.env/schemas)) (count all-tests)) "some tests take the schemas class, not every test")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       (is (< 0 (count m) (count all-tests)) (str (count m) " of " (count all-tests) " tests take the " c " class: some, not every test"))
       (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
     (is (< (count web) (count bin)) "fewer tests read the web handler than may run a script")))
+
+(deftest a-schema-key-a-test-names-is-an-edge-to-its-entry
+  ;; root, 2026-10-27: 896 tests took the schema resources on every schema edit. A schema key a form
+  ;; names as a literal keyword (a valid? or a registered error variant) is an edge to that entry:
+  ;; an edit moves the tests that reach it, and the tests that name no entry keep their digest
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        db (-> (record (empty-db) 'user "(ns app.pt-sk)" 'user "(ns app.pt-sk-test (:require [clojure.test :refer [deftest is]]))"
+                       'app.pt-sk-test "(deftest names-test (is (= 1 (count [:app.sk/k]))))"
+                       'app.pt-sk-test "(deftest other-test (is (= 1 1)))")
+               (schema :app.sk/k ":int") (schema :app.sk/z ":int"))
+        dg (fn [db] (program/reach-digests db {:env "e" :tree "t" :config {}}))
+        before (dg db)
+        changed (dg (schema db :app.sk/k ":string"))
+        other-entry (dg (schema db :app.sk/z ":string"))]
+    (is (not= (before 'app.pt-sk-test/names-test) (changed 'app.pt-sk-test/names-test)) "the test naming the entry moves with it")
+    (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
+    (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and

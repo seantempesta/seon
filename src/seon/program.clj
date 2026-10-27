@@ -1025,8 +1025,7 @@
   schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
   (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
   takes every class, which graph-index adds from its flags, not this map."
-  '{seon.config/baked-schema-forms :seon.env/schemas
-    seon.fx/declared-refs :seon.env/system
+  '{seon.fx/declared-refs :seon.env/system
     seon.system/read-decl :seon.env/system
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
@@ -1040,7 +1039,19 @@
   (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
-  (conj (set (keys env-class-readers)) 'seon.proofs/verdicts))
+  (conj (set (keys env-class-readers)) 'seon.proofs/verdicts 'seon.config/baked-schema-forms))
+
+(def schema-readers
+  "The vars that look a schema up by a key they are given, or list the registry: a form outside
+  seon.contract and seon.config referencing one reads the schema resources (:seon.env/schemas)
+  as a class, because the key is a value it computes (seon.db/schema derives the store's
+  attributes from every entity schema). A schema key a form names as a literal keyword is an
+  edge to that entry instead (reach-step), so an edit to an entry moves the tests that reach
+  it; the contract machinery inside seon.contract and seon.config (checked, forms, the registry
+  a contracted function validates its arguments against) reaches the entries the function's own
+  contract names, edges too."
+  '#{seon.contract/forms seon.contract/registry seon.contract/registry-of seon.contract/schema
+     seon.contract/properties seon.contract/valid? seon.contract/arm! seon.config/schema-forms})
 
 (def config-key-readers
   "The vars that read a config key named in data rather than in their own code: a form defining
@@ -1095,7 +1106,8 @@
   the keys and classes its reach reads (graph-index), so a key no test reads moves no digest."
   {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol]] [:or [:= :all] [:set :qualified-keyword]]]}
   [keywords refs nsym]
-  (let [classes (into #{} (keep env-class-readers) refs)]
+  (let [classes (cond-> (into #{} (keep env-class-readers) refs)
+                  (and (not (#{'seon.contract 'seon.config} nsym)) (some schema-readers refs)) (conj :seon.env/schemas))]
     (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
           (refs 'seon.config/baked-schema-forms) classes
           :else (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
@@ -1124,6 +1136,7 @@
     (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
            {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
             :defines (into #{} (keep key-of) (dv e))
+            :keywords (set (kv e))
             :config (config-reads (set (kv e)) refs nsym)}))))
 
 (defn reached-by
@@ -1166,6 +1179,13 @@
         ;; a config-key-reader reads the config keys schema entries name (config-key-readers)
         added (for [f added] (cond-> f (and (set? (:config f)) (some (fn [[k s]] (and (= :var k) (config-key-readers s))) (:defines f)))
                                    (update :config into (:schema-config g))))
+        ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
+        ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.
+        ;; The form that bakes the registry (seon.config/schema-forms) holds every key as data, not as lookups
+        added (vec (for [f added] (-> f (assoc :sedges (if ((:refs f) 'seon.config/baked-schema-forms)
+                                                         []
+                                                         (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
+                                      (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
         defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
         var-form #(peek (get defs %))
@@ -1186,6 +1206,7 @@
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
                         (vec (concat (remove test-ids (keep var-form (named f)))
+                                     (filter rows (:sedges f))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
