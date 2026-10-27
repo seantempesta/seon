@@ -399,7 +399,7 @@
 (deftest a-previous-roots-inputs-are-not-shared
   ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
   ;; source on the same main) must not key its agents' results by a fact an earlier boot wrote
-  (let [inputs {:env "e" :tree "t" :data-refs {}}
+  (let [inputs {:env "e" :tree "t" :config {} :data-refs {}}
         source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs inputs}
         db (fn [boot] (datahike.api/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot boot :seon.root/source source}]))]
     (is (some? (:dir (agent/test-plan (db "b1") (db "b1") #{}))) "this boot's inputs: its results are kept")

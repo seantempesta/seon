@@ -245,7 +245,7 @@
   "What a change from db to db' selects, as every run selects it: seon.proofs/plan's :selected
   over the two dbs' reach digests."
   [db db']
-  (let [in {:env "e" :tree "t"}]
+  (let [in {:env "e" :tree "t" :config {}}]
     (set (:selected (proofs/plan (program/reach-digests db in) (program/reach-digests db' in) {} #{})))))
 
 (deftest a-test-reaches-what-it-calls
@@ -329,20 +329,20 @@
 
 (deftest a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
   (let [db (calc-db)
-        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
+        before (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
         db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
-        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) calc-tests)]
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t" :config {}}) calc-tests)]
     (is (= calc-tests (set (keys before))) "every test has a digest")
     (is (= 3 (count (set (vals before)))) "each test its own")
     (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test}
            (set (for [[t d] after :when (not= d (before t))] t)))
         "add changed: exactly the tests reaching it moved (sum3-test through sum3), neg-test kept its digest")
-    (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t"}) calc-tests))
+    (is (not= before (select-keys (program/reach-digests db {:env "e2" :tree "t" :config {}}) calc-tests))
         "the inputs without program facts are in every digest")))
 
 (deftest an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
-        in {:env "e" :tree "t"}
+        in {:env "e" :tree "t" :config {}}
         g (program/reach-graph db nil)
         db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
         g' (program/reach-update g db')
@@ -359,7 +359,7 @@
 (deftest a-second-run-with-nothing-changed-runs-nothing
   (let [db (calc-db)
         dir (scratch-dir "results")
-        digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
+        digests (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
         plan #(proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{})
         first-plan (plan)
         ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-verdicts! #(fx/write-file {:req %}) dir)))
@@ -451,9 +451,9 @@
                    'app.pt-mac-test "(deftest m-test (is (= 2 (a/m 1))))"
                    'app.pt-mac-test "(deftest plain-test (is (= 1 1)))")
         ts '#{app.pt-mac-test/m-test app.pt-mac-test/plain-test}
-        before (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts)
+        before (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts)
         db' (record db 'app.pt-mac "(defmacro m [x] `(+ 2 ~x))")
-        after (select-keys (program/reach-digests db' {:env "e" :tree "t"}) ts)]
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t" :config {}}) ts)]
     (is (not= (before 'app.pt-mac-test/m-test) (after 'app.pt-mac-test/m-test)) "the macro's body changed: the test expanding it moved (no stale green)")
     (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
     (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
@@ -471,7 +471,7 @@
                    'app.pt-res-test "(deftest plain-test (is (= 1 1)))"
                    'app.pt-res-test "(deftest data-test (is (= 'app.pt-res/f (first (list 'app.pt-res/f)))))")
         ts '#{app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test app.pt-res-test/later-test app.pt-res-test/plain-test app.pt-res-test/data-test}
-        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts))
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts))
         before (dg db)
         changed (dg (record db 'app.pt-res "(defn f [] 3)"))
         defined (dg (record db 'app.pt-res "(defn g [] 2)"))]
@@ -494,7 +494,7 @@
                (schema :app.pt-sc/n "[:and :int :app.pt-sc/base]")
                (schema :app.pt-sc/base "int?"))
         ts '#{app.pt-sc-test/h-test app.pt-sc-test/plain-test}
-        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t"}) ts))
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts))
         before (dg db)
         after (dg (schema db :app.pt-sc/n "[:and :string :app.pt-sc/base]"))
         after-base (dg (schema db :app.pt-sc/base "pos-int?"))]
@@ -598,15 +598,22 @@
     (is (not (width 'seon.program-test/only-a-test-reading-the-tree-takes-its-digest)) "a test that reaches no reader of the key keeps its digest")
     (is (= #{} (moved :seon.config.no/such-key "1")) "a key no form names moves none")
     (is (seq readers) "tests reach the reader of a computed key")
-    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")))
+    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
+    ;; the reader list is complete: a form outside seon.config that calls the config's one reader
+    ;; (value, resolve) naming no config key of its own reads a computed one, and is named
+    (is (= [] (sort (for [[_ r] (:rows g)
+                          :when (and (not= 'seon.config (:ns r)) (set? (:config r)) (empty? (:config r))
+                                     (some (:refs r) '[seon.config/value seon.config/resolve]))]
+                      (:defines r))))
+        "every form reading a computed config key is a config-key-reader")))
 
 (deftest only-a-test-reading-the-tree-takes-its-digest
   ;; seon.program/env-readers: platform reads of resources/ (the baked schemas every contract
   ;; expands), deps.edn or web/ are :env inputs already, so reaching them does not make a test
   ;; rerun on every edit (327 of 368 did); a reader of src, test, docs or the task files still does
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1"})
-        b (program/reach-digests db {:env "e" :tree "t2"})
+        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
+        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
         moved (set (for [[t d] a :when (not= d (b t))] t))]
     (is (not (moved 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a reader test reaches only :env reads: the tree is no input")
     (is (moved 'seon.task-files-test/the-shipped-task-files-load) "a test reading the task files (my.root/task-files, not in :env): the tree is its input")
@@ -625,8 +632,8 @@
                    'app.pt-names-test "(deftest names-a-proof (is (= 'app.pt-calc-test/add-test 'app.pt-calc-test/add-test)))")
         db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
         k 'app.pt-names-test/names-a-proof
-        before (program/reach-digests db {:env "e" :tree "t"})
-        after (program/reach-digests db' {:env "e" :tree "t"})]
+        before (program/reach-digests db {:env "e" :tree "t" :config {}})
+        after (program/reach-digests db' {:env "e" :tree "t" :config {}})]
     (is (not= (before 'app.pt-calc-test/add-test) (after 'app.pt-calc-test/add-test)) "the named test reaches add: it moves")
     (is (= (before k) (after k)) "the test only naming it keeps its digest")
     (is (not (contains? (selected db db') k)) "and every run's selection leaves it out")))
@@ -641,7 +648,7 @@
                    'user "(ns app.pt-sys-test (:require [clojure.test :refer [deftest is]] [app.pt-sys :as s]))"
                    'app.pt-sys-test "(deftest boot-test (is (= :decl (s/start))))")
         db' (record db 'app.pt-procs "(defn writer-proc [] 2)")
-        in {:env "e" :tree "t" :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
+        in {:env "e" :tree "t" :config {} :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((program/reach-digests db in) k) ((program/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
     (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
@@ -651,8 +658,8 @@
   ;; seon.root-test runs target/seon (seon.test-store/binary-sh): what it proves is the whole
   ;; program the binary is built from, so any change to the tree moves its digest
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
-        a (program/reach-digests db {:env "e" :tree "t1"})
-        b (program/reach-digests db {:env "e" :tree "t2"})
+        a (program/reach-digests db {:env "e" :tree "t1" :config {}})
+        b (program/reach-digests db {:env "e" :tree "t2" :config {}})
         runs-binary '[seon.root-test/root-threads-are-what-root-declares seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
                       seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote seon.agent-test/an-agent-holds-mains-tests-and-runs-them]]
     (is (every? #(not= (a %) (b %)) runs-binary) "every test running the binary moves with the tree")
@@ -719,7 +726,7 @@
         db (d/db-with db (vec (concat (mapcat #(program/account-tx db (chain-account % "x") %) (range 10))
                                       (mapcat (fn [[t i] k] (program/account-tx db (test-acct t i) (+ 10 k))) [["ta" 2] ["tb" 7] ["tc" 9]] (range)))))
         g (program/reach-graph db nil)
-        in {:env "e" :tree "t"}
+        in {:env "e" :tree "t" :config {}}
         moved (fn [i] (let [db2 (d/db-with db (program/record-tx db (chain-account i "(dec x)")))
                             before (program/graph-index g in nil) after (program/graph-index (program/reach-update g db2) in nil)]
                         (set (for [[t {d :digest}] after :when (not= d (:digest (before t)))] t))))]
