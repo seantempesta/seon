@@ -52,3 +52,55 @@
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
                  (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))
+
+;; data-of's store, a second of this test's own: the three-way proof releases and removes its
+;; store at its end
+(def ^:private data-store
+  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/merge-data-cost-" (random-uuid)) 0 :db))))
+
+(defn data-of
+  "delta-three-way's arguments for a merge of declared data (:all): base holding n data
+  attributes (:app.data/a0..an-1, longs) and one entity with a value of the first, and ours and
+  theirs, each a branch of it that changed that one value, all read from the store."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:= :all]]]}
+  [n]
+  (let [conn @data-store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "d" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (d/connect (assoc cfg :branch b))
+        attrs (mapv #(keyword "app.data" (str "a" %)) (range n))
+        _ (d/transact bc {:tx-data (mapv #(hash-map :db/ident % :db/valueType :db.type/long :db/cardinality :db.cardinality/one) attrs)})
+        _ (d/transact bc {:tx-data [{:app.data/a0 1}]})
+        e (d/q '[:find ?e . :where [?e :app.data/a0 1]] @bc)
+        side (fn [nm v] (let [s (keyword (str (name b) "-" nm))
+                              _ (d/branch! conn b s)
+                              c (d/connect (assoc cfg :branch s))]
+                          (d/transact c {:tx-data [[:db/add e :app.data/a0 v]]})
+                          (d/release c)
+                          (pdb/head conn s)))
+        r [(pdb/head conn b) (side "ours" 2) (side "theirs" 3) :all]]
+    (d/release bc)
+    r))
+
+(deftest a-merge-reads-the-data-attributes-from-the-index
+  ;; task seon.merge/data-attrs-read-from-the-attribute-index: a merge of declared data (:all)
+  ;; read which attributes are data from (d/schema db), which rebuilds the whole schema map on
+  ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
+  ;; is data is asked of the attributes of the datoms that differ (seon.merge/data-attr?), so the
+  ;; merge costs the same however many attributes the store declares
+  (try
+    (cost/proof
+      {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/data-of
+       :n "data attributes the store declares, one value changed on each side"
+       :work (str "the datoms that differ (one value each side), the keys their entity bears, each "
+                  "asked whether its attribute is data: never the schema, so never the attributes' count")
+       :growth :constant
+       ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000;
+       ;; reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
+       ;; 8,126 calls
+       :fixed {:bytes 650000 :calls 39}
+       :sizes [100 300 1000]})
+    (finally (when (realized? data-store)
+               (let [path (get-in @@data-store [:config :store :path])]
+                 (d/release @data-store) (clojure.java.shell/sh "rm" "-rf" path))))))

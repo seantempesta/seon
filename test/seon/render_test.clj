@@ -1088,6 +1088,19 @@
         (is (not-any? #(= :error (:op %)) (:to-api @o2)))
         (is (some #(and (= 3 (:k %)) (str/includes? (:html %) "seon.render/view-defect")) (:to-web @o2)) "its page is still the error")))))
 
+(deftest a-cut-with-its-whole-form-holds-no-copy
+  ;; the second context audit (F7): a plan cut on the page kept its whole text in the cut's :title,
+  ;; which the model reads too (1.2k chars twice on two pages). A cut that names the form reading the
+  ;; whole holds no copy; with no form, the title is a person's way to the rest
+  (let [long (str/join " " (repeat 400 "word"))
+        with (ui/prose long 20 {:whole '(:plan (my.task/data))})
+        without (ui/prose long 20)
+        titles (fn [h] (keep #(when (map? %) (:title %)) (tree-seq coll? seq h)))]
+    (is (empty? (titles with)) (pr-str with))
+    (is (str/includes? (pr-str with) "(:plan (my.task/data))") "the cut names the form that reads the whole")
+    (is (= [long] (titles without)) "no form: the title holds the whole")
+    (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
@@ -1124,8 +1137,8 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) "ctx-keys"] (mapv :id task))
-        "the task, what is related, what its newest turn observed, the run, then the keys the agent added: each keyed by what it shows")
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
+        "the task, what is related, what its newest turn observed, the run (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
       (is (str/includes? h ":fail"))

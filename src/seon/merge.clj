@@ -40,15 +40,27 @@
   (let [n (namespace k)]
     (and (some? n) (or (= "seon" n) (str/starts-with? n "seon.")) (not (carried-platform-attrs k)))))
 
+(defn- data-attr?
+  "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
+  the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
+  gives it a value type, outside the program's namespaces and the platform's records. A merge
+  asks it of the attributes of the datoms that differ, so it costs those, never the schema:
+  d/schema rebuilt the whole schema map on every call, once per db per read."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] ifn?]}
+  [db data-attrs]
+  (if (= :all data-attrs)
+    (let [schema (:schema db)]
+      (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
+                            (not (program/attr-namespaces (namespace a))) (not (platform-record? a))))))
+    data-attrs))
+
 (defn- data-attr-set
-  "The data attributes of db that data-attrs (a set, or :all) names."
+  "The data attributes of db that data-attrs names, as a set: the db's attributes (its attribute
+  index, rschema's :db/ident) that data-attr? holds, for a read of the whole program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] [:set :keyword]]}
   [db data-attrs]
   (if (= :all data-attrs)
-    (into #{} (for [[k v] (d/schema db)
-                    :when (and (keyword? k) (map? v) (:db/valueType v)
-                               (not (program/attr-namespaces (namespace k))) (not (platform-record? k)))]
-                k))
+    (into #{} (filter (data-attr? db :all)) (get-in db [:rschema :db/ident]))
     data-attrs))
 
 (defn- def-content
@@ -139,7 +151,7 @@
   "The program keys entity e bears on db: a form's own and those of the definitions it
   makes (their content holds its text), a definition's own and that of the form it points
   to (whose liveness it decides), a schema entry's, and e's declared data."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int [:set :keyword]] [:set :seon.merge/program-key]]}
+  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int ifn?] [:set :seon.merge/program-key]]}
   [db many e data-attrs]
   ;; one seek reads the entity's datoms; an entity that bears no key (a turn's facts, a
   ;; transaction) costs only that seek
@@ -156,7 +168,7 @@
           (concat (when-let [k (form-key x)] (cons k def-key))
                   (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
                   (when-let [k (:schema/key x)] [[:schema k]])
-                  (for [dt (when (seq data-attrs) ds) :when (data-attrs (:a dt))]
+                  (for [dt (when-not (= #{} data-attrs) ds) :when (data-attrs (:a dt))]
                     (if (many (:a dt))
                       [:datum e (:a dt) (:v dt)]
                       [:datum e (:a dt)]))))))
@@ -165,7 +177,7 @@
   "Key k's content on db, as `program` holds it, or nil when db's program lacks k. A form's
   content is its row less where it was read (:source: one form id can be imported on one
   branch and recorded at a REPL on another, the same text)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key [:set :keyword]] :any]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key ifn?] :any]}
   [db [kind a b c :as k] data-attrs]
   (case kind
     :form (when-let [e (pdb/eid db :form/id a)]
@@ -186,7 +198,7 @@
   "The part of db's program at keys ks: `program` restricted to them, read key by key."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.merge/program]}
   [db ks data-attrs]
-  (let [das (data-attr-set db data-attrs)]
+  (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
 (defn touched-keys
@@ -196,7 +208,7 @@
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
-  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr-set db data-attrs)])
+  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr? db data-attrs)])
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
@@ -245,7 +257,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
-        das (data-attr-set src data-attrs)
+        das (data-attr? src data-attrs)
         carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)

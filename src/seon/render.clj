@@ -214,13 +214,15 @@
 (declare emit unmount!)
 
 (defn- with-id
-  "Hiccup hc with its root element's id id (a component's key)."
-  {:malli/schema [:=> [:cat :any :string] :any]}
-  [hc id]
+  "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
+  its render's name as its one class, in place of any class the render gave its root (its style is
+  its var's :seon.render/style: `styled`)."
+  {:malli/schema [:=> [:cat :any :map] :any]}
+  [hc attrs]
   (if (and (vector? hc) (keyword? (first hc)))
     (let [[tag & more] hc]
-      (if (map? (first more)) (into [tag (assoc (first more) :id id)] (rest more)) (into [tag {:id id}] more)))
-    [:div {:id id} hc]))
+      (if (map? (first more)) (into [tag (merge (first more) attrs)] (rest more)) (into [tag attrs] more)))
+    [:div attrs hc]))
 
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
@@ -251,11 +253,11 @@
             reads (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (apply f o args) (assoc env :children kids)) id)
+            one #(try (with-id (emit w (apply f o args) (assoc env :children kids)) {:id id :class (name (first k))})
                       (catch Throwable e
                         (with-id [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
                                                                                (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]
-                                 id)))
+                                 {:id id})))
             draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (if-let [rx (:rx prev)]
@@ -305,13 +307,27 @@
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
 
+(defn- styled
+  "Component output out as the page writes it: its root's class, its render's name, followed by the
+  Tailwind classes render var f states (:seon.render/style, literal text in its source, so the
+  stylesheet's scan builds them): the style of each render drawn, by reference, never in what the
+  model reads."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [out f]
+  (let [style (:seon.render/style (meta f))]
+    (if (and style (vector? out) (map? (second out)) (:class (second out)))
+      (update-in out [1 :class] str " " style)
+      out)))
+
 (defn resolved
   "Component k's output in walk w with every child's marker replaced by that child's output: the
-  page's hiccup below k."
-  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
-  [w k]
-  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x)) x))
-                         (:out (get @(:cache w) k))))
+  page's hiccup below k. With html? true each component as the page writes it (styled)."
+  {:malli/schema [:function [:=> [:cat :map [:vector :any]] :any] [:=> [:cat :map [:vector :any] :boolean] :any]]}
+  ([w k] (resolved w k false))
+  ([w k html?]
+   (let [c (get @(:cache w) k)]
+     (clojure.walk/postwalk (fn [x] (if (and (vector? x) (= ::child (first x))) (resolved w (second x) html?) x))
+                            (cond-> (:out c) html? (styled (:f c)))))))
 
 (defn frame!
   "Walk w drawn as of now: its root on the first frame, then each component a change queued (a
@@ -359,7 +375,7 @@
                  ;; its html written once a revision (a render of 15 units re-written each frame cost
                  ;; 2.2M ticks for a change that drew nothing): kept on its cache entry, by its revision
                  html (if (= r (:unit-rev c)) (:unit-html c)
-                          (let [h (h/html (resolved w k))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
+                          (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
              {:id (:id c) :container sel :rev r :html html})))))
 
 (defn placed-hiccup
