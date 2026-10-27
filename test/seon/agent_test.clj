@@ -331,6 +331,19 @@
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
+(deftest a-death-costs-the-test-it-interrupted-and-no-other
+  ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
+  ;; line at its end, so a death anywhere lost every report before it (the test service's run of
+  ;; main: 344 tests, one death, 0 results). Each test's reports go as it ends; a death is the
+  ;; one :error on the test it interrupted, and the rest run in a new child. Run as the service
+  ;; runs main (mode :main, the namespace named)
+  (let [[_ r] (in-agent ["(ns app.die-test (:require [clojure.test :refer [deftest is]])) (deftest a-first (is (= 1 1))) (deftest b-dies (seon.lib/c-exit 7)) (deftest c-last (is (= 2 2)))"
+                         (str "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{app.die-test})]"
+                              " (pr-str {:pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
+                              "          :passed (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")])
+        v (some-> (:value r) clojure.edn/read-string)]
+    (is (= {:pass 2 :error 1 :died ["#'app.die-test/b-dies"] :passed ["#'app.die-test/a-first" "#'app.die-test/c-last"]} v) (pr-str r))))
+
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle

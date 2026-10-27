@@ -102,16 +102,25 @@
                (->> (map (fn [e s] [(- s) e]) es (ffi/read-array fs :float m 0))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
+(defn rrf-scores
+  "Rankings fused by reciprocal rank (Cormack et al. 2009): {item score}, each item's score the sum
+  of w/(k + rank) over the rankings it is in, k :seon.config.vector/rrf-k, w the ranking's weight (1.0
+  unless weights, one per ranking, are given)."
+  {:malli/schema [:function [:=> [:cat [:sequential [:sequential :any]]] [:map-of :any number?]]
+                  [:=> [:cat [:sequential [:sequential :any]] [:sequential number?]] [:map-of :any number?]]]}
+  ([rankings] (rrf-scores rankings (repeat 1.0)))
+  ([rankings weights]
+   (let [k (cfg/value :seon.config.vector/rrf-k)]
+     (apply merge-with + {} (for [[r w] (map vector rankings weights)] (into {} (map-indexed (fn [i x] [x (/ w (+ k i 1))])) r))))))
+
 (defn rrf
-  "Rankings fused by reciprocal rank (Cormack et al. 2009): each item scores the sum of 1/(k + rank)
-  over the rankings it is in, k :seon.config.vector/rrf-k; best first, the name breaking a tie.
+  "The items of rankings fused by reciprocal rank (rrf-scores), best first, the name breaking a tie.
   Measured fusing the call graph with embeddings (docs/vector.md#fused-with-the-call-graph); the
-  page's related part fuses their reference graph with meaning by it (seon.context/related)."
+  page's related part fuses their reference graph with meaning by it (seon.context/related), and
+  my.agent/search fuses exact text, meaning and references."
   {:malli/schema [:=> [:cat [:sequential [:sequential :any]]] [:vector :any]]}
   [rankings]
-  (let [k (cfg/value :seon.config.vector/rrf-k)
-        s (apply merge-with + {} (for [r rankings] (into {} (map-indexed (fn [i x] [x (/ 1.0 (+ k i 1))])) r)))]
-    (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) s)))))
+  (mapv peek (sort (map (fn [[x v]] [(- v) (str x) x]) (rrf-scores rankings)))))
 
 ;; ---- what is embedded --------------------------------------------------------------------
 ;; EmbeddingGemma's prompts (its model card; v1's script/embed/gemma_text.py): a document is

@@ -179,11 +179,12 @@
   \"outside\": a Claude session works it through seon_attach, and the reconciler forks no model's
   agent for it (it is written held, and attached it starts no turn loop)."
   {:malli/schema [:=> [:cat :seon.agent/id :seon.run/id [:map [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
-                                                       [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                                                       [:last-op {:optional true} [:maybe :seon.agent/last-op]]
+                                                       [:api {:optional true} :map]]]
                   :seon.task/declaration]}
   [agent run s]
   (let [pid (:pid s)
-        stall (cond-> {:agent agent :run run :quiet-ms (:quiet-ms s)} pid (assoc :pid pid) (:last-op s) (assoc :last-op (:last-op s)))]
+        stall (cond-> {:agent agent :run run :quiet-ms (:quiet-ms s)} pid (assoc :pid pid) (:last-op s) (assoc :last-op (:last-op s)) (:api s) (assoc :api (:api s)))]
     {:seon.task/ns 'root :seon.task/name (str "stall-" (name agent) "-" (str/replace run #"[^A-Za-z0-9]+" "-"))
      :seon.task/kind :work :seon.task/model "outside" :seon.task/proofs stall-proofs
      :seon.task/cause {:stall stall}

@@ -335,3 +335,47 @@
     (let [two (d/db-with db [{:db/id "a" :var/name 'app/a} {:db/id "b" :var/name 'app/b}
                              {:form/id "app/ab" :form/src "(do (defn a [] :zed) (defn b [] :zed))" :form/defines ["a" "b"]}])]
       (is (= ['app/a 'app/b] (mapv :var (grep-on two ":zed"))) "a form defining two vars: each, once"))))
+
+(defn kinds-db
+  "grep-db's forms beside a wiki section, a task and a schema entry that hold the word `fusing`."
+  []
+  (d/db-with (grep-db [["g" nil "(defn g []\n  (fusing 1))"] ["h" nil "(defn h [] 3)"]])
+             [{:seon.section/address "p.md#fusing-ranks" :seon.section/heading "Fusing ranks" :seon.section/text "Ranks are fused.\nThe fusing is by reciprocal rank."}
+              {:seon.section/address "p.md#other" :seon.section/heading "Other" :seon.section/text "Fusing, in the middle."}
+              {:seon.task/id "app/fusing-task" :seon.task/plan "Plan.\nMake the FUSING cheaper."}
+              {:schema/key :app/fuse :schema/form "[:map {:doc \"fusing\"}]"}]))
+
+(deftest exact-text-reads-every-kind-and-ignores-case-when-asked
+  (let [db (kinds-db) hit (fn [h] [(:kind h) (:name h)])]
+    (is (= [[:task "app/fusing-task"] [:section "p.md#fusing-ranks"] [:schema :app/fuse] [:var 'app/g] [:section "p.md#other"]]
+           (map hit (seon.docs/exact db "fusing" #{:var :test :section :task :schema} true)))
+        "name or heading first, then the rest by name; every kind; case ignored")
+    (is (= [[:var 'app/g]] (map hit (seon.docs/exact db "fusing" #{:var} true))) "the kinds asked only")
+    (is (= [] (seon.docs/exact db "FUSING" #{:var} false)) "case matters when asked to")
+    (is (= "Make the FUSING cheaper." (:line (first (filter #(= :task (:kind %)) (seon.docs/exact db "fusing" #{:task} true))))))
+    (is (every? (set (keys seon.docs/text-attrs)) #{:var :test :section :task :schema}))))
+
+(defn corpus-db
+  "kinds-db among filler: 40 forms and 20 sections that hold none of the word, so a few matching texts stand
+  out of the corpus' scores (tokens keeps only those z standard deviations above the mean)."
+  []
+  (d/db-with (kinds-db)
+             (vec (concat (mapcat (fn [i] [{:db/id (str "fv" i) :var/name (symbol "fill" (str "v" i))}
+                                           {:form/id (str "fill/" i) :form/src (str "(defn v" i " [] (inc " i "))") :form/defines [(str "fv" i)]}])
+                                  (range 40))
+                          (for [i (range 20)] {:seon.section/address (str "fill.md#s" i) :seon.section/heading (str "Filler " i)
+                                               :seon.section/text (str "Plain prose number " i ".")})))))
+
+(deftest tokens-keep-the-texts-that-stand-out-by-the-words-of-a-query
+  (let [db (corpus-db) hit (fn [h] [(:kind h) (:name h)])
+        all #{:var :test :section :task :schema}]
+    (is (= #{[:task "app/fusing-task"] [:section "p.md#fusing-ranks"] [:section "p.md#other"] [:var 'app/g] [:schema :app/fuse]}
+           (set (map hit (seon.docs/tokens db "fusing" all 2.0)))) "every kind holding the word, and none of the filler")
+    (is (= [:section "p.md#fusing-ranks"] (hit (first (seon.docs/tokens db "fusing ranks" all 2.0)))) "more of the words: first")
+    (is (every? #(< 2.0 (:z %)) (seon.docs/tokens db "fusing" all 2.0)))
+    (is (= [[:var 'app/g]] (map hit (seon.docs/tokens db "fusing" #{:var} 2.0))) "the kinds asked only")
+    (is (= [] (seon.docs/tokens db "nowhere" all 2.0)) "no word of it in any text")
+    (is (= [] (seon.docs/tokens db "" all 2.0)))
+    (is (= ["datoms" "diff" "seon" "run" "outcome" "a" "b"] (seon.docs/words "datoms-diff seon.run/outcome aB")) "an identifier is its parts, camelCase too")
+    (testing "the first line holding a word, and its number"
+      (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
