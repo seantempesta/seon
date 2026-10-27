@@ -604,6 +604,7 @@
 
 (defn- report-with
   "`report` over the answers its caller read."
+  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold] :seon.problems/report]}
   [db ans fold]
   (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
