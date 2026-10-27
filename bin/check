@@ -41,6 +41,7 @@ fi
 # caller of the re-exec: 15 + 15) prints "nice(5) failed: operation not permitted"
 unsetopt BG_NICE
 . "$ROOT/bin/env"
+heavy_held || { heavy_hold "$0" "$@"; exit $? }   # one of the machine's heavy-run slots (bin/env)
 main_first   # main's merge verification goes first (bin/env)
 export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a

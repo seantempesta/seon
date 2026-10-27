@@ -38,6 +38,7 @@
   ;; the machine
   [:seon.config.machine/memory-mb :seon.config.machine/memory-mb]
   [:seon.config.machine/relay-mb :seon.config.machine/relay-mb]
+  [:seon.config.machine/heavy-runs :seon.config.machine/heavy-runs]
   ;; the check harness
   [:seon.config.check/ping-ms :seon.config.check/ping-ms]
   [:seon.config.check/hold-ms :seon.config.check/hold-ms]
