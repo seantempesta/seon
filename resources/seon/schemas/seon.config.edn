@@ -57,6 +57,7 @@
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
   [:seon.config.merge/max-conflicts :seon.config.merge/max-conflicts]
+  [:seon.config.merge/max-behind :seon.config.merge/max-behind]
   [:seon.config.merge/max-merge-turns :seon.config.merge/max-merge-turns]
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
@@ -64,6 +65,8 @@
   [:seon.config.source/dirs :seon.config.source/dirs]
   [:seon.config.source/program-dirs :seon.config.source/program-dirs]
   [:seon.config.source/process-vars :seon.config.source/process-vars]
+  [:seon.config.source/process-entry :seon.config.source/process-entry]
+  [:seon.config.source/pin-namespaces :seon.config.source/pin-namespaces]
   [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/main :seon.config.source/main]
@@ -119,6 +122,11 @@
   [:seon.config.ctx/callers :seon.config.ctx/callers]
   [:seon.config.render/similar :seon.config.render/similar]
   [:seon.config.render/related :seon.config.render/related]
+  [:seon.config.render/search :seon.config.render/search]
+  [:seon.config.render/search-weights :seon.config.render/search-weights]
+  [:seon.config.render/search-token-z :seon.config.render/search-token-z]
+  [:seon.config.render/search-relevance :seon.config.render/search-relevance]
+  [:seon.config.render/search-min :seon.config.render/search-min]
   [:seon.config.render/related-rarity :seon.config.render/related-rarity]
   [:seon.config.render/related-near :seon.config.render/related-near]
   [:seon.config.render/related-seeds-near :seon.config.render/related-seeds-near]

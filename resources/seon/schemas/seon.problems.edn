@@ -53,6 +53,9 @@
  :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]
  :seon.root/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-root]] [:runs [:vector :string]]]]
  :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
+ ;; my.root/hold! of a task that is not running (held, cancelled, unknown): nothing to take back
+ :seon.root/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-running]] [:task :string]
+                                                [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :string]]]

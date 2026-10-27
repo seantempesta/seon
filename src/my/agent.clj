@@ -8,7 +8,10 @@
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
     (callees 'ns/f)           the vars ns/f's recorded definition names
-    (grep "text")             the program vars whose recorded definition's text holds it
+    (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
+                              text, its meaning and its references: [{:kind :name :score :by :line} ...]
+    (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
+    (grep "text")             the program vars whose recorded definition's text holds it (exact text only)
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
     (related "text" k)        the k wiki sections nearest the text, a line each, and how to read one:
@@ -128,46 +131,58 @@
   "x's vector on db: a var's definition's (its entity, whose vector near reads), or text embedded
   as a search's query by root's :embed effect (a failed embedding its error); nil for a var with
   no vector yet."
-  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :string]] :any]}
+  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword :string]] :any]}
   [db x]
+  (if (qualified-keyword? x)
+    (some-> (d/entity db [:schema/key x]) :db/id)
   (if (symbol? x)
     (some-> (d/entity db [:var/name x]) :var/form :db/id)
     (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
-      (if (contract/error? r) r (first (:vectors (:value r)))))))
+      (if (contract/error? r) r (first (:vectors (:value r))))))))
+
+(defn search
+  "The best matches on this branch for q, a text, a var's name or a schema key, over code, wiki sections, tasks and
+  schema keys at once: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
+  caller filters it with plain Clojure, e.g. (filter #(= :section (:kind %)) (search \"rrf\")). :kind is
+  one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :by
+  the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
+  sections naming it), :line the line of its text that holds q. opts, all optional: :kinds (a set of
+  those kinds), :by (a set of :text :meaning :refs), :ns (a prefix: only vars and tests whose namespace
+  starts with it), :k (:seon.config.render/search). Each hit also holds :e, its entity, and :at, the line of its text
+  (my.agent/help takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
+  last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
+  or key with no vector yet is searched without meaning."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector :map] :map]]
+                  [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]]}
+  ([q] (search q {}))
+  ([q opts]
+   (let [db (agent/db)
+         qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of db q))]
+     (if (contract/error? qv) qv (context/search db q opts qv)))))
 
 (defn similar
-  "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
-  vector, or text, embedded as a search's query by root's :embed effect. [[name score] ...] best
-  first, k of them (10 unless given), each name a var, a wiki section's address or a task's id;
-  a var with no vector yet answers [], and a failed embedding its error."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] [:or [:vector [:tuple :any number?]] :map]]
-                            [:=> [:cat [:or :qualified-symbol :string] nat-int?] [:or [:vector [:tuple :any number?]] :map]]]}
-  ([x] (similar x 10))
-  ([x k]
-   (let [db (agent/db)
-         q (query-of db x)
-         name-of (fn [e] (let [x (d/entity db e)]
-                           (or (some-> (:var/_form x) first :var/name) (:seon.section/address x) (:seon.task/id x) e)))]
-     (cond (contract/error? q) q
-           (nil? q) []
-           :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
+  "What on this branch is nearest x by meaning, [[name score] ...] best first, k of them
+  (:seon.config.render/search unless given): (search x {:by #{:meaning} :k k}) without its kinds' extras. x a
+  var, a schema key or text; a failed embedding answers its error."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector [:tuple :any number?]] :map]]
+                            [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] pos-int?] [:or [:vector [:tuple :any number?]] :map]]]}
+  ([x] (similar x (cfg/value :seon.config.render/search)))
+  ([x k] (let [r (search x {:by #{:meaning} :k k})]
+           (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
 
 (defn related
-  "The wiki sections nearest x by meaning, a text (embedded as a search's query by root's :embed
-  effect) or a var's definition, k of them (:seon.config.render/related unless given), each a
-  line at summary depth with the forms that read one whole and search further
-  (seon.context/related-view): how an agent refines, in its own words, what its page's related
-  part showed. A var with no vector yet says so; a failed embedding answers its
-  error."
+  "The wiki sections nearest x by meaning, a text or a var's definition, k of them
+  (:seon.config.render/related unless given), each a line at summary depth with the forms that read one
+  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning}})
+  shown as the page's related part shows its own. A failed embedding answers its error."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
   ([x] (related x (cfg/value :seon.config.render/related)))
   ([x k]
-   (let [db (agent/db) q (query-of db x)]
-     (cond (contract/error? q) q
-           (nil? q) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view db {:sections (mapv #(:seon.section/address (d/entity db (first %)))
-                                                           (vector/near db q k {:of :seon.section/address}))})))))
+   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
+     (cond (contract/error? r) r
+           (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
+           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name) (take k)) r)})))))
 
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
@@ -210,7 +225,8 @@
   turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
   [sym]
-  (if-let [v (if (var? sym) sym (resolve sym))]
+  ;; a name that resolves to a class (java.lang.String) or to anything but a var has no recorded source
+  (if-let [v (let [r (if (var? sym) sym (resolve sym))] (when (var? r) r))]
     (or (:source (meta v))
         (docs/source-of (agent/db) (named v))
         (file-source v))
@@ -246,31 +262,59 @@
   evaluated to the symbol or var it holds, as the call reads naturally."
   [sym]
   (let [x (if (and (symbol? sym) (not (contains? &env sym))) (list 'quote sym) sym)]
-    `(let [s# (named ~x)]
-       (println (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#))))))
+    `(let [x# ~x]
+       (println (if (or (symbol? x#) (var? x#))
+                  (let [s# (named x#)]
+                    (or (source-fn s#) (:seon.error/message (no-var (agent/db) s#)) (str "Source not found for " s#)))
+                  (str "Source not found for " (pr-str x#) ": source reads a name or a var"))))))
+
+(defn- help-nearest
+  "What a help address that is no section may have meant: the help page's sections and the pages
+  whose address or heading holds a word of it (three letters or more), then the nearest by Jolt's
+  did-you-mean ranking (as no-var), at most six addresses. Not the page: (my.agent/help) lists it."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
+  [db address]
+  (let [sections (docs/page db context/help-page :summary)
+        by-address (into {} (map (juxt :seon.ref/address :seon.ref/heading)) sections)
+        pages (docs/page-paths db)
+        words (re-seq #"[a-z0-9]{3,}" (str/lower-case address))
+        holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
+        named (concat (for [[a h] by-address :when (or (holds? a) (holds? (str h)))] a) (filter holds? pages))
+        ranked (jolt.analyzer/suggestions-for address (concat (keys by-address) pages))]
+    (vec (take 6 (distinct (concat named ranked))))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
   page (seon.context/help-page) at summary, each section its address, heading and lead's first
   sentence, with the sections it cites and those citing it. With an address (``docs/vector.md#the-model``) or
   an anchor of the help page (\"done\"), that section whole; with a page's path (\"docs/vector.md\"), that page
-  at summary. A miss answers the help page's sections, every page's path and the form that reads
-  one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)
+  at summary. A miss answers what it did not find, the nearest addresses (help-nearest) and the
+  forms that read one, never nil. (Before this an anchor answered its text alone; it answers the view, :seon.ref/text among its keys.)
   With a namespace's name ('seon.print.select), the namespace as a plan's citation of it shows it:
   its ns head and docstring, then each definition, privates included, in file order, a line each
-  (its name and its doc's first sentence; seon.ref/namespace-view)."
+  (its name and its doc's first sentence; seon.ref/namespace-view). With a hit of (my.agent/search ...)
+  (a map with its :kind and :name), or its :name (a var's symbol, a schema key, a section's address),
+  the thing itself at doc depth: a var its docstring, contract and source, a section whole, a task its
+  plan, proofs and needs."
   {:malli/schema [:function [:=> [:cat] [:vector :seon.ref/view]]
-                  [:=> [:cat [:or :string :symbol]] [:or :seon.ref/view [:vector :seon.ref/view] [:maybe [:map [:seon.print/code :string]]] [:map [:no-section :string] [:help-page [:vector :seon.ref/view]] [:pages [:vector :string]] [:read-one :string]]]]]}
+                  [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]]}
   ([] (vec (docs/page (agent/db) context/help-page :summary)))
   ([address]
-   (if (symbol? address)
+   (cond
+     (map? address) (let [db (agent/db) {:keys [kind name]} address]
+                      (case kind
+                        :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
+                        :section (docs/view db name :code)
+                        :more address
+                        (docs/cited-code db {:seon.ref/name name :seon.ref/depth :doc :seon.ref/line 1})))
+     (or (symbol? address) (keyword? address))
      (docs/cited-code (agent/db) {:seon.ref/name address :seon.ref/depth :doc :seon.ref/line 1})
+     :else
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]
      (or (docs/view db a :code)
          (docs/page db address :summary)
          {:no-section address
-          :help-page (vec (docs/page db context/help-page :summary))
-          :pages (docs/page-paths db)
-          :read-one "(my.agent/help \"docs/<page>.md\") lists a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))
+          :nearest (help-nearest db address)
+          :read-one "(my.agent/help) lists the help page's sections; (my.agent/help \"docs/<page>.md\") a page's sections; (my.agent/help \"docs/<page>.md#<section>\") reads one; (my.agent/help 'ns.name) a namespace, every definition a line"})))))
 

@@ -6,7 +6,7 @@ This is the help page: what an agent reads when it asks, beside the short system
 
 ## Your turn
 
-You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call.
+You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call. (Attached from outside, your tools are the server's: `from-outside`, below.)
 
 - Evaluate a little, read the answer, then take the next step. Each eval call takes ``prose`` first, then ``code``: in the prose, say what you are doing and what you expect to see. The user sees all your prose, rendered as markdown.
 - A reference in your prose is looked up and shown by `(my.task/status)` at your next turn: a var written as ``ns/name`` shows its source and docstring, a task (``ns/task-name``) its plan and proofs, a wiki section (``docs/page.md#section``) its text, as docs/references.md reads them. Name what you want to see.
@@ -14,6 +14,17 @@ You have one tool, eval: call it with Clojure forms, and you see what the REPL a
 - A reply with no eval call is a message to the user: your turn ends there, and the run waits for the user's answer. Finishing is an eval, not a reply.
 - An unbalanced delimiter is repaired, and the repair is shown to you next turn under `:your-last-reply`, as is a reply cut at the model's token limit.
 - Every cut in what you read names the form that reads its rest. Your last turn's responses, live: `(my.turn/evals)`.
+
+## From outside
+
+A Claude session attached through the MCP server works the same task as a Seon agent does, with the server's tools in place of the one eval tool (`docs/server.md`; the tool list says each one's arguments). Where this page says "a reply" or "your turn", read the tool that does it:
+
+- `seon_attach` with the task (ns/name) starts your agent on the task's branch and answers its id; every other tool names that id.
+- `seon_context` is your turn: it answers what a model is sent now (the system prompt, your page and your conversation), runs your proofs and takes the messages sent to you. The first read shows the page whole, each later one what changed since the read before. Read it after every few evals, not after each.
+- `seon_eval` evaluates Clojure in your agent: the forms in this page, `@ctx` and its `swap!`, your definitions. It is your REPL, one call per eval, answered as an eval is (`:handle :value :out :err :ex`). Pass the agent `root` for root's own REPL.
+- `seon_prove` runs the tests your branch's change reaches, as the judge will; a result already green at its digest is not run again.
+- `seon_message` tells an agent something; `seon_agents` lists the agents and every task with its runs.
+- `seon_done` ends your run: your proofs run, then root judges the run and merges it when the done rule refuses nothing. It answers the verdict, with the done rule's reasons when the task is held. There is no reply that ends a turn: finishing is `seon_done`, and a task that cannot be done as planned is failed with `my.task/fail!` through `seon_eval`, then handed back with `seon_done`, and root holds the task.
 
 ## What you read
 
@@ -25,7 +36,8 @@ The run's part:
 - `:to-prove`: each of your proofs and the form that runs it at your REPL, or, for one not written yet, that it is not and what the plan says it should assert.
 - `:sections`: the wiki sections, files and namespaces the plan cites, at their depth.
 - `:similar`: a few program functions nearest the plan in meaning that it does not name, a line each (name and first sentence); often a helper the task needs.
-- More helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/tests-reaching 'ns/f)`` (every test whose reach includes it, nearest first, with its last result), ``(my.agent/similar "text")``, ``(clojure.repl/dir the.ns)``.
+- Search first: ``(my.agent/search "text")`` finds the best matches over code, wiki sections, tasks and schema keys at once, fusing the text's exact words, its meaning and its references: ``[{:kind :name :score :by :line} ...]``, best first, so you filter it with Clojure (``(filter #(= :section (:kind %)) (my.agent/search "rrf"))``); options focus it (``{:kinds #{:section :task} :by #{:text} :ns "seon.merge" :k 20}``). ``(my.agent/grep "text")`` is its exact-text half over code alone.
+- More helpers the plan does not name: ``(my.agent/callees 'ns/f)``, ``(my.agent/callers 'ns/f)``, ``(my.agent/tests-reaching 'ns/f)`` (every test whose reach includes it, nearest first, with its last result), ``(my.agent/similar "text")`` (meaning alone), ``(clojure.repl/dir the.ns)``.
 
 The conversation: each of your replies with its eval calls and their responses, and the messages sent to you, each `{:from :body}` (the owner's words, `:from "owner"`; root's; another agent's, its run id), where they arrived. The owner's is a fact (`:seon.message/*`) your turn writes on your branch.
 
@@ -46,7 +58,7 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 - `(ns app.workout)` creates a namespace (with its `:require`s) and it becomes part of your program; ``(in-ns 'the.ns)`` then ``(defn f ...)`` changes an existing one, and its callers see it at once.
 - Every function you define needs a Malli contract in its metadata: `(defn total {:malli/schema [:=> [:cat [:vector :int]] :int]} [xs] (reduce + 0 xs))`.
-- Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here.
+- Your own namespace is scratch and never merges: `(in-ns (symbol (str "agent." (name (:id (my.agent/whoami))))))`. There the `my.*` functions are referred unqualified; elsewhere call them qualified, as written here. The REPL's own helpers (`source`, `doc`, `dir`, `apropos`, `find-doc`, `pst`) follow you into any namespace you switch to, as `clojure.repl`'s do at a REPL.
 - A schema changes as a function does, on your branch: `(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])`; your next forms see it. To change an existing key, start from its form: `(get (my.schema/forms) :seon.task/task)`.
 - Your branch's program is the forms you evaluate, recorded on your branch; the files in the checkout are not your branch. Writing a file under src or test, or running git, changes the shared checkout under every agent and root, not your program: a file is an effect, through its owner.
 - An earlier response: ``result/e3``, or ``(my.agent/$ :e3)`` by its handle; the last value `*1`; the last error is `*e`, and ``(my.agent/pst)`` prints it with its causes.

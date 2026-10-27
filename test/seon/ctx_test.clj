@@ -478,7 +478,7 @@
      :sizes [100 300 1000 3000]}))
 
 (deftest a-redefined-vars-record-holds-its-new-form
-  ;; a var's form is a unit of the var (:seon.db/var-fact's :seon.render/units): a record over a
+  ;; a var's form is part of the var's record (:seon.db/var-fact's pattern, [:var/form :as :form]): a record over a
   ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
   (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
         e (:db/id (d/entity db [:var/name 'demo/f]))

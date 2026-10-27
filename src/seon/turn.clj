@@ -93,7 +93,7 @@
         ;; the functions the branch defines without a contract (seon.merge/uncontracted): what root's judge and the merge gate ask
         unc (set (pm/uncontracted ch))
         unmerged (branch/unmerged)
-        caused (:caused (problems/caused-split (:base @agent/state) db ch))
+        {:keys [caused]} (problems/caused-split (:base @agent/state) db ch)
         t (task/task db id)]
     {:test-run test-run :tests-ms tests-ms :results results :uncontracted unc :unmerged unmerged :caused caused :task t
      :reasons (r/done-explain (assoc (r/done-input (index! db) id results unc (mapv #(sedn/encode (:key %)) unmerged) nil plan-before
@@ -347,8 +347,10 @@
         taken (take! take?)
         _ (when take? (observed! task {:turn n :max-turns 1 :origin :outside :observed ob :merge? true}))
         basis (assoc (basis! task run n 1 :outside ob taken) :agent (:key @agent/state))
-        {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run])})
+        {:keys [messages printed sent]} (context/render (agent/db) basis {:printed (get-in @agent/state [:printed run]) :pages (get-in @agent/state [:pages run])})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
+        ;; the page it drew, kept by every read (an observer's too, which records a turn): the next diff draws no page twice
+        _ (swap! agent/state assoc-in [:pages run] (:pages printed))
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:db/id "run" :seon.run/id run}

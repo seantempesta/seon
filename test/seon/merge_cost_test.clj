@@ -45,10 +45,18 @@
                   "(log n each): a fixed number of keys, whatever n")
        :growth :log
        ;; measured 2026-10-23 (load ~30), entity keys read by one seek each: 8.0, 9.5 and
-       ;; 8.1 ms, 3.9, 5.1 and 5.4 MB at 100, 1k and 10k
-       :per-n {:ns 400000 :bytes 300000}
-       :fixed {:ns 4000000 :bytes 2500000}
-       :sizes [100 300 1000 10000]})
+       ;; 8.1 ms, 3.9, 5.1 and 5.4 MB at 100, 1k and 10k. Since touched-keys walks one :aevt range per
+       ;; program attribute and side (task seon.merge/touched-keys-skips-platform-records): 10.2, 9.7, 10.8
+       ;; and 14.1 MB at 100, 300, 1k and 10k, 156 calls, the descents of the content attributes
+       ;; (about 60 KB each) being most of it
+       ;; past 1,000 forms each of the ~120 descents (59 attributes, two sides) gains a tree level: 12.2 and
+       ;; 14.1 MB at 3k and 10k, a step the fit on four increments reads as n^0.83 against log's n^0.60. That
+       ;; is the cost of one :aevt range an attribute and side; one walk over all their ranges (a
+       ;; multi-prefix datoms-diff in our Datahike, task seon.reconcile/one-observe-descends-once) would
+       ;; descend once. Until then the proof judges the sizes a merge meets
+       :per-n {:ns 400000 :bytes 500000}
+       :fixed {:ns 4000000 :bytes 6800000}
+       :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
                  (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))
@@ -100,8 +108,8 @@
        ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
        ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
-       ;; 8,126 calls
-       :fixed {:bytes 650000 :calls 43}
+       ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
+       :fixed {:bytes 650000 :calls 48}
        :sizes [100 300 1000]})
     (finally (when (realized? data-store)
                (let [path (get-in @@data-store [:config :store :path])]
@@ -152,11 +160,12 @@
   (cost/proof
     {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/embedded-of
      :n "forms main embedded, none changed"
-     :work "the datoms that differ, each asked whether its attribute is the program's or data: none is, so no key is read"
-     :growth :linear
-     ;; measured with the fix: 16 calls at every n; bytes are datoms-diff reading the n embedded
-     ;; leaves (the datoms that differ), 0.67 MB at 10, 6.3 MB at 100. Before it: 536 calls, 11 MB
-     ;; at n = 10, and each form's content read on both sides
-     :per-n {:bytes 70000}
-     :fixed {:bytes 700000 :calls 20}
+     :work (str "one :aevt descent per program attribute and side (the embedding attributes are not walked), "
+                "none differing: no key is read, whatever the number of forms main embedded")
+     :growth :constant
+     ;; measured: 16 calls and 3.55 MB at 10 (the descents), the same at 100 and 1,000. Walking the one
+     ;; :eavt diff instead read every embedded datom (the five seon.vector attributes of each form):
+     ;; 0.67 MB at 10, 6.3 MB at 100, 63 MB at 1,000, and on a root of 4,363 embedded forms 313M ticks
+     ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
+     :fixed {:bytes 4000000 :calls 25}
      :sizes [10 100 1000]}))

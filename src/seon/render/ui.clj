@@ -114,23 +114,11 @@
   {:malli/schema [:=> [:cat :string] :any]}
   [id] (h/raw (str "<!--s:" id "-->")))
 
-(defn slot-id
-  "The element id slot marker x holds (`slot`), or nil when x is no slot."
-  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [x] (when (h/raw? x) (second (re-matches #"<!--s:(.*)-->" (:seon.web.html/raw x)))))
-
 (defn- kicker {:malli/schema [:=> [:cat :any :any] :any]}
   [k sub] [:header [:span {:class "kicker"} k] (if (vector? sub) sub [:span {:class "sub"} sub])])
 
-(defn context-read?
-  "Is eval record e a context read: an outside agent reading its current-state block through
-  root's server (by \"context\"; seon.server)? Its output is the block itself."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [e] (and (map? e) (= "context" (:by e))))
-
 ;;; --- status -------------------------------------------------------------------
 
-(def status-order "Agent statuses in the swarm's order (:seon.agent/status)." (contract/enum-values :seon.agent/status))
 (def live "The live agent statuses (:seon.agent/status)." (:seon.status/live (contract/properties :seon.agent/status)))
 (def ^:private gone (:seon.status/gone (contract/properties :seon.agent/status)))
 (def ^:private finished task/finished)
@@ -146,8 +134,6 @@
         :else (or (:status a) :unknown)))
 
 ;;; --- the load, as data -------------------------------------------------------------
-
-(def state-title "What each observed state means, for its pill's title (:seon.task/state)." (:seon.status/title (contract/properties :seon.task/state)))
 
 (defn run-row
   "A run: its agent, status, turns, tokens and outcome (from main's facts)."
@@ -908,6 +894,15 @@
     [:section
      (render/html {:schema :seon.run/run-fact} (assoc (relevant :seon.run/run-fact run) :turns-taken (count (:turns run))))]))
 
+(defn own-problems
+  "The open problems of the agent's run (a component over its branch db, seon.problems/own: its run's,
+  its task's failure and the errors raised in its task), by the report's render, the one root's tile
+  draws; nothing when none is open."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{db :seon.db/db} rid]
+  (let [r (problems/own db rid)]
+    (when (seq (:classes r)) [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} r)])))
+
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
   its value by the key's render."
@@ -1023,6 +1018,7 @@
                                (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
+      (when rid [#'own-problems {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
       (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]
@@ -1112,11 +1108,12 @@
   [:section (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))])
 
 (defn problems-tile
-  "Main's open problems (a component over the db): seon.problems/health by its render, every class's
-  rows; it runs again when a transaction touches what health read."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
-  [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} (problems/health db))])
+  "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
+  with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!):
+  every class's rows by the report's render. It runs again only when :health changes."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:section [:h2 "problems"] (when-let [h (:health c)] (render/html {:schema :seon.problems/report} (ratom/realize h)))])
 
 (defn runs-tile
   "Main's runs (a component over the db): how many by status and each running one (runs-of)."

@@ -1,11 +1,4 @@
-[{:seon.task/name "a-task-cites-what-it-needs"
-  :seon.task/plan "What exists (merged): the task writer derives `:seon.task/references`, the names a plan and instructions cite (`seon.ref/names`), in `seon.task/create-tx` (so in `seon.task/load-tx` and `my.root/create!`), never authored; `seon.task/citation-problems` answers each citation resolving to nothing on a db as {:task :name :problem :unresolved}, and `my.root/create!` and `my.root/load-tasks!` carry them as :problems while the write still happens; the context's entry for an unresolved name (`seon.docs/resolve-ref`) says what it means and what to do (two backticks mention a name without citing it). Before, a citation to nothing showed only as `:unresolved true` in the context, and nobody was told when the task was written: a default plan citing `app.m/a`, a var that did not exist, cost a real run 24 model calls and 69k tokens. v1: an unresolved reference is a problem on whatever cites it and never rejects the write (~/src/seon/src/seon/task.clj `with-references`, ~/src/seon/src/my/task.clj `update!`'s :my.task/problems). Lesson in docs/references.md."
-  :seon.task/kind :work
-  :seon.task/needs #{}
-  :seon.task/proofs #{seon.task-test/the-writer-derives-a-tasks-references
-                      seon.task-test/unresolved-citations-are-answered-not-refused
-                      seon.context-test/an-unresolved-citation-says-what-to-do}}
- {:seon.task/name "the-shipped-task-files-load"
+[{:seon.task/name "the-shipped-task-files-load"
   :seon.task/plan "What exists (merged): `seon.task-files-test/the-shipped-task-files-load` loads resources/seon/tasks into a test branch with `seon.task/load-tx` and expects no error. Before, an unescaped double quote inside one plan string made `(my.root/load-tasks! sys dir)` answer :seon.task/refused (\"not readable EDN: Map literal must contain an even number of forms\") and no task file loaded, unseen because no test read the shipped directory. An error names the file; its line (from the reader's ex-data) would help."
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-files-test/the-shipped-task-files-load}}
@@ -24,8 +17,4 @@
  {:seon.task/name "design-writes-the-implement-steps-proofs"
   :seon.task/plan "What exists: `my.task/update!` edits only this agent's own :seon.task/plan or :seon.task/instructions, and `seon.merge/carried-platform-attrs` carries only those two, so the proofs a design step writes for implement reach main only as plan text. Reproduction: a staged request with no proofs (`seon.template/stages`); design writes red deftests and rewrites its plan; implement is refused :no-proofs by `seon.reconcile/done-explain` (recorded in task seon.template/a-request-is-one-linked-transaction). Cause: no function edits another task's members, and proofs are not carried. Correct (DESIGN-tasks §5.2, prototyped): ``my.task/edit!`` (id f & args: clojure.core/update on any authored member of any task, written on the branch), and :seon.task/proofs among what `seon.task/carry-tx` carries. Deletes: `my.task/update!`."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.task-test/edit-writes-another-tasks-proofs seon.reconcile-test/implement-holds-the-proofs-design-wrote}}
- {:seon.task/name "a-runs-lifecycle-is-read-once"
-  :seon.task/plan "Owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs (DECISIONS). Found by the one-offs survey (notes/one-offs-2026-10-23.md, item 1). What existed: a run's lifecycle sets (:seon.run/status's finished, judged and failed, declared on its schema) read by seon.reconcile, seon.problems and seon.render.ui each; whether a task is done computed by the reconciler from its index and again by seon.problems/task-done? on the db; and seon.server's run-of and :context op reading every run on main (task/runs) for the one running. Correct: seon.task, below them all, reads the sets once (finished, judged, failed) and owns done? (one AVET seek of a task's runs) and running (one seek of the :running status); the others require them. A law keeps the sets read once: no src form outside seon.task calls a schema reader (properties, enum-values) on :seon.run/status. Deletes the three readers, problems' task-done? and the server's whole-main scans."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.main-test/a-runs-lifecycle-is-read-once seon.task-test/a-runs-lifecycle-is-read-from-its-schema}}]
+  :seon.task/proofs #{seon.task-test/edit-writes-another-tasks-proofs seon.reconcile-test/implement-holds-the-proofs-design-wrote}}]

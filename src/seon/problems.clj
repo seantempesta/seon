@@ -367,13 +367,17 @@
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (defn- section-state
-  "{address {:e :names :dead}} of db's sections, by three aevt scans and no pull: what a section
-  cites and the links it made that reached nothing."
+  "{address {:e :names :dead :read :reviewed :baseline}} of db's sections, by aevt scans and no pull:
+  what a section cites, the links it made that reached nothing, and what closes or opens its
+  stale-section rows (the code it read, who reviewed it, a baseline git could not give)."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :map]]}
   [db]
   (let [group (fn [attr] (reduce (fn [m {:keys [e v]}] (update m e (fnil conj #{}) v)) {} (d/datoms db :aevt attr)))
-        names (group :seon.section/names) dead (group :seon.section/dead-links)]
-    (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.section/address)] [v {:e e :names (get names e #{}) :dead (get dead e #{})}]))))
+        one (fn [attr] (into {} (map (juxt :e :v)) (d/datoms db :aevt attr)))
+        names (group :seon.section/names) dead (group :seon.section/dead-links)
+        reads (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)]
+    (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.section/address)]
+               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (reads e) :reviewed (reviewed e) :baseline (baseline e)}]))))
 
 (defn- existing-names
   "The names db's vars and tasks hold (a task id as a symbol): what a citation may name."
@@ -395,9 +399,45 @@
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
   #{:dead-citation :unnamed-site :stale-section})
 
+(defn- split-rows
+  "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
+  that base had not, and base had that head has not, by signature: the candidates `caused-split`
+  explains, read on both."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
+  [base head ans ch]
+  (let [bs (section-state base) hs (section-state head)
+        removed (set/difference (existing-names base) (existing-names head))
+        changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
+        added (set/difference (existing-names head) (existing-names base))
+        new-sections (set/difference (set (keys hs)) (set (keys bs)))
+        ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
+        secs (-> changed
+                 (into (for [[a st] hs :when (or (some removed (:names st)) (some added (:names st)) (some new-sections (:dead st)))] a))
+                 (into (for [a (keys bs) :when (not (contains? hs a))] a)))
+        eids (fn [state] (set (keep #(:e (state %)) secs)))
+        page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
+        all-sites? (some page? changed)
+        sites (fn [db state eids-of]
+                (if all-sites?
+                  (unnamed-sites db ans nil)
+                  (mapcat (fn [{:keys [fact]}] (unnamed-sites db ans (eids-of fact))) laws)))
+        lf (memoize (fn [db fact] (law-forms db fact)))
+        changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
+                                            (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
+        ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
+        moved (pm/changed-vars ch)
+        rows (fn [db state forms-of]
+               (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
+                       (map #(assoc % :class :unnamed-site) (sites db state forms-of))
+                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved :sections (eids state)}))))
+        had (vec (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))
+        has (vec (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
+        sigs (fn [rs] (into #{} (map :signature) rs))]
+    {:made (vec (remove (comp (sigs had) :signature) has)) :closed (vec (remove (comp (sigs has) :signature) had))}))
+
 (defn caused-split
-  "{:caused :attention :rows}: the derived problems the branch at head has that base (its merge base) had not, by
-  message (:rows: each with its class, both kinds): what the branch's own work broke (:caused: the done rule refuses while any is open,
+  "{:caused :attention :rows :closed}: the derived problems the branch at head has that base (its merge base) had not, by
+  message (:rows: each with its class, both kinds; :closed: the rows base had and head has not, the same shape): what the branch's own work broke (:caused: the done rule refuses while any is open,
   seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
   sections it made stale, which the agent reads and never a reason to refuse; the classes
   :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
@@ -411,37 +451,18 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
+                                                                     [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
+                                                                                    [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]]}
   ([base head] (caused-split base head (pm/delta-changes base head #{})))
   ([base head ch]
-  (let [bs (section-state base) hs (section-state head)
-        removed (set/difference (existing-names base) (existing-names head))
-        changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
-        secs (into changed (for [[a st] hs :when (some removed (:names st))] a))
-        eids (fn [state] (set (keep #(:e (state %)) secs)))
-        page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
-        all-sites? (some page? changed)
-        sites (fn [db state eids-of]
-                (if all-sites?
-                  (unnamed-sites db {} nil)
-                  (mapcat (fn [{:keys [fact]}] (unnamed-sites db {} (eids-of fact))) laws)))
-        lf (memoize (fn [db fact] (law-forms db fact)))
-        changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
-                                            (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
-        ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
-        moved (pm/changed-vars ch)
-        rows (fn [db state forms-of]
-               (concat (map #(assoc % :class :dead-citation) (dead-citations db {} (eids state)))
-                       (map #(assoc % :class :unnamed-site) (sites db state forms-of))
-                       (map #(assoc % :class :stale-section) (stale-sections db {} {:names moved :sections (eids state)}))))
-        before (into #{} (map :signature)
-                     (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))]
-    (let [attention? (:seon.problems/attention (contract/properties :seon.problems/class))
-          made (remove (comp before :signature) (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
-          messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))]
-      {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
-       :rows (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) made)))}))))
+  (let [{:keys [made closed]} (split-rows base head {} ch)
+        attention? (:seon.problems/attention (contract/properties :seon.problems/class))
+        messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))
+        shown (fn [rs] (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) rs))))]
+    {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
+     :rows (shown made) :closed (shown closed)})))
 
 (defn caused
   "The derived problems the branch at head has that base had not that refuse its done
@@ -607,16 +628,23 @@
           :answered-by (get-in ans [:signature s] []) :at-ms nil})))
 
 (defn- report-with
-  "`report` over the answers its caller read."
-  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold] :seon.problems/report]}
-  [db ans fold]
+  "`report` over the answers its caller read; with only (run entity ids) the run classes hold just
+  those runs' rows, found without scanning the runs' attributes (`health-moved` carries the rest)."
+  {:malli/schema [:=> [:cat :seon.host/db :map :seon.error/fold [:maybe [:set :int]]] :seon.problems/report]}
+  [db ans fold only]
   (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
+        done? (memoize #(task/done? db %))
+        ;; a run of a done task has no open problem but its unrun tests: its history is never pulled
+        open-run? (fn [e] (or (seq (d/datoms db :eavt e :seon.run/deferred))
+                              (not (done? (:v (first (d/datoms db :eavt e :seon.run/task)))))))
         runs (into (sorted-set)
-                       (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
-                                                   :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
-                               (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind))))
+                       (filter open-run?)
+                       (or only
+                           (concat (mapcat #(es db %) [:seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/deferred
+                                                       :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
+                                   (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind)))))
         by-class (apply merge-with into (map #(run-rows db ans %) runs))
         failed (mapv #(failed-row db ans %) (es db :seon.task/failure))
         {flaky true reds false} (group-by (comp boolean :flaky :evidence) (test-reds db ans))]
@@ -639,7 +667,23 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (report db {}))
-  ([db fold] (report-with db (answers db) fold)))
+  ([db fold] (report-with db (answers db) fold nil)))
+
+(defn- health-with
+  "db's health from its recorded problems (`report`'s classes) and `derived`, the derived classes' rows by class."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] :seon.problems/report]}
+  [db ans recorded derived]
+  (let [classes (merge recorded (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
+        unlinked (problem-unlinked db ans classes)]
+    (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
+               assoc :seon.render/schema :seon.problems/report)))
+
+(defn- other-derived
+  "The derived classes `caused-split` does not read, their rows on db."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
+  [db ans]
+  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans)
+   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
@@ -650,12 +694,62 @@
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
   ([db] (health db {}))
   ([db fold]
-   (let [ans (answers db)
-         derived {:stalled (stalled-agents db ans) :dead-citation (dead-citations db ans) :unnamed-site (unnamed-sites db ans) :stale-pin (stale-pins db ans)
-                  :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
-                  :leadless-section (leadless-sections db ans)
-                  :uncited-task (uncited-tasks db ans)}
-         classes (merge (:classes (report-with db ans fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
-         unlinked (problem-unlinked db ans classes)]
-     (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
-                assoc :seon.render/schema :seon.problems/report))))
+   (let [ans (answers db)]
+     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans) :dead-citation (dead-citations db ans)
+                                     :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
+
+(defn- touched-runs
+  "The run entities of head the move touched (moved: the datoms that differ between the dbs, as
+  `d/datoms-diff` gives them): those with a datom that differs, and every run of a task whose own datoms
+  or a run's differ (a task's runs share its done-ness and its cancel)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:set :int]]}
+  [head moved]
+  (let [moved (into #{} (map :e) moved)
+        task-of (fn [e] (cond (seq (d/datoms head :eavt e :seon.task/id)) e
+                              (seq (d/datoms head :eavt e :seon.run/id)) (:v (first (d/datoms head :eavt e :seon.run/task)))))]
+    (into #{} (comp (keep task-of) (mapcat #(map :e (d/datoms head :avet :seon.run/task %)))) moved)))
+
+(defn health-moved
+  "Health of head, given prev, the health of base and moved, the datoms that differ between them (`d/datoms-diff`, which the render proc reads already): the classes `caused-split` reads
+  (`caused-classes`) are prev's rows less those base had and head has not, plus those head has and
+  base had not (`split-rows`, read where the two differ, each row's answers current), and a run
+  class holds prev's rows of the runs the move left alone and the rows of those it touched
+  (`touched-runs`), so a move of main costs what it changed, not its closed history; the errors
+  and the few cheap derived classes are read anew. Equal to `health` of head
+  (seon.problems-test/health-moved-is-health)."
+  {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
+  [prev base head moved]
+  (let [ans (answers head)
+        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved))
+        gone (into #{} (map :signature) closed)
+        current (fn [row] (assoc row :answered-by (get-in ans (if (:run row) [:from (:run row)] [:signature (:signature row)]) [])))
+        carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))
+                              (comp (filter #(= c (:class %))) (map #(dissoc % :class))) made))
+        touched (touched-runs head moved)
+        ids (into #{} (keep #(:v (first (d/datoms head :eavt % :seon.run/id)))) touched)
+        recorded (:classes (report-with head ans {} touched))
+        recorded (into recorded (for [c run-classes
+                                      :let [rows (into (into [] (comp (remove #(ids (:run %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
+                                            rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
+                                  [c {:n (count rows) :rows rows}]))]
+    (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
+                                          :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
+
+(defn own
+  "The open problems of one run, by class and shaped as `report` (so the one render draws it, an
+  agent's page and root's alike): the run with entity run-e on db (an agent's branch), its task's
+  failure, and the recorded errors last raised in its task. Cost: the run's pull, the task's, and the
+  error signatures' last-task datoms with a pull for each match; never main's history."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.problems/report]}
+  [db run-e]
+  (let [ans (answers db)
+        te (:v (first (d/datoms db :eavt run-e :seon.run/task)))
+        tid (:v (first (d/datoms db :eavt te :seon.task/id)))
+        open (fn [rows] (vec (remove #(false? (:open? %)) rows)))
+        by-class (merge-with into
+                             (run-rows db ans run-e)
+                             (when (seq (d/datoms db :eavt te :seon.task/failure)) {:failed [(failed-row db ans te)]})
+                             (group-by :class (for [{:keys [e v]} (d/datoms db :aevt :seon.error/last-task) :when (= tid v)] (error-row db ans e))))]
+    (vary-meta {:t (:max-tx db)
+                :classes (into {} (for [[c rows] by-class :let [rows (open rows)] :when (seq rows)] [c {:n (count rows) :rows rows}]))}
+               assoc :seon.render/schema :seon.problems/report)))

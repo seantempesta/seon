@@ -208,7 +208,9 @@
  ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
  ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
  :seon.task/cause [:map [:stall [:map [:agent :keyword] [:run :seon.run/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
-                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+                                 [:last-op {:optional true} [:maybe :seon.agent/last-op]]
+                                 ;; the api's open asks ([rid kind agent]) and the test service's state (seon.prove/state-view) when it stalled
+                                 [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]
@@ -289,6 +291,9 @@
  ;; measured at the run's end from the branch (seon.problems/caused): the derived problems
  ;; its work made true since its merge base, by message; the done rule refuses while any is open
  :seon.run/caused [:set :string]
+ ;; the keys main changed since the branch's merge base when the run was judged (the writer's :theirs): a branch
+ ;; behind main is judged before it has merged main, and the done rule says so first (seon.reconcile/done-explain :behind)
+ :seon.run/behind pos-int?
  :seon.run/run-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch] :seon.ctx/pattern [* {[:seon.run/task :as :task] :seon.task/task-fact} {[:seon.turn/_run :as :turns :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.message/_to :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/run}
                              [:seon.run/id :seon.run/id] [:seon.run/task :seon.run/task]
                              [:seon.run/status :seon.run/status] [:seon.run/boot :seon.run/boot]
@@ -310,6 +315,7 @@
                              [:seon.run/deferred-results {:optional true} :seon.run/deferred-results]
                              [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
                              [:seon.run/caused {:optional true} :seon.run/caused]
+                             [:seon.run/behind {:optional true} :seon.run/behind]
                              [:seon.run/commit {:optional true} :seon.run/commit]
                              [:seon.run/commit-error {:optional true} :seon.run/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]

@@ -201,27 +201,48 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(defn touched-keys
-  "Every program key whose content may differ between base and any of dbs: the keys borne,
-  on base or on that db, by each entity a datom of which one holds and the other does not
-  (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
-  attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
-  data (data-attr?), never a platform record such as an embedding. Cost: the datoms that
-  differ, not the program."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
-  [base dbs data-attrs]
+(defn touched-by
+  "The program keys whose content may differ between base and db, given moved, the datoms that differ
+  between them (what datahike.api/datoms-diff answers, joined; a caller that holds them reads
+  nothing again): the keys borne, on base or on db, by each entity of a moved datom whose attribute is one a
+  key's content reads (the program's, program/attr-namespaces, or declared data, data-attr?), never a platform
+  record such as an embedding."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] [:set :seon.merge/program-key]]}
+  [base db data-attrs moved]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
                          (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
-        b (read base)]
-    (into #{} (for [db dbs
-                    :let [[gone added] (d/datoms-diff base db :eavt [])
-                          d (read db)
-                          content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
-                    e (into #{} (comp (filter content?) (map :e)) (concat gone added))
+        b (read base) d (read db)
+        content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
+    (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
                     [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))
+
+(defn- content-datoms
+  "The datoms that differ between base and db in the attributes a key's content reads (the
+  program's, program/attr-namespaces, or declared data, data-attr?), what `touched-by` takes as
+  moved: for data-attrs a set, one datahike.api/datoms-diff :aevt range per such attribute, so the
+  platform's records are never walked (a whole :eavt diff read every datom that differs, the
+  22,000 embedding datoms of a main that embedded after an agent forked: 313M ticks and 640 MB for
+  no key); for :all (every attribute the store declares) the one :eavt diff. Cost: a set, one
+  descent per content attribute and the datoms of those that differ; :all, the datoms that differ."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:sequential :any]]}
+  [base db data-attrs]
+  (if (= :all data-attrs)
+    (apply concat (d/datoms-diff base db :eavt []))
+    (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)
+          content? (fn [a] (and (keyword? a) (or (program/attr-namespaces (namespace a)) (das-b a) (das-d a))))]
+      (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a])))
+              (filter content? (set (concat (keys (:schema base)) (keys (:schema db)))))))))
+
+(defn touched-keys
+  "Every program key whose content may differ between base and any of dbs (`touched-by`, over
+  the datoms that differ in the attributes a key's content reads: `content-datoms`). Cost: those
+  datoms and one descent per such attribute, not the program and not what else main wrote."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
+  [base dbs data-attrs]
+  (into #{} (mapcat (fn [db] (touched-by base db data-attrs (content-datoms base db data-attrs)))) dbs))
 
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
@@ -243,11 +264,14 @@
     {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
 
 (defn delta-changes
-  "`changes` from db from to db to, read only where they differ (touched-keys)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]}
-  [from to data-attrs]
-  (let [ks (vec (touched-keys from [to] data-attrs))]
-    (changes (program-of from ks data-attrs) (program-of to ks data-attrs))))
+  "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
+  differ (which a caller already read), nothing is diffed again."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] :seon.merge/changes]]}
+  ([from to data-attrs] (delta-changes from to data-attrs (content-datoms from to data-attrs)))
+  ([from to data-attrs moved]
+   (let [ks (vec (touched-by from to data-attrs moved))]
+     (changes (program-of from ks data-attrs) (program-of to ks data-attrs)))))
 
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
@@ -286,10 +310,14 @@
   store's, issued once (docs/storage.md#ids), so on any other branch they name the same
   entities and transactions: a merge adds what the branch wrote, never a copy. Platform
   records ride on no key, so they stay where they were written. Datahike keeps a carried
-  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom)."
+  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom). A carried form's
+  namespace entity is carried with it."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
+        ;; a carried form names its namespace by ref: the namespace entity rides with it (a namespace made
+        ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
+        es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
         carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
@@ -305,13 +333,28 @@
         (into added)
         (into (for [t txs d (d/datoms src :eavt t)] d)))))
 
+(defn- own-namespaces
+  "tx, with a namespace the target already has under its own entity read there: the datoms of the
+  source's entity for it are dropped and the carried forms' :form/ns refs name the target's (two
+  branches that each made a namespace without an (ns) form hold it under two ids, and carrying
+  both would give one :ns/name two entities)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
+  [onto src tx]
+  (let [mine (into {} (for [d tx :when (= :ns/name (:a d))
+                            :let [t (pdb/eid onto :ns/name (:v d))] :when (and t (not= t (:e d)))]
+                        [(:e d) t]))]
+    (if (empty? mine)
+      tx
+      (vec (for [d tx :when (not (and (mine (:e d)) (not= :form/ns (:a d))))]
+             (if (and (= :form/ns (:a d)) (:added d) (mine (:v d))) (d/datom (:e d) :form/ns (mine (:v d)) (:tx d)) d))))))
+
 (defn merge-tx
   "The tx-data merging src's changes since base for program keys ks onto db onto: the
   datoms src wrote, as they are (carried-tx), and the Datahike declarations a merged schema
   entry's population needs on onto (as a registration installs them)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
-  (let [tx (carried-tx base src ks data-attrs)]
+  (let [tx (own-namespaces onto src (carried-tx base src ks data-attrs))]
     (if (some #(= :schema (first %)) ks)
       (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
       tx)))

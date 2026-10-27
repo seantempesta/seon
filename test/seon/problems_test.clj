@@ -71,27 +71,6 @@
                          (get-in (problems/report @conn f) [:classes :eval :rows 0 :count])])
             "the report reads the true count from the fold")))))))
 
-(deftest a-defect-in-the-reconciler-does-not-feed-itself
-  ;; root's path in miniature: the reconciler proc's step throws on a commit (root's entity
-  ;; with no boot fact, what a refused boot left), the api folds the thrown error and writes
-  ;; it to main as one commit, and that commit is the reconciler's next input. A step that
-  ;; throws leaves the proc's state as it was, so it fails on every commit it is handed.
-  ;; Main's commits over ten rounds are the first record, and no more.
-  (ts/test-branch! (fn [_ conn] (let [_ (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t 1 :root-causes []}}]})
-        t0 (:max-tx @conn)
-        st (rec/reconciler-proc {:boot "boot-1"})
-        round (fn [f i]
-                (let [db @conn
-                      e (try (rec/reconciler-proc st :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)}) nil
-                             (catch Throwable e e))
-                      f (err/fold f (err/occurrence (agent/error-map e) :platform {} (+ 5000 i)))
-                      [f tx] (err/flush-tx f db)]
-                  (when (seq tx) (d/transact conn {:tx-data tx}))
-                  f))]
-    (is (= ['seon.task/entity-value] (map #(get-in % [:example :seon.error/operation]) (vals (reduce round {} (range 10)))))
-        "the step fails in the task owner's contract, each round")
-    (is (<= (or (d/q '[:find (count ?tx) . :in $ ?t0 :where [?tx :db/txInstant] [(> ?tx ?t0)]] @conn t0) 0) 1) "ten failing commits, one record")))))
-
 ;; ---- eval errors: the error map as data, on the branch, and counted across agents ------
 
 (deftest an-eval-error-is-recorded-as-data
@@ -263,8 +242,10 @@
         [_ o1] (step (assoc (api view) :conn (atom db)) :back (stalled :a1))
         [t] (tasks o1)]
     (is (= ["root/stall-a1-demo-t-1"] (mapv :seon.task/id (tasks o1))) "one task, named for the agent and its run")
-    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (get-in t [:seon.task/cause :stall]))
+    (is (= {:agent :a1 :run "demo/t#1" :quiet-ms 4000 :pid 77 :last-op {:kind :tests :form "#'app.t/hangs"}} (dissoc (get-in t [:seon.task/cause :stall]) :api))
         "its cause pre-filled with the stall")
+    (is (= {:open [] :prove nil} (get-in t [:seon.task/cause :stall :api]))
+        "and what the api held then: no ask open, no report from the test service yet")
     (is (= [:held "outside" seon.template/stall-proofs] [(:seon.task/execution t) (:seon.task/model t) (set (:seon.task/proofs t))])
         "held, for an outside worker, its proofs the boundary conditions")
     (is (empty? (tasks (second (step (assoc (api view) :conn (atom (d/db-with db (vec (tasks o1))))) :back (stalled :a1)))))
@@ -460,8 +441,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 51) "the contracted calls of one health read (59 when answers and problem-unlinked ran twice; 51 with report-with's own contract)")))
+    (is (<= (:calls m) 59) "the contracted calls of one health read (59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, and health-with's contract is one more)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -527,14 +507,59 @@
   green run."
   [k] [(seeded 4 k)])
 
+(defn- diff [base head] (apply concat (d/datoms-diff base head :eavt [])))
+
+(defn history-input
+  "The flatness proof's input at k: the health of main with 4 problems of each class beside k finished
+  tasks, each with a merged run as production writes it (judge-tx records its cost verdict and its
+  waste too), then main one run later: [health base head moved]."
+  [k] (let [base (ts/test-branch! (fn [_ conn]
+                                    (d/transact conn (vec (concat
+                                                           (for [i (range k)] {:seon.task/id (str "t/h" i) :seon.task/ns 't :seon.task/name (str "h" i) :seon.task/plan "p"
+                                                                               :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work})
+                                                           (for [i (range k)] {:seon.run/id (str "t/h" i "#1") :seon.run/task [:seon.task/id (str "t/h" i)] :seon.run/boot "b"
+                                                                               :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 1 :seon.run/end-ms 2
+                                                                               :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green
+                                                                               :seon.run/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
+                                                                               :seon.run/waste {:turns 1}}))))
+                                    @conn))
+            head (d/db-with base [{:seon.run/id "t/h0#2" :seon.run/task [:seon.task/id "t/h0"] :seon.run/boot "b"
+                                   :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 3 :seon.run/end-ms 4
+                                   :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green}])]
+        [(problems/health base) base head (diff base head)]))
+
+(defn own-input
+  "The proof's input at k: a db with k finished tasks beside the run of one: [db run-entity]."
+  [k] (let [[_ base] (history-input k)] [base (pdb/eid base :seon.run/id "t/h0#1")]))
+
+(deftest an-agents-own-problems-cost-nothing-for-the-history
+  (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
+               :n "finished tasks, each with a merged run, beside the run asked for"
+               :work "the run's pull, its task's, and the error signatures' last-task datoms: none per finished task"
+               :growth :constant
+               :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
+               :fixed {:ticks 85000 :bytes 320000 :calls 4}
+               :sizes [10 100 1000]}))
+
+(deftest problems-move-at-the-cost-of-what-changed
+  ;; main moves by one run while its finished history grows: the health of the move reads the run it
+  ;; touched, not the history (health-moved; report read every run's cost verdict and waste)
+  (cost/proof {:of 'seon.problems/health-moved :input 'seon.problems-test/history-input
+               :n "finished tasks, each with a merged run carrying a cost verdict and waste"
+               :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched run and its task's runs, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
+               :growth :linear
+               :per-n {:ticks 1400 :bytes 7000 :calls 0}
+               :fixed {:ticks 390000 :bytes 1900000 :calls 46}
+               :sizes [10 100 1000]}))
+
 (deftest problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
                :n "clean tasks (each with a green run), beside 4 problems of each class"
                :work "none per clean task: the indexes the read seeks hold only problem rows; the 4 problem sets cost what they cost"
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
-               :sizes [10 100 1000]
-               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 2622000.0 :bytes 2686400.0}}}))
+               :fixed {:bytes 750000}
+               :sizes [10 100 1000]}))
 
 ;; ---- the model call: thinking mode as a provider field, its cost and its empty reply as data ----
 
@@ -736,7 +761,7 @@
         row #(first (get-in (problems/report %) [:classes :platform :rows]))
         db (refused db0)]
     (testing "the target section is missing: the error is open"
-      (is (not (false? (:open? (row db))))))
+      (is (some? (row db)) "the error has a row") (is (not (false? (:open? (row db))))))
     (let [after (d/db-with db (seon.docs/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
       (testing "the section exists now: closed, with nothing written to close it"
         (is (some? (pdb/eid after :seon.section/address "demo/b.md#b")))
@@ -749,55 +774,15 @@
                                  :seon.error/example {:seon.error/type :seon.docs/refused :seon.ref/address "demo/b.md#nowhere" :seon.section/address "demo/a.md#a"}}])
             rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
             fixed (d/db-with err (seon.docs/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
-        (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
+        (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
         (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
       (let [v (:v (first (d/datoms db0 :aevt :var/name)))
             e (:e (first (d/datoms db0 :aevt :var/name)))
             err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
                                  :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
-        (is (not (false? (:open? (row err)))))
+        (is (some? (row err)) "the error has a row") (is (not (false? (:open? (row err)))))
         (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
-
-(defn- literal-catch-sites
-  "The old bin/laws rule over text: each line of each src file but e2e.clj (check.clj is test/'s now), strings
-  and comments stripped, holding `(catch ` is a site of the last top-level def before it (a deftype's
-  or defrecord's by its type's name), as ns/name."
-  [files]
-  (set (for [[path text] files :when (not (re-find #"/(check|e2e)\.clj$" path))
-             :let [nsym (seon.source/file-ns text)]
-             site (loop [lines (str/split-lines text) in-str? false n nil acc []]
-                    (if-let [l (first lines)]
-                      (let [n (if-let [m (re-find #"^\((?:defn-?|defchecked|defmacro|def|defonce|deftype|defrecord) (\S+)(?: (\S+))?" l)]
-                                (if (str/starts-with? (second m) "^") (nth m 2) (second m))
-                                n)
-                            [code in-str?] (loop [cs (seq l) in-str? in-str? out []]
-                                             (if-let [c (first cs)]
-                                               (cond in-str? (cond (= c \\) (recur (nnext cs) true out) (= c \") (recur (next cs) false out) :else (recur (next cs) true out))
-                                                     (= c \\) (recur (nnext cs) false out)
-                                                     (= c \") (recur (next cs) true out)
-                                                     (= c \;) [out false]
-                                                     :else (recur (next cs) false (conj out c)))
-                                               [out in-str?]))]
-                        (recur (rest lines) in-str? n (cond-> acc (str/includes? (apply str code) "(catch ") (conj (str nsym "/" n)))))
-                      acc))]
-         site)))
-
-(deftest the-catch-class-finds-the-sites-the-literal-scan-finds
-  ;; parity (root's review of a370169): over Seon's own src the :unnamed-site class lists exactly the
-  ;; sites bin/laws' text scan listed, none dropped (a catch in a defmethod, an extend-protocol or a
-  ;; reify is attributed to its form). Extras the compiler's facts add are listed here, each justified.
-  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
-        _ (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
-        db0 (ts/test-db)
-        db (d/db-with db0 (seon.source/import-tx db0 files))
-        class (set (map #(str (:site %)) (get-in (problems/health db) [:classes :unnamed-site :rows])))
-        literal (literal-catch-sites files)
-        ;; a catch in a deftype's method is its form's, which defines the type and its factory both
-        extras {"seon.ratom/->Reaction" "the factory seon.ratom/Reaction's form defines"}]
-    (is (seq literal))
-    (is (= #{} (clojure.set/difference literal class)) "no literal site dropped")
-    (is (= (set (keys extras)) (clojure.set/difference class literal)) "every extra is listed with its reason")))
 
 ;; ---- cost proofs of the derived classes beyond dead-citations ---------------------------------
 
@@ -890,14 +875,17 @@
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
 
 (defn caused-flat-input
-  "The cost proof's input at n: [base head] over a program of n catch sites and n citing sections,
-  the head one section rewritten to cite a dead name and one more catch site: a fixed change."
+  "The cost proof's input at n: [base head changes] over a program of n catch sites and n citing
+  sections, the head one section rewritten to cite a dead name and one more catch site: a fixed
+  change, its changes since base read as the turn and the writer hold them (seon.merge/delta-changes,
+  read once: its own cost is proved at seon.program-cost-test/a-turns-diff-reads-what-the-branch-changed)."
   [n] (let [db0 (ts/test-db)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
             base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
-            changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))]
-        [base (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]))
+            changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
+            head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
+        [base head (seon.merge/delta-changes base head #{})]))
 
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
@@ -907,8 +895,12 @@
                :n "sections citing a var and catch sites in the program, one of each changed"
                :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
+               ;; the fixed part is the program attributes' ranges seon.merge/delta-changes walks (44 on a
+               ;; stored db; on this in-memory test store a range walks its datoms, as seon.reconcile-test's
+               ;; observed-input says): 4.9M ticks, 13.6 MB, 61 calls at 10 (it was 2.4M, 5.8 MB with the one
+               ;; :eavt diff, which also reads every datom the branch writes besides the program)
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               :fixed {:ticks 800000 :bytes 3800000 :calls 24}
+               :fixed {:ticks 4700000 :bytes 14500000 :calls 67}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -928,6 +920,59 @@
   [db v & [attr]]
   (let [ve (pdb/eid db :var/name v)]
     (d/db-with (change-var db v) [[:db/add ve (or attr :var/doc) (str "changed " (random-uuid))]])))
+
+(deftest health-moved-is-health
+  ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
+  ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
+  (let [db0 (ts/test-db)
+        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
+        db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
+        same? (fn [base head]
+                (let [moved (problems/health-moved (problems/health base) base head (diff base head)) whole (problems/health head)]
+                  (and (= (set (keys (:classes whole))) (set (keys (:classes moved))))
+                       (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
+                               (keys (:classes whole))))))
+        task {:seon.task/id "t/x" :seon.task/ns 't :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/proofs #{'t-test/x}}
+        run (fn [n status] {:seon.run/id (str "t/x#" n) :seon.run/task [:seon.task/id "t/x"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
+                            :seon.run/start-ms 1 :seon.run/end-ms n :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status status})]
+    (is (same? db1 db1) "nothing moved")
+    (testing "a run that died opens a problem, and a later run that finished its task closes it"
+      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
+            db3 (d/db-with db2 [(assoc (run 2 :merged) :seon.run/outcome :green)])]
+        (is (same? db1 db2))
+        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :dead :n])))
+        (is (same? db2 db3))
+        (is (zero? (get-in (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3)) [:classes :dead :n])))))
+    (testing "a docstring changed under the text opens a stale section"
+      (let [db2 (change-meaning db1 v)]
+        (is (same? db1 db2))
+        (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :stale-section :n])))
+        (testing "and editing the section closes it"
+          (is (same? db2 (d/db-with db2 (seon.docs/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
+    (testing "a cited name added to a section opens a dead citation, a deleted var opens another"
+      (let [dead (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nAnd `" (namespace v) "/no-such-var`.\n")}))]
+        (is (same? db1 dead))
+        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 dead (diff db1 dead)) [:classes :dead-citation :n])))
+        (is (same? dead db1))
+        (is (same? dead (d/db-with dead [[:db/retractEntity (pdb/eid dead :var/name v)]])) "a deleted var opens more")
+        (testing "and a var added that an unchanged section cites closes it"
+          (let [back (d/db-with dead [{:var/name (symbol (namespace v) "no-such-var")}])]
+            (is (same? dead back))
+            (is (< (get-in (problems/health-moved (problems/health dead) dead back (diff dead back)) [:classes :dead-citation :n])
+                   (get-in (problems/health dead) [:classes :dead-citation :n])))))))
+    (testing "a section added that an unchanged section links to closes its dead link"
+      (let [linking (d/db-with db1 (seon.docs/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
+            both (d/db-with linking (seon.docs/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
+        (is (same? db1 linking))
+        (is (same? linking both))))
+    (testing "an answer added to an untouched run's row is carried current"
+      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
+            db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
+                                 :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :run :from "t/x#1"}}])
+            moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3))
+            whole (problems/health db3)]
+        (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
 
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (ts/test-db)

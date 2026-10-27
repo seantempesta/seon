@@ -32,10 +32,8 @@
 (defc c-getpid "getpid" [] :int)
 (defc c-chdir "chdir" [:string] :int)
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
-(defc c-pipe "pipe" [:pointer] :int)
 (defc c-close "close" [:int] :int)
 (defc c-shutdown "shutdown" [:int :int] :int)
-(defc c-read "read" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
 (defc c-signal "signal" [:int :pointer] :pointer)
 (defc c-kill "kill" [:int :int] :int)
@@ -250,14 +248,20 @@
   [{:keys [child refused parent fd double?]}]
   (let [pid (fork-alone*)]
     (if (zero? pid)
-      (let [status (volatile! 1)]
+      (let [status (volatile! 1) said? (volatile! false)]
         (try (when (or (not double?) (zero? (c-fork))) (child))
              (vreset! status 0)
              (catch Throwable e
+               (vreset! said? true)
                (binding [*out* *err*] (println "a forked child threw out of its code:" (.getName (class e)) (ex-message e) (sedn/encode (ex-data e))
                                          "\n  from:" (throw-frames e)) (flush)))
-             ;; a finally is a winder, run on any exit from the try (a fiber's park drops it)
-             (finally (c-exit @status))))
+             ;; a finally is a winder, run on any exit from the try (a fiber's park drops it). A child
+             ;; that ends 1 with no throw said left its code by an escape no catch takes: said here, so
+             ;; an exit 1 with nothing on stderr is not the child's code's
+             (finally
+               (when (and (= 1 @status) (not @said?))
+                 (binding [*out* *err*] (println "a forked child left its code by an escape no catch took: exiting 1") (flush)))
+               (c-exit @status))))
       (do (some-> fd c-close)
           (if (neg? pid) (refused (active-threads)) (do (when double? (wait-status pid)) (parent pid)))))))
 

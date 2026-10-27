@@ -59,6 +59,39 @@
               {:ok true :changed 0})
       (seq refused) (assoc :not-held refused))))
 
+(defn take-back-tx
+  "The write that takes the running tasks among ids back from their runs on db: each is held by
+  compare-and-swap from :running (a cancel! or a hold between the read and the write refuses the write),
+  with its failure naming reason; the reconciler kills a held task's live run (seon.reconcile/classify)
+  and keeps the task, which run! releases again (its failure, the reason, stays like any hold's: the
+  next run continues from it). Answers {:tx :taken ids :not-running errors}: a task that is held,
+  cancelled, unknown, never released or already done (merged work keeps :running) is answered
+  :seon.root/not-running."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
+  [db ids reason]
+  (let [x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
+        idx (reconcile/index db)
+        done? (fn [id] (contains? #{:done :merged} (reconcile/task-state idx id)))
+        taken (filterv #(and (= :running (x %)) (not (done? %))) ids)]
+    {:taken taken
+     :tx (vec (mapcat (fn [id] [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
+                                {:seon.task/id id :seon.task/failure {:reason reason}}]) taken))
+     :not-running (vec (for [id ids :when (not-any? #{id} taken)]
+                         (contract/error :seon.root/not-running #'my.root/take-back-tx
+                                         (str "task " id (cond (nil? (x id)) " does not exist" (and (= :running (x id)) (done? id)) " is done" :else (str " is " (name (x id)))) ", not running: nothing to take back")
+                                         {:task id :execution (x id)})))}))
+
+(defn hold!
+  "Take the running tasks among ids back from their runs (take-back-tx): the live run is killed, the
+  task is held with reason and keeps its branch, and run! releases it again (the next run
+  continues the branch). Where cancel! is final, this is a pause root can end. Answers the writer's answer
+  (or {:ok true :changed 0} when none is running) with :not-running when any."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id] :string] :map]}
+  [sys ids reason]
+  (let [{:keys [tx not-running]} (take-back-tx @(:conn sys) ids reason)]
+    (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
+      (seq not-running) (assoc :not-running not-running))))
+
 (defn cancel!
   "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
@@ -210,8 +243,6 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
   [sys] (problems/health @(:conn sys) (root/errors sys)))
 
-(def ^:private kinds "Main's loaders, each a kind of what changed on disk." #{:docs :tasks :source})
-
 (defn- load-kinds!
   "Each of ks loaded into main once by its own loader: the wiki (load-docs!), the task files
   (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,
@@ -290,9 +321,9 @@
 (defn source-changes
   "The source files a watcher's batch changed, as relative paths under checkout co, when the batch
   made root load the source by files alone: every record that makes the source load is a changed
-  path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or the branch's own ref moving
+  path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or a branch's own ref moving
   (a commit, a merge): the whole tree is then read. Cost: the batch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:maybe :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
+  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
   [co refs own batch]
   (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
     (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)) (re-find #"\.(clj|edn)$" path))) source))

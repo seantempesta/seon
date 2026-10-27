@@ -1,0 +1,46 @@
+:program {:ok true, :datoms 73}
+:program {:ok true, :datoms 181}
+:create {:ok true, :datoms 12}
+jolt fiber dump: 1 live fibers of 1 held, on thread 0
+fiber 0: parked, carrier 0, parked on nothing, wait state none, 159666648 ticks
+  0 ?
+  1 jfn$seon.sock/recv!$0/recv! [jolt.host/fiber? jolt.host/main-carrier?] (a form of 358 chars)
+  2 jfn$malli.core/-=>-schema$41 [clojure.core/any? clojure.core/__catch-broad? clojure.core/Exception] (jolt-invoke1 f a)
+  3 ? (f a)
+  4 jfn$seon.agent/recv-raw!$0/recv-raw! [seon.agent/state clojure.core/deref] (jolt-invoke1 _a$135 _a$136)
+  5 jfn$malli.core/-=>-schema$40 [clojure.core/__catch-broad? clojure.core/Exception] (jolt-invoke0 f)
+  6 ? (f)
+  7 jfn$seon.agent/await-op!$0/await-op! [clojure.core/update seon.agent/state clojure.core/swap! seon.agent/handle!] (jolt-invoke0 jv$seon.agent/recv-raw!)
+  8 jfn$malli.core/-=>-schema$43 [clojure.core/__catch-broad? clojure.core/Exception clojure.core/int? clojure.core/keyword?] (jolt-invoke3 f a b c)
+  9 ? (f a b d)
+  10 jfn$seon.agent/prove!$0/prove! [clojure.core/update clojure.core/swap! seon.agent/state clojure.core/deref] (jolt-invoke3 jv$seon.agent/await-op! _kc$6612 k _kc$6613)
+  11 jfn$malli.core/-=>-schema$40 [clojure.core/__catch-broad? clojure.core/Exception] (jolt-invoke0 f)
+  12 ? (f)
+  13 jfn$seon.turn/observe$0/observe [jolt.host/static-member clojure.core/seq? seon.agent/state clojure.core/deref] (jolt-invoke0 jv$seon.agent/prove!)
+  14 jfn$malli.core/-=>-schema$42 [clojure.core/__catch-broad? clojure.core/Exception clojure.core/string?] (jolt-invoke2 f a b)
+  15 ? (f a b)
+  16 jfn$seon.turn/work!$0/work! [seon.agent/state clojure.core/deref clojure.core/seq?] (jolt-invoke2 jv$seon.turn/observe task plan-before)
+  17 jfn$malli.core/-=>-schema$41 [clojure.core/__catch-broad? clojure.core/Exception] (jolt-invoke1 f a)
+  18 ? (f a)
+  19 ?
+  20 dynamic-wind
+  21 ? (jolt-invoke0 f)
+  22 dynamic-wind
+  23 dynamic-wind
+  24 ?
+  25 ? [clojure.core/deref jolt.host/ticks jolt.host/ticks-of] (a form of 1798 chars)
+  26 dynamic-wind
+  27 jfn$malli.core/-=>-schema$42 [clojure.core/any? seon.profile/measure! clojure.core/__catch-broad? clojure.core/Exception clojure.core/fn?] (jolt-invoke2 f a b)
+  28 ? (jolt-invoke1 ef form)
+  29 dynamic-wind
+  30 ? (a form of 624 chars)
+  31 dynamic-wind
+  32 ? (jolt-invoke0 _tt$2273)
+  33 dynamic-wind
+  34 jfn$malli.core/-=>-schema$41 [clojure.core/any? clojure.core/__catch-broad? clojure.core/Exception clojure.core/fn?] (jolt-invoke1 f a)
+  35 ? (f a)
+  36 ?
+  37 dynamic-wind
+  38 jolt-run-interruptible*
+  39 ? (_kc$809 _tt$813 _tt$814)
+  ... 72 more frames

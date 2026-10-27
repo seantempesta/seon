@@ -245,6 +245,7 @@
         ch (pm/delta-changes b branch #{})]
     (is (= {:added ['app/c] :changed ['app/f] :removed ['app/g] :schemas [:app/k :app/n]} (pm/divergence ch)))
     (is (= #{'app/c 'app/f 'app/g} (pm/changed-vars ch)) "the changed vars are its vars")
+    (is (= ch (pm/delta-changes b branch #{} (apply concat (d/datoms-diff b branch :eavt [])))) "given the datoms that differ, nothing is diffed again and the changes are the same")
     (is (= {} (pm/divergence (pm/delta-changes b b #{}))) "an unchanged branch carries nothing")))
 
 (deftest a-branch-that-merged-main-carries-only-its-own-changes
@@ -296,3 +297,51 @@
   ;; that changed something threw "nth not supported on this type: Keyword" in every turn's test plan
   (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:kind :fn}] [:var 'app/g] [{:kind :fn} nil] [:schema :app/k] [nil {}]})))
   (is (= #{} (pm/changed-vars {}))))
+(deftest a-merge-carries-the-namespace-of-a-form-it-carries
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
+  ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
+  ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
+  ;; behind check never settled). The merge carries the namespace entity too.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ns"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
+                                                  :defs [{:var 'app.z/z :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                  :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
+       (try
+         (d/transact bc (newns @bc))
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
+           (is (some #(= :form (first %)) ks) "the form is a key to carry")
+           (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
+           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
+           (is (= {} (:ours (pm/delta-three-way head after main #{}))) "and nothing differs between the two programs any more"))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-namespace-both-sides-made-is-one-entity-after-the-merge
+  ;; the branch and main each made app.z without an (ns) form, so they hold it under two entity ids: carrying the
+  ;; branch's would give :ns/name two entities; the merge keeps main's and points the carried form at it
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ns2"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           rec (fn [nm] (fn [db] (program/record-tx db {:id (str "app.z/(defn " nm " [x] x)") :src (str "(defn " nm " [x] x)") :ns 'app.z :ns-form? false
+                                                        :defs [{:var (symbol "app.z" nm) :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                        :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))]
+       (try
+         (d/transact conn ((rec "m") @conn))
+         (d/transact bc ((rec "z") @bc))
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
+           (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
+           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it"))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))
