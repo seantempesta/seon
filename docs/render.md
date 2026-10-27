@@ -122,6 +122,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 - `seon.context/eval-messages`, `seon.context/request`, `seon.context/parts-of`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`, `{:history {:left-out n}}`) around a response the one printer already printed: the wire, not output.
+- `seon.context/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
 
@@ -140,6 +141,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
+- `seon.context/search`: the top `k` of a search's ranking (`take` and `drop`), with a last entry that counts the hits left out per kind and names the call that returns them: a search's answer, whose cut says what it left, not a cut of output. my.agent/related asks it for the sections.
 - `seon.context/related`: the top k of a search over the wiki's sections (`take` the config's `:seon.config.render/related` of its ranking, the cited ones left out), with the forms that read one whole and search further (`seon.context/related-view`): a search's answer, not a cut of output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).

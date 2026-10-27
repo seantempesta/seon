@@ -426,6 +426,12 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: run directories. A bin/prove or bin/test run writes its shard files and logs under
+ ;; target/prove/<timestamp>-<pid> (test-runner/prune-runs!); the newest this many stay. Provenance:
+ ;; worktree session one-run-one-directory 2026-10-27: a run's directory holds a few MB of logs, and
+ ;; a session reads the last run or two; 20 reach back over a day of a busy checkout's runs. At the
+ ;; bound: the oldest run directories beside the one starting are removed (target/prove/ms stays).
+ :seon.config.proofs/runs-kept 20
  ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
  ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
  ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
