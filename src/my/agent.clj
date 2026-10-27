@@ -17,6 +17,8 @@
                               what it changed since main, each one with a result at its digest reused
     @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
                               kept current as it works; the page shows it as a block
+    (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
+                              transaction on the branch, or refused with why; the next turn tells it
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
