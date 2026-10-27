@@ -8,6 +8,9 @@ What a fresh root needs in one read, beyond AGENTS.md, docs/plan.md and docs/dec
 3. notes/merge-audit-2026-10-27.md, notes/merge-design-review-2026-10-27.md and notes/merge-probe-2026-10-27.md (on jolt/merge-state until it merges), and notes/session-state-2026-10-27/ (each session's own last state, copied from the app's shared notes) (the merge work: an audit, a design, and an independent review that cut it).
 4. The last 40 lines of notes/merge-log.md, `git log --oneline --first-parent -30`, `bin/root status`, `uptime`.
 
+## The goal
+The owner, 2026-10-27: "The goal is to stop using the worktrees and to do all work within seon itself" (docs/plan.md THE PLAN step 0). Every next step serves it: the source tree following main, root-repair gaps 1-2, tests-reaching, then the first piece of work done by a Claude session through Seon's server on the standing root.
+
 ## The state
 - **First act for the next root:** run `nice -n 15 bin/build && nice -n 15 bin/prove --merge` on main. The last merges (jolt/a-flaky-digest-is-red, jolt/merge-state, jolt/root-repair-playbook) passed their own sessions' runs and a plain `bin/prove`, but main's `--merge` of the flaky change was stopped to commit this handoff. `bin/update` ran after them (08:45, 2026-10-27), and root's main is current (checked: seon.ratom's 52 vars present, seon.repl/draw-part gone).
 - Main is green under `bin/prove --merge` (every test and check step the change reaches, process tests included, contracts and smoke, nothing left out), except one known red that comes and goes: seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program, a 96-byte runtime variance when another thread allocates (task seon.cost/a-call-allocates-the-same-bytes-each-time, held). The flaky-results change (merged last) now marks a digest that was both green and red as :flaky.
