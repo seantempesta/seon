@@ -21,12 +21,22 @@
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
+(defn- outside?
+  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
+  drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [env] (= "outside" (:model env)))
+
 (defn desired-env
-  "The environment task t's runs must run in."
-  {:malli/schema [:=> [:cat :seon.task/own] :seon.task/env]}
-  [t]
-  {:branch (:seon.task/branch t) :model (:seon.task/model t)
-   :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})})
+  "The environment task t's runs must run in; with prior, a run's environment it goes on from,
+  an outside agent's stays outside (seon.server's attach: the model is the outside agent's,
+  whatever the task's)."
+  {:malli/schema [:function [:=> [:cat :seon.task/own] :seon.task/env] [:=> [:cat :seon.task/own [:maybe :map]] :seon.task/env]]}
+  ([t] (desired-env t nil))
+  ([t prior]
+   (cond-> {:branch (:seon.task/branch t) :model (:seon.task/model t)
+            :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})}
+     (outside? prior) (assoc :model "outside"))))
 
 ;; ---- the done rule -----------------------------------------------------------------
 
@@ -154,12 +164,6 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
-(defn- outside?
-  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
-  drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
-  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [env] (= "outside" (:model env)))
-
 (defn- idle
   "Task id's parked run whose process is idle now: parked in this boot, by an agent. A wake
   reuses it; a cancel, a hold or a new branch for its task stops it (classify: its process
@@ -277,8 +281,7 @@
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
-                           ;; an outside run's model is the outside agent's (attach), whatever the task's
-                           (not= (cond-> (desired-env t) (outside? (:seon.run/env a)) (assoc :model "outside")) (:seon.run/env a)) :env-changed)
+                           (not= (desired-env t (:seon.run/env a)) (:seon.run/env a)) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))
@@ -491,7 +494,7 @@
                                      ;; by nobody: an outside one stays outside
                                      newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
                                      lost? (or (= :lost (:seon.run/status newest)) (contains? (:reap idx) (:seon.run/id newest)))
-                                     env (cond-> (desired-env t) (and lost? (outside? (:seon.run/env newest))) (assoc :model "outside"))]]
+                                     env (desired-env t (when lost? (:seon.run/env newest)))]]
                  ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
                    {:op :wake :task id :env env :run run :agent (:seon.run/agent p)}
