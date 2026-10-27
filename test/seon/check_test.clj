@@ -288,7 +288,17 @@
         (is (not= t0 (seon.fx/tree-id dir)) "a doc is in the tree")
         (write! "src/a.clj")
         (is (not= (seon.fx/tree-id dir) (do (commit! "src/a.clj") (seon.fx/tree-id dir))) "and so is a source file")
-        (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it"))
+        (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it")
+        (testing "bin/tree reads the same exclusions from the shipped config (its sed against cfg/value)"
+          (let [me (System/getProperty "user.dir")]
+            (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/resources/seon/config")))
+            (clojure.java.shell/sh "cp" (str me "/bin/tree") (str dir "/bin/tree"))
+            (clojure.java.shell/sh "cp" (str me "/resources/seon/config/default.edn") (str dir "/resources/seon/config/default.edn"))
+            (git "add" "-A") (git "commit" "-qm" "bin and config")
+            (let [same (fn [] (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))]
+              (is (same) "agree")
+              (write! "notes/more.md")
+              (is (same) "and agree with a note written")))))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (deftest bin-tree-names-the-tree-tree-id-names
