@@ -248,15 +248,15 @@
         ;; two forms, as an agent writes them: each recorded on its branch (a definition inside a do is not)
         held (str "(deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
                   " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) ")))))")
-        _ (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") "))"))
-        defined (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str held) "))"))
+        _ (eval-root (str "@(c/submit! sys :a1 " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") ")"))
+        defined (eval-root (str "@(c/submit! sys :a1 " (pr-str held) ")"))
         ;; the test service proves a1's branch as its turn does (mode :turn: the tests the branch changed,
         ;; held-proof/h among them): it asks the idle agent for :tests
         _ (eval-root "(def held-run (future @(c/prove! sys :a1 #{} :turn)))")
         in (java.io.FileInputStream. ^String began)
         in-test (.read in)
         ;; the child holds in its test: the agent answers an eval meanwhile
-        answered (eval-root "(seon.edn/decode (:text (:response @(c/submit! sys :a1 \"(+ 40 2)\"))))")
+        answered (ts/ask root {:op :eval :agent "root" :code "@(c/submit! sys :a1 \"(+ 40 2)\")"})
         out (java.io.FileOutputStream. ^String gate)
         _ (do (.write out 50) (.flush out) (.close out) (.close in))
         result (eval-root "(select-keys @held-run [:pass :fail :error])")]
@@ -264,7 +264,7 @@
     (ts/drop-main! store main)
     (sh/sh "rm" "-rf" runs began gate)
     (is (= 49 in-test) (str "the test child was in its test (" (pr-str defined) ")"))
-    (is (= 42 (:value answered)) (str "the agent answered while its test held: " (pr-str answered)))
+    (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
 (deftest a-blocked-agent-ends-with-its-root

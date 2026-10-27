@@ -874,7 +874,7 @@
 
 (defn divergence-view
   "What the branch's merge carries to main (a component over the db; the base's commit its child):
-  seon.merge/divergence of its changes, the vars it added, redefined and removed and the schema keys it changed."
+  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
   [:section [:h2 "its merge carries"]

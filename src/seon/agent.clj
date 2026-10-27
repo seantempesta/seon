@@ -79,11 +79,13 @@
     (let [m (sock/recv! (:conn @state))] (if (= m :eof) :dead m))))
 
 (defn- poll!
-  "The next message already there, without waiting: :none when none is, :dead at EOF."
+  "The next message already there, without waiting: :none when none is, :dead at EOF. The intake's
+  reader runs only while the loop parks, so a frame already on root's socket (or in its conn's
+  buffer) is taken by parking until the reader hands it over (sock/readable?)."
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [ch (intake)]
-    (or (a/poll! ch) :none)
+    (or (a/poll! ch) (if (sock/readable? (:conn @state)) (a/<!! ch) :none))
     (let [m (sock/next-frame! (:conn @state))] (if (= m :eof) :dead m))))
 
 (declare commit!)
@@ -1044,10 +1046,13 @@
                                      #(say {:op :tests-started :id (:id m) :pid %})
                                      (some-> (:names m) set)
                                      (when ch
+                                       ;; a run that throws hands the loop its throwable (go-monitor),
+                                       ;; raised where the answer is made, as an inline run raises it
                                        (fn [go]
-                                         (a/io-thread
-                                           (let [done (go say)]
-                                             (a/>!! ch {:op ::ran :id (:id m) :finish done}))))))]
+                                         (let [g (a/io-thread (go say)) died (a/go-monitor g)]
+                                           (a/io-thread
+                                             (let [done (or (a/<!! g) (let [e (a/<!! died)] #(throw e)))]
+                                               (a/>!! ch {:op ::ran :id (:id m) :finish done})))))))]
              (when-not (= ::running r) [{:op :tests :id (:id m) :result r :mem-mb (mem-mb)}]))
     ::say [(:msg m)]
     ::ran [{:op :tests :id (:id m) :result ((:finish m)) :mem-mb (mem-mb)}]
