@@ -1,8 +1,8 @@
 (ns seon.template-test
-  "A request becomes its linked task set at once (owner, 2026-10-22): design -> implement ->
-  merge on one branch, written released in one transaction, and the reconciler forks its
-  first agent only from a main that holds all of it (task
-  seon.template/a-request-is-one-linked-transaction).
+  "A request becomes its task set at once, written released in one transaction (by default one
+  whole task a single agent works through and merges; the stages design -> implement -> merge on
+  one branch are the experiments' choice), and the reconciler forks its first agent only from a
+  main that holds all of it (task seon.template/a-request-is-one-linked-transaction).
   Run: bin/test seon.template-test"
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [clojure.edn]
             [datahike.api :as d]
@@ -108,30 +108,6 @@
       (is (not (str/includes? (k tpl/instructions) "end your turn")) (str k ": no closing-prose step"))
       (is (str/includes? (k tpl/instructions) "(my.task/fail! ") (str k ": a false premise is a failed task")))
     (is (seq (task/create-tx (ts/test-db) ws)) "a valid task")))
-
-(deftest each-steps-instructions-are-its-task-briefly-prose-first
-  ;; root, 2026-10-25: each step's instructions short, prose first (its goal, when it is done, by
-  ;; what means: the standard format's stage task data), with no ;; anywhere
-  (doseq [[k v] tpl/instructions]
-    (is (str/starts-with? v "Your task: ") (str k ": its goal first"))
-    (is (not (str/includes? v ";;")) (str k ": no ;; reaches the model"))
-    (is (< (count v) 1200) (str k ": short (" (count v) " chars)")))
-  ;; live agents round 3 (2026-10-25, notes/archive/live-2026-10-25.md A2): a design agent that was told
-  ;; to write deftests but not how found the checkout on disk, appended its deftest to the test file
-  ;; and load-file'd it; a deftest is evaluated in its namespace, recorded on the branch
-  (is (str/includes? (:design tpl/instructions) "(in-ns 'ns.x-test)") "design says where a proof is evaluated")
-  ;; the thinking-off designs of 2026-10-26 registered a red proof at turns 7, 12 and 21, then
-  ;; tried the fix until the cap and never wrote the plan
-  (is (str/includes? (:design tpl/instructions) "Once the proof is red, write the plan") "the plan follows the red proof")
-  (is (str/includes? (:design tpl/instructions) "Do not try the fix") "the fix is the implement step's")
-  (is (str/includes? (:design tpl/instructions) "you write no file"))
-  ;; pipeline 1 (notes/archive/live-2026-10-25.md F4): both printer designs reproduced their bug by turn 11,
-  ;; then read on to the cap and registered no proof; reading came before the proof, with no end.
-  ;; The design reproduces the bug as a deftest, registers it and runs it red, then reads
-  (let [d (:design tpl/instructions)
-        steps ["reproduce what the plan says is wrong" "as a deftest" "register it" "run it red" "Then read what the change touches"]]
-    (is (every? #(str/includes? d %) steps) "each step is in the design instructions")
-    (is (= steps (sort-by #(or (str/index-of d %) -1) steps)) "proof first: reproduce as a deftest, register, run red, then read")))
 
 
 (deftest a-requests-stages-are-one-sessions-agent

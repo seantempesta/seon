@@ -182,8 +182,8 @@
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
       (let [[tasks-1 runs-1 watch-1] (printed (nth first-boot 3))
             [tasks-2 runs-2 watch-2] (printed (second second-boot))]
-        (is (= [2 1] [tasks-1 (count runs-1)]) (str "the first boot holds root's task and the one it loaded, and the run it started; its watcher: " (pr-str watch-1)))
-        (is (= 2 tasks-2) (str "the second boot still holds both tasks; its watcher: " (pr-str watch-2)))
+        (is (= [1 1] [tasks-1 (count runs-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the run it started; its watcher: " (pr-str watch-1)))
+        (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
         (is (every? runs-2 runs-1) "and the first boot's run (it reaps it and starts the next)"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
@@ -203,11 +203,11 @@
     (try
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
       ;; a fresh root's boot loads its task dir (my.root/watch!: a fresh store, or a task file changed
-      ;; while root was down, has nothing else to load it): demo/t and the root task the first load
-      ;; writes, none of the checkout's. It held none before: a root loaded task files only on a
+      ;; while root was down, has nothing else to load it): demo/t, a file task being one whole task
+      ;; (my.root/task-files), none of the checkout's. It held none before: a root loaded task files only on a
       ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
       ;; loaded it; the count is the boot's load
-      (is (= 2 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file and root's task, loaded at boot")
+      (is (= 1 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file's one whole task, loaded at boot")
       ;; its watcher's roots are what its loaders read and the refs, never the checkout, whose builds,
       ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
       ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
@@ -336,11 +336,11 @@
             sha-b (commit! b)
             [two] (boot! [probe])
             [three] (boot! [probe])]
-        (is (= [sha-a a 2] [(:commit (:fact one)) (:text one) (:tasks one)]) (pr-str one))
+        (is (= [sha-a a 1] [(:commit (:fact one)) (:text one) (:tasks one)]) (pr-str one))
         (is (= sha-b (:commit (:fact two))) "the second boot imported the tree's new commit")
         (is (= b (:text two)) "main holds B's text, byte for byte")
         (is (= [0 0] [(:removed-forms two) (:removed-var two)]) "no form or var of the removed function")
-        (is (= 2 (:tasks two)) "the tasks are intact")
+        (is (= 1 (:tasks two)) "the task is intact")
         (is (= 3 (:retracted (:fact two))) "retracted: the changed function's old form, the removed function's form and its var")
         (is (= (dissoc (:fact two) :boot) (dissoc (:fact three) :boot)) "the same commit imports nothing: the fact is the second boot's, but for whose boot it is")
         (is (not= (:boot (:fact two)) (:boot (:fact three))) "one source fact per boot")

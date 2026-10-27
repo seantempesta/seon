@@ -1,0 +1,356 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+
+FAIL in (background-gc-invokable-cross-platform) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$background_gc_invokable_cross_platform$fn__1.invoke(background_gc_test.cljc:90)
+expected: false
+  actual: false
+
+FAIL in (guard-spares-unreferenced-writes) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$guard_spares_unreferenced_writes$fn__1.invoke(background_gc_test.cljc:145)
+expected: false
+  actual: false
+
+FAIL in (commit-holds-the-guard) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$commit_holds_the_guard$fn__1.invoke(background_gc_test.cljc:188)
+expected: false
+  actual: false
+
+ERROR in (background-gc-under-pipelined-writes) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.IllegalArgumentException: No matching ctor found for class java.util.concurrent.Semaphore
+Exception in go/fiber body (channel closed):
+Unhandled exception (ClassCastException): car: false is not a pair
+  trace:
+    jolt=2
+    not=
+    tp
+    na-chunk-filter-first
+    filter-seq
+    lazyseq-realize-general!
+    seq->list
+    jfn$clojure.core.async/merge$1
+jolt fiber dump: 18 live fibers of 925 held, on thread 0
+fiber 0: parked, carrier 15, parked on alt-handler, wait state none, 123988 ticks
+  a CPS step: the procedure ?
+fiber 1: parked, carrier 8, parked on alt-handler, wait state none, 2273962 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/merge clojure.core.async/into konserve.core/dissoc clojure.core/butlast clojure.core/merge clojure.core/seq? konserve.impl.defaults/key->store-key clojure.core/comp konserve.core/multi-dissoc clojure.core.async/<! clojure.core/mapv konserve.utils/multi-key-capable?] (jolt-invoke1 _a$88920 _a$88921)
+  3 ? (a form of 3942 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 ?
+  8 ?
+  9 dynamic-wind
+  10 jolt-fiber-resume*
+  11 jolt-fiber-run
+  12 jolt-fiber-drain!
+  13 jolt-fiber-carrier-loop
+  14 dynamic-wind
+  15 ?
+  16 dynamic-wind
+  17 invoke
+fiber 2: parked, carrier 16, parked on alt-handler, wait state none, 396244 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/<! superv.async/chan?] (jolt-invoke1 (var-cell-deref _kc$8154) maybe-ch)
+  3 ? (a form of 1550 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 ?
+  8 ?
+  9 dynamic-wind
+  10 jolt-fiber-resume*
+  11 jolt-fiber-run
+  12 jolt-fiber-drain!
+  13 jolt-fiber-carrier-loop
+  14 dynamic-wind
+  15 ?
+  16 dynamic-wind
+  17 invoke
+fiber 3: parked, carrier 10, parked on alt-handler, wait state none, 474 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/merge clojure.core.async/into konserve.core/dissoc konserve.impl.defaults/key->store-key clojure.core/comp konserve.core/multi-dissoc clojure.core/mapv konserve.utils/multi-key-capable? clojure.core.async/go-spawn superv.async/reduce<?- clojure.core/butlast clojure.core/merge clojure.core/seq? clojure.core/partition-all konserve.core/keys clojure.core.async/<!] (jolt-invoke1 _a$88935 _a$88936)
+  3 ? (a form of 9075 chars)
+  4 dynamic-wind
+  5 ?
+  6 dynamic-wind
+  7 ?
+  8 ?
+  9 dynamic-wind
+  10 jolt-fiber-resume*
+  11 jolt-fiber-run
+  12 jolt-fiber-drain!
+  13 jolt-fiber-carrier-loop
+  14 dynamic-wind
+  15 ?
+  16 dynamic-wind
+  17 invoke
+fiber 4: parked, carrier 7, parked on alt-handler, wait state none, 92198 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core/fnil konserve.core/update clojure.core.async/<!! konserve.gc/sweep! datahike.index.secondary/sweep-from-key-maps! clojure.core/group-by datahike.index.interface/collection-key datahike.roster/roster-store-keys clojure.core/mapcat clojure.core/mapv datahike.gc/reachable-in-branch clojure.core.async/merge clojure.core.async/into clojure.core.async/<! clojure.core/atom datahike.roster/roster datahike.schema-cache/clear-write-cache clojure.core/make-delay taoensso.trove/*log-fn* datahike.gc/get-time datahike.gc-guard/safe-point] (jolt-invoke1 _a$1345 _a$1346)
+  3 dynamic-wind
+  4 ? (a form of 23461 chars)
+  5 ? (a form of 30845 chars)
+  6 dynamic-wind
+  7 jfn$datahike.gc/gc-storage!$4 (a form of 31534 chars)
+  8 dynamic-wind
+  9 ?
+  10 dynamic-wind
+  11 jolt-fiber-resume*
+  12 jolt-fiber-run
+  13 jolt-fiber-drain!
+  14 jolt-fiber-carrier-loop
+  15 dynamic-wind
+  16 ?
+  17 dynamic-wind
+  18 invoke
+fiber 5: parked, carrier 14, parked on alt-handler, wait state none, 206837 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 6: parked, carrier 13, parked on alt-handler, wait state none, 6976508 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 7: parked, carrier 9, parked on alt-handler, wait state none, 944875 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 8: parked, carrier 8, parked on alt-handler, wait state none, 76804384 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 9: parked, carrier 5, parked on alt-handler, wait state none, 1612155 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-alt-await
+  2 await
+  3 jfn$datahike.gc/start-background-gc!$1 [clojure.core/deref datahike.gc/gc-storage! clojure.core.async/__sm-take clojure.core/make-delay taoensso.trove/*log-fn* clojure.core/Throwable jolt.host/static-member clojure.core.async/timeout clojure.core.async/alts!] (jolt-invoke1 _a$1460 _a$1461)
+  4 dynamic-wind
+  5 jolt-fiber-resume*
+fiber 10: parked, carrier 0, parked on alt-handler, wait state none, 529599 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 11: parked, carrier 17, parked on alt-handler, wait state none, 82682295 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 12: parked, carrier 13, parked on alt-handler, wait state none, 2168 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 13: parked, carrier 12, parked on alt-handler, wait state none, 233285 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 14: parked, carrier 8, parked on alt-handler, wait state none, 2168 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 15: parked, carrier 7, parked on alt-handler, wait state none, 233885 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke
+fiber 16: parked, carrier 3, parked on alt-handler, wait state none, 3246 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<!] (jolt-invoke1 (var-cell-deref _kc$2276) commit-queue)
+  3 ? [superv.async/-track-exception clojure.core/ex-data clojure.core.async/timeout datahike.writer/fail-pending-commits! clojure.core.async/put! clojure.core.async/close! clojure.core.async/>! datahike.committed-report/offer-committed! clojure.core/assoc-in clojure.core/reset! datahike.query/advance-query-cache-context clojure.core/butlast clojure.core/merge clojure.core/seq? datahike.writer/measured-commit! clojure.core.async/thread-spawn clojure.core/boolean clojure.core/mapv datahike.writing/batch-cache-revision-attributes datahike.tools/get-time-ms clojure.core/update clojure.core/get-in clojure.core/mapcat clojure.core/not-empty clojure.core/deref clojure.core/make-delay taoensso.trove/*log-fn* clojure.core.async/poll! clojure.core/repeatedly clojure.core/take-while clojure.core.async/<! superv.async/throw-if-exception-] (a form of 36070 chars)
+  4 dynamic-wind
+  5 jfn$datahike.writer/create-thread$5 (a form of 38529 chars)
+  6 dynamic-wind
+  7 ?
+  8 dynamic-wind
+  9 jolt-fiber-resume*
+  10 jolt-fiber-run
+  11 jolt-fiber-drain!
+  12 jolt-fiber-carrier-loop
+  13 dynamic-wind
+  14 ?
+  15 dynamic-wind
+  16 invoke
+fiber 17: parked, carrier 2, parked on alt-handler, wait state none, 264110 ticks
+  0 jolt-fiber-waiter-wait!/ibox
+  1 jolt-fiber-<!*
+  2 ? [superv.async/throw-if-exception- datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (jolt-invoke1 (var-cell-deref _kc$2276) transaction-queue)
+  3 ? [datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core.async/close! clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref] (a form of 31319 chars)
+  4 dynamic-wind
+  5 ? (a form of 33340 chars)
+  6 ? [superv.async/-track-exception clojure.core/ex-data datahike.writer/fail-pending-transactions! datahike.writer/writer-shut-down-error clojure.core/update clojure.core/not= clojure.core.async/>! clojure.core/disj clojure.core.async/__sm-spawn clojure.core/swap! clojure.core.async/promise-chan datahike.writer/chan? clojure.core/Error datahike.writer/write-error-log clojure.core.async/put! clojure.core/get-in clojure.core/NullPointerException clojure.core/type clojure.core/make-delay datahike.writer/buf-count clojure.core/butlast clojure.core/merge clojure.core/seq? taoensso.trove/*log-fn* superv.async/throw-if-exception- clojure.core.async/timeout clojure.core.async/<! clojure.core/deref clojure.core.async/close!] (a form of 33994 chars)
+  7 dynamic-wind
+  8 jfn$datahike.writer/create-thread$0 (a form of 36453 chars)
+  9 dynamic-wind
+  10 ?
+  11 dynamic-wind
+  12 jolt-fiber-resume*
+  13 jolt-fiber-run
+  14 jolt-fiber-drain!
+  15 jolt-fiber-carrier-loop
+  16 dynamic-wind
+  17 ?
+  18 dynamic-wind
+  19 invoke

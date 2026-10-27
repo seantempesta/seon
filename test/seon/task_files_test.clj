@@ -92,23 +92,30 @@
 
 (def ^:private still-worked
   "Task entries whose branch merged and whose work goes on under the same entry, each with its reason."
-  {"seon.render/walk" "render work still moving: later branches finish it"
+  {"seon.reconcile/one-observe-descends-once" "merged as the stored-shape measurement only; the one multi-prefix datoms-diff walk its plan asks for is still a per-attribute loop (low priority in its plan)"
+   "seon.render/walk" "render work still moving: later branches finish it"
    "seon.render/page" "render work still moving: later branches finish it"})
 
 (deftest no-shipped-task-is-merged-work
   ;; task seon.task/merged-work-leaves-the-task-files: the merge that merges a task's work removes its
   ;; entry in the same commit (git keeps the plan, test/ keeps the proofs); a task Seon agents work keeps
-  ;; its derived state. A worktree session's branch is named for its task, so an entry whose name is a
-  ;; "Merge jolt/<name>" (or "Land jolt/<name>") commit on main's first-parent history is merged work left
-  ;; in the files. It sees only that convention, and main as this repository holds it: the next branch's
-  ;; run names an entry a merge left behind (the merge's own run precedes its commit)
+  ;; its derived state. An entry is merged work left in the files when main's first-parent history holds
+  ;; a "Merge jolt/<name>" or "Land jolt/<name>" commit for its name (a worktree session's branch is named
+  ;; for its task), or a Merge/Land commit whose subject or body names its qualified name <ns>/<name>
+  ;; (a branch named otherwise, e.g. jolt/fileref for seon.ref/files-namespaces-and-symbols-are-plain-markdown).
+  ;; It reads main as this repository holds it: the next branch's run names an entry a merge left behind
+  ;; (the merge's own run precedes its commit)
   (let [root (config/checkout)
-        merged (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%s" "main")))
-                          :let [m (re-find #"^(?:Merge|Land) jolt/([^\s:]+)" l)] :when m]
-                      (second m)))
+        commits (for [rec (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%s%x1f%b%x1e" "main")) #"\x1e")
+                      :let [[subject body] (str/split rec #"\x1f" 2)
+                            subject (str/trim (str subject))]
+                      :when (re-find #"^(?:Merge|Land) " subject)]
+                  {:subject subject :text (str subject "\n" body)})
+        merged (set (for [{:keys [subject]} commits :let [m (re-find #"^(?:Merge|Land) jolt/([^\s:]+)" subject)] :when m] (second m)))
         left (for [[ns-sym ds] (root/task-files) :when (vector? ds) d ds
                    :let [k (str ns-sym "/" (:seon.task/name d))]
-                   :when (and (merged (:seon.task/name d)) (not (still-worked k)) (not= :merge (:seon.task/kind d)))]
+                   :when (and (or (merged (:seon.task/name d)) (some #(str/includes? (:text %) k) commits))
+                              (not (still-worked k)) (not= :merge (:seon.task/kind d)))]
                k)]
     (is (seq merged) "main's merges are read")
     (is (= [] (vec left)) "each is merged work: remove its entry from resources/seon/tasks/ (still-worked names the exceptions)")))

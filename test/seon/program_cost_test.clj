@@ -148,17 +148,18 @@
                   "one index path per changed entity), the keys they bear and those keys' content on both sides; "
                   "nothing reads the forms they share")
        :growth :constant
-       ;; measured 2026-10-27 on LMDB, after touched-keys walked one :aevt range per program attribute
-       ;; (task seon.merge/touched-keys-skips-platform-records): 437k ticks / 1.26 MB at 100 forms,
+       ;; measured 2026-10-27 on LMDB with the one :eavt diff: 437k ticks / 1.26 MB at 100 forms,
        ;; 462k / 1.37 MB at 300, 547k / 1.61 MB at 1,000 (629k / 1.83 MB at 10,000 in an earlier layout);
-       ;; 56 contracted calls each. The rise from 100 to 1,000 is the stored index gaining a level (64
+       ;; 56 contracted calls each. With one :aevt range per program attribute instead (task
+       ;; seon.merge/touched-keys-skips-platform-records): 1.06M ticks / 3.97 MB / 59 calls at 100, the ~44
+       ;; descents (60-90 KB each) being the fixed part; what that buys is below. The rise from 100 to 1,000 is the stored index gaining a level (64
        ;; datoms a node), which three sizes cannot fit as a log: it is bounded, a program scan (1 MB
        ;; per 1,000 forms) would not be. A branch that wrote besides the program (evals, turns,
        ;; messages) and main's embeddings since the fork are never read: the ranges skip them. What it
        ;; replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
        ;; diff reads went from ~2.5-3.3 MB to one of these
        :per-n {}
-       :fixed {:ticks 700000.0 :bytes 2000000.0 :calls 56}
+       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 59}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 

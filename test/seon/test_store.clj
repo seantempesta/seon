@@ -100,7 +100,7 @@
   seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
   (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
   never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
-  (shared-roots), whose bin/held then refused to run (the roots outlived their shards).
+  (start-shared-root!), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
   (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
@@ -224,26 +224,34 @@
         status (second (re-find #"\(exit (\d+)\)" out))]
     (if status {:exit (parse-long status) :log log} {:error :stopped-without-status :out out :log log})))
 
-(def ^:private ^{:malli/schema [:=> [:cat :string [:vector :string]] :map]} shared-roots
-  "This test process's shared roots, one per [checkout args] and started at the first test that
-  asks for it (shared-root!): a root boots once per shard, not once per test (the boot was most
-  of an in-agent test; an attach on a running root costs milliseconds). Each on a main of
-  its own of the process store, stopped and its main dropped when the process ends (a shutdown
-  hook)."
-  (memoize
-    (fn [checkout args]
-      (let [main (str "shard-" (random-uuid))
-            store (process-store checkout)
-            root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
-        (.addShutdownHook (Runtime/getRuntime)
-                          (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
-                                                   (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
-        root))))
+(defonce ^:private shared-roots
+  ;; this test process's shared roots by [checkout args] (shared-root!): data, not a function
+  (java.util.concurrent.ConcurrentHashMap.))
+
+(defn- start-shared-root!
+  "A root for this test process to share among its tests (shared-root!) on checkout with root
+  arguments args, on a main of its own of the process store; stopped and its main dropped when
+  the process ends (a shutdown hook)."
+  {:malli/schema [:=> [:cat :string [:vector :string]] :map]}
+  [checkout args]
+  (let [main (str "shard-" (random-uuid))
+        store (process-store checkout)
+        root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
+    (.addShutdownHook (Runtime/getRuntime)
+                      (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
+                                               (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+    root))
 
 (defn shared-root!
-  "The root this test process shares among its tests for root arguments args (shared-roots):
-  start-root!'s answer, started at the first call. A test sharing it works on branches of its
-  main and deletes them when it ends (seon.agent-test/in-agent); a test whose subject is a root's
-  life (boot, stop, kill, a generation) or main itself starts a root of its own."
+  "The root this test process shares among its tests for root arguments args: started at the
+  first call for them (start-shared-root!), then the same one: a root boots once per shard, not
+  once per test (the boot was most of an in-agent test; an attach on a running root costs
+  milliseconds). A test sharing it works on branches of its main and deletes them when it ends
+  (seon.agent-test/in-agent); a test whose subject is a root's life (boot, stop, kill, a
+  generation) or main itself starts a root of its own."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]}
-  [args] (shared-roots (.getCanonicalPath (java.io.File. ".")) (vec args)))
+  [args]
+  (let [k [(.getCanonicalPath (java.io.File. ".")) (vec args)]
+        ;; a start that is not run unless it is the one put: two callers at once share one root
+        d (delay (start-shared-root! (first k) (second k)))]
+    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))

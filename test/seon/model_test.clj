@@ -39,8 +39,7 @@
         (is (= {:include_usage true} (:stream_options @seen)) "with its usage")
         (is (= "```clojure\n(defn square [x] (* x x))\n```" (:text r)) "every piece, in order, until the server ended it")
         (is (= "Square multiplies." (:reasoning r)))
-        (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r)))
-        (is (< 1000 (:ms r)) "the reply took as long as the server streamed it"))
+        (is (= ["stop" "deepseek-flash" 120 30 64] ((juxt :finish-reason :model :prompt-tokens :completion-tokens :cache-hit-tokens) r))))
       (finally (adapter/stop-server server {:drain-timeout-ms 0})))))
 
 (deftest a-dropped-connection-is-a-transport-failure

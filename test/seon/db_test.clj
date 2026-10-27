@@ -558,8 +558,8 @@
   ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
   ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
-  ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms,
-  ;; test/seon/bench_commit.clj), so <= 32 KB per commit above its values. So n turns
+  ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms),
+  ;; so <= 32 KB per commit above its values. So n turns
   ;; committed one by one (an agent commits each turn) cost what the same turns cost in
   ;; one commit plus n paths. Measured 2026-10-22: a turn with an 8 KB context, committed
   ;; per turn, wrote ~15x the one commit, because every commit rewrites the whole tail leaf
