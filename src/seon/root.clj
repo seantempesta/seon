@@ -1184,33 +1184,20 @@
 (defn prove!
   "Ask the test service (seon.prove) to prove a branch at its head, the tests of namespaces names
   (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
-  proves it), or main (agent nil) in mode :judge. The run is keyed by the digest of what it reads
-  (seon.prove/read-digest): an agent's, its branch's program, as its turn's seon.agent/prove!
-  takes it, so a session's request and the turn's are one run; main's, the checkout's
-  seon.fx/inputs (its tests come from there; read through the :source effect with no dirs, which
-  this waits for) and main's program. A checkout with no inputs (no git HEAD) cannot key main's
-  run: :seon.test/prepare. A promise of the run's answer ({:key :ran :pass :fail :error :red
-  :reports ...}), the same run for every asker of that key."
+  proves it), or main (agent nil) in mode :judge. The run is keyed by the digest of what it reads,
+  its branch's program (seon.program/program-digest), as its turn's seon.agent/prove! takes it,
+  so a session's request and the turn's are one run, and a request for main and the run main's
+  own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
+  :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
                   [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]]}
   ([sys agent-id] (prove! sys agent-id #{}))
   ([sys agent-id names]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (let [db (pdb/head (:conn sys) b)
-          src (when-not agent-id @(call! sys {:op :fx :kind :source :req {:root (cfg/checkout) :dirs [] :binary-tree (str (cfg/checkout) "/target/seon.tree")}}))
-          dg (cond agent-id (seon.prove/read-digest nil (program/program-digest db))
-                   (contract/error? src) src
-                   (:inputs src) (seon.prove/read-digest (:inputs src) (program/program-digest db))
-                   :else (contract/error :seon.test/prepare #'seon.root/prove!
-                                         (str "main's run is keyed by the checkout's inputs, and " (cfg/checkout) " has none (no git HEAD)") {}))]
-      (if (contract/error? dg)
-        ;; a failed read of the checkout is recorded here, as import-source! records its own: the
-        ;; next good import closes it (seon.error/asked-tx)
-        (do (when (contract/error? src)
-              @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx db src :seon.root/source [])}}))
-            (doto (promise) (deliver dg)))
-        (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode (if agent-id :turn :judge) :digest dg}
-                     agent-id (assoc :agent agent-id) (seq names) (assoc :names names)))))
+    (let [db (pdb/head (:conn sys) b)]
+      (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode (if agent-id :turn :judge)
+                          :digest (program/program-digest db)}
+                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}

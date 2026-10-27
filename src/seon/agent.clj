@@ -14,7 +14,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.prove] [seon.fx :as fx] [seon.source :as source] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -620,28 +620,11 @@
 
 (declare handle!)
 
-(defn load-tests!
-  "Make the checkout's tests (the files under dirs, read here by the :source performer: the tree
-  is megabytes, more than a frame to root carries) part of this
-  agent's program: their namespaces loaded here and their forms recorded on its branch
-  (seon.source/import-tx), so test-plan finds them and their reach digests. What the test
-  service's prove agent does before it runs (seon.prove). Answers the files loaded, or the
-  :source effect's error."
-  {:malli/schema [:=> [:cat [:sequential :string]] [:or :int :map]]}
-  [dirs]
-  (let [r (fx/read-source {:req {:root (cfg/checkout) :dirs (vec dirs)}})]
-    (if (:value r)
-      (let [files (:value r)]
-        (doseq [[_ _ text] (source/load-order files)] (load-string text))
-        (transact! (source/import-tx (db) files))
-        (count files))
-      r)))
-
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
-  asks, the key the digest of what the run reads (seon.prove/read-digest of this branch's
-  program, as seon.root/prove! takes it of the same head): a session's request and this ask are one run; when it is
+  asks, the key the digest of what the run reads (seon.program/program-digest of this branch's
+  head, as seon.root/prove! takes it): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
   messages wait for the loop. :dead when root is gone (the process then ends). mode :turn (a
   turn's observation, the default) or :judge (root's judge at the run's end: its :judge request)."
@@ -650,7 +633,7 @@
   ([mode]
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (seon.prove/read-digest nil (program/program-digest (db))) :mode mode})) (lib/c-exit 0))
+    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode})) (lib/c-exit 0))
     (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
