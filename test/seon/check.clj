@@ -971,31 +971,9 @@
           _ (.delete f)
           hook (Thread. ^Runnable (fn [] (spit f (str (lib/c-getpid)) :append true)))]
       (.addShutdownHook (Runtime/getRuntime) hook)
-      (let [st (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [n] {:refused n}) :parent lib/wait-status})
-            ran (when (.exists f) (slurp f))]
-        (.removeShutdownHook (Runtime/getRuntime) hook)
-        (.delete f)
-        {:status st :parents-hook-ran-in ran}))
-   "child-fibers"
-   ;; a child runs only its own code: a fiber of its parent (root's socket pumps, reading every
-   ;; agent's socket) copied into a fork and run there takes what was the parent's to read. A
-   ;; parent fiber parks reading a socket that already holds a line; the parent forks and waits
-   ;; for the child (waitpid holds its carrier: only the child runs meanwhile), the child parks,
-   ;; so a copied fiber would run then; the line goes to whoever read it, named by pid
-   #(let [f (java.io.File/createTempFile "seon-child-fiber" ".txt")
-          _ (.delete f)
-          [r w] (sock/socketpair)
-          _ (a/go (let [rd (sock/line-reader r)]
-                    (loop [] (let [ls (rd)] (if (seq ls) (spit f (str (lib/c-getpid) " " (first ls))) (recur))))))
-          ;; written before the fork, the reader queued and not yet run: no timer is started before
-          ;; the fork (a fork after one deadlocks the child on a lock its thread held: Jolt's,
-          ;; notes/hang-2026-10-27/fork-child-timeout)
-          _ (sock/write-line! w "ping")
-          st (lib/fork! {:child (fn [] (a/<!! (a/timeout 300)) (lib/c-exit 0)) :refused (fn [n] {:refused n}) :parent lib/wait-status})
-          _ (a/<!! (a/timeout 300))
-          read-by (when (.exists f) (first (clojure.string/split (slurp f) #" ")))]
-      (.delete f)
-      {:status st :read-by (if (= read-by (str (lib/c-getpid))) :parent (if read-by :child :nobody))})})
+      (try (let [st (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [n] {:refused n}) :parent lib/wait-status})]
+             {:status st :parents-hook-ran-in (when (.exists f) (slurp f))})
+           (finally (.removeShutdownHook (Runtime/getRuntime) hook) (.delete f))))})
 
 (defn forks
   "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."

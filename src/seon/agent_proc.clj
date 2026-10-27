@@ -245,9 +245,9 @@
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :noise (:noise st)
                               ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
-                              :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st 0)})})
+                              :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
-                 :inflight {} :noise 0 :fx-kinds (:fx-kinds args)
+                 :inflight {} :noise 0 :fx-out 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
                  ::flow/out-ports {:to-writer (:to-writer args) :to-api (:back args) :events (:events args)}))
   ([st tr]

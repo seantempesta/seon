@@ -248,9 +248,10 @@
   once per test (the boot was most of an in-agent test; an attach on a running root costs
   milliseconds). A test sharing it works on branches of its main and deletes them when it ends
   (seon.agent-test/in-agent); a test whose subject is a root's life (boot, stop, kill, a
-  generation) or main itself starts a root of its own. A shard runs its tests one at a time."
+  generation) or main itself starts a root of its own."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]}
   [args]
-  (let [k [(.getCanonicalPath (java.io.File. ".")) (vec args)]]
-    (or (.get ^java.util.concurrent.ConcurrentHashMap shared-roots k)
-        (let [r (start-shared-root! (first k) (second k))] (.put ^java.util.concurrent.ConcurrentHashMap shared-roots k r) r))))
+  (let [k [(.getCanonicalPath (java.io.File. ".")) (vec args)]
+        ;; a start that is not run unless it is the one put: two callers at once share one root
+        d (delay (start-shared-root! (first k) (second k)))]
+    @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))

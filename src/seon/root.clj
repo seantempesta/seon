@@ -250,9 +250,7 @@
                       (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
                         (step/out! o [:fx/evidence :in]
                                    {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
-                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)
-                                          ;; every ask the api holds unanswered, rid -> [kind agent]: what the stuck agent may be owed
-                                          :asks (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))}
+                                          :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
                                     :prio 0 :dest {:stall-evidence tid :agent id}}))
                       st)))
       st)))
