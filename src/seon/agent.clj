@@ -944,6 +944,21 @@
       (alias 'str 'clojure.string))
     nsx))
 
+(defn state-summary
+  "The agent's process state m as the printer shows it (seon.render/summarized, the schema
+  :seon.agent/state): each key with its value when that is a scalar, else what it holds, a count
+  for a collection and its type for a host object (a database, a connection, a descriptor),
+  with the form that reads it whole. A bare (swap! seon.agent/state ...) answers the state: it
+  costs what the state names, not what it holds."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [m]
+  (into (array-map)
+        (for [[k v] m
+              :let [read (list 'get (list 'deref 'seon.agent/state) k)]]
+          [k (cond (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)) v
+                   (coll? v) {:count (count v) :read read}
+                   :else {:host (str (type v)) :read read})])))
+
 (defn- key-of
   "Agent id's key (seon.task/agent-key) in the boot of the root that forked it: main's
   :seon.root/boot, read from main (db: main as the agent forked, or main's head), never from the
@@ -1144,6 +1159,7 @@
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.turn's index!), never lists it here
                    index (assoc :index index)))
+     (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
      (mark! :state)
      (swap! state assoc :marks @marks)
      ;; a kept branch, resumed (root released its held task: seon.reconcile/hold-tx), takes
