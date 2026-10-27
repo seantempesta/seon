@@ -15,8 +15,8 @@
 # Each run writes under a directory of its own, target/prove/<run-id> (the run id: a timestamp and
 # the process's pid), or the DIR --out names; the run says where on its first line ("prove: run ID,
 # logs in DIR"), so two runs on one checkout never overwrite each other's shard files and logs, and
-# every reader takes the path from the run. The newest 20 runs are kept (target/prove/ms, each test's
-# last measured ms, is the checkout's, shared by the runs).
+# every reader takes the path from the run. The newest :seon.config.proofs/runs-kept runs are kept
+# (test-runner/prune-runs!; target/prove/ms, each test's last measured ms, is the checkout's, shared by the runs).
 #
 # bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
 # runs every test and step with no green at its digest, the ones that
@@ -60,8 +60,6 @@ WHAT=both
 (( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }
 if [[ -z $OUT ]]; then
   OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$
-  # the newest 20 runs stay (run ids sort by time); the rest are logs of runs nobody reads now
-  old=("$ROOT"/target/prove/[0-9]*(N/On)); (( $#old > 20 )) && rm -rf -- "${(@)old[21,-1]}"
 fi
 mkdir -p "$OUT"
 echo "prove: run ${OUT:t}, logs in $OUT"
