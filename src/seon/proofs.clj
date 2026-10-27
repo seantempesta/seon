@@ -245,15 +245,14 @@
 
 (defn results-tx
   "The facts that record ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes
-  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change; :kept, the
-  file it waited in while no root took it}): one
+  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change}): one
   :seon.proof/ result per digest that ran, with failures ({key [assertion]}, seon.proofs/failures),
   and the run's entity, holding its detail (what each test's functions cost: detail, one value).
   A flaky result (judged, not run) and an :unreported one (its namespace threw before it reported:
   no verdict of its own) record nothing, as no result with no :digest does; a reused one is never
   in ran. When nothing ran, nothing at all."
   {:malli/schema [:=> [:cat [:map [:id :string] [:tree {:optional true} :string] [:branch {:optional true} [:or :keyword :string]]
-                              [:t {:optional true} :int] [:change {:optional true} :map] [:kept {:optional true} :string] [:unread {:optional true} :string]]
+                              [:t {:optional true} :int] [:change {:optional true} :map]]
                        [:map-of :any [:map [:digest {:optional true} :string] [:test {:optional true} :qualified-symbol] [:step {:optional true} :string]
                                       [:pass {:optional true} nat-int?] [:fail {:optional true} nat-int?] [:error {:optional true} nat-int?]
                                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
@@ -267,13 +266,11 @@
                 (:change run) (assoc :seon.proof/change (:change run)))
         ran (into {} (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r))))) ran)
         dt (detail ran)]
-    ;; nothing ran (every key reused): nothing to write, but a run that could not read its results says so
-    (into (if (and (empty? ran) (not (:unread run))) [] [(cond-> {:seon.proof.run/id (:id run)}
+    ;; nothing ran (every key reused): nothing to write
+    (into (if (empty? ran) [] [(cond-> {:seon.proof.run/id (:id run)}
              (:tree run) (assoc :seon.proof.run/tree (:tree run))
              (:branch run) (assoc :seon.proof.run/branch (name (:branch run)))
              (:t run) (assoc :seon.proof.run/t (:t run))
-             (:kept run) (assoc :seon.proof.run/kept (:kept run))
-             (:unread run) (assoc :seon.proof.run/unread (:unread run))
              (seq dt) (assoc :seon.proof.run/detail dt))])
           (for [[k r] ran :let [dg (:digest r) t (:test r)]]
             (cond-> (assoc where :seon.proof/digest dg :seon.proof/status (status-of r)

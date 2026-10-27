@@ -213,11 +213,6 @@
          (try (edn/read-string {:default tagged-literal} out)
               (catch Exception e {:error :unreadable :message (ex-message e)})))))))
 
-(def ^:private no-root
-  "What ask-root answers when no root answered: bin/ask's (refused, closed, reset) and its own (no
-  port, no reply, a reply that does not read)."
-  #{:refused :eof :reset :no-results-port :no-answer :unreadable})
-
 (defn read-results
   "The results the root at port holds at digests (its :results op): {digest result}, or the typed
   :seon.proofs/unread naming why none came (:why, ask-root's: the root refused the connection, as
@@ -231,43 +226,16 @@
                       (str "no results read from the root at port " port ": " (pr-str (or (:error asked) (:seon.error/message asked))))
                       {:port port :why (or (:error asked) (:seon.error/type asked))}))))
 
-(defn- unrecorded?
-  "Did the standing root not record a :record request's answer r?"
-  [r] (boolean (or (:error r) (:seon.error/type r))))
-
-(defn- keep-unsent!
-  "Request m, which no root recorded, kept in :seon.config.proofs/unsent-dir for the next run to
-  send (send-unsent!), and said so. Answers the file's path."
-  [m why]
-  (let [path (str (config/value :seon.config.proofs/unsent-dir) "/" (random-uuid) ".edn")]
-    ;; the run names where it waited, so its facts say it was sent late (:seon.proof.run/kept)
-    (write! path (str (sedn/encode (assoc-in m [:run :kept] path)) "\n"))
-    (println (str "NOT RECORDED: the standing root (port " (config/value :seon.config.proofs/results-port) ") took no results ("
-                  (pr-str why) "); kept in " path " for the next run to send"))
-    path))
-
-(defn- send-unsent!
-  "Each request no root recorded (keep-unsent!'s files), sent to the standing root now; a file the
-  root recorded is removed, one it did not stays. Answers how many stay."
-  []
-  (let [dir (io/file (config/value :seon.config.proofs/unsent-dir))
-        fs (sort (filter #(str/ends-with? (.getName %) ".edn") (or (seq (.listFiles dir)) [])))]
-    (count (for [f fs :let [r (ask-root (edn/read-string (slurp f)))]
-                 :when (or (unrecorded? r) (not (.delete f)))]
-             f))))
-
-(defn- record-run!
-  "The results ran ({key result}) of run ({:id :tree}) and their failures sent to the standing
-  root's main (its :record op: seon.proofs/record!, the one writer), :main? when this checkout is
-  the main tree; kept to send later when no root answered (keep-unsent!). Answers the refused
-  ([{:key :message}]: the root answered an error, so they run again), empty when recorded or kept."
-  [run ran failures]
-  (let [m {:op :record :run run :ran ran :failures failures :main? (= (.getCanonicalPath (io/file (config/checkout))) (main-tree))}
-        r (ask-root m)]
+(defn record-run!
+  "The results ran ({key result}) of run ({:id :tree}) and their failures recorded on the main of the
+  root at port (:seon.config.proofs/results-port; its :record op: seon.proofs/record!, the one
+  writer), :main? when this checkout is the main tree. One path: recorded, or the run is red.
+  Answers the unrecorded ([{:key :message}]: no root answered, as while it restarts, or it refused
+  them), empty when recorded."
+  [port run ran failures]
+  (let [r (ask-root port {:op :record :run run :ran ran :failures failures :main? (= (.getCanonicalPath (io/file (config/checkout))) (main-tree))})]
     (cond
-      ;; no root took them: kept to send, not lost, so the run is not red for it
-      (no-root (:error r)) (do (keep-unsent! m (:error r)) [])
-      ;; the root refused them: red, and they run again
+      (:error r) [{:key :all :message (str "no root recorded them (port " port "): " (pr-str (:error r)))}]
       (:seon.error/type r) [{:key :all :message (:seon.error/message r)}]
       :else [])))
 
@@ -358,7 +326,7 @@
           ;; one request of the shard's results, their failures and each test's function costs
           unstored (when same?
                      (let [cost-of (proofs/costs {:reports @reports})]
-                       (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
+                       (record-run! (config/value :seon.config.proofs/results-port) {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
                                     (into {} (for [[t r] ran] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
                                     (proofs/failures {:reports @reports}))))
           red (count (remove proofs/green? (vals ran)))]
@@ -407,17 +375,13 @@
   [what all? out names]
   (if-let [bad (refused-names names)]
     (do (println (str "TEST FAILED: " bad)) 1)
-  (let [unsent (send-unsent!)
-        plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+  (let [plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
   (if-let [u (:unread plan)]
-    ;; a read that failed is not zero greens: nothing runs, and the failure is kept for the results
-    ;; root to record when it takes the kept requests (a run's :seon.proof.run/unread)
-    (do (keep-unsent! {:op :record :run {:id (str "unread " (random-uuid)) :unread (:seon.error/message u)} :ran {}} (:why u))
-        (println (str "TEST FAILED: " (:seon.error/message u) " (the standing root restarting refuses until it listens: bin/root status)"))
+    ;; a read that failed is not zero greens: nothing runs, and the run says why
+    (do (println (str "TEST FAILED: " (:seon.error/message u) " (the standing root restarting refuses until it listens: bin/root status)"))
         1)
   (let [t0 (profile/now-ns)
         dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
-        _ (when (pos? unsent) (println (str "prove: " unsent " runs' results still unsent in " (config/value :seon.config.proofs/unsent-dir))))
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} plan
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
@@ -486,7 +450,7 @@
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
-                     (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
+                     (record-run! (config/value :seon.config.proofs/results-port) {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
                                   (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
@@ -502,6 +466,4 @@
                    (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
-        "--store-steps" (store-steps! (first more))
-        ;; the results root's start (bin/root): what runs kept while no root took them, sent
-        "--send-unsent" (let [n (send-unsent!)] (println (str "unsent results: " n " still unsent in " (config/value :seon.config.proofs/unsent-dir))) (if (zero? n) 0 1))))))
+        "--store-steps" (store-steps! (first more))))))

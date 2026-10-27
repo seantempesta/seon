@@ -468,3 +468,10 @@
     (is (= :seon.proofs/unread (:seon.error/type r)) (pr-str r))
     (is (= :refused (:why r)))))
 
+
+(deftest a-run-no-root-recorded-is-red
+  ;; the test audit's cut 2 (root, 2026-10-27): a run whose results no root took stayed green while
+  ;; its request waited in a queue to be sent later. One path: recorded, or the run is red
+  (let [u (runner/record-run! 1 {:id "r" :tree "t"} {'a.b-test/t {:test 'a.b-test/t :digest "d-any" :pass 1 :fail 0 :error 0}} {})]
+    (is (seq u) "unrecorded")
+    (is (re-find #"no root recorded them \(port 1\): :refused" (:message (first u))) (pr-str u))))
