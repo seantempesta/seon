@@ -66,21 +66,21 @@
 
 (defn write-back!
   "Write the source files of the merged runs ids (run ids) onto the merges branch again: those a
-  failed write-back left :seon.run/unwritten (a reconciler :committed that the git effect
-  refused), read from main as it is now and committed in one :git effect like the reconciler's.
-  The answer is recorded by seon.reconcile/commit-tx: the sha on each run, which clears its
-  unwritten files and the error, or the error and the files again. A run with none unwritten is
+  failed write-back left (a reconciler :committed that the git effect refused: the
+  :seon.git/commit-failed error on the run, naming them), read from main as it is now and committed in one :git effect like the reconciler's.
+  The answer is recorded by seon.reconcile/commit-tx: the sha on each run, which clears the error from
+  each run, or the error and the files again. A run with no lost write-back is
   answered :seon.root/nothing-lost under :not-lost and left out. Answers {:written ids :sha} or the
   git effect's error, with :not-lost when any."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.run/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)
         runs (into {} (for [id ids] [id (task/run db id)]))
-        lost (filterv #(seq (:seon.run/unwritten (runs %))) ids)
+        lost (filterv #(some? (reconcile/lost-write-back (runs %))) ids)
         not-lost (vec (for [id ids :when (not-any? #{id} lost)]
                         (contract/error :seon.root/nothing-lost #'my.root/write-back!
                                         (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
-        paths (vec (sort (distinct (mapcat #(:seon.run/unwritten (runs %)) lost))))
+        paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (runs %))) lost))))
         root (config/value :seon.config.source/root)
         files (source/files db paths)
         members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))

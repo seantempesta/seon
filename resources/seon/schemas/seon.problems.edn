@@ -65,6 +65,9 @@
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
+ ;; a merged run's write-back the git effect refused (seon.reconcile/commit-tx): held in the run's :seon.run/error
+ ;; with the source files no commit holds yet, until one does (my.root/write-back!)
+ :seon.git/commit-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.git/commit-failed]] [:seon.git/files [:vector :string]]]]
  ;; a cost proof the cap (:seon.config.proofs/cost-max-n) leaves fewer than seon.cost/min-points sizes: refused, measured nothing
  :seon.cost/too-few-sizes [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/too-few-sizes]] [:of :qualified-symbol]
                                                   [:sizes [:vector pos-int?]] [:cap pos-int?]]]

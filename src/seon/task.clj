@@ -453,7 +453,6 @@
       (:seon.run/deferred a) (update :seon.run/deferred set)
       (:seon.run/deferred-results a) (update :seon.run/deferred-results #(into {} (map (juxt :seon.proof/test :seon.proof/status)) %))
       (:seon.run/caused a) (update :seon.run/caused set)
-      (:seon.run/unwritten a) (update :seon.run/unwritten set)
       conflicts (assoc :seon.run/conflicts
                        (vec (sort-by (comp str :key) (map pm/conflict-value conflicts)))))))
 

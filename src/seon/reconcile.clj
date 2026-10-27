@@ -495,6 +495,14 @@
   (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %)))
                      (disj (downstream idx #{id}) id)))))
 
+(defn lost-write-back
+  "The :seon.git/commit-failed error a merged run a holds (its write-back was refused and no commit
+  has held its files since), or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [a]
+  (let [e (:seon.run/error a)]
+    (when (and (= :merged (:seon.run/status a)) (= :seon.git/commit-failed (:seon.error/type e))) e)))
+
 (defn root-causes
   "Why released work is not done, as root causes: each task held for root with a failure
   (a run refused, its agent dead, its merge refused, or marked failed: its reason),
@@ -502,7 +510,7 @@
   too many live agents), each task whose latest run parked its session (its outcome: it waits
   for a message, which wakes it), and each other task not released (cancelled, held) that released
   work needs, with the released tasks it blocks, and each merged run whose write-back failed (its
-  :seon.run/unwritten files: no commit holds them). Read once at quiescence: one pass over the
+  :seon.git/commit-failed error: no commit holds its files). Read once at quiescence: one pass over the
   tasks and runs."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
   [idx]
@@ -524,30 +532,30 @@
            (:run f) (assoc :run (:run f))
            stopped (assoc :run (:seon.run/id stopped))))
                ;; a merged run whose source files no commit holds: its write-back failed (my.root/write-back!)
-               (for [[aid a] (sort-by key (:runs idx)) :when (and (= :merged (:seon.run/status a)) (seq (:seon.run/unwritten a)))]
+               (for [[aid a] (sort-by key (:runs idx)) :let [e (lost-write-back a)] :when e]
                  {:task (:seon.run/task a) :run aid :blocks []
-                  :cause (str "write-back lost: " (:seon.run/commit-error a) " [" (str/join ", " (sort (:seon.run/unwritten a))) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
+                  :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
 
 (defn commit-tx
   "Main's write of the :git effect's answer r for the runs of members, which wrote paths: a sha is
-  :seon.run/commit on each (and clears what an earlier failure left: its :seon.run/unwritten and
-  the error that named it); a failure is :seon.run/commit-error with the paths still
-  :seon.run/unwritten, which root-causes names until a commit holds them, and its :effect row
-  (seon.error/asked-tx), closed by the next commit's sha. Nil when r is neither. The reconciler's
-  write-back and my.root/write-back! write it alike."
+  :seon.run/commit on each, and clears the :seon.git/commit-failed error an earlier failure left on
+  it (beside any note of forms that name no file, which stays); a failure is that error, with
+  the paths no commit holds, as the run's :seon.run/error (root-causes names it until a commit holds
+  them), and its :effect row (seon.error/asked-tx), closed by the next commit's sha. Nil when r is
+  neither. The reconciler's write-back and my.root/write-back! write it alike."
   {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :map] [:sequential :string]] [:maybe [:vector :any]]]}
   [db r members paths]
   (let [sha (get-in r [:value :sha])
-        m (cond sha {:seon.run/commit sha}
-                (contract/error? r) {:seon.run/commit-error (:seon.error/message r) :seon.run/unwritten (set paths)})]
-    (when m
+        failed (when (contract/error? r)
+                 (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx (:seon.error/message r) {:seon.git/files (vec (sort paths))}))]
+    (when (or sha failed)
       (err/asked-tx db r :seon.run/commit
                     (vec (mapcat (fn [{:keys [run]}]
-                                   (let [a (task/run db run) lost (:seon.run/unwritten a)]
-                                     (cond-> [(assoc m :seon.run/id run)]
-                                       (and sha (seq lost))
-                                       (into (cons [:db/retract [:seon.run/id run] :seon.run/commit-error (:seon.run/commit-error a)]
-                                                   (for [p lost] [:db/retract [:seon.run/id run] :seon.run/unwritten p]))))))
+                                   (if sha
+                                     (cons {:seon.run/id run :seon.run/commit sha}
+                                           (when-let [e (:seon.run/error (task/run db run))]
+                                             (when (= :seon.git/commit-failed (:seon.error/type e)) [[:db/retract [:seon.run/id run] :seon.run/error e]])))
+                                     [{:seon.run/id run :seon.run/error failed}]))
                                  members))))))
 
 (defn- unfiled-error

@@ -262,9 +262,6 @@
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
  :seon.run/commit :string
  :seon.run/commit-error :string
- ;; the source files of a merged run whose write-back failed, until a commit holds them (seon.reconcile
- ;; :committed; my.root/write-back! writes them again): a lost write-back is a root cause
- :seon.run/unwritten [:set :string]
  :seon.run/basis-t :int
  ;; the task's accumulated plan as the run began (seon.task/accumulate): a design step is
  ;; done only when the plan differs from it (seon.reconcile/done-explain :no-design)
@@ -314,8 +311,7 @@
                              [:seon.run/gate-unread {:optional true} :seon.run/gate-unread]
                              [:seon.run/caused {:optional true} :seon.run/caused]
                              [:seon.run/commit {:optional true} :seon.run/commit]
-                             [:seon.run/commit-error {:optional true} :seon.run/commit-error]
-                             [:seon.run/unwritten {:optional true} :seon.run/unwritten]]
+                             [:seon.run/commit-error {:optional true} :seon.run/commit-error]]
  :seon.proof/proof-fact [:map {:seon.db/attributes true} [:seon.proof/test :seon.proof/test] [:seon.proof/status :seon.proof/status]]
  ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]

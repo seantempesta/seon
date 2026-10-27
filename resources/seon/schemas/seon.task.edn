@@ -73,8 +73,7 @@
                         [:seon.run/changed {:optional true} :seon.run/changed]
                         [:seon.run/deferred {:optional true} [:set :qualified-symbol]]
                         [:seon.run/deferred-results {:optional true} :seon.proof/results]
-                        [:seon.run/caused {:optional true} [:set :string]]
-                        [:seon.run/unwritten {:optional true} [:set :string]]]
+                        [:seon.run/caused {:optional true} [:set :string]]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
  ;; a released task not done at quiescence: a root cause (held for root with its failure, a
