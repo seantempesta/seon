@@ -237,17 +237,22 @@
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
   with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched). bin/tree computes the same, which bin/build records for the tree it builds
-  (target/seon.tree), so a root can tell whether its binary is built from its source."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [root]
-  (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
-        env {"GIT_INDEX_FILE" (.getPath idx)}]
-    (try
-      (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
-      (git! env root ["add" "-A"] nil)
-      (git! env root ["write-tree"] nil)
-      (finally (.delete idx)))))
+  repository's index untouched), less the top-level paths excludes names (default
+  :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
+  it moves nothing). bin/tree computes the same, which bin/build records for the tree it
+  builds (target/seon.tree), so a root can tell whether its binary is built from its source."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string [:vector :string]] :string]]}
+  ([root] (tree-id root (cfg/value :seon.config.source/tree-excludes)))
+  ([root excludes]
+   (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
+         env {"GIT_INDEX_FILE" (.getPath idx)}
+         top (map #(str ":(top)" %) excludes)]
+     (try
+       (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
+       (git! env root ["add" "-A"] nil)
+       (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
+       (git! env root ["write-tree"] nil)
+       (finally (.delete idx))))))
 
 (defn base-commit
   "The commit the checkout at root's health is read against (health is what a branch caused,
@@ -299,7 +304,7 @@
   (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
     (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
       head
-      (str head "+" (tree-id dir)))))
+      (str head "+" (tree-id dir [])))))
 
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test

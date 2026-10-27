@@ -311,6 +311,14 @@
  ;; 5's big-map request, whose related functions were test/ helpers). At the bound: an empty
  ;; vector makes nothing the program's (no law site, no related function but the agent's own).
  :seon.config.source/program-dirs ["src"]
+ ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
+ ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a
+ ;; commit to them moves no digest and rebuilds nothing. notes/ is working papers (AGENTS.md
+ ;; section 7), and every merge appends its merge-log line there. A path not named is in the
+ ;; tree: a new directory reruns what reads the tree, never reuses a stale green. Provenance:
+ ;; root, 2026-10-27 (286 of 919 tests rerun after one merge-log line). At the bound: an empty
+ ;; vector puts every file in the tree id.
+ :seon.config.source/tree-excludes ["notes"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of Seon's own: an agent (in-agent), a fork
  ;; (lib/fork!), the binary or a root booted for it (binary-sh, through which ts/start-root!
