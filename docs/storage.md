@@ -12,7 +12,7 @@ A db value reads its index nodes lazily from its store's LMDB env, and the last 
 
 ## The map is address space
 
-LMDB's map (`:seon.config.store/lmdb-map-bytes`, 64 GiB) is address space only: an open or a fork costs the same at 1 or 64 GiB, and the file grows only as it is used. Anything that walks a map page by page pays for its size, under the file's one VM-object lock that every process mapping the store shares: the memory probe once did (`VM_REGION_EXTENDED_INFO` on every region, ~1.5 ms per GiB), and 100 agents took 18 s to be ready instead of 0.65 s. `native/probe.c` now makes one `task_info` call, the kernel's ledger of the process's own memory (`seon.lib/mp-probe`), so its cost does not grow with what is mapped (`seon.lib-test/the-memory-probe-costs-what-the-process-holds-not-what-it-maps`). Not this: a smaller map; at 1 GiB the kept store hit Datahike's fatal-commit-error.
+LMDB's map (`:seon.config.store/lmdb-map-bytes`, 64 GiB) is address space only: an open or a fork costs the same at 1 or 64 GiB, and the file grows only as it is used. Anything that walks a map page by page pays for its size, under the file's one VM-object lock that every process mapping the store shares: the memory probe once did (`VM_REGION_EXTENDED_INFO` on every region, ~1.5 ms per GiB), and 100 agents took 18 s to be ready instead of 0.65 s. `native/probe.c` now makes one `task_info` call, the kernel's ledger of the process's own memory (`seon.lib/mp-probe`), so its cost does not grow with what is mapped (`seon.lib-test/the-memory-probe-answers-what-the-process-holds`). Not this: a smaller map; at 1 GiB the kept store hit Datahike's fatal-commit-error.
 
 ## The proof: what a commit costs
 
