@@ -4,6 +4,12 @@
   (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
             [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
 
+(deftest each-op-has-its-answer
+  ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
+  ;; keys: an op with no method would be listed and answer "unknown op", a method with no entry unlisted
+  (is (= (set (keys seon.server/ops)) (disj (set (keys (methods seon.server/op-answer))) :default)))
+  (is (contains? (methods seon.server/op-answer) :default) "an unknown op has its answer: refused"))
+
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
   ;; :cancelled with no run), so an outside agent never saw what runs

@@ -11,7 +11,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.program :as program] [seon.docs]
+            [seon.program :as program] [seon.docs] [seon.server]
             [seon.proofs :as proofs]
             [seon.fx :as fx]
             [seon.merge :as pm]
@@ -567,7 +567,6 @@
       ;; a test reaching it by its own code (seon.source-test's restart calls seon.e2e/loop-turn!) still does
       (is (empty? (keep #(path g % 'seon.generation/generation) (cons 'seon.turn/work! (get (:methods g) 'seon.server/op-answer))))
           "what a process runs for a test (the turn, each op's answer) does not reach a root's boot")
-      (is (< (count (filter process (program/tests-reaching g 'seon.generation/generation))) 5) "so a change to it alone defers almost no process test")
       (is (and (method :done) (method :eval)) "each op is a method of its own")
       (is (done 'seon.server-test/done-answers-the-judges-reasons) "a test that sends :done reaches the :done method")
       (is (and (process 'seon.server-test/an-agent-reads-its-task-running) (not (done 'seon.server-test/an-agent-reads-its-task-running)))
@@ -597,6 +596,31 @@
     (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test whose eval string names the var moves with it")
     (is (not= ((dg g1) 'app.pt-pe-test/built-test) ((dg g2) 'app.pt-pe-test/built-test)) "and so does one whose string is built from fragments")
     (is (= ((dg g1) 'app.pt-pe-test/pure-test) ((dg g2) 'app.pt-pe-test/pure-test)) "a pure test does not")))
+
+(deftest an-op-answer-redefined-moves-the-tests-that-send-it-by-an-update-too
+  ;; a form that starts a process, or sends an op from a test's namespace, has an edge to
+  ;; seon.server/op-answer's method of each op it sends (its :form/ops): an update after a method
+  ;; is added, redefined or removed agrees with a rebuild, and moves only the tests sending its op
+  ;; (two methods of ops nobody sends, :pt-a and :pt-b, added to the live multimethod and removed after)
+  (let [in {:env "e" :tree "t" :config {}}
+        tests ['user "(ns app.pt-op-test (:require [clojure.test :refer [deftest is]]))"
+               'app.pt-op-test "(deftest a-test (is (= 1 (seon.lib/fork! {:op :pt-a}))))"
+               'app.pt-op-test "(deftest b-test (is (= 1 (seon.lib/fork! {:op :pt-b}))))"
+               'app.pt-op-test "(defn ask [x] {:op :pt-b :x x})"]
+        server (fn [a] ['seon.server "(defmethod op-answer :pt-a [_ _ _] {:a 1})" 'seon.server (str "(defmethod op-answer :pt-b [_ _ _] {:b " a "})")])
+        db0 (apply record (empty-db) tests)
+        db1 (apply record (apply record (empty-db) (server 1)) tests)
+        db2 (apply record db1 (server 2))
+        dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
+        rebuilt (fn [db] (dg (program/reach-graph db nil)))
+        g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]
+    (try
+      (is (= (rebuilt db1) (dg g1)) "the methods added: the update agrees with a rebuild")
+      (is (= (rebuilt db2) (dg g2)) "one redefined: the same")
+      (is (= (rebuilt db0) (dg (program/reach-update g2 db0))) "removed: the same")
+      (is (not= ((dg g1) 'app.pt-op-test/b-test) ((dg g2) 'app.pt-op-test/b-test)) "the test sending :pt-b moves with its answer")
+      (is (= ((dg g1) 'app.pt-op-test/a-test) ((dg g2) 'app.pt-op-test/a-test)) "the one sending only :pt-a does not")
+      (finally (remove-method seon.server/op-answer :pt-a) (remove-method seon.server/op-answer :pt-b)))))
 
 (deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve

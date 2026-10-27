@@ -264,8 +264,8 @@
 
 (defmethod op-answer :results [sys _ req]
   (let [db @(:conn sys)]
-                                        (cond-> {:results (proofs/stored-results db (vec (:digests req)))}
-                                          (seq (:tests req)) (assoc :ms (proofs/last-ms db (mapv symbol (:tests req)))))))
+    (cond-> {:results (proofs/stored-results db (vec (:digests req)))}
+      (seq (:tests req)) (assoc :ms (proofs/last-ms db (mapv symbol (:tests req)))))))
 
 (defmethod op-answer :done [sys ag _]
   (if-let [{:keys [run task env]} (run-of sys ag)]

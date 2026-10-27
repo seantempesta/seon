@@ -1255,7 +1255,9 @@
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
         holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
-        starters (when (some (into V M) entry) (concat proc bin))
+        ;; an entry var or method changed: every form whose edges go to them (one that starts a
+        ;; process, or sends an op from a test's namespace) is re-edged
+        starters (when (some (into V M) entry) (concat proc bin (filter #(seq (:ops (rows %))) (keys rows))))
         dirty (-> (set (map :id added))
                   (into (mapcat #(get refd %)) V)
                   (into (keep var-form) (concat V M P))
