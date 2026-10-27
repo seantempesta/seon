@@ -232,7 +232,7 @@
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} true #{})))
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))
     (testing "the run fact lists what was skipped"
-      (let [tx (prove/result-tx {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :deferred '[a.p-test/proc]})]
+      (let [tx (prove/result-tx nil {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :deferred '[a.p-test/proc]})]
         (is (= '[a.p-test/proc] (:seon.proof.run/skipped-process (first tx))))))))
 
 (deftest a-red-on-an-agents-branch-is-not-a-problem-of-main
