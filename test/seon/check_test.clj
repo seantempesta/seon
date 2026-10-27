@@ -283,6 +283,51 @@
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+(deftest the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
+  ;; task seon.fx/inputs-hash-only-what-changed: tree-id starts from the checkout's own index, whose stat cache
+  ;; skips every file that did not move (0.2 s against 1.1 s on this repository), and answers the tree a fresh index
+  ;; of HEAD plus `add -A` would: for a clean tree, an edit, a new file, a deleted file, a staged and an ignored one;
+  ;; the repository's index is not touched
+  (let [dir (str (System/getProperty "user.dir") "/target/runs/tree-id-test-" (random-uuid))
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
+        write! (fn [f t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) t))
+        fresh (fn [] (let [idx (str dir "/.git/ref-index") run #(apply clojure.java.shell/sh "env" (str "GIT_INDEX_FILE=" idx) "git" "-C" dir %&)]
+                       (try (run "read-tree" "HEAD") (run "add" "-A") (run "rm" "-r" "--cached" "-q" "--ignore-unmatch" "--" ":(top)notes")
+                            (str/trim (:out (run "write-tree")))
+                            (finally (.delete (java.io.File. idx))))))
+        index-bytes (fn [] (vec (java.nio.file.Files/readAllBytes (.toPath (java.io.File. (str dir "/.git/index"))))))]
+    (try
+      (.mkdirs (java.io.File. dir))
+      (git "init" "-q" "-b" "main")
+      (write! ".gitignore" "ignored/\n") (write! "src/a.clj" "(ns a)") (write! "src/b.clj" "(ns b)") (write! "notes/n.md" "n")
+      (git "add" "-A") (git "commit" "-qm" "first")
+      (let [idx0 (index-bytes)]
+        (is (= (fresh) (seon.fx/tree-id dir)) "clean")
+        (write! "src/a.clj" "(ns a) ;; edited with a longer text")
+        (is (= (fresh) (seon.fx/tree-id dir)) "an edit")
+        (write! "src/c.clj" "(ns c)")
+        (is (= (fresh) (seon.fx/tree-id dir)) "a new file")
+        (.delete (java.io.File. (str dir "/src/b.clj")))
+        (is (= (fresh) (seon.fx/tree-id dir)) "a deleted file")
+        (write! "ignored/x" "x") (write! "notes/m.md" "m")
+        (is (= (fresh) (seon.fx/tree-id dir)) "an ignored file and a note move nothing")
+        (git "add" "src/c.clj") (write! "src/c.clj" "(ns c) ;; staged, then changed again")
+        (is (= (fresh) (seon.fx/tree-id dir)) "a staged file changed again: the file on disk")
+        (git "reset" "-q" "--mixed")
+        (testing "index flags and index-only state read HEAD's tree afresh, never the copy's"
+          (git "add" "-A") (git "commit" "-qm" "second")
+          (git "update-index" "--assume-unchanged" "src/a.clj") (write! "src/a.clj" "(ns a) ;; changed behind assume-unchanged")
+          (is (= (fresh) (seon.fx/tree-id dir)) "an edit of an assume-unchanged file")
+          (git "update-index" "--no-assume-unchanged" "src/a.clj")
+          (git "update-index" "--skip-worktree" "src/c.clj") (.delete (java.io.File. (str dir "/src/c.clj")))
+          (is (= (fresh) (seon.fx/tree-id dir)) "a deleted skip-worktree file")
+          (git "update-index" "--no-skip-worktree" "src/c.clj")
+          (git "add" "-f" "ignored/x")
+          (is (= (fresh) (seon.fx/tree-id dir)) "a forced-added ignored file"))
+        (is (not= idx0 (index-bytes)) "(the test's own git commands moved the index)")
+        (let [before (index-bytes)] (seon.fx/tree-id dir) (is (= before (index-bytes)) "tree-id leaves the repository's index as it was")))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
 (deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
   ;; task seon.fx/the-tree-id-is-what-is-read: notes/ is no input (every merge appends its log line
   ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
@@ -345,29 +390,25 @@
     (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
-  ;; bin/prove --merge's verdict comes from prove's, contracts' and smoke's exit statuses alone,
-  ;; names each red from their logs, and appends its line to the merge log itself (so a line
-  ;; cannot say green over a red exit); bin/prove --merge-verdict runs that part alone
+  ;; bin/prove --merge's verdict comes from prove's exit status alone (contracts and smoke are steps of
+  ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and appends
+  ;; its line to the merge log itself (so a line cannot say green over a red exit);
+  ;; bin/prove --merge-verdict runs that part alone
   (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
         log (str dir "/merge-log.md")
-        run (fn [st cst sst] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) (str cst) (str sst) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
+        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"
                                       "RED seon.x-test/a-red {:pass 1, :fail 1, :error 0}\nPROVE FAILED\n"))
-    (spit (str dir "/contracts.log") "CONTRACTS OK\n")
-    (spit (str dir "/smoke.log") "SMOKE OK\n")
     (spit log "x one earlier line, 195 process keys left out\n")
     (try
-      (let [r (run 1 0 0) line (last (str/split-lines (slurp log)))]
+      (let [r (run 1) line (last (str/split-lines (slurp log)))]
         (is (= 1 (:exit r)) (:out r))
         (is (str/ends-with? (str/trim (:out r)) "MERGE FAILED"))
         (is (str/includes? line "MERGE FAILED; prove FAILED (exit 1)") line)
         (is (str/includes? line "reds: RED seon.x-test/a-red") line)
         (is (str/includes? line "main's last line: 195") line))
-      (let [r (run 0 0 2) line (last (str/split-lines (slurp log)))]
-        (is (= 1 (:exit r)) "a red smoke is a failed merge though prove is green")
-        (is (str/includes? line "smoke FAILED (exit 2)") line))
-      (let [r (run 0 0 0) line (last (str/split-lines (slurp log)))]
+      (let [r (run 0) line (last (str/split-lines (slurp log)))]
         (is (zero? (:exit r)))
         (is (str/includes? line "MERGE OK") line))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
