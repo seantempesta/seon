@@ -75,33 +75,32 @@
   so a refused spawn writes nothing and the reconciler never sees a release with no run
   (it would spawn a second agent for it). Answers {:agent :task :run}. A task an outside run
   already works (an attach before, or a context read of the task, which attaches) answers that
-  run, :attached its start-ms: the caller has the branch, and shares it with whoever attached it.
-  A branch another live run holds is refused, naming its agent, the task it works and its run.
-  (THE PLAN 0.7, 2026-10-27: a session's first attach was refused \"held by live agent :a7\",
-  an agent another session's context read had attached.)"
+  run, :shared true: the caller has the branch, with whoever attached it, and that one's
+  seon_done ends it for both. A branch another live agent holds is spawn!'s refusal, which names
+  the agent, the task it works and its run."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
   [sys id]
   (let [db @(:conn sys)
         t (task/task db id)
-        env (when t (assoc (r/desired-env t) :model "outside"))
-        running (when t (task/running db))
-        own (some #(when (and (= id (:seon.run/task %)) (= "outside" (get-in % [:seon.run/env :model]))) %) running)
-        holder (some #(when (= (:branch env) (get-in % [:seon.run/env :branch])) %) running)]
+        own (when t (some #(when (and (= id (:seon.run/task %)) (= "outside" (get-in % [:seon.run/env :model]))) %) (task/running db)))]
     (cond
       (not t) (refused (str "no task " id))
-      own {:agent (:seon.run/agent own) :task id :run (:seon.run/id own) :attached (:seon.run/start-ms own)}
-      holder (refused (str "task " id "'s branch " (:branch env) " is held by live agent " (:seon.run/agent holder)
-                           " working " (:seon.run/task holder) " (run " (:seon.run/id holder) ", model "
-                           (get-in holder [:seon.run/env :model]) "): its seon_done or an end frees it"))
+      own {:agent (:seon.run/agent own) :task id :run (:seon.run/id own) :shared true}
       :else
-      (let [aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
+      (let [env (assoc (r/desired-env t) :model "outside")
+            aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
             ;; the session's agent continues (design agent-loop section 1)
             k (task/session-key db id)
-            ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
-        @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
-                                            (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
-                                                                   (:plan (:seon.task/accumulated t)) k))))
-        {:agent ag :task id :run aid}))))
+            ;; spawn!'s request, its answer taken as a value: a refusal (a branch another agent holds,
+            ;; named with its task and run) is the attach's answer, never a server defect
+            r @(c/call! sys (c/request 'spawn! nil (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)) nil))
+            ag (:id r)]
+        (if-not ag
+          r
+          (do @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
+                                                  (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
+                                                                         (:plan (:seon.task/accumulated t)) k))))
+              {:agent ag :task id :run aid}))))))
 
 (defn- run-of
   "The live run agent ag works, from main: {:run :task :env}, or nil."

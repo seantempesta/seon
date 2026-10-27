@@ -374,8 +374,11 @@
                                                      aid))
                                      (get-in st [:view :agents])))]
                (cond
-                 holder (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder)
-                                              {:branch (:branch opts) :agent holder}))
+                 holder (let [{:keys [task run]} (get-in st [:view :agents holder])]
+                          (reply! st o p (refused 'seon.root/spawn! (str "branch " (:branch opts) " is held by live agent " holder
+                                                                       (when task (str " working " task)) (when run (str " (run " run ")"))
+                                                                       ": its seon_done or an end frees it")
+                                                  (cond-> {:branch (:branch opts) :agent holder} task (assoc :task task) run (assoc :run run)))))
                  ;; no server to fork it: refused before an agent proc and its socket are made (a
                  ;; socket the lost server closes would end that agent first, as a death)
                  (= :lost (get-in st [:view :fork-server :status])) (reply! st o p (fs/lost))

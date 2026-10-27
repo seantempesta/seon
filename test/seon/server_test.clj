@@ -254,9 +254,11 @@
                                  :seon.task/proofs #{'demo-test/v} :seon.task/branch (keyword (str "task-" ns "-t"))}])})]
     (is (string? (:context ctx)) "the context read attached an agent to u")
     (is (keyword? (:agent attached)) (pr-str attached))
-    (is (= (:agent attached) (:agent again)) "attaching again answers the same agent")
-    (is (contract/error? other) "v's branch is t's, which t's agent holds: refused")
-    (is (re-find #"held by .*:a\d+.* working .*/t" (str (:seon.error/message other))) (pr-str other))))
+    (is (true? (:shared attached)) "the context read's agent, shared: its seon_done ends it for both")
+    (is (= [(:agent attached) (:task attached)] [(:agent again) (:task again)]) "attaching again answers the same agent and task")
+    (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
+    (is (= :seon.root/refused (:seon.error/type other)) (pr-str other))
+    (is (re-find #"held by live agent :a\d+ working t[0-9a-f]+/t \(run t[0-9a-f]+/t#1\)" (str (:seon.error/message other))) (pr-str other))))
 
 (deftest a-prove-never-ends-the-agent-it-proves
   ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
