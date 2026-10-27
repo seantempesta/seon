@@ -6,7 +6,7 @@ What is in flight, what the owner has not yet ruled, and the steps from here to 
 
 Pins (docs/forks.md): Chez fa6a4c73; Jolt 07d9655d; Datahike cc614f4e; LMDB 15420ce; http-client e866277d. Paid model runs: $30 approved by the owner, spent only after a free audit of each request's context finds none of its known problems; two audits ran and neither was clean, so nothing is spent. The sessions that did the night's work have ended; their state is in the task files, notes/root-handoff-2026-10-27.md and notes/session-state-2026-10-27/.
 
-**Where it stands.** Main is green under `bin/prove --merge` (every test and check step the change reaches, process tests included; nothing left out), with one known intermittent red, merge-cost's three-way proof (a 96-byte runtime variance; task held), which the flaky rule now marks :flaky. Main goes first through one lock. After a merge, restart root with `bin/update` (never `bin/root stop/start`) until jolt/the-source-tree-follows-main merges: the standing root imports main's program from .worktrees/merges, which only bin/update moves.
+**Where it stands.** Main is green under `bin/prove --merge` (MERGE OK at c2336a6a75: every test and check step, process tests included; nothing left out), with one known intermittent red, merge-cost's three-way proof (a 96-byte runtime variance; task held), which the flaky rule now marks :flaky. Main goes first through one lock. After a merge, restart root with `bin/update` (never `bin/root stop/start`) until jolt/the-source-tree-follows-main merges: the standing root imports main's program from .worktrees/merges, which only bin/update moves.
 
 **The direction.** In this order:
 1. **Use what's built, not only test it** (owner, 2026-10-27: "I want to actually use all the stuff we've been building so make sure it's all working and don't just report success because some tests passed"): main's program current on the standing root; root's and an agent's page and debug panel live in the browser (3b-root); an outside agent attached to a request and worked by hand, every wrong or confusing answer fixed.
@@ -21,7 +21,6 @@ Every Claude session that worked last night has ended; these are their branches,
 |---|---|---|
 | jolt/the-source-tree-follows-main | approved, not built | e2e proof red first (task seon.fx/the-source-tree-follows-main) |
 | jolt/every-page-is-its-parts | 3b-root in progress | finish per task seon.render/every-page-is-its-parts; browser-check every page |
-| (task my.agent/tests-reaching-finds-the-tests-a-change-selects) | tests-reaching merged | swap (my.agent/callers 'ns/f) for (my.agent/tests-reaching 'ns/f) in the :work and :whole texts |
 | (task seon.root/root-repairs-a-failed-merge-from-its-repl) | merged as a task | stage the four failures on a worktree root and write the playbook into docs/merging.md |
 | jolt/the-request-is-the-page-and-its-diffs | build 4, proofs red | after 3b-root |
 
