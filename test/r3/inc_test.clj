@@ -36,10 +36,11 @@
 
 (defn- acyclic? [db] (some? (try (r/actions (r/index db)) (catch Throwable _ nil))))
 
-(deftest incremental-equals-full
-  ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds)
-  (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
-    (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
+(defn- equals-full
+  "A random history from seed, 150 commits: after each, the incremental reconciler's actions
+  against the oracle's."
+  [seed]
+  (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
                     ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
           _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.merge/max-running 1}]})]
       (loop [k 0 idx (r/index @conn) bad 0]
@@ -64,4 +65,15 @@
                   (println :seed seed :k k :tx (pr-str tx))
                   (println :full (pr-str (remove (set incr) full)))
                   (println :inc (pr-str (remove (set full) incr))))
-                (recur (inc k) idx' (if ok bad (inc bad)))))))))))))
+                (recur (inc k) idx' (if ok bad (inc bad))))))))))))
+
+(deftest incremental-equals-full
+  ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds)
+  (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
+    (equals-full seed)))
+
+(deftest a-refused-work-run-gets-its-verdict-in-both
+  ;; the seed whose history first held what slice 6' changed: run r3/p26#1 ended :green with a
+  ;; regression, which the reconciler sends back to its session (:verdict) and the oracle, written
+  ;; before, held for root; 23 of its 140 commits disagreed
+  (equals-full 913731333918154371))

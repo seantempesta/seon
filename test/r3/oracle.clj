@@ -180,7 +180,16 @@
                      (cond
                        (and (empty? rs) merge?) {:op :merge :run aid :task id}
                        (empty? rs) {:op :accept :run aid :task id}
-                       ;; a refused run: its task is held for root (no automatic retry)
+                       ;; it parked (waiting, or its turns spent): its session waits, never a hold (owner, 2026-10-25,
+                       ;; docs/decisions.md#every-agent-parks-resume-replays-pure-forms-and-asks-for-effects)
+                       (and (#{:waiting :cap} (:seon.run/outcome a)) (not= :merge (:seon.task/kind t))) {:op :park :run aid}
+                       ;; a work task's refused run, ended green or red by its own loop: the judge's verdict goes back
+                       ;; to its session as an entry (the approved one-derivation design, notes/archive/one-derivation-
+                       ;; design-rev4.md, the entries a turn takes; a whole task's too, since it merges itself:
+                       ;; debeb7f336); a merge task's holds, and an outside agent's (no turn loop takes entries)
+                       (and (not= :merge (:seon.task/kind t)) (not= "outside" (get-in a [:seon.run/env :model])) (#{:green :red} (:seon.run/outcome a)))
+                       {:op :verdict :run aid :task id :reasons rs}
+                       ;; any other refused run: its task is held for root (no automatic retry)
                        :else
                        {:op :hold :run aid :task id
                         :problem (str "run " aid " ended" (some->> (:seon.run/outcome a) name (str " "))
