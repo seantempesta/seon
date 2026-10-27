@@ -735,6 +735,14 @@
 
 (declare call!)
 
+(defn platform-tx
+  "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch, a source fact
+  the store refused: import-source!), as the
+  transaction recording it on main db: a :platform error by its signature (seon.error), what
+  my.root/problems shows."
+  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
+  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
+
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (their files, the tree's HEAD commit and its reference-code pins, and the
@@ -746,8 +754,10 @@
   inputs only when the running binary was built from this very tree (target/seon.tree,
   written by bin/build) and why not otherwise (:unshared), so agents never key results by a
   previous root's inputs or by code the binary does not run. A failed read is recorded with
-  the fact, its :effect row naming :seon.root/source (seon.error/asked-tx). Answers the fact in
-  force.
+  the fact, its :effect row naming :seon.root/source (seon.error/asked-tx); a fact the store
+  refuses is a :platform cause with the writer's reason, and the fact in force is then this
+  boot's without its inputs, saying why (:error). Answers the fact in force, or the error a
+  write of it answered.
   With changed (the relative paths a watcher saw change, or none), only those files are read and
   main's program is brought up to date with them (seon.source/refresh-tx, the cost of what
   changed, not of the tree), and the fact's digest is still the tree's: the git tree id
@@ -780,15 +790,20 @@
                               (contract/error? r) (assoc :error (:seon.error/message r))
                               (contract/error? w) (assoc :error (:seon.error/message w))))))]
     ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
-    @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})
-    fact)))
+    (let [w @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})]
+      (if-not (contract/error? w)
+        fact
+        ;; the store refused the fact (a value its codec cannot encode): in force, this boot's
+        ;; fact with what it read and why it holds nothing more, so no agent keys results by
+        ;; inputs never stored; then root's own defect, a :platform cause with the writer's
+        ;; reason, written after the fact so that only a later import's write closes it.
+        ;; Either write refused too is the answer
+        (let [refused (-> (select-keys fact [:root :commit :pins :files :forms :ms :boot])
+                          (assoc :error (str (some-> (:error fact) (str "; ")) "the store refused root's source fact: " (:seon.error/message w))))
+              f @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source refused}]}})
+              c @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc w :seon.error/subject :seon.root/source) (System/currentTimeMillis))}})]
+          (cond (contract/error? f) f (contract/error? c) c :else refused)))))))
 
-(defn platform-tx
-  "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch), as the
-  transaction recording it on main db: a :platform error by its signature (seon.error), what
-  my.root/problems shows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
-  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
 
 (defn wiki-baseline
   "What each wiki section lacking a :seon.section/read was last written against, from git (the
