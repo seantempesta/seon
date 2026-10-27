@@ -322,10 +322,13 @@
 
 (defn- old-word-patterns
   "Whole-word patterns for the table's old words, as the text spells them (a plural, \"merge train\"); \"admit\"
-  and \"land\" are also plain English and Seon's admission, so only names are read for them."
+  and \"land\" are also plain English and Seon's admission, so only names are read for them. Each is
+  [word pattern needle]: the lower-case text every match holds, which a file is searched for first
+  (a regex costs ~140 us a line here, a `contains` over the whole tree 89 ms)."
   [agents]
   (for [w (old-words agents) :when (not (#{"admit" "land"} w))]
-    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))]))
+    [w (re-pattern (str "(?i)(?<!\\w)" (if (= w "merge-train") "merge[ -]train" w) "s?(?!\\w)"))
+     (if (= w "merge-train") "train" w)]))
 
 (deftest no-text-uses-an-old-word
   (let [root (config/checkout)
@@ -337,9 +340,11 @@
                     :let [p (subs (.getPath ^java.io.File f) (inc (count root)))] :when (text? p)]
                 p)
         hits (for [p (concat ["AGENTS.md" "BAGGAGE.md" "README.md"] paths) :when (not (text-kept p))
-                   :let [lines (str/split-lines (slurp (str root "/" p)))]
-                   [i line0] (map-indexed vector lines) :let [line (str/replace line0 kept-span "")]
-                   [w re] patterns :when (re-find re line)]
+                   :let [text (slurp (str root "/" p)) low (str/lower-case text)
+                         present (filter (fn [[_ _ needle]] (.contains ^String low ^String needle)) patterns)]
+                   :when (seq present)
+                   [i line0] (map-indexed vector (str/split-lines text)) :let [line (str/replace line0 kept-span "")]
+                   [w re] present :when (re-find re line)]
                [p (inc i) w])]
     (is (contains? (set (map first patterns)) "attempt") "the table is read, the run row included")
     (is (empty? hits) "no text uses an old word outside text-kept: each is [file line word]")))
