@@ -102,12 +102,15 @@
                (->> (map (fn [e s] [(- s) e]) es (ffi/read-array fs :float m 0))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
-(def ^:private fused
-  "{item score} of rankings fused by reciprocal rank, each ranking's share weighed: a def, not a contracted
-  function, so rrf (called per line of the page's related part) costs the one contracted call it did."
-  (fn [rankings weights]
-    (let [k (cfg/value :seon.config.vector/rrf-k)]
-      (apply merge-with + {} (for [[r w] (map vector rankings weights)] (into {} (map-indexed (fn [i x] [x (/ w (+ k i 1))])) r))))))
+(defmacro fused
+  "{item score} of rankings fused by reciprocal rank, each ranking's share weighed, as an expression
+  in the caller: a macro, not a function (a def'd fn escapes the contracts every function carries,
+  a contracted one is a second call), so rrf (called per line of the page's related part) costs the
+  one contracted call it did (seon.context-cost-test/related-ranks-each-kind-by-one-search)."
+  [rankings weights]
+  `(let [k# (cfg/value :seon.config.vector/rrf-k)]
+     (apply merge-with + {} (for [[r# w#] (map vector ~rankings ~weights)]
+                              (into {} (map-indexed (fn [i# x#] [x# (/ w# (+ k# i# 1))])) r#)))))
 
 (defn rrf-scores
   "Rankings fused by reciprocal rank (Cormack et al. 2009): {item score}, each item's score the sum
