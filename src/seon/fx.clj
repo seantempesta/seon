@@ -268,9 +268,10 @@
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
 (defn tree-id
-  "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
-  with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched), less the top-level paths excludes names (default
+  "git's id of the tree at root as it is on disk: the checkout's own index (its stat cache: only a
+  file whose size or mtime moved is read again, 0.2 s against 1.1 s to hash every file; HEAD's tree
+  before a first commit) with every changed and untracked unignored file added, in a copy of its
+  own (the repository's index untouched), less the top-level paths excludes names (default
   :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
   it moves nothing). bin/tree computes the same, which bin/build records for the tree it
   builds (target/seon.tree), so a root can tell whether its binary is built from its source."
@@ -281,7 +282,9 @@
          env {"GIT_INDEX_FILE" (.getPath idx)}
          top (map #(str ":(top)" %) excludes)]
      (try
-       (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
+       (let [real (java.io.File. ^String (git! {} root ["rev-parse" "--path-format=absolute" "--git-path" "index"] nil))]
+         (cond (.isFile real) (java.nio.file.Files/copy (.toPath real) (.toPath idx) (into-array java.nio.file.CopyOption []))
+               (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil)))
        (git! env root ["add" "-A"] nil)
        (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
        (git! env root ["write-tree"] nil)
@@ -334,8 +337,9 @@
   the same, and builds it)."
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]
-  (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
-    (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
+  (let [status (str/split-lines (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil))
+        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))]
+    (if (every? #(str/starts-with? % "# ") status)
       head
       (str head "+" (tree-id dir [])))))
 

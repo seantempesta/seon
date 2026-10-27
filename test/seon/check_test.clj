@@ -283,6 +283,41 @@
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
+(deftest the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
+  ;; task seon.fx/inputs-hash-only-what-changed: tree-id starts from the checkout's own index, whose stat cache
+  ;; skips every file that did not move (0.2 s against 1.1 s on this repository), and answers the tree a fresh index
+  ;; of HEAD plus `add -A` would: for a clean tree, an edit, a new file, a deleted file, a staged and an ignored one;
+  ;; the repository's index is not touched
+  (let [dir (str (System/getProperty "user.dir") "/target/runs/tree-id-test-" (random-uuid))
+        git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
+        write! (fn [f t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) t))
+        fresh (fn [] (let [idx (str dir "/.git/ref-index") run #(apply clojure.java.shell/sh "env" (str "GIT_INDEX_FILE=" idx) "git" "-C" dir %&)]
+                       (try (run "read-tree" "HEAD") (run "add" "-A") (run "rm" "-r" "--cached" "-q" "--ignore-unmatch" "--" ":(top)notes")
+                            (str/trim (:out (run "write-tree")))
+                            (finally (.delete (java.io.File. idx))))))
+        index-bytes (fn [] (vec (java.nio.file.Files/readAllBytes (.toPath (java.io.File. (str dir "/.git/index"))))))]
+    (try
+      (.mkdirs (java.io.File. dir))
+      (git "init" "-q" "-b" "main")
+      (write! ".gitignore" "ignored/\n") (write! "src/a.clj" "(ns a)") (write! "src/b.clj" "(ns b)") (write! "notes/n.md" "n")
+      (git "add" "-A") (git "commit" "-qm" "first")
+      (let [idx0 (index-bytes)]
+        (is (= (fresh) (seon.fx/tree-id dir)) "clean")
+        (write! "src/a.clj" "(ns a) ;; edited with a longer text")
+        (is (= (fresh) (seon.fx/tree-id dir)) "an edit")
+        (write! "src/c.clj" "(ns c)")
+        (is (= (fresh) (seon.fx/tree-id dir)) "a new file")
+        (.delete (java.io.File. (str dir "/src/b.clj")))
+        (is (= (fresh) (seon.fx/tree-id dir)) "a deleted file")
+        (write! "ignored/x" "x") (write! "notes/m.md" "m")
+        (is (= (fresh) (seon.fx/tree-id dir)) "an ignored file and a note move nothing")
+        (git "add" "src/c.clj") (write! "src/c.clj" "(ns c) ;; staged, then changed again")
+        (is (= (fresh) (seon.fx/tree-id dir)) "a staged file changed again: the file on disk")
+        (git "reset" "-q" "--mixed")
+        (is (not= idx0 (index-bytes)) "(the test's own git commands moved the index)")
+        (let [before (index-bytes)] (seon.fx/tree-id dir) (is (= before (index-bytes)) "tree-id leaves the repository's index as it was")))
+      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
 (deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
   ;; task seon.fx/the-tree-id-is-what-is-read: notes/ is no input (every merge appends its log line
   ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
