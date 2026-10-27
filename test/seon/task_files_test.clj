@@ -102,19 +102,25 @@
   ;; its derived state. An entry is merged work left in the files when main's first-parent history holds
   ;; a "Merge jolt/<name>" or "Land jolt/<name>" commit for its name (a worktree session's branch is named
   ;; for its task), or a Merge/Land commit whose subject or body names its qualified name <ns>/<name>
-  ;; (a branch named otherwise, e.g. jolt/fileref for seon.ref/files-namespaces-and-symbols-are-plain-markdown).
+  ;; (a branch named otherwise, e.g. jolt/fileref for seon.ref/files-namespaces-and-symbols-are-plain-markdown)
+  ;; when the entry was already in the files before that merge: a merge that files a task names it too
+  ;; (3eface7bab filed seon.db/a-roots-heap-costs-what-it-reads).
   ;; It reads main as this repository holds it: the next branch's run names an entry a merge left behind
   ;; (the merge's own run precedes its commit)
   (let [root (config/checkout)
-        commits (for [rec (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%s%x1f%b%x1e" "main")) #"\x1e")
-                      :let [[subject body] (str/split rec #"\x1f" 2)
+        commits (for [rec (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%H%x1f%s%x1f%b%x1e" "main")) #"\x1e")
+                      :let [[sha subject body] (str/split (str/trim rec) #"\x1f" 3)
                             subject (str/trim (str subject))]
                       :when (re-find #"^(?:Merge|Land) " subject)]
-                  {:subject subject :text (str subject "\n" body)})
+                  {:sha sha :subject subject :text (str subject "\n" body)})
         merged (set (for [{:keys [subject]} commits :let [m (re-find #"^(?:Merge|Land) jolt/([^\s:]+)" subject)] :when m] (second m)))
+        held-before? (fn [{:keys [sha]} ns-sym tname]
+                       (str/includes? (:out (sh/sh "git" "-C" root "show" (str sha "^1:resources/seon/tasks/" ns-sym ".edn")))
+                                      (pr-str tname)))
         left (for [[ns-sym ds] (root/task-files) :when (vector? ds) d ds
                    :let [k (str ns-sym "/" (:seon.task/name d))]
-                   :when (and (or (merged (:seon.task/name d)) (some #(str/includes? (:text %) k) commits))
+                   :when (and (or (merged (:seon.task/name d))
+                                  (some #(and (str/includes? (:text %) k) (held-before? % ns-sym (:seon.task/name d))) commits))
                               (not (still-worked k)) (not= :merge (:seon.task/kind d)))]
                k)]
     (is (seq merged) "main's merges are read")
