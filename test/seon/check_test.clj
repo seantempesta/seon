@@ -294,7 +294,7 @@
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
         write! (fn [f t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) t))
         fresh (fn [] (let [idx (str dir "/.git/ref-index") run #(apply clojure.java.shell/sh "env" (str "GIT_INDEX_FILE=" idx) "git" "-C" dir %&)]
-                       (try (run "read-tree" "HEAD") (run "add" "-A") (run "rm" "-r" "--cached" "-q" "--ignore-unmatch" "--" ":(top)notes")
+                       (try (run "read-tree" "HEAD") (run "add" "-A") (run "rm" "-r" "--cached" "-q" "--ignore-unmatch" "--" ":(top)claude_scratch")
                             (str/trim (:out (run "write-tree")))
                             (finally (.delete (java.io.File. idx))))))
         index-bytes (fn [] (vec (java.nio.file.Files/readAllBytes (.toPath (java.io.File. (str dir "/.git/index"))))))]
