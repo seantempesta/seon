@@ -92,11 +92,15 @@
                :no-proofs {:reason reason :do '(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)}
                :no-design {:reason reason :unchanged :seon.task/plan
                            :do '(my.task/update! :seon.task/plan str "\n\n" "<what the implement step must do>")}
-               ;; no result: never written, or never run; what writes and runs it
-               :proof-unknown {:reason reason :test symbol
-                               :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
-                                         (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) (list 'clojure.test/is false task/placeholder-assertion))
-                                         (list 'clojure.test/run-test-var (list 'var symbol)))}
+               ;; no result: never run, or never written. Written, the runner whose results the
+               ;; judge reads runs it (the template would have overwritten a finished deftest); else
+               ;; what writes and runs it
+               :proof-unknown (if (defined? symbol)
+                                {:reason reason :test symbol :written true :do '(my.agent/prove)}
+                                {:reason reason :test symbol
+                                 :do (list 'do (list 'in-ns (list 'quote (clojure.core/symbol (namespace symbol))))
+                                           (list 'clojure.test/deftest (clojure.core/symbol (name symbol)) (list 'clojure.test/is false task/placeholder-assertion))
+                                           (list 'clojure.test/run-test-var (list 'var symbol)))})
                {:reason reason}))
            (when (seq gaps) [{:reason :contract-gap :vars gaps}])
            (when (seq unmerged) [{:reason :unmerged :keys unmerged}])
