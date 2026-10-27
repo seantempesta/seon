@@ -1,6 +1,6 @@
 # ctx: the agent's record as one map
 
-An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `notes/archive/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
+An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `claude_scratch/archive/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
 
 ## The pattern
 
@@ -14,9 +14,21 @@ The map is the agent's entity pulled by a pattern: Datahike's pull syntax, held 
   - `:cited`, the vars its text names, each with its `:form` whole (its source) and `:callers`, the newest ``:seon.config.ctx/callers`` forms naming it: the tests among them are the var's existing tests, for a render to join to their last result by name;
   - `:proved`, its proofs, each with its `:form`, whose `:form/refs` names every var the proof calls;
   - `:needs`, the tasks it waits on;
+  - `:errors`, the newest ``:seon.config.ctx/errors`` recorded errors last raised in this task (a lookup by the task's id on the indexed ``:seon.error/last-task``, newest first, a few attributes each, never the example's whole map), so the pull reads the task's errors where it works and not the store's history of them: 541k, 543k and 548k ticks and 292 contracted calls at 10, 100 and 1,000 errors in the store, against 408k ticks and 263 calls before the join (`seon.ctx-test/a-pull-costs-what-the-task-cites-not-the-stores-history`);
   - `:sections`, the wiki sections its text cites (``:seon.task/sections``, the section-address twin of `:seon.task/references`, written by the same producer from the same text by the one parser, ``seon.ref/addresses``), each with its heading and text.
 
 Every render of ctx reads what this declaration holds ([render](render.md#the-page)).
+
+## What the scorer reads from a pulled node
+
+The scorer (```seon.context/relevance```, embed-lab) ranks the nodes the pull holds; web-ui's render shows the ranked set. The pull is the candidate pool and carries **stored facts only** (the next section: nothing derived), each node's `:db/id` and its schema (the walk hands both); the scorer computes what it needs beyond them from the record and the existing producers, and a node it cannot score by its stored vector it scores by the text of its summary render. One contract, agreed with embed-lab:
+
+- **A node's facts.**
+  - *error* (a task's `:errors`): `:seon.error/signature`, `class`, `type`, `operation`, `message`, `count`, `first-ms` (new on this branch or main's, against the merge base's time), `last-ms`, `last-task` (this task or another's);
+  - *test result* (held, see below): `:seon.proof/test`, `status` (`:pass` `:fail` `:error`), `failures` (at most ``:seon.config.proofs/max-assertions`` assertions), `ms`, `digest`, `var` (a ref to the test's `{:var/name}`);
+  - *eval*: `:seon.eval/id`, `by` and `record`, whose `:code`, `:line` and `:response` (`:ex` present when it threw) it reads (an eval's record and a task's plan have a stored vector, the one index, so the scorer's focus is read from the evals the pull holds by `:db/id`, and nothing is pulled for it); *var and form*: `:var/name`, `:var/form`, `:form/src`, `:form/refs`; *task*: plan, proofs, references, sections, needs, `failure` and `evidence` (values); *section*: address, heading, text.
+- **What the scorer derives, from the record and the producers, never from a field.** Whether a test is a proof of the task (its name among the task's `:proved`); whether a var is cited (a key of `:cited`); whether a var changed on this branch (the turn's branch changes, ```seon.merge/divergence```); whether a test's reach includes such a var (```seon.program```'s reach); whether main holds the same red (main's `:seon.proof/latest`). A producer that wants one as data writes it as a fact. The scorer is pool-relative (its meaning and word features are z-scores over the candidates), so the render calls ```seon.context/relevance``` once with every pulled node it may show, never per node: a node's chance changes with what else is in the pool.
+- **Every join is bounded** by a config `:limit`, newest first, and reads from the current task or agent, never from a var or a section back to its history: `:callers` (``:seon.config.ctx/callers``), `:errors` (``:seon.config.ctx/errors``, a lookup by the task's id on the indexed `:seon.error/last-task`). A test result's join is **held**: the owner's ruling is that an agent has turns and evals and no run, so the result must point at what asked for it, which the context inventory decides; the pull's cost stays flat in the store's history (```seon.ctx-test/a-pull-costs-what-the-task-cites-not-the-stores-history```).
 
 ## Kept by the change, never rebuilt
 

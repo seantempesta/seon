@@ -1,0 +1,20 @@
+[{:q "where is a merge refused when the branch is behind" :want #{"seon.writer/merge-refused" "seon.writer/octopus-merge" "seon.reconcile/behind?"}}
+{:q "what writes :seon.run/outcome" :want #{"seon.reconcile/advance" "seon.reconcile/dead-tx" "seon.reconcile/start" "seon.task/end-members"}}
+{:q "how does the render cache a component" :want #{"seon.render/render!" "docs/render.md#components" "docs/render.md#reactive-renders"}}
+{:q "parse markdown headings and the names a text cites" :want #{"seon.ref/parse" "seon.ref/scan" "docs/references.md#one-parse"}}
+{:q "retry a model request after the provider rate limits it" :want #{"seon.model/retry-after-ms" "docs/model.md#failures"}}
+{:q "kill an agent's processes when root dies" :want #{"docs/processes.md#the-fork-server" "seon.fork-server/reaped" "seon.fork-server/lost"}}
+{:q "a wiki section with no lead sentence" :want #{"seon.problems/leadless-sections" "docs/health.md#a-section-with-no-lead"}}
+{:q "resolve a config value through the task, the model and the provider" :want #{"seon.config/value" "seon.config/resolve" "seon.config/resolve-in"}}
+{:q "load the task files into the store" :want #{"seon.task/load-tx" "my.root/load-tasks!" "seon.task/file-declarations"}}
+{:q "reciprocal rank fusion of rankings" :want #{"seon.vector/rrf" "docs/vector.md#fused-with-the-call-graph"}}
+{:q "group commit: when is a write durable" :want #{"seon.writer/flusher-proc" "seon.writer/commit-batch" "docs/decisions.md#durability-is-continuous-group-commit"}}
+{:q "judge whether a cost grows faster than the work needs" :want #{"seon.cost/growth" "seon.cost/judge" "docs/cost.md#how-growth-is-judged"}}
+{:q "reuse a test result whose inputs have not changed" :want #{"docs/source.md#a-result-is-a-function-of-its-digest" "seon.proofs/stored-results" "docs/merging.md#the-test-service"}}
+{:q "fork a new agent process from the fork server" :want #{"seon.fork-server/server-step" "docs/processes.md#the-fork-server" "seon.fork-server/fork-carrying!"}}
+{:q "print a value without clipping it" :want #{"seon.print/print-value" "docs/render.md#no-clipping" "docs/render.md#one-printer"}}
+{:q "three-way merge of the program's definitions" :want #{"seon.merge/three-way" "seon.merge/delta-three-way" "docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program"}}
+{:q "embed only the texts a commit changed" :want #{"seon.vector/written" "seon.vector/due" "seon.agent/embed-written!"}}
+{:q "who calls a function" :want #{"my.agent/callers" "seon.docs/callers"}}
+{:q "a wiki section whose code changed since it was written" :want #{"seon.problems/stale-sections" "docs/health.md#a-stale-section"}}
+{:q "datoms-diff" :want #{"seon.vector/written" "seon.program/diff-plan" "seon.union/changes" "seon.merge/touched-keys" "seon.merge/carried-tx" "seon.reconcile/index" "seon.ctx/moved" "seon.render.proc/advance-main"}}]

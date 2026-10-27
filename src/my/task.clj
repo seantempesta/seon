@@ -61,13 +61,18 @@
 
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the
-  wiki sections, program functions and schema keys nearest it by its references and by meaning,
-  :seon.config.render/related of each (seon.context/related, a render over the plan's vectors),
-  each a line at summary depth with the forms that read one whole and search further
-  (seon.context/related-view). (my.agent/related \"words\" k) refines it by any text."
-  {:malli/schema [:=> [:cat] :map]}
-  []
+  wiki sections, program functions and schema keys the page shows beside the work
+  (seon.context/selected: what its plan and recent evals point to, at doc depth), each with its
+  chance and the forms that read one whole and search further (seon.context/related-view). Given cut, every item
+  at or above it, uncounted (0: every item scored; nil: the configured cut and count). (my.agent/related \"words\" k) refines it by any text."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:maybe number?]] :map]]}
+  ([] (related nil))
+  ([cut]
   (let [db (agent/db)]
-    (if-let [r (some->> (current) :seon.task/id (pdb/eid db :seon.task/id) (context/related db))]
+    (if-let [r (when-let [te (some->> (current) :seon.task/id (pdb/eid db :seon.task/id))]
+                 ;; what the page shows (seon.context/selected), or, given a cut, every item at or above it
+                 (if cut
+                   (context/related db te {:cut cut})
+                   (some-> (context/included db (:seon.task/id (current)) (:key @agent/state)) context/shown)))]
       (or (context/related-view db r) {:nothing "nothing nearer the plan than what it cites"})
-      {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"})))
+      {:none "none: the count is 0 (:seon.config.render/related), or the plan has no vector yet; (my.agent/related \"your words\") searches the wiki by any text"}))))

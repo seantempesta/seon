@@ -1,0 +1,838 @@
+[
+ {
+  "task": "seon.reader/a-backslash-starts-a-character-anywhere-in-a-token#1 turn 2",
+  "plan": "Found 2026-10-23: main red on seon.reader-test/the-laws-hold-over-generated-replies at seed 449380042768857075, the replies [\"`\" \"\\\\\" \"(\"], a latent reader fault a reseed exposed. The law that broke: forgiving forgiven text changes nothing. seon.reader/scan read the token `\\ as ending before the ( (a backslash started a character literal only at a token's start), so it closed a paren that `\\( never opened (syntax-quote of the character (), and the second pass, unable to read `\\(), made the line prose. Correct, at the producer: a backslash anywhere in a token starts a character literal that takes the next character whatever it is, and a closer is never inserted right after a backslash ending a line (lone), wherever in a token it stands. The counterexample is a fixed case of seon.reader-test/texts beside the generated ones.",
+  "recent-evals": [
+   "(in-ns 'seon.reader)\n(let [t \"`\\\\(\"\n      f1 (forgive t)]\n  {:text t :once f1 :twice (forgive (:text f1))})",
+   "(for [t [\"`\\\\(\" \"`\\n\\\\\\n(\" \"`\\\\\\n(\" \"`\\\\\" \"x`\\\\(\" \"(`\\\\(\" \"`\\\\( a\" \"`\\\\)\" \"`\\\\\\n\"]\n      :let [f1 (forgive t) f2 (forgive (:text f1))]]\n  [t (:text f1) (:repairs f1) (= (:text f1) (:text f2)) (empty? (:repairs f2))])",
+   "(my.task/fail! \"premise false on main: seon.reader/forgive already keeps both laws on the counterexample; its three proofs pass (3 tests, 43 assertions, 0 red)\"\n  {:form '(let [f1 (seon.reader/forgive \"`\\\\(\")] [(:text f1) (:repairs f1) (seon.reader/forgive (:text f1))])\n   :answer [\"`\\\\(\" [] {:text \"`\\\\(\" :repairs []}]})"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/failure-points.md#edges-that-catch-each-names-its-one-variant 22%: The failure points whose edge function catches, each with the one variant it declares and who handles it as data.",
+    "docs/agent.md#what-you-read 16%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/parity.md#the-agents-repl-my 9%: Each v1 function of the agent's REPL and where it stands here.",
+    "docs/vocabulary.md#tasks-task-chains-words 7%: The words for tasks and their prerequisites, and the namespace that owns each.",
+    "docs/source.md#tests-run-by-reach 6%: A test runs only when something it reaches changed since it was last green, in any checkout (task `seon.program/tests-run-by-reach`)."
+   ],
+   "functions": [
+    "seon.reader/closers 56%: (def ^:private closers {\\) \\( \\] \\[ \\} \\{})",
+    "seon.reader/code-tags 54%: (def ^:private code-tags #{\"clojure\" \"clj\" \"cljc\" \"edn\"})",
+    "seon.template/instructions 52%: What each step's agent does, by task kind (its own work: instructions never flow): its goal, when it is done and by what means, short, the standard format's stage descriptions (seon.judge's).",
+    "seon.reader/openers 50%: (def ^:private openers {\\( \\) \\[ \\] \\{ \\}})",
+    "seon.fixtures/scenarios 48%: Merge scenarios, by name (seon.e2e runs each as a row): :specs (the program and its tasks, in app.m), :after (merge task -> the merge task it must follow, so the order is fixed), the scripted model's replies by task name and turn, and :check, the one form a fresh agent runs on what main runs, with :expect, what its value prints as ([printed], seon.e2e/fresh); :model holds the :check and :expect of a real model's run where they differ: what the task's plan and proofs ask of any correct solution, where :check also asserts the scripted model's own extras."
+   ],
+   "schemas": [
+    ":seon.fx/in-test 50%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/in-test]]]]\"",
+    ":seon.fx/defect 30%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/defect]]]]\"",
+    ":seon.prove/answer 26%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.proof/status 22%: \"[:enum :pass :fail :error :none]\"",
+    ":seon.task/failure 14%: \"[:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 10",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(println (str (seon.repl/source-of-ns 'seon.task-test)))",
+   "(source 'seon.task-test)",
+   "(println (my.agent/callers 'my.task/status))\n(println (my.agent/callers 'seon.turn/input))\n(println (my.agent/tests-reaching 'seon.turn/input))"
+  ],
+  "read-next": [
+   "seon.agent-test/in-agent"
+  ],
+  "shown": {
+   "sections": [
+    "docs/parity.md#the-agents-repl-my 70%: Each v1 function of the agent's REPL and where it stands here.",
+    "docs/agent.md#what-you-read 53%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/resolution.md#sanctioned 50%: The sites that resolve a name held in data to a var by design, each with its reason.",
+    "docs/agent.md#finding-your-way 42%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/source.md#tests-run-by-reach 16%: A test runs only when something it reaches changed since it was last green, in any checkout (task `seon.program/tests-run-by-reach`)."
+   ],
+   "functions": [
+    "my.task/status 56%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "seon.render.ui/cited-of 54%: Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and its newest callers): its source; its tests, the newest :seon.config.ctx/callers deftests whose form names v, read here by one query (ctx's callers window holds callers of any kind, so newer callers would push them out), each with its last result on main as db holds it (its :seon.proof/latest's status, which only main's runs write, so a branch holds main's as of its base; :none when there is none), and the form that reads every test whose reach includes v (:reaching, my.agent/tests-reaching); then ctx's other callers, v itself left out.",
+    "seon.server/ops 42%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "form:1134201626011395210 40%: (ns my.agent \"An agent's own functions (from proto/flow f2-final proto.agent's agent API).",
+    "my.agent/tests-reaching 35%: The tests whose reach includes var x on this branch, nearest first, each with its last result on main as this branch holds it ({:test :status}, :none when main holds none): the tests a change to x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same reverse walk (seon.program/tests-reaching)."
+   ],
+   "schemas": [
+    ":seon.task/task-fact 39%: \"[:map {:seon.db/attributes true, :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}], :seon.render/html seon.render.ui/task} [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution] [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/model {:optional true} :seon.task/model] [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/gate?",
+    ":seon.task/own 36%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.task/pulled 23%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.run/run-fact 20%: \"[:map {:seon.db/attributes true, :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch], :seon.ctx/p",
+    ":seon.run/pulled 18%: \"[:map [:seon.run/id :seon.run/id] [:seon.run/task [:map [:seon.task/id :seon.task/id]]] [:seon.run/status :seon.run/status] [:seon.run/boot :string] [:seon.run/agent {:optional true} [:map [:seon.age"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 4",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md). A namespace-lifted map prints `#:seon.task{:kind :work,` and its later keys under the `#`, eleven columns left of `:kind`, so they read as the parent's (every agent's context shows its task so); `#error {:via` does the same. Cause: ```seon.print.emit/emit-collection``` nests a map's members one column past the group's indentation, not past its opener, and ```seon.print.select/member-indent``` charges that same one column, not knowing the lift. Correct: members nest past the opener (`#:seon.task{` is 12 columns) and the selection charges what the emitter lays out, its lift decided once where both read it. Proof: a lifted map of three keys under a narrow width prints each key in one column, inside its charge (seon.print-test/the-text-stays-inside-its-budget stays green).",
+  "recent-evals": [
+   "(println seon.print/budgets)\n(println (:doc (meta #'seon.print/text)) (:arglists (meta #'seon.print/text)))\n(println (:doc (meta #'seon.print/print-value)) (:arglists (meta #'seon.print/print-value)))",
+   "(println (:text (seon.print/print-value {:seon.task/kind :work :seon.task/plan \"a plan of some length\" :seon.task/proofs #{'a/b}} {:width 30 :budget 200})))\n(println (:text (seon.print/print-value {:a/kind :work :a/plan \"a plan of some length\"} {:width 20 :budget 200})))",
+   "(println (:seon.print/code (my.agent/source-fn 'seon.print.emit/emit-collection)))\n(println (my.agent/source-fn 'seon.print.emit/emit-collection))\n(println (my.agent/source-fn 'seon.print.select/member-indent))"
+  ],
+  "read-next": [
+   "seon.print-test/a-map-shows-its-first-entry-whenever-its-least-form-fits",
+   "seon.print.emit/same-key-namespace"
+  ],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 89%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 78%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#finding-your-way 39%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/references.md#resolving-and-showing 19%: ```seon.ref/references``` resolves names against the program's `:var/name` facts, keywords against the schema registry and paths against the checkout; ```seon.ref/names``` is the qualified symbols alone (what `seon.reconcile/hairy` and the context use).",
+    "docs/render.md#a-value-on-the-page-is-its-structure 12%: The page draws a value from its data, the model reads it as text, and both come from one selection: `seon.print.emit`'s hiccup fold reads the same operation stream the layout reads, so the text is unchanged by what the page shows (owner, 2026-10-25: \"We can do more complex representations of values there\")."
+   ],
+   "functions": [
+    "seon.print.emit/nests 84%: (def ^:private nests [{:op :nest :offset 0} {:op :nest :offset 1} {:op :nest :offset 2}])",
+    "seon.print.emit/entry-begin 77%: (def ^:private entry-begin {:op :begin :seon.print/open :seon.print/entry})",
+    "seon.print.emit/outdent 76%: (def ^:private outdent {:op :outdent})",
+    "seon.print.emit/line 76%: (def ^:private line {:op :line :inline \" \" :terminate \"\"})",
+    "seon.print.emit/end 75%: (def ^:private end {:op :end})"
+   ],
+   "schemas": [
+    ":seon.print/alloc 90%: \"[:map [:kind [:enum :leaf :string :name :map :coll :entry]]]\"",
+    ":seon.print/context 90%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/node 79%: \":map\"",
+    ":seon.print/op 65%: \"[:map [:op :keyword]]\"",
+    ":seon.print/opts 65%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op"
+   ]
+  }
+ },
+ {
+  "task": "seon.ref/an-alias-is-resolved-in-its-namespace#1 turn 0",
+  "plan": "What exists: a text's `str/join` is read as a resolve-only candidate that names nothing (`seon.ref/names-something?`), because an alias is looked up nowhere; measured 2026-10-23 (it came out of an error string as a candidate and would resolve to no var). The text of an eval item is written in a namespace, whose aliases (`ns-aliases`) say what `str` is. Correct: `seon.ref/parse` and `references` take the namespace the text is read in (nil for a text with none, today's behaviour) and resolve an alias through it before the `:var/name` lookup. One resolver, one more input. Proof: `seon.ref-test/an-alias-names-its-var-in-its-namespace` (`str/join` in a namespace aliasing clojure.string cites `clojure.string/join`; in one that does not, nothing) and the cost proof stays at one seek per name. Deletes nothing; it replaces the agent spelling out full names to be understood.",
+  "recent-evals": [
+   "(print (seon.turn/context-block \"seon.ref/an-alias-is-resolved-in-its-namespace\" \"seon.ref/an-alias-is-resolved-in-its-namespace#1\" true))"
+  ],
+  "read-next": [
+   "seon.ref/candidate",
+   "seon.ref/names",
+   "seon.ref/names-on-db?",
+   "seon.ref/references",
+   "seon.ref/span-candidate"
+  ],
+  "shown": {
+   "sections": [
+    "docs/resolution.md#sanctioned 57%: The sites that resolve a name held in data to a var by design, each with its reason.",
+    "docs/references.md#one-parse 55%: ```seon.ref/parse``` reads Markdown once (given its path, or nil for a plan or a docstring) and returns its sections and its citations.",
+    "docs/parity.md#context-printing-the-page 38%: Each v1 capability for building and printing the model's context, and where it stands here.",
+    "docs/render.md#the-models-context-a-cached-prefix-then-the-turn 29%: A model request sends what does not change first, so the provider serves it from its prefix cache, and sends nothing twice.",
+    "docs/references.md#files-and-namespaces-on-demand 12%: A file or a namespace the plan cites is read when the context is built and never stored; only Seon's own `docs/` is (above)."
+   ],
+   "functions": [
+    "seon.ref/alias-form? 82%: Is citation c a qualified symbol whose namespace part names no namespace on db or in this process, and no var or task?",
+    "seon.ref/kept 58%: Of citations (each once, at its strongest depth: `cited`), the references on db: a resolve-only one (a prose word) kept only when it names something, an alias form left out.",
+    "seon.ref/names-on-db? 57%: Does a name (a qualified symbol, a symbol or a keyword) name something on db: a var by its :var/name or as loaded, a task by its :seon.task/id, a namespace by its :ns/name or as loaded, a schema key the contract registry holds (a declared form or a host predicate, :seon.host/db)?",
+    "form:962081948129917965 56%: (ns seon.context \"The agent's context, rendered live each turn from its task and what it references: the current-state block (task plan and instructions, the proofs with their red assertions and source, every var the task's text cites (seon.ref/references) resolved to its doc and source, every wiki section, file and namespace it cites shown at the depth its delimiter asks (seon.docs/view, seon.ref/file-view, seon.ref/namespace-view), the last evaluations), printed through the one value printer (seon.print).",
+    "seon.docs/resolve-ref 53%: Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth): :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract, :code its source (from the db), whole: the printer cuts it where it is shown, with the form that reads its rest; at :doc a var with no doc shows its source."
+   ],
+   "schemas": [
+    ":seon.turn/not-observed 37%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]\"",
+    ":seon.merge/resolved? 35%: \":boolean\"",
+    ":seon.ref/citation 24%: \"[:map {:closed true} [:seon.ref/name {:optional true} :seon.ref/name] [:seon.ref/path {:optional true} :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/problem-kind {:o",
+    ":seon.turn/reply 21%: \"[:string {:seon.render/prose true}]\"",
+    ":var/ns 17%: \":seon.db/ref\""
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 2",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(in-ns 'user)\n(let [rows (vec (for [i (range 177)] {:a i :b \"x\" :c [i] :d {:e i} :f :g :h 1 :i 2}))\n      v (assoc rows 3 :odd)\n      {:keys [text]} (seon.print/print-value v {:handle 'result/e1 :budget 600})\n      ls (clojure.string/split-lines text)]\n  {:lines (count ls) :elided (count (filter #(clojure.string/includes? % \"{\u00e2\u0080\u00a6\") ls)) :tail (take-last 3 ls)})",
+   "(println (my.agent/source-fn 'seon.print.select/fill-rows))\n(println (my.agent/source-fn 'seon.print.select/fill-members))\n(println (my.agent/callers 'seon.print.select/fill-members))\n(println (my.agent/tests-reaching 'seon.print.select/fill-members))",
+   "(in-ns 'seon.print.select)\n(println (my.agent/source-fn 'seon.print.select/minimal))\n(println (my.agent/source-fn 'seon.print.select/collapsed))\n(println (my.agent/source-fn 'seon.print.select/more?))"
+  ],
+  "read-next": [
+   ":seon.print/alloc",
+   ":seon.print/context"
+  ],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 90%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 52%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/render.md#one-printer 36%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/agent.md#finding-your-way 34%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/agent.md#what-you-read 14%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies."
+   ],
+   "functions": [
+    "seon.print.select/grow-values 72%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/allot 69%: `node` within `budget` characters: whole when it fits, else filled to the budget (a collection breadth before depth, fill-members); a collection at the depth bound collapsed.",
+    "seon.print.select/shows? 68%: (defn- shows?",
+    "seon.print.select/separator 58%: What one more member line costs at most: its separator and, when it breaks, its indentation.",
+    "seon.fixtures/requests 57%: The ten requests a live run measures, as a user would ask for them: a short problem description and the one form that reproduces it, with what it answers and what it should, no proof and no write set (its agent writes its own proof, red, and names what to change)."
+   ],
+   "schemas": [
+    ":seon.print/context 93%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/alloc 90%: \"[:map [:kind [:enum :leaf :string :name :map :coll :entry]]]\"",
+    ":seon.print/opts 52%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op",
+    ":seon.print/answer 36%: \"[:map [:text :string] [:tokens nat-int?] [:truncated?",
+    ":seon.print/prose 22%: \"[:map [:text :string] [:shown :string] [:truncated?"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 0",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(in-ns 'user)\n(let [rows (vec (for [i (range 177)] {:a i :b \"x\" :c [i] :d {:e i} :f :g :h 1 :i 2}))\n      v (assoc rows 3 :odd)\n      {:keys [text]} (seon.print/print-value v {:handle 'result/e1 :budget 600})\n      ls (clojure.string/split-lines text)]\n  {:lines (count ls) :elided (count (filter #(clojure.string/includes? % \"{\u00e2\u0080\u00a6\") ls)) :tail (take-last 3 ls)})"
+  ],
+  "read-next": [
+   "seon.print.select/collapsed",
+   "seon.print.select/minimal",
+   "seon.print.select/more?"
+  ],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 91%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 61%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/render.md#one-printer 46%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/agent.md#your-turn 24%: You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call.",
+    "docs/render.md#a-value-on-the-page-is-its-structure 12%: The page draws a value from its data, the model reads it as text, and both come from one selection: `seon.print.emit`'s hiccup fold reads the same operation stream the layout reads, so the text is unchanged by what the page shows (owner, 2026-10-25: \"We can do more complex representations of values there\")."
+   ],
+   "functions": [
+    "seon.print.select/grow-values 76%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.fixtures/requests 60%: The ten requests a live run measures, as a user would ask for them: a short problem description and the one form that reproduces it, with what it answers and what it should, no proof and no write set (its agent writes its own proof, red, and names what to change).",
+    "seon.print.select/allot 59%: `node` within `budget` characters: whole when it fits, else filled to the budget (a collection breadth before depth, fill-members); a collection at the depth bound collapsed.",
+    "seon.print.select/separator 57%: What one more member line costs at most: its separator and, when it breaks, its indentation.",
+    "seon.print.select/shows? 56%: (defn- shows?"
+   ],
+   "schemas": [
+    ":seon.print/context 93%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/alloc 92%: \"[:map [:kind [:enum :leaf :string :name :map :coll :entry]]]\"",
+    ":seon.print/prose 35%: \"[:map [:text :string] [:shown :string] [:truncated?",
+    ":seon.print/answer 35%: \"[:map [:text :string] [:tokens nat-int?] [:truncated?",
+    ":seon.print/opts 31%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 7",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(let [r (my.agent/prove)] (select-keys r [:ran :pass :fail :error :red :test :deferred]))",
+   "(let [r (my.agent/prove)] (->> (:reports r) (filter #(#{:error :fail} (:type %))) (map #(select-keys % [:var :type :message :actual :expected])) (map #(update % :actual (fn [a] (some-> a str (subs 0 (min 700 (count (str a))))))))))",
+   "(binding [clojure.test/*test-out* *out*] (select-keys (clojure.test/run-tests 'seon.print-test 'seon.print-cost-test) [:test :pass :fail :error]))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 67%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 51%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/errors.md#an-eval-errors-diagnostics 37%: An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.agent/error-map`).",
+    "docs/render.md#one-printer 37%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/agent.md#finding-your-way 19%: The program as your branch records it answers where things are, so read before you write."
+   ],
+   "functions": [
+    "seon.agent/test-report 57%: One clojure.test report as the run keeps it: its type, test var and message; a failing assertion's expected and actual printed by the one printer under :part; a cost proof's rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent page renders them; the judge persists them on the run); a typed error's :seon.error/type, :ticks and :budget (a test past its tick budget).",
+    "seon.print.select/cut-reserve 56%: An upper bound on what a collection's one cut costs once members show.",
+    "seon.print.select/shows? 56%: (defn- shows?",
+    "seon.print.select/separator 54%: What one more member line costs at most: its separator and, when it breaks, its indentation.",
+    "seon.agent/run-tests-forked 51%: Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no green held at their digest), each test within ticks engine ticks of work of its own, writing each test var as it starts and then one EDN line of its result on a pipe."
+   ],
+   "schemas": [
+    ":seon.test/report 65%: \"[:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]] [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]] ",
+    ":seon.prove/answer 50%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.test/result 37%: \"[:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.test/ticks-spent 26%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int] [:test {:optional true} :string]]]\"",
+    ":seon.print/result 19%: \"[:or :seon.print/answer [:map [:seon.error/type :qualified-keyword] [:seon.error/message :string]]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 17",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(in-ns 'seon.task-test)\n(clojure.test/deftest status-answers-before-any-turn\n  ;; the agent has had no turn and no context read in this process: status measures the task as a turn would\n  (swap! seon.agent/state update :turn dissoc :observed)\n  (let [status (my.task/status)]\n    (is (not (:seon.error/type status)) (pr-str status))\n    (is (vector? (:proofs status)))\n    (is (= status (my.task/status)) \"the second ask reads what the first measured\")))\n(let [r (my.agent/prove)] (select-keys r [:pa",
+   "(in-ns 'seon.turn)\n(defn measure!\n  \"Measure this agent's task as a turn would (observe), held for my.task/status (input): what\n  status answers before any model turn or context read of this process has observed it. Answers\n  input.\"\n  {:malli/schema [:=> [:cat] :map]}\n  []\n  (let [{:keys [task run]} @agent/state\n        {:keys [plan-before]} (begin! task run)]\n    (observed! task (assoc (observed (observe task plan-before)) :merge? true))\n    (input)))\n(in-ns 'my.task)\n(defn status\n  \"This agen",
+   "(let [r (my.agent/prove)] (filter #(#{:error :fail} (:type %)) (:reports r)))"
+  ],
+  "read-next": [
+   "docs/agent.md#done",
+   "docs/turn.md#observe"
+  ],
+  "shown": {
+   "sections": [
+    "docs/agent.md#what-you-read 53%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/turn.md#observe 44%: Each turn starts from facts measured now, never remembered: `seon.turn/observe` asks the test service (`seon.agent/prove!`, `seon.prove`: one run per branch and tx whoever asks, in a fork of the agent) to run the task's accumulated proofs and the tests the branch changed, each test bounded by `:seon.config.agent/test-ticks` (a run that cannot be made ran no proof, so every proof is unknown and the run's error is `:test-run`), the contract gaps the branch adds since its merge base (`seon.merge/uncontracted`, the question root's judge asks), its unmerged entries, the problems its own work made true (`seon.problems/caused`: it refuses done), and the done rule over them (`seon.reconcile/done-explain`: [tasks](tasks.md#the-done-rule)), read from the reconciler's index of the branch, which the agent holds across turns and observes from the last turn's db over what differs (`seon.turn/index!`, `seon.reconcile/index`): listing it again every turn cost 92M ticks and 384 MB on a main of 680 tasks, observing it 1.3M and 10 MB.",
+    "docs/prompt.md#you-are-a-seon-agent 8%: You work at a Clojure REPL inside Seon's running program, on your own branch of it.",
+    "docs/vocabulary.md#tasks-task-chains-words 6%: The words for tasks and their prerequisites, and the namespace that owns each.",
+    "docs/server.md#ops 4%: The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count."
+   ],
+   "functions": [
+    "my.task/status 91%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "seon.turn/observe 50%: What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof: every proof is unknown, and the refused answer is the run's error), the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's judge and the merge gate ask it), its unmerged entries, the problems its work made true (seon.problems/caused, as root's judge asks it), the done rule over them, and the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing else.",
+    "seon.reconcile/advance 37%: Run aid's flight takes answer r of its step.",
+    "seon.turn/act! 37%: One model turn: the context of what was observed to the model, the reply's eval calls through the one REPL path, each answered as its own result, the turn's facts on the branch.",
+    "seon.server/ops 36%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request."
+   ],
+   "schemas": [
+    ":seon.task/state 35%: \"[:enum {:seon.status/title {:running \\\"running: a run works it now\\\", :blocked \\\"blocked: a task it needs is not done (its blocked-by)\\\", :open \\\"open: released, no run running yet\\\", :failed \\\"failed: held for root with a failure: a run refused, its agent dead, its merge refused, or marked failed (my.task/fail!); root decides: (my.root/run!",
+    ":seon.run/run-fact 30%: \"[:map {:seon.db/attributes true, :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch], :seon.ctx/p",
+    ":seon.task/task-fact 22%: \"[:map {:seon.db/attributes true, :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}], :seon.render/html seon.render.ui/task} [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution] [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/model {:optional true} :seon.task/model] [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/gate?",
+    ":seon.proof/status 19%: \"[:enum :pass :fail :error :none]\"",
+    ":seon.run/run 15%: \"[:map {:seon.render/html seon.render.ui/run-row} [:seon.run/id :seon.run/id] [:seon.run/task :seon.task/id] [:seon.run/status :seon.run/status] [:seon.run/boot :string] [:seon.run/agent {:optional tr"
+   ]
+  }
+ },
+ {
+  "task": "seon.ref/an-alias-is-resolved-in-its-namespace#1 turn 3",
+  "plan": "What exists: a text's `str/join` is read as a resolve-only candidate that names nothing (`seon.ref/names-something?`), because an alias is looked up nowhere; measured 2026-10-23 (it came out of an error string as a candidate and would resolve to no var). The text of an eval item is written in a namespace, whose aliases (`ns-aliases`) say what `str` is. Correct: `seon.ref/parse` and `references` take the namespace the text is read in (nil for a text with none, today's behaviour) and resolve an alias through it before the `:var/name` lookup. One resolver, one more input. Proof: `seon.ref-test/an-alias-names-its-var-in-its-namespace` (`str/join` in a namespace aliasing clojure.string cites `clojure.string/join`; in one that does not, nothing) and the cost proof stays at one seek per name. Deletes nothing; it replaces the agent spelling out full names to be understood.",
+  "recent-evals": [
+   "(source seon.ref/references) (source seon.ref/candidate) (source seon.ref/names)",
+   "(def t \"Use str/join and `str/join` here.\")\n(seon.ref/references (seon.agent/db) t)\n(source seon.ref/span-candidate)\n(source seon.ref/names-on-db?)\n(ns-aliases 'seon.ref)",
+   "(print (seon.turn/context-block \"seon.ref/an-alias-is-resolved-in-its-namespace\" \"seon.ref/an-alias-is-resolved-in-its-namespace#1\" true))"
+  ],
+  "read-next": [
+   ":seon.ref/citation",
+   ":seon.ref/depth",
+   ":seon.ref/document",
+   ":seon.ref/line",
+   ":seon.ref/name",
+   ":seon.ref/span",
+   "seon.ref-test/a-citation-naming-no-page-names-nothing",
+   "seon.ref-test/kinds"
+  ],
+  "shown": {
+   "sections": [
+    "docs/references.md#one-parse 59%: ```seon.ref/parse``` reads Markdown once (given its path, or nil for a plan or a docstring) and returns its sections and its citations.",
+    "docs/references.md#files-and-namespaces-on-demand 42%: A file or a namespace the plan cites is read when the context is built and never stored; only Seon's own `docs/` is (above).",
+    "docs/resolution.md#sanctioned 25%: The sites that resolve a name held in data to a var by design, each with its reason.",
+    "docs/render.md#one-printer 18%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/parity.md#context-printing-the-page 17%: Each v1 capability for building and printing the model's context, and where it stands here."
+   ],
+   "functions": [
+    "seon.ref/alias-form? 85%: Is citation c a qualified symbol whose namespace part names no namespace on db or in this process, and no var or task?",
+    "seon.ref/kept 58%: Of citations (each once, at its strongest depth: `cited`), the references on db: a resolve-only one (a prose word) kept only when it names something, an alias form left out.",
+    "my.agent/no-var 56%: The one answer for a name sym that is no var on db nor in this process (a library's var is one), else nil: what callers, callees and source say of it, never [] or silence.",
+    "seon.docs/resolve-ref 53%: Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth): :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract, :code its source (from the db), whole: the printer cuts it where it is shown, with the form that reads its rest; at :doc a var with no doc shows its source.",
+    "form:962081948129917965 52%: (ns seon.context \"The agent's context, rendered live each turn from its task and what it references: the current-state block (task plan and instructions, the proofs with their red assertions and source, every var the task's text cites (seon.ref/references) resolved to its doc and source, every wiki section, file and namespace it cites shown at the depth its delimiter asks (seon.docs/view, seon.ref/file-view, seon.ref/namespace-view), the last evaluations), printed through the one value printer (seon.print)."
+   ],
+   "schemas": [
+    ":var/ns 45%: \":seon.db/ref\"",
+    ":form/ns 34%: \"[:and {:seon.db/index true} :seon.db/ref]\"",
+    ":seon.turn/run 26%: \"[:and {:seon.db/index true} :seon.db/ref]\"",
+    ":seon.section/references 16%: \"[:set :seon.db/ref]\"",
+    ":ns/name 14%: \"[:and {:seon.db/identity true, :seon.db/content-id true} :symbol]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 21",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(println (re-seq #\".{200}deferred.{300}\" (:seon.print/code (source 'seon.prove/run))))\n(println (map str (filter #(re-find #\"defer|judge|process\" (name %)) (keys (ns-interns 'seon.prove)))))",
+   "(in-ns 'seon.task-test)\n(println (:seon.ref/text (my.agent/help \"docs/turn.md#observe\")))\n(println (re-seq #\"(?i)[^.]*process test[^.]*\\.\" (str (:seon.ref/text (my.agent/help \"docs/agent.md#done\")))))\n(println (take 40 (map str (keys (ns-interns 'seon.prove)))))",
+   "(println (my.agent/help 'my.agent))\n"
+  ],
+  "read-next": [
+   ":seon.config.source/process-vars",
+   "seon.agent/branch-graph",
+   "seon.program/process-tests"
+  ],
+  "shown": {
+   "sections": [
+    "docs/agent.md#finding-your-way 47%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/agent.md#what-you-read 37%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/parity.md#the-agents-repl-my 20%: Each v1 function of the agent's REPL and where it stands here.",
+    "docs/failure-points.md#edges-that-catch-each-names-its-one-variant 20%: The failure points whose edge function catches, each with the one variant it declares and who handles it as data.",
+    "docs/README.md#the-program-and-its-loop 7%: The pages on how agents change Seon's own program and how a text's references and renders show it."
+   ],
+   "functions": [
+    "form:1134201626011395210 57%: (ns my.agent \"An agent's own functions (from proto/flow f2-final proto.agent's agent API).",
+    "my.agent/help 53%: The wiki through the one view (seon.docs/view), as this branch holds it.",
+    "seon.server/ops 42%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "seon.fixtures/requests 41%: The ten requests a live run measures, as a user would ask for them: a short problem description and the one form that reproduces it, with what it answers and what it should, no proof and no write set (its agent writes its own proof, red, and names what to change).",
+    "form:1086366926124602827 38%: (ns my.task \"The agent's task functions (Seon's my.task): read its task, improve it, or mark it failed."
+   ],
+   "schemas": [
+    ":my.agent/no-var 39%: \"[:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]\"",
+    ":seon.eval/agent 22%: \":seon.db/ref\"",
+    ":seon.run/agent 18%: \":seon.db/ref\"",
+    ":seon.task/own 16%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.root/no-agent 13%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 14",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(in-ns 'seon.task-test)\n(require 'seon.agent-test)\n(clojure.test/deftest status-answers-before-any-turn\n  ;; a freshly attached agent has had no turn and no context read: status measures the task as a turn would\n  (let [[status again] (map :value (seon.agent-test/in-agent [\"(my.task/status)\" \"(my.task/status)\"] {:proofs '#{demo-test/t}}))]\n    (is (map? status))\n    (is (not (:seon.error/type status)) (pr-str status))\n    (is (= [{:test 'demo-test/t :status :undefined}] (map #(select-keys % [:te",
+   "(my.task/status)",
+   "(let [r (my.agent/prove)] (def last-prove r) r)"
+  ],
+  "read-next": [
+   "seon.render.ui/divergence-view"
+  ],
+  "shown": {
+   "sections": [
+    "docs/agent.md#what-you-read 49%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/agent.md#done 25%: Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies.",
+    "docs/agent.md#finding-your-way 12%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/agent.md#ctx 11%: `@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process).",
+    "docs/server.md#ops 8%: The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count."
+   ],
+   "functions": [
+    "my.task/status 56%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "seon.server/ops 52%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "seon.check/robust 42%: (defn robust [] (run-check \"ROBUST\" {:datoms 2000} (fn [sys] (let [[a b x] (spawn-ready!",
+    "my.agent/prove 41%: Run what root's judge will run on this branch, through the test service (seon.agent/prove!",
+    "seon.reconcile/advance 40%: Run aid's flight takes answer r of its step."
+   ],
+   "schemas": [
+    ":my.agent/no-var 39%: \"[:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]\"",
+    ":seon.agent/stalled 26%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword] [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]\"",
+    ":seon.task/cause 22%: \"[:map [:stall [:map [:agent :keyword] [:run :seon.run/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]] [:what {:optional true} :string] [:evidence {:optional true} :map] [:bug?",
+    ":seon.agent/stall 21%: \"[:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]\"",
+    ":seon.prove/request 17%: \"[:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]\""
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 6",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(in-ns 'seon.print.select)\n(defn- shows-nothing?\n  \"Does node, at its least, print only its cut: a collection with no member shown and more held?\"\n  {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]}\n  [node]\n  (boolean (and (#{:map :coll} (:kind node)) (empty? (:kids node)) (more? node))))\n(defn- fill-members\n  \"Collection `node` within `budget`, breadth before depth: every member at its least while they\n  fit (a map's key with its value at its least), then one cut; the budget left grows t",
+   "(let [r (my.agent/prove)] (select-keys r [:ran :pass :fail :error :red :test :deferred]))",
+   "(let [r (my.agent/prove)] (->> (:reports r) (filter #(#{:error :fail} (:type %))) (map #(select-keys % [:var :type :message :actual :expected])) (map #(update % :actual (fn [a] (some-> a str (subs 0 (min 700 (count (str a))))))))))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 89%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/agent.md#what-you-read 32%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/render.md#prose-and-the-one-string-cutter 27%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#ctx 9%: `@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process).",
+    "docs/failure-points.md#edges-that-catch-each-names-its-one-variant 8%: The failure points whose edge function catches, each with the one variant it declares and who handles it as data."
+   ],
+   "functions": [
+    "seon.print.select/grow-values 84%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/cut-reserve 67%: An upper bound on what a collection's one cut costs once members show.",
+    "seon.print.select/allot 64%: `node` within `budget` characters: whole when it fits, else filled to the budget (a collection breadth before depth, fill-members); a collection at the depth bound collapsed.",
+    "seon.print.select/whole 61%: `node` shown whole when its charge is at most `cap`, else nil; the work stops once the charge passes `cap`.",
+    "seon.print.select/separator 59%: What one more member line costs at most: its separator and, when it breaks, its indentation."
+   ],
+   "schemas": [
+    ":seon.prove/answer 29%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.test/report 28%: \"[:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]] [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]] ",
+    ":seon.test/ticks-spent 15%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int] [:test {:optional true} :string]]]\"",
+    ":seon.config.agent/test-ticks 14%: \"[:int {:min 0, :seon.config/unit \\\"engine ticks\\\", :description \\\"Work one test may do, wherever it runs (a turn, the judge, bin/test); past it that test is an :error of :seon.test/ticks-spent naming it, and the run goes on.",
+    ":seon.db/agent-fact 11%: \"[:map {:seon.db/attributes true, :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/stall :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description], :seon.ctx/patt"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 15",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md). A namespace-lifted map prints `#:seon.task{:kind :work,` and its later keys under the `#`, eleven columns left of `:kind`, so they read as the parent's (every agent's context shows its task so); `#error {:via` does the same. Cause: ```seon.print.emit/emit-collection``` nests a map's members one column past the group's indentation, not past its opener, and ```seon.print.select/member-indent``` charges that same one column, not knowing the lift. Correct: members nest past the opener (`#:seon.task{` is 12 columns) and the selection charges what the emitter lays out, its lift decided once where both read it. Proof: a lifted map of three keys under a narrow width prints each key in one column, inside its charge (seon.print-test/the-text-stays-inside-its-budget stays green).",
+  "recent-evals": [
+   "(println (my.agent/source-fn 'seon.print.emit/nests))\n(println (my.agent/callers 'seon.print.emit/nests))",
+   "(in-ns 'seon.print.emit)\n(defn- nest-op\n  \"The :nest op of n columns: the shared one for the openers of three or fewer, else made (a namespace-lifted map's `#:ns{`).\"\n  {:malli/schema [:=> [:cat :int] :map]}\n  [n]\n  (if (< n (count nests)) (nth nests n) {:op :nest :offset n}))\n(defn- emit-collection\n  \"`ops` (a transient vector) with one collection's ops appended: its open group, members and close.\n  A member's path is made only for a member that is itself a collection (a leaf's is never read).\n",
+   "(println (my.agent/grep \":prefix\"))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 86%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 24%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#the-repl 12%: This is a real Clojure REPL: what you define becomes part of your branch's program exactly as written.",
+    "docs/agent.md#what-you-read 9%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/forks.md#jolt 6%: `reference-code/jolt` pinned at `6e604ac8`, the tip of ``jolt/emit-string-literals``, on `eba8826a`, the tip of ``jolt/image-fn-forms-opt-in``, on `2a6ae8f8`, the tip of ``jolt/arrays-compare``, on `86f49de8`, the tip of ``jolt/analysis-lookups``, on ``jolt/record-field-binds`` `0d39edc3`, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in)."
+   ],
+   "functions": [
+    "seon.print.emit/entry-begin 81%: (def ^:private entry-begin {:op :begin :seon.print/open :seon.print/entry})",
+    "seon.print.emit/outdent 76%: (def ^:private outdent {:op :outdent})",
+    "seon.print.emit/entry-end 76%: (def ^:private entry-end {:op :end :seon.print/close :seon.print/entry})",
+    "seon.print.emit/line 75%: (def ^:private line {:op :line :inline \" \" :terminate \"\"})",
+    "seon.print.emit/begin 75%: (def ^:private begin {:op :begin})"
+   ],
+   "schemas": [
+    ":seon.print/context 70%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/op 67%: \"[:map [:op :keyword]]\"",
+    ":seon.print/hiccup 27%: \"[:vector :any]\"",
+    ":seon.print/opts 18%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op",
+    ":seon.root/no-agent 12%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 22",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(in-ns 'seon.task-test)\n(println (:seon.ref/text (my.agent/help \"docs/turn.md#observe\")))\n(println (re-seq #\"(?i)[^.]*process test[^.]*\\.\" (str (:seon.ref/text (my.agent/help \"docs/agent.md#done\")))))\n(println (take 40 (map str (keys (ns-interns 'seon.prove)))))",
+   "(println (my.agent/help 'my.agent))\n",
+   "(in-ns 'seon.task-test)\n(clojure.test/deftest status-answers-before-any-turn\n  ;; a freshly attached agent has had no turn and no context read: status measures the task as a turn would\n  (let [[status again] (map :value (seon.agent-test/in-agent [\"(my.task/status)\" \"(my.task/status)\"]))]\n    (is (map? status))\n    (is (not (:seon.error/type status)) (pr-str status))\n    (is (vector? (:proofs status)))\n    (is (= status again) \"the second ask reads what the first measured\")))\n(let [r (my.agent/pr"
+  ],
+  "read-next": [
+   ":seon.config.source/process-vars",
+   "seon.agent/branch-graph",
+   "seon.program/process-tests",
+   "seon.test-store/shared-root!"
+  ],
+  "shown": {
+   "sections": [
+    "docs/agent.md#what-you-read 35%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/errors.md#an-eval-errors-diagnostics 21%: An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.agent/error-map`).",
+    "docs/server.md#ops 12%: The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count.",
+    "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval 4%: The page's `[:related]` part (```seon.render.ui/related```), which the model reads with the rest of the page, and `(my.task/related)` at the REPL, show what the plan's work is likely to need beyond wh",
+    "docs/merging.md#the-test-service 4%: One proc, `:prove` (```seon.prove/prove-proc```, declared in `resources/seon/system.edn`), admits every request to run tests, whoever asks: a Claude session (the server's `:prove` op, the MCP tool `seon_prove`, ```seon.root/prove!```) and an agent's turn (```seon.agent/prove!```, which ```seon.turn/observe``` calls) share it, so a change is proved once."
+   ],
+   "functions": [
+    "seon.server/ops 50%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "my.task/status 50%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "my.agent/prove 47%: Run what root's judge will run on this branch, through the test service (seon.agent/prove!",
+    "form:1134201626011395210 42%: (ns my.agent \"An agent's own functions (from proto/flow f2-final proto.agent's agent API).",
+    "seon.fixtures/requests 38%: The ten requests a live run measures, as a user would ask for them: a short problem description and the one form that reproduces it, with what it answers and what it should, no proof and no write set (its agent writes its own proof, red, and names what to change)."
+   ],
+   "schemas": [
+    ":my.agent/no-var 51%: \"[:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]\"",
+    ":seon.root/no-agent 18%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]\"",
+    ":seon.prove/answer 18%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.task/own 17%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.task/task-fact 12%: \"[:map {:seon.db/attributes true, :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}], :seon.render/html seon.render.ui/task} [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution] [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/model {:optional true} :seon.task/model] [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/gate?"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 5",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md). A namespace-lifted map prints `#:seon.task{:kind :work,` and its later keys under the `#`, eleven columns left of `:kind`, so they read as the parent's (every agent's context shows its task so); `#error {:via` does the same. Cause: ```seon.print.emit/emit-collection``` nests a map's members one column past the group's indentation, not past its opener, and ```seon.print.select/member-indent``` charges that same one column, not knowing the lift. Correct: members nest past the opener (`#:seon.task{` is 12 columns) and the selection charges what the emitter lays out, its lift decided once where both read it. Proof: a lifted map of three keys under a narrow width prints each key in one column, inside its charge (seon.print-test/the-text-stays-inside-its-budget stays green).",
+  "recent-evals": [
+   "(println (:text (seon.print/print-value {:seon.task/kind :work :seon.task/plan \"a plan of some length\" :seon.task/proofs #{'a/b}} {:width 30 :budget 200})))\n(println (:text (seon.print/print-value {:a/kind :work :a/plan \"a plan of some length\"} {:width 20 :budget 200})))",
+   "(println (:seon.print/code (my.agent/source-fn 'seon.print.emit/emit-collection)))\n(println (my.agent/source-fn 'seon.print.emit/emit-collection))\n(println (my.agent/source-fn 'seon.print.select/member-indent))",
+   "(println (my.agent/callers 'seon.print.select/member-indent))\n(println (my.agent/callers 'seon.print.emit/same-key-namespace))\n(println (my.agent/source-fn 'seon.print.emit/same-key-namespace))\n(println (my.agent/tests-reaching 'seon.print.emit/emit-collection))"
+  ],
+  "read-next": [
+   "seon.print-test/a-map-shows-its-first-entry-whenever-its-least-form-fits"
+  ],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 87%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/agent.md#finding-your-way 51%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/render.md#prose-and-the-one-string-cutter 48%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/parity.md#the-agents-repl-my 15%: Each v1 function of the agent's REPL and where it stands here.",
+    "docs/resolution.md#sanctioned 14%: The sites that resolve a name held in data to a var by design, each with its reason."
+   ],
+   "functions": [
+    "seon.print.emit/nests 85%: (def ^:private nests [{:op :nest :offset 0} {:op :nest :offset 1} {:op :nest :offset 2}])",
+    "seon.print.emit/entry-begin 77%: (def ^:private entry-begin {:op :begin :seon.print/open :seon.print/entry})",
+    "seon.print.emit/outdent 76%: (def ^:private outdent {:op :outdent})",
+    "seon.print.emit/line 75%: (def ^:private line {:op :line :inline \" \" :terminate \"\"})",
+    "seon.print.emit/end 74%: (def ^:private end {:op :end})"
+   ],
+   "schemas": [
+    ":seon.print/alloc 91%: \"[:map [:kind [:enum :leaf :string :name :map :coll :entry]]]\"",
+    ":seon.print/context 89%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/node 77%: \":map\"",
+    ":seon.print/opts 62%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op",
+    ":seon.print/op 52%: \"[:map [:op :keyword]]\""
+   ]
+  }
+ },
+ {
+  "task": "seon.server/seon-agents-answers-what-is-live#2 turn 1",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: not generating crap). ```seon.server/agents-answer``` answers every one of main's 676 tasks (30,897 tokens printed whole once its empty keys are left out; 41,434 before), almost all :held with no runs, so the reply budget shows 95 held tasks alphabetically and an outside agent never sees what is running (docs/parity.md: too much context). Correct: the live agents, the tasks running or with runs, newest first, then the rest counted by execution with the form that lists them ((seon.server/task-summaries db) filtered), as root's context groups what repeats. Proof: on a root with one running task among many held ones, the seon_agents text names the running task before any held one and counts the held.",
+  "recent-evals": [
+   "(print (seon.turn/context-block \"seon.server/seon-agents-answers-what-is-live\" \"seon.server/seon-agents-answers-what-is-live#1\" true))",
+   "(seon.turn/work! (quote {:task \"seon.server/seon-agents-answers-what-is-live\", :run \"seon.server/seon-agents-answers-what-is-live#2\", :max-turns 40}))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/server.md#ops 84%: The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count.",
+    "docs/render.md#the-models-context-a-cached-prefix-then-the-turn 25%: A model request sends what does not change first, so the provider serves it from its prefix cache, and sends nothing twice.",
+    "docs/server.md#mcp 23%: MCP is the same table seen through JSON-RPC: ```seon.server/mcp-reply``` answers `initialize`, `ping`, `tools/list` (each op as the tool `seon_<op>`) and `tools/call`, and a method or tool it does not know is the JSON-RPC error that names the ones it has.",
+    "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval 20%: The page's `[:related]` part (```seon.render.ui/related```), which the model reads with the rest of the page, and `(my.task/related)` at the REPL, show what the plan's work is likely to need beyond wh",
+    "docs/parity.md#context-printing-the-page 10%: Each v1 capability for building and printing the model's context, and where it stands here."
+   ],
+   "functions": [
+    "seon.server/ops 77%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "seon.e2e/run-scenario 54%: Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run (:during sys ev) on a tap of root's events taken before the release, and wait for quiescence; a row without :specs only boots and waits (a restart's second phase).",
+    "seon.turn/act! 53%: One model turn: the context of what was observed to the model, the reply's eval calls through the one REPL path, each answered as its own result, the turn's facts on the branch.",
+    "seon.turn/context-block 50%: The request of task as a model is sent it on this branch now (the proofs run again): what an outside agent working the task reads, the system prompt and its page, as one text, recorded as a turn of the run (origin :outside).",
+    "seon.e2e/loop-run 49%: The self-improvement loop, first turn: root boots on a clone of this repository (its committed HEAD, under the run's directory: never the live tree) with Seon's own source as main's program, and runs loop-turn!."
+   ],
+   "schemas": [
+    ":seon.run/turns 68%: \":int\"",
+    ":seon.run/run-fact 53%: \"[:map {:seon.db/attributes true, :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch], :seon.ctx/p",
+    ":seon.config.agent/max-turns 32%: \"[:int {:min 1, :seon.config/unit \\\"turns\\\", :description \\\"Turns a run may take when its task sets none.\\\"}]\"",
+    ":seon.task/failure 29%: \"[:map [:reason :string] [:counterexample {:optional true} :string] [:run {:optional true} [:maybe :seon.run/id]]]\"",
+    ":seon.run/pulled 24%: \"[:map [:seon.run/id :seon.run/id] [:seon.run/task [:map [:seon.task/id :seon.task/id]]] [:seon.run/status :seon.run/status] [:seon.run/boot :string] [:seon.run/agent {:optional true} [:map [:seon.age"
+   ]
+  }
+ },
+ {
+  "task": "seon.ref/the-parser-reads-with-options-built-once#1 turn 4",
+  "plan": "What exists: `seon.ref/parse` reads each candidate name with `seon.reader/read-text`, which rebuilds `seon.reader/opts` on every call: about half of the ~13 us and 18 KB a name costs (docs/references.md#cost). Correct: the options are one value built where `seon.reader` defines them, and `read-text` reads with it; a pure speedup of the one parser, so first of the string-parser tasks. Not a cache (the value has no inputs, so nothing is keyed by time or anything else). Deletes the per-call construction. Proof: `seon.ref-test/one-parse-costs-one-pass` keeps its bound and states the lower per-name bytes it now measures (work done: bytes allocated and contracted calls per candidate, never time); every `seon.reader-test` law stays green.",
+  "recent-evals": [
+   "(in-ns 'seon.reader)\n(println (my.agent/source 'seon.reader/read-all))\n(let [m (fn [f] (let [r (runtime-bytes f)] r))] nil)\n(println (map str (filter #(re-find #\"bytes|alloc\" (str %)) (keys (ns-publics 'seon.profile)))))",
+   "(dotimes [_ 1000] (opts 'user))",
+   "(dotimes [_ 1000] (read-text \"seon.ref/parse\" 'user))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/references.md#files-and-namespaces-on-demand 77%: A file or a namespace the plan cites is read when the context is built and never stored; only Seon's own `docs/` is (above).",
+    "docs/references.md#one-parse 59%: ```seon.ref/parse``` reads Markdown once (given its path, or nil for a plan or a docstring) and returns its sections and its citations.",
+    "docs/references.md#references 40%: A reference is what a text cites, read by one parser from the text itself, never from a declared list.",
+    "docs/agent.md#finding-your-way 36%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/forks.md#jolt 35%: `reference-code/jolt` pinned at `6e604ac8`, the tip of ``jolt/emit-string-literals``, on `eba8826a`, the tip of ``jolt/image-fn-forms-opt-in``, on `2a6ae8f8`, the tip of ``jolt/arrays-compare``, on `86f49de8`, the tip of ``jolt/analysis-lookups``, on ``jolt/record-field-binds`` `0d39edc3`, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in)."
+   ],
+   "functions": [
+    "seon.reader/definition-head 61%: Definition text src (a defn's, written in namespace nsym) up to its body, as written: its name, docstring, attribute map and arglist, or per arity its arglist, each arity's body and the definition's end marked `\u2026)`; nil when src is not a defn, defn-, defmacro or fn (a def, a defmulti: no arglist).",
+    "seon.learn/form-reads 60%: What one evaluated form reads, by its shape: :explore?",
+    "seon.learn/aliases 55%: The aliases the forms of a run set up with (require '[ns :as a]): a -> ns.",
+    "seon.reader/literal-line? 53%: Is trimmed line t exactly one literal (number, string, keyword, character, true, false, nil) or one qualified symbol?",
+    "seon.ref/span-candidate 52%: A code span or prose word read as a based path (its first segment one of the checkout's top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as written, not ending in *), a namespace (one dotted simple symbol, resolve-only: a reference only when it names a namespace, v1's rule), or nil: prose or code."
+   ],
+   "schemas": [
+    ":seon.cost/unit 31%: \"[:map {:closed true} [:ticks {:optional true} [:double {:min 0.0}]] [:ns [:double {:min 0.0}]] [:bytes [:double {:min 0.0}]] [:what :string]]\"",
+    ":seon.run/gate-unread 30%: \"[:vector [:map [:ns :symbol] [:reason :string]]]\"",
+    ":seon.agent/tx-result 21%: \"[:map [:t :int] [:datoms nat-int?]]\"",
+    ":seon.cost/dim 12%: \"[:enum :ticks :ns :bytes :calls]\"",
+    ":seon.root/no-source-text 12%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 26",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(let [g (seon.agent/branch-graph)] (println (keys g)) (println (contains? (set (seon.program/process-tests (:index g))) 'seon.task-test/status-answers-before-any-turn)) (println (count (seon.program/process-tests (:index g)))) (println (seon.config/value :seon.config.source/process-vars)))",
+   "(println (seon.config/value :seon.config.source/process-vars))\n(println (my.agent/callers 'seon.test-store/shared-root!))\n(println (my.agent/tests-reaching 'seon.test-store/shared-root!))",
+   "(swap! seon.agent/state update :turn dissoc :observed)\n(let [s (my.task/status)] [(:seon.error/type s) (keys s) (some? (seon.turn/input))])"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/source.md#tests-run-by-reach 43%: A test runs only when something it reaches changed since it was last green, in any checkout (task `seon.program/tests-run-by-reach`).",
+    "docs/parity.md#the-agents-repl-my 33%: Each v1 function of the agent's REPL and where it stands here.",
+    "docs/merging.md#a-merge-runs-what-the-change-reaches 22%: A merge runs what the change reaches, not every check.",
+    "docs/resolution.md#sanctioned 16%: The sites that resolve a name held in data to a var by design, each with its reason.",
+    "docs/agent.md#what-you-read 10%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies."
+   ],
+   "functions": [
+    "my.task/status 53%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "seon.root/ext-op 48%: (defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]} [st o m] (let [{:keys [op p id]} m] (case op ;; seon.root/apply!: the declaration again; only the units whose declaration changed are ;; rebuilt, and update!",
+    "seon.reconcile/advance 45%: Run aid's flight takes answer r of its step.",
+    "seon.server/ops 39%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "seon.turn/observe 37%: What a turn starts from, measured now: the proofs run by the test service (seon.prove: one run per branch and tx whoever asks, in a fork of this agent; a run it could not fork ran no proof: every proof is unknown, and the refused answer is the run's error), the contract gaps the branch adds since its merge base (seon.merge/uncontracted, as root's judge and the merge gate ask it), its unmerged entries, the problems its work made true (seon.problems/caused, as root's judge asks it), the done rule over them, and the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing else."
+   ],
+   "schemas": [
+    ":seon.task/task-fact 25%: \"[:map {:seon.db/attributes true, :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}], :seon.render/html seon.render.ui/task} [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution] [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/model {:optional true} :seon.task/model] [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/gate?",
+    ":seon.task/own 23%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.run/pulled 22%: \"[:map [:seon.run/id :seon.run/id] [:seon.run/task [:map [:seon.task/id :seon.task/id]]] [:seon.run/status :seon.run/status] [:seon.run/boot :string] [:seon.run/agent {:optional true} [:map [:seon.age",
+    ":seon.run/run-fact 21%: \"[:map {:seon.db/attributes true, :seon.render/keys [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/model :seon.run/turns :seon.run/max-turns :seon.run/branch], :seon.ctx/p",
+    ":seon.config/config 21%: \"[:map {:closed true, :seon.db/attributes true, :seon.render/html seon.render.ui/config-panel, :description \\\"The resolved config: every limit, bound and default of the platform, one key each.\\\"} [:seon.config.root/max-agents :seon.config.root/max-agents] [:seon.config.root/death-stderr-bytes :seon.config.root/death-stderr-bytes] [:seon.config.root/view-window :seon.config.root/view-window] [:seon.config.root/api-writes :seon.config.root/api-writes] [:seon.config.root/api-batch :seon.config.root/api-batch] [:seon.config.root/writer-batch :seon.config.root/writer-batch] [:seon.config.root/writer-buf :seon.config.root/writer-buf] [:seon.config.root/reconciler-buf :seon.config.root/reconciler-buf] [:seon.config.root/wiki-baseline :seon.config.root/wiki-baseline] [:seon.config.root/standby-every :seon.config.root/standby-every] [:seon.config.root/gc-sweepers :seon.config.root/gc-sweepers] [:seon.config.root/runs-dir :seon.config.root/runs-dir] [:seon.config.root/store-path :seon.config.root/store-path] [:seon.config.root/main :seon.config.root/main] [:seon.config.root/system-path :seon.config.root/system-path] [:seon.config.root/tasks-dir :seon.config.root/tasks-dir] [:seon.config.store/backend :seon.config.store/backend] [:seon.config.store/lmdb-map-bytes :seon.config.store/lmdb-map-bytes] [:seon.config.store/branching-factor :seon.config.store/branching-factor] [:seon.config.store/keep-history?"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 5",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(in-ns 'seon.print-test)\n(deftest breadth-shows-no-member-that-shows-nothing\n  ;; 177 rows and a keyword: no member prints as a bare `{\u00e2\u0080\u00a6n form}` placeholder, the rest is one cut\n  (let [rows (vec (for [i (range 177)] {:a i :b \"x\" :c [i] :d {:e i} :f :g :h 1 :i 2}))\n        v (assoc rows 3 :odd)\n        {:keys [text] :as r} (seon/print-value v {:handle 'result/e1 :budget 600})\n        lines (str/split-lines (str text))]\n    (is (nil? (:seon.error/type r)) (pr-str r))\n    (is (str/includes? (str",
+   "(in-ns 'seon.print.select)\n(defn- shows-nothing?\n  \"Does node, at its least, print only its cut: a collection with no member shown and more held?\"\n  {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]}\n  [node]\n  (boolean (and (#{:map :coll} (:kind node)) (empty? (:kids node)) (more? node))))\n(defn- fill-members\n  \"Collection `node` within `budget`, breadth before depth: every member at its least while they\n  fit (a map's key with its value at its least), then one cut; the budget left grows t",
+   "(let [r (my.agent/prove)] (select-keys r [:ran :pass :fail :error :red :test :deferred]))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 90%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 40%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#what-you-read 32%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/render.md#one-printer 7%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/agent.md#ctx 5%: `@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process)."
+   ],
+   "functions": [
+    "seon.print.select/grow-values 87%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/cut-reserve 68%: An upper bound on what a collection's one cut costs once members show.",
+    "seon.print.select/allot 68%: `node` within `budget` characters: whole when it fits, else filled to the budget (a collection breadth before depth, fill-members); a collection at the depth bound collapsed.",
+    "seon.print.select/whole 67%: `node` shown whole when its charge is at most `cap`, else nil; the work stops once the charge passes `cap`.",
+    "seon.print.select/shows? 65%: (defn- shows?"
+   ],
+   "schemas": [
+    ":seon.prove/answer 54%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.test/result 20%: \"[:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.prove/request 15%: \"[:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]\"",
+    ":seon.error/problem 12%: \"[:map {:description \\\"One refused part of a value: malli's path and the value as it prints, marked code (seon.print/code).\\\"} [:path vector?] [:in vector?] [:expected :any] [:value [:map [:seon.print",
+    ":seon.render/proofs 12%: \"[:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]\""
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 5",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(in-ns 'seon.print-test)\n(deftest breadth-shows-no-member-that-shows-nothing\n  ;; 177 rows and a keyword: no member prints as a bare `{\u00e2\u0080\u00a6n form}` placeholder, the rest is one cut\n  (let [rows (vec (for [i (range 177)] {:a i :b \"x\" :c [i] :d {:e i} :f :g :h 1 :i 2}))\n        v (assoc rows 3 :odd)\n        {:keys [text] :as r} (seon/print-value v {:handle 'result/e1 :budget 600})\n        lines (str/split-lines (str text))]\n    (is (nil? (:seon.error/type r)) (pr-str r))\n    (is (str/includes? (str",
+   "(in-ns 'seon.print.select)\n(defn- shows-nothing?\n  \"Does node, at its least, print only its cut: a collection with no member shown and more held?\"\n  {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]}\n  [node]\n  (boolean (and (#{:map :coll} (:kind node)) (empty? (:kids node)) (more? node))))\n(defn- fill-members\n  \"Collection `node` within `budget`, breadth before depth: every member at its least while they\n  fit (a map's key with its value at its least), then one cut; the budget left grows t",
+   "(let [r (my.agent/prove)] (select-keys r [:ran :pass :fail :error :red :test :deferred]))"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 90%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 40%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#what-you-read 32%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/render.md#one-printer 7%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/agent.md#ctx 5%: `@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process)."
+   ],
+   "functions": [
+    "seon.print.select/grow-values 87%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/cut-reserve 68%: An upper bound on what a collection's one cut costs once members show.",
+    "seon.print.select/allot 68%: `node` within `budget` characters: whole when it fits, else filled to the budget (a collection breadth before depth, fill-members); a collection at the depth bound collapsed.",
+    "seon.print.select/whole 67%: `node` shown whole when its charge is at most `cap`, else nil; the work stops once the charge passes `cap`.",
+    "seon.print.select/shows? 65%: (defn- shows?"
+   ],
+   "schemas": [
+    ":seon.prove/answer 54%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.test/result 20%: \"[:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.prove/request 15%: \"[:map [:branch :keyword] [:t :int] [:agent {:optional true} [:maybe :keyword]] [:proofs {:optional true} [:set :qualified-symbol]]]\"",
+    ":seon.error/problem 12%: \"[:map {:description \\\"One refused part of a value: malli's path and the value as it prints, marked code (seon.print/code).\\\"} [:path vector?] [:in vector?] [:expected :any] [:value [:map [:seon.print",
+    ":seon.render/proofs 12%: \"[:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]\""
+   ]
+  }
+ },
+ {
+  "task": "seon.print/a-prefixed-collection-indents-its-members-past-its-opener#1 turn 9",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md). A namespace-lifted map prints `#:seon.task{:kind :work,` and its later keys under the `#`, eleven columns left of `:kind`, so they read as the parent's (every agent's context shows its task so); `#error {:via` does the same. Cause: ```seon.print.emit/emit-collection``` nests a map's members one column past the group's indentation, not past its opener, and ```seon.print.select/member-indent``` charges that same one column, not knowing the lift. Correct: members nest past the opener (`#:seon.task{` is 12 columns) and the selection charges what the emitter lays out, its lift decided once where both read it. Proof: a lifted map of three keys under a narrow width prints each key in one column, inside its charge (seon.print-test/the-text-stays-inside-its-budget stays green).",
+  "recent-evals": [
+   "(println (my.agent/source-fn 'seon.print-test/a-map-shows-its-first-entry-whenever-its-least-form-fits))\n(println (take 12 (map str (keys (ns-interns 'seon.print-test)))))",
+   "(in-ns 'seon.print-test)\n(deftest a-lifted-map-indents-its-keys-past-its-opener\n  ;; `#:a{` is four columns, so the keys after the first stand in column 4, under :kind, never under the `#`\n  (let [m {:a/kind :work :a/plan \"a plan of some length\" :a/proofs #{'x/y}}\n        {:keys [text] :as r} (seon/print-value m {:width 20 :budget 400})\n        lines (str/split-lines (str text))\n        indent (fn [l] (- (count l) (count (str/triml l))))]\n    (is (nil? (:seon.error/type r)) (pr-str r))\n    (is (",
+   "(println (my.agent/source-fn 'seon.print.select/sized))\n(println (my.agent/source-fn 'seon.print.select/child))\n(println (map str (filter #(re-find #\"alias|ns \" (str %)) [])))\n(println (clojure.string/join \" \" (map str (:requires (meta (find-ns 'seon.print.select))))))"
+  ],
+  "read-next": [
+   ":seon.print/alloc",
+   ":seon.print/node",
+   "seon.print.select/flat-width"
+  ],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 88%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 63%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/agent.md#finding-your-way 25%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/render.md#one-printer 15%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/forks.md#jolt 8%: `reference-code/jolt` pinned at `6e604ac8`, the tip of ``jolt/emit-string-literals``, on `eba8826a`, the tip of ``jolt/image-fn-forms-opt-in``, on `2a6ae8f8`, the tip of ``jolt/arrays-compare``, on `86f49de8`, the tip of ``jolt/analysis-lookups``, on ``jolt/record-field-binds`` `0d39edc3`, on `e0351af8` (``jolt/global-ids-pin``: ``jolt/pin-2026-10-23`` `f05de7db` with ``jolt/hashset-bulk`` `ce384f07` merged in)."
+   ],
+   "functions": [
+    "seon.print.emit/nests 70%: (def ^:private nests [{:op :nest :offset 0} {:op :nest :offset 1} {:op :nest :offset 2}])",
+    "seon.print.emit/entry-begin 66%: (def ^:private entry-begin {:op :begin :seon.print/open :seon.print/entry})",
+    "seon.print.emit/line 58%: (def ^:private line {:op :line :inline \" \" :terminate \"\"})",
+    "seon.print.emit/entry-end 57%: (def ^:private entry-end {:op :end :seon.print/close :seon.print/entry})",
+    "seon.fixtures/requests 57%: The ten requests a live run measures, as a user would ask for them: a short problem description and the one form that reproduces it, with what it answers and what it should, no proof and no write set (its agent writes its own proof, red, and names what to change)."
+   ],
+   "schemas": [
+    ":seon.print/alloc 93%: \"[:map [:kind [:enum :leaf :string :name :map :coll :entry]]]\"",
+    ":seon.print/node 71%: \":map\"",
+    ":seon.print/context 67%: \"[:map [:budget number?] [:max-depth number?]]\"",
+    ":seon.print/op 63%: \"[:map [:op :keyword]]\"",
+    ":seon.print/opts 28%: \"[:map [:handle {:optional true} [:maybe [:or :symbol [:sequential :any]]]] [:budget {:optional true} pos-int?] [:max-depth {:optional true} pos-int?] [:width {:optional true} nat-int?] [:outputs {:op"
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#2 turn 8",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(let [r (my.agent/prove)] (->> (:reports r) (filter #(#{:error :fail} (:type %))) (map #(select-keys % [:var :type :message :actual :expected])) (map #(update % :actual (fn [a] (some-> a str (subs 0 (min 700 (count (str a))))))))))",
+   "(binding [clojure.test/*test-out* *out*] (select-keys (clojure.test/run-tests 'seon.print-test 'seon.print-cost-test) [:test :pass :fail :error]))",
+   "(seon.turn/hand-back! \"seon.print/breadth-shows-no-member-that-shows-nothing\" \"seon.print/breadth-shows-no-member-that-shows-nothing#1\")"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 87%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/render.md#prose-and-the-one-string-cutter 48%: Text is cut one way, inside a value or shown as itself: the printer's string cutter (`seon.print.select/break-at`) ends the shown part after a line break in its room's second half, else after a space in its final quarter, else at the room, and the cut says `\u2026+N chars in M more lines` and the form that reads exactly the rest (`seon.print.emit/cut-words`).",
+    "docs/render.md#one-printer 23%: There is one value printer, `seon.print`, and nothing is cut before it.",
+    "docs/failure-points.md#edges-that-catch-each-names-its-one-variant 14%: The failure points whose edge function catches, each with the one variant it declares and who handles it as data.",
+    "docs/errors.md#an-eval-errors-diagnostics 11%: An exception from an evaluated form is the `:seon.agent/eval-error` map (`seon.agent/error-map`)."
+   ],
+   "functions": [
+    "seon.print.select/shows? 64%: (defn- shows?",
+    "seon.print.select/separator 63%: What one more member line costs at most: its separator and, when it breaks, its indentation.",
+    "seon.print.select/grow-values 57%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/cut-reserve 56%: An upper bound on what a collection's one cut costs once members show.",
+    "seon.agent/test-report 52%: One clojure.test report as the run keeps it: its type, test var and message; a failing assertion's expected and actual printed by the one printer under :part; a cost proof's rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent page renders them; the judge persists them on the run); a typed error's :seon.error/type, :ticks and :budget (a test past its tick budget)."
+   ],
+   "schemas": [
+    ":seon.test/result 41%: \"[:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.prove/answer 30%: \"[:map [:key :string] [:ran :boolean] [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\"",
+    ":seon.print/result 29%: \"[:or :seon.print/answer [:map [:seon.error/type :qualified-keyword] [:seon.error/message :string]]]\"",
+    ":seon.root/nothing-lost 26%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]\"",
+    ":seon.test/report 17%: \"[:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]] [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]] "
+   ]
+  }
+ },
+ {
+  "task": "seon.print/breadth-shows-no-member-that-shows-nothing#1 turn 10",
+  "plan": "Found by the printer audit (notes/printer-audit-2026-10-25.md; owner, 2026-10-25: elision placeholders should not be printed). ```seon.print.select/fill-rows``` shows rows whole then one cut, but a collection of rows with one member of another kind falls back to ```seon.print.select/fill-members```, which places every member at its least first: 177 rows and a keyword print 177 lines of `{\u20267 (get-in result/e1 [N])}`. Correct: breadth places a member whose least form shows nothing only where a later member that shows something needs its position; a run of them at the tail is the collection's one cut. Proof: (assoc rows 3 :odd) of 177 rows prints no `{\u2026` line and one cut past the rows shown.",
+  "recent-evals": [
+   "(seon.turn/hand-back! \"seon.print/breadth-shows-no-member-that-shows-nothing\" \"seon.print/breadth-shows-no-member-that-shows-nothing#1\")",
+   "[(boolean (resolve 'seon.agent/test-child)) (some->> (:task @seon.agent/state) (seon.task/task (seon.agent/db)) :seon.task/accumulated :proofs)]",
+   "(seon.turn/hand-back! \"seon.print/breadth-shows-no-member-that-shows-nothing\" \"seon.print/breadth-shows-no-member-that-shows-nothing#2\")"
+  ],
+  "read-next": [],
+  "shown": {
+   "sections": [
+    "docs/render.md#how-a-value-is-printed 88%: A value is printed in two passes, selection under one token budget and then layout, so its text and its hiccup come from one selection and every cut names the form that reads the rest.",
+    "docs/agent.md#what-you-read 24%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/vocabulary.md#tasks-task-chains-words 19%: The words for tasks and their prerequisites, and the namespace that owns each.",
+    "docs/failure-points.md#edges-that-catch-each-names-its-one-variant 14%: The failure points whose edge function catches, each with the one variant it declares and who handles it as data.",
+    "docs/ctx.md#kept-by-the-change-never-rebuilt 11%: ``seon.ctx/build`` walks the pattern once, when the agent's state first holds its db (a spawn, a resume, a clone), and ``seon.ctx/patch`` keeps it from each transaction's datoms, which ``seon.agent/transact!`` records with the db they made."
+   ],
+   "functions": [
+    "seon.print.select/shows? 78%: (defn- shows?",
+    "seon.print.select/separator 71%: What one more member line costs at most: its separator and, when it breaks, its indentation.",
+    "seon.print.select/row-class 68%: The kind that makes `held`, a member of `node`, a row: :map, :vector or :set (an array map and a hash map are one kind), or in a sequence :string; else nil.",
+    "seon.print.select/grow-values 65%: `entries` at their least grown into `extra` characters: each cut one whole when its growth fits, else filled to its room.",
+    "seon.print.select/child 59%: Member `held` of collection `parent`, shown `i`th; a map's member is its entry of key and value."
+   ],
+   "schemas": [
+    ":seon.render/proofs 26%: \"[:map-of {:seon.render/html seon.render.ui/proofs} :symbol [:map [:status :keyword] [:failure {:optional true} [:map [:assert :any] [:got :any]]]]]\"",
+    ":seon.task/task 24%: \"[:and {:seon.render/html seon.render.ui/task-box} :seon.task/own [:map [:seon.task/accumulated [:map [:plan :string] [:proofs :seon.task/proofs]]]]]\"",
+    ":seon.root/nothing-lost 21%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]\"",
+    ":seon.turn/not-observed 18%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]\"",
+    ":seon.test/result 16%: \"[:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]\""
+   ]
+  }
+ },
+ {
+  "task": "my.task/status-answers-before-any-turn#1 turn 13",
+  "plan": "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message.",
+  "recent-evals": [
+   "(source 'seon.agent-test/in-agent)\n(println (re-seq #\"\\(deftest [^\\s]+\" \"x\"))\n(println (take 6 (filter #(re-find #\"turn|context-read|observ\" (str %)) (keys (ns-interns 'seon.agent-test)))))",
+   "(in-ns 'seon.task-test)\n(require 'seon.agent-test)\n(clojure.test/deftest status-answers-before-any-turn\n  ;; a freshly attached agent has had no turn and no context read: status measures the task as a turn would\n  (let [[status again] (map :value (seon.agent-test/in-agent [\"(my.task/status)\" \"(my.task/status)\"] {:proofs '#{demo-test/t}}))]\n    (is (map? status))\n    (is (not (:seon.error/type status)) (pr-str status))\n    (is (= [{:test 'demo-test/t :status :undefined}] (map #(select-keys % [:te",
+   "(my.task/status)"
+  ],
+  "read-next": [
+   "seon.render.ui/divergence-view"
+  ],
+  "shown": {
+   "sections": [
+    "docs/agent.md#what-you-read 44%: Your context comes in two parts: the run's, sent once and unchanged while you work, then the turn's, measured again after each of your replies.",
+    "docs/agent.md#finding-your-way 37%: The program as your branch records it answers where things are, so read before you write.",
+    "docs/agent.md#ctx 12%: `@ctx` is your record as one map (`ctx` is referred into your own namespace only; from any other it is `seon.ctx/ctx`, read as `@seon.ctx/ctx` and changed by `swap!` the same way): your agent entity pulled by a pattern (its runs with their task, turns and messages, the vars the task cites, and your evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``, one atom in your process).",
+    "docs/agent.md#done 7%: Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies.",
+    "docs/agent.md#your-turn 5%: You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call."
+   ],
+   "functions": [
+    "my.task/status 68%: This agent's task now, as its turn reads it: each proof's status (a red one with its failures, source and calls), what else the done rule refuses, a failed test run, the turn of how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as this turn's observe measured them; what the branch's merge carries, whether it can merge, the stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view, tests-view).",
+    "seon.server/ops 49%: The server's ops, the one table, keyed by a request's :op (an EDN request is a keyword-keyed map, {:op :agents}; a line opening `{\"` is MCP's, respond): each op's description, its arguments (JSON Schema properties; :required, the ones it needs) and its answer, a fn of root's system, the agent the request names (:root, an agent's keyword, or nil) and the request.",
+    "seon.check/robust 37%: (defn robust [] (run-check \"ROBUST\" {:datoms 2000} (fn [sys] (let [[a b x] (spawn-ready!",
+    "seon.reconcile/advance 37%: Run aid's flight takes answer r of its step.",
+    "form:242155594797913394 36%: (ns seon.judge \"The first-move judge (DECISIONS, No live agent runs until the context has a format agents respond well to): a task's first-turn context sent to the model once, and the reply's first move scored from the compiler's facts, never by another model."
+   ],
+   "schemas": [
+    ":seon.task/state 35%: \"[:enum {:seon.status/title {:running \\\"running: a run works it now\\\", :blocked \\\"blocked: a task it needs is not done (its blocked-by)\\\", :open \\\"open: released, no run running yet\\\", :failed \\\"failed: held for root with a failure: a run refused, its agent dead, its merge refused, or marked failed (my.task/fail!); root decides: (my.root/run!",
+    ":seon.task/task-fact 33%: \"[:map {:seon.db/attributes true, :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}], :seon.render/html seon.render.ui/task} [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution] [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind] [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs] [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/instructions {:optional true} :seon.task/instructions] [:seon.task/model {:optional true} :seon.task/model] [:seon.task/evidence {:optional true} :seon.task/evidence] [:seon.task/gate?",
+    ":my.agent/no-var 31%: \"[:and :seon.error/base [:map [:seon.error/type [:= :my.agent/no-var]] [:name :symbol] [:nearest [:vector :symbol]] [:ask {:optional true} :string]]]\"",
+    ":seon.task/own 22%: \"[:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]] [:seon.t",
+    ":seon.turn/not-observed 19%: \"[:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]\""
+   ]
+  }
+ }
+]

@@ -148,7 +148,7 @@
     (is (not-any? :reasoning_content [(first (:messages b)) (nth (:messages b) 2)]) "and only on the assistant's message")))
 
 (deftest a-request-lets-the-model-reply-in-prose
-  ;; notes/archive/design-agent-view-2026-10-24.md §1 (step 0 measured it live: four DeepSeek turns,
+  ;; claude_scratch/archive/design-agent-view-2026-10-24.md §1 (step 0 measured it live: four DeepSeek turns,
   ;; thinking on, all 200, cache hits 87-96% from turn 2): tool_choice auto (DeepSeek refuses
   ;; `required` with thinking on), so a reply may be prose alone; the eval tool takes code
   ;; only; the reasoning goes back as it was returned; no ;; reaches the model

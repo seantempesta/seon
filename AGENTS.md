@@ -6,7 +6,7 @@ Seon is where many agents do real work for their user, each in its own process o
 
 You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the JVM version, now read-only reference): everything v1 does, smaller, faster and more certain; a v1 capability left out is left out on purpose, with its reason in `BAGGAGE.md`.
 
-Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
+The repository's front page for a person arriving is [README.md](README.md#start-here). Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
 
 The running system: `bin/root status|start` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
 
@@ -27,6 +27,8 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 
 ## 2. Who does what
 
+The owner rules, root directs and merges, worktree sessions each work one task, and Seon agents work the same tasks through the same server.
+
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time, with evidence and, for a big one, priced options (the simplest viable first, your recommendation marked).
 - **Root** (the orchestrating session; in Seon, the root agent) owns **direction, THE PLAN, merging into main and the docs**. Its output is the whole system moving forward, not findings it made itself. Root:
   - keeps several things in flight at once (worktrees implementing, agents researching, a batch merging) and records them in the plan's "In flight";
@@ -39,7 +41,10 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 - **Seon agents** are forked processes working tasks through the same server, tasks and context (§6). What our worktree sessions find missing from that context is a task for Seon.
 
 ### Root's working rules (what a fresh root needs; the owner's rulings behind them are in docs/decisions.md)
-- **On resume, read before replying to anything:** this file, `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand), `docs/restart.md`, and the last lines of `notes/merge-log.md`. Then `git log --oneline --first-parent -15`, `uptime`, `bin/root status` and the sessions list, and write the owner a five-line state summary before acting.
+
+What a fresh root needs to run the work; the owner's ruling behind each rule is in [decisions](docs/decisions.md).
+
+- **On resume, read before replying to anything:** this file, `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand), `docs/restart.md`, and the last lines of `claude_scratch/merge-log.md`. Then `git log --oneline --first-parent -15`, `uptime`, `bin/root status` and the sessions list, and write the owner a five-line state summary before acting.
 - **Sessions:** Claude sessions are filed in the project's sidebar group, with titles that say their current work. Model by task: Opus for design and dependencies, Sonnet for mechanical work, reviews and the merge session, Haiku or Sonnet for browser testers. Archive a session once its branch has merged and it holds nothing else.
 - **The app caps one session's cross-session messages at about 10 per owner message.** So standing rules go in this file, not in messages, and root's current orders and assignments go in `claude_scratch/root-orders.md` (gitignored, edited in place), which every session reads before each new task, branch, run or ready report; each session keeps its status in `claude_scratch/status/<name>.md`, rewritten in place. Batch what must be sent, most important first. Sessions report ready to the merge session when one runs, else to root.
 - **Heavy runs** (`bin/prove`, full checks, builds of a changed tree): up to three at once while `uptime` load stays under ~8 on the 18-core machine. Never tell every session to run at the same moment. Each run writes under a directory of its own, `target/prove/<run-id>` (it names it on its first line), so two runs on one checkout never overwrite each other; the main tree's runs belong to the merge session. Nothing waits on main's verification: no lock (owner, 2026-10-27, "Remove it"); load stays down by not running the same work twice.
@@ -49,17 +54,17 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 - **A pin bump is verified** with `git ls-tree HEAD reference-code/<lib>` and `gh api repos/seantempesta/<lib>/commits/<sha>` before it is reported.
 - **Fewer sessions, each with one job** (owner, restart of 2026-10-24, docs/restart.md): at most five working sessions plus merge; no session starts another without root's go; a session is archived once its branches merge (the owner asked first).
 - **An independent audit every 10 merges or once a day,** whichever comes first (restart of 2026-10-24): an agent that has not seen the work reads the merges since the last audit against §3's value rules and §9, and files what to cut; root assigns the cuts.
-- **A merge is verified by `bin/prove --merge` in the main tree** (after `nice -n 15 bin/build`): it holds main's lock, runs every test and check step the change reaches with no green at its digest, process tests included, contracts and smoke among them, ends on one MERGE OK/FAILED and writes its own line to `notes/merge-log.md`. Read every red it names before keeping or reverting; never a hand-named list of tests (one missed render-test twice, 2026-10-26). **Nothing tracked is edited or committed while it runs** (the binary goes stale). **Restart root after a merge with `bin/update`**, never `bin/root stop/start`, until task seon.fx/the-source-tree-follows-main merges: the standing root imports main's program from `.worktrees/merges`, which only bin/update moves (it froze for 262 commits on 2026-10-26). After a restart, check that a just-merged var's entity is on root's main. A design the size of a subsystem gets an independent review before it is approved (2026-10-26).
+- **A merge is verified by `bin/prove --merge` in the main tree** (after `nice -n 15 bin/build`): it holds main's lock, runs every test and check step the change reaches with no green at its digest, process tests included, contracts and smoke among them, ends on one MERGE OK/FAILED and writes its own line to `claude_scratch/merge-log.md`. Read every red it names before keeping or reverting; never a hand-named list of tests (one missed render-test twice, 2026-10-26). **Nothing tracked is edited or committed while it runs** (the binary goes stale). **Restart root after a merge with `bin/update`**, never `bin/root stop/start`, until task seon.fx/the-source-tree-follows-main merges: the standing root imports main's program from `.worktrees/merges`, which only bin/update moves (it froze for 262 commits on 2026-10-26). After a restart, check that a just-merged var's entity is on root's main. A design the size of a subsystem gets an independent review before it is approved (2026-10-26).
 - **Root merges verified fixes as they come in** (owner, 2026-10-24: "merge fixes as they come in"): a fix whose report carries its numbers, its self-review rating and a green `bin/prove`, when no merge session is running; the merge steps are the merge session's below.
 
 ### Briefing an agent
 
 A brief is complete, or the agent spends its turns rediscovering. Every brief states:
 1. **the question or task**, and where it sits in THE PLAN (why it matters now);
-2. **what is known**, as paths: the task entry, wiki sections, notes, the exact failing command and its output, earlier agents' findings;
+2. **what is known**, as paths: the task entry, wiki sections, `claude_scratch/` papers, the exact failing command and its output, earlier agents' findings;
 3. **the scope**: read-only or which worktree it may write; what not to touch (the standing store, `~/src/seon`);
 4. **what done looks like**: the shape of the answer and the evidence it must carry (a reproduction form, file:line, measured numbers, proofs red → green);
-5. **where the result goes**: a file in its worktree or `notes/`, plus a short reply.
+5. **where the result goes**: a file in its worktree or `claude_scratch/`, plus a short reply.
 
 For a worktree session, the brief is its task entry (§3) plus its worktree name. When the cause of a problem is unclear, send two agents with independent briefs; neither sees the other.
 
@@ -103,7 +108,7 @@ Its references are derived from the plan's citations by the one parser ([referen
 
 **A view is a render of what already exists, checked in a browser** (owner, 2026-10-24: "the debug page should be doing basically zero work … in the past I've asked for the debug page and entirely separate machinery that is somehow slower is built"). A page shows records through their views and the render cache; it never recomputes what the system already computed (a debug page shows what was sent, as recorded, not a rebuilt request), and its cost proof shows it costs what changed. A session whose work changes what an agent is sent or what the owner sees opens the page in a browser (a subagent with the built-in browser) before it reports.
 
-**Measure before and after.** Every perf or cost claim carries numbers from the same input before and after, and every "faster" is checked by an independent run. `notes/perf-<date>.md` stays current; a regression found there is a task the same day.
+**Measure before and after.** Every perf or cost claim carries numbers from the same input before and after, and every "faster" is checked by an independent run. `claude_scratch/perf-<date>.md` stays current; a regression found there is a task the same day.
 
 ### Testing: compute only what is needed
 
@@ -160,6 +165,8 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 
 ## 5. Laws
 
+The laws every change is held to; a check or a test reads each of them.
+
 - **Only documented config.** Every limit, bound or default is a key in `resources/seon/config/default.edn`, with its unit, provenance and what happens at the bound, under a `seon.config.*` schema.
   - It's read through one resolver (task → model → provider → config).
   - No literals, no `System/getenv` outside the loader.
@@ -202,23 +209,32 @@ Without MCP, one line works:
 printf '{:op :eval :agent "root" :code "(my.root/problems sys)"}\n' | nc -w 10 127.0.0.1 PORT
 ```
 
-## 7. The docs are a wiki, and the system's memory
+## 7. The wiki is the one home for how the system works
+
+**Use the wiki for everything about the system** (owner, 2026-10-27: "we should be using the wiki for everything so it gets better because that's what agents are pulling into their context"). `docs/` is what a task's context pulls, so a fact that lives anywhere else is a fact no agent reads. Mechanisms, rulings, measurements and the reasons for them are written into the wiki page where the problem lives, in the commit that changes the system. Never duplicate the wiki: say a thing once, where it belongs, and cite it from everywhere else.
+
+Where each kind of information lives, and how the wiki that holds the system's memory is kept.
 
 - **Pages:** ``docs/<topic>.md``, one concept per page; `docs/README.md` is the map, and it states how the wiki is kept (one home per concept, a leading sentence that stands alone, patterns in their topic sections, everything linked, current truth rather than a dated log). Sections are addressed `topic#slug` and mirrored in the database.
-- **References are what the text cites, read by one parser**, at the depth the delimiter asks: [references](docs/references.md). Prefer citing a var to a `file:line`.
+- **Every function, schema entry and deftest carries a citation to the wiki section (or the plan step) that describes its mechanism.** Its docstring says what this var is, in a sentence, and cites the section for how it works; it never restates the section. A function's docstring is checked (the `:uncited-var` problem class, [health](docs/health.md)); a deftest's leading `;;` comment and a schema entry's `:description` carry the citation too, not yet checked. The citations are read by one parser from the text itself ([references](docs/references.md)), and these are the forms it looks up:
+  - a section: its bare address ``docs/<topic>.md#<anchor>`` (GitHub's slug of the heading), which pulls the heading and its lead (summary), or a link to it, which pulls the section (doc); a page the same way. A docstring wants the bare address;
+  - a var: ``ns/name`` (a `#'` before it is punctuation); a schema key: ``:ns/keyword``; a task: ``ns/task-name``; a file: its path (never ``path:line``: cite the var);
+  - **the delimiter picks the depth** (bare word summary, one backtick or a link doc, three backticks code; two backticks a literal that cites nothing; a word inside a `"..."` string is data): [references](docs/references.md#the-delimiter-picks-the-depth) has the rules and their limits, which this section does not restate.
+  - Example, a docstring's text: Writes the merged files back to the merges branch. See docs/source.md#commit-the-merges-branch.
+  - A comment that records where a number or a choice came from (its provenance, in `default.edn` or a source file) may name an archived scratch paper; what a reader needs to understand the mechanism is in the wiki.
 - **Merging a change updates its section in the same commit.** Before reporting, read your task's context through the server and confirm it pulls what the task needs.
+- **`claude_scratch/` is the Claude sessions' scratch space,** for working papers, evidence and logs a session needs while it works (`merge-log.md` is written there). It is never system documentation. Anything in it that is still true moves to the wiki, and then the paper moves to `claude_scratch/archive/` in the same commit; no live doc cites a scratch paper as current.
 
 ### Where information lives
 
 Each kind of information has one home, and a fact found anywhere else is moved there:
 - **the wiki** (`docs/`): how the system works now, by topic; no dated logs, no plans;
-- **docstrings and schemas**: what one var or one value is, beside its code; a key's meaning is its comment in `resources/seon/config/default.edn`. A page cites the var rather than restating it;
+- **docstrings and schemas**: what one var or one value is, in a sentence, beside its code, with the citation to its wiki section; a key's meaning is its comment in `resources/seon/config/default.edn`. A page cites the var rather than restating it, and a docstring cites the page rather than restating it;
 - **task entries** (`resources/seon/tasks/`): work to do, its reproduction, cause, proofs and what it deletes;
 - **DECISIONS** (`docs/decisions.md`): the owner's standing rulings, one line each with its quote, date and where it is now stated;
 - **the plan** (`docs/plan.md`): what is in flight, the open owner questions and THE PLAN, on one screen;
-- **git**: history: who did what, when, and every number a merge measured (in its commit message).
-
-A note (`notes/`) is a working paper. Once its content is filed in one of the homes above, it moves to `notes/archive/` in the same commit, and no live doc cites it as current.
+- **git**: history: who did what, when, and every number a merge measured (in its commit message);
+- **`claude_scratch/`**: a session's working papers only (above).
 
 ## 7a. Words
 
@@ -247,6 +263,8 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 
 ## 8. The machine
 
+The machine Seon is built on and for, and the rules that keep it from being flooded.
+
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
 - **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
@@ -257,6 +275,8 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
 ## 9. Mistakes we have made, and do not repeat
+
+The mistakes made so far, each stated so it is not made again.
 
 - **Root doing the work itself** (owner, 2026-10-22: "you spent most of the session just debugging rather than outsourcing with agents"): debugging, measuring or reading many files personally, step by step, while the plan stood still. Delegate it with a brief (§2).
 - **Trees before the forest:** a detail chased past its worth with no step of THE PLAN asking for it; guessing at a cause instead of launching agents to find it.
@@ -280,7 +300,7 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 - **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change,** a full run while iterating, or a second run of an unchanged tree (§3, Testing).
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
-- **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A worktree is removed as soon as its branch is merged and nothing in it is unsaved: commits merged, notes filed, and a store or run output recorded or handed to the owner.
+- **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A worktree is removed as soon as its branch is merged and nothing in it is unsaved: commits merged, scratch papers filed (to the wiki or `claude_scratch/archive/`), and a store or run output recorded or handed to the owner.
 - **Flooding the machine,** killing by pattern, leaving things running, or walking past garbage (a leftover process, a merged worktree) because someone else left it.
 
 ## 10. Done

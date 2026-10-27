@@ -260,14 +260,15 @@
   ;; key: the session's agent the run continues (seon.task/session-key); nil, the agent's
   ;; own key in this boot
   ([aid task boot agent env start-ms plan] (run-start-tx aid task boot agent env start-ms plan nil))
-  ([aid task boot agent {:keys [branch model max-turns]} start-ms plan key]
+  ([aid task boot agent {:keys [branch model max-turns holder]} start-ms plan key]
   (let [k (when agent (or key (agent-key boot agent)))]
     (filterv some?
              [(cond-> {:seon.run/id aid :seon.run/task [:seon.task/id task] :seon.run/status :running
                        :seon.run/boot boot :seon.run/start-ms start-ms
                        :seon.run/branch branch :seon.run/max-turns max-turns :seon.run/plan plan}
                 k (assoc :seon.run/agent k)
-                model (assoc :seon.run/model model))
+                model (assoc :seon.run/model model)
+                holder (assoc :seon.run/holder holder))
               ;; the agent its own entity map, so it takes its content id (Datahike's content-tempids);
               ;; its tempid is its key, unique in a transaction that starts several runs
               (when k {:db/id k :seon.agent/key k :seon.agent/id agent})]))))
@@ -441,12 +442,12 @@
   "A pulled run as :seon.run/run."
   {:malli/schema [:=> [:cat :seon.run/pulled] :seon.run/run]}
   [a]
-  (let [{:seon.run/keys [branch model max-turns results uncontracted conflicts unmerged]} a]
-    (cond-> (-> a (dissoc :db/id :seon.run/branch :seon.run/model :seon.run/max-turns :seon.run/results
+  (let [{:seon.run/keys [branch model max-turns holder results uncontracted conflicts unmerged]} a]
+    (cond-> (-> a (dissoc :db/id :seon.run/branch :seon.run/model :seon.run/max-turns :seon.run/holder :seon.run/results
                           :seon.run/uncontracted :seon.run/conflicts :seon.run/unmerged)
                 (update :seon.run/task :seon.task/id)
                 (cond-> (:seon.run/agent a) (update :seon.run/agent :seon.agent/id))
-                (assoc :seon.run/env {:branch branch :model model :max-turns max-turns}))
+                (assoc :seon.run/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))
       results (assoc :seon.run/results (into {} (map (juxt :seon.proof/test :seon.proof/status)) results))
       uncontracted (assoc :seon.run/uncontracted (set uncontracted))
       unmerged (assoc :seon.run/unmerged (vec (sort unmerged)))
@@ -498,15 +499,16 @@
     (when (:seon.run/status a) (run-value a))))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout}, nil
+  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout :gate-self}, nil
   before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
-                                                     [:gate-checkout {:optional true} :string]]]]}
+                                                     [:gate-checkout {:optional true} :string] [:gate-self {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout] [:seon.root/id :root])]
+  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout :seon.config.source/gate-self] [:seon.root/id :root])]
     (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
       (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
-      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r)))))
+      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r))
+      (:seon.config.source/gate-self r) (assoc :gate-self (:seon.config.source/gate-self r)))))
 
 (defn entity-value
   "The task, run or root that entity e of db is now, as the reconciler's index holds it:

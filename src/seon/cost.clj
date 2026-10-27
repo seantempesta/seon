@@ -245,22 +245,23 @@
   bytes 1,536 to 3,776 B over and runs of 8 equal calls on the way down, so a bound near the
   estimate went red or green by the draw (task seon.cost/a-call-allocates-the-same-bytes-each-time).
   A count of calls, never a time. A call that has not settled after
-  `:seon.config.proofs/cost-max-samples` calls is a :seon.cost/unsettled error, thrown: its bytes
-  are not a number to judge."
+  `:seon.config.proofs/cost-max-samples` calls answers the least of them, marked in the answer's
+  meta (`:unsettled {:calls n :lowered-at k}`): noise on a large allocation lowers the least now and
+  then without end (a 32 MB call: the last new low at call 53 of 60), so \"no new low in a run of
+  calls\" is a test that fails by chance, not a defect of the call; a call that never reaches a floor
+  shows in that mark and in the spread of its bytes."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [need (config/value :seon.config.proofs/cost-settled)
         cap (config/value :seon.config.proofs/cost-max-samples)
         b @baseline
-        best (loop [n 1 best (once f args) low-at 1]
-               (cond (>= (- n low-at) need) best
-                     (>= n cap) (throw (ex-info (str "a call allocated fewer bytes than its least for " (- n low-at) " calls only in " n " calls (cost-settled " need ")")
-                                                (contract/error :seon.cost/unsettled #'seon.cost/measure
-                                                                (str "the call's bytes did not settle in " n " calls: its least so far " (long (:bytes best)) " B was last lowered at call " low-at)
-                                                                {:calls n :least (long (:bytes best))})))
-                     :else (let [m (once f args) n (inc n)]
-                             (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))]
-    (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))))
+        [best n low-at] (loop [n 1 best (once f args) low-at 1]
+                          (if (or (>= (- n low-at) need) (>= n cap))
+                            [best n low-at]
+                            (let [m (once f args) n (inc n)]
+                              (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
+        dims (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))]
+    (cond-> dims (< (- n low-at) need) (vary-meta assoc :unsettled {:calls n :lowered-at low-at}))))
 
 (declare units)
 
@@ -439,7 +440,10 @@
    :fn/call {:ticks 5.16 :ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
    ;; 353.53 B before malli's total arms went unguarded (task seon.contract/an-armed-call-costs-its-checks:
    ;; two try's a call, 2026-10-23); a total arm is checked bare
-   :fn/armed-call {:ticks 10.2 :ns 20.3 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   ;; 14.16 ticks since seon.profile's wrapper counts each call's ticks and bytes (task seon.proofs/tests-are-facts:
+   ;; a test's record holds what its contracted functions cost): 10.2 when it counted calls alone, measured by the bisect
+   ;; of tonight's merges (jolt/tests-are-facts moved it, nothing before it); the ns is the same wrapper's, 62-76 on a loaded machine
+   :fn/armed-call {:ticks 14.16 :ns 62.4 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
    :vec/nth {:ticks 8.15 :ns 12.4 :bytes 0.0 :what "nth of a vector"}
    :vec/conj {:ticks 29.18 :ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
    :vec/conj! {:ticks 7.49 :ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}

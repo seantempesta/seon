@@ -1,13 +1,13 @@
 (ns seon.render
   "Render selection and the one render call (W1's proto.render and proto.render.schema,
-  ported onto next's registry: notes/archive/option3-W1-render.md §1).
+  ported onto next's registry: claude_scratch/archive/option3-W1-render.md §1).
 
   A render is a plain function (opts & children) -> its result, Reagent's form: opts are
   its props, all optional (:as, the room it is shown in, :inline, :block or :tile; :budget,
   its tokens; :handle, the form its cuts read the rest through), and a function that does not
   care about one ignores it (owner: \"It's all just functions and results\"). A render answers
   hiccup (serialized by seon.web.html, where a vector headed by a function is a call, expanded
-  as Reagent does), and the page and the model read the same hiccup (notes/one-derivation-design-
+  as Reagent does), and the page and the model read the same hiccup (claude_scratch/one-derivation-design-
   rev42.md §2). Selection, first match wins, and nothing else (DECISIONS, Renders attach to
   schemas; the UI and the context are renders, ported not reinvented):
     1. the value's own override key (:seon.render/html, in the map or its metadata): a render
@@ -55,7 +55,12 @@
   "What the printer shows in place of v (seon.print/print-value's :render): {:value summary}
   when v's schema (its metadata :seon.render/schema) declares a summary function, which makes a
   value (an array map of what matters, docs/render.md#a-render-is-a-value-printed-once) that the
-  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read."
+  one printer then prints, at its budget, with its own cuts; else nil. Costs one metadata read.
+  The summary is a render declared on the value's schema, the mechanism AGENTS 9 sanctions (output
+  improves only through the one printer or such a render), and the printer's part is four lines (a
+  render may answer {:value x} as well as {:text :html}, as its `call` clause already prints a value in
+  place); the producer-side alternative, keeping host objects out of seon.agent/state, is a rewrite
+  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8, 2026-10-27)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v]
   (when-let [sym (summary-declared (:seon.render/schema (meta v)))]

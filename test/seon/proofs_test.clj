@@ -183,7 +183,7 @@
 
 (deftest a-refused-commit-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
-  ;; throw went only to printed output with a guessed message; the store's refusal is
+  ;; throw went only to printed output with a guessed message; the store's refused write is
   ;; :seon.proofs/unrecorded, never read as recorded
   (prog)
   (record (ts/test-db) 'user "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
@@ -460,3 +460,18 @@
                        {:type :error :var "#'a.b-test/died" :exit {:exit 1} :message "test process died: {:exit 1} while #'a.b-test/died ran"}]}]
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
+(deftest a-results-read-that-fails-is-an-error-never-zero-greens
+  ;; root, 2026-10-27 (test-audit's re-measure): an ask refused while the standing root restarted
+  ;; (bin/update after a merge: 20:00:21 down, 20:00:46 listening) read as "nothing is reused", a
+  ;; failed read taken for zero greens. A port nothing listens on refuses as a restarting root does
+  (let [r (runner/read-results 1 ["d-any"])]
+    (is (= :seon.proofs/unread (:seon.error/type r)) (pr-str r))
+    (is (= :refused (:why r)))))
+
+
+(deftest a-run-no-root-recorded-is-red
+  ;; the test audit's cut 2 (root, 2026-10-27): a run whose results no root took stayed green while
+  ;; its request waited in a queue to be sent later. One path: recorded, or the run is red
+  (let [u (runner/record-run! 1 {:id "r" :tree "t"} {'a.b-test/t {:test 'a.b-test/t :digest "d-any" :pass 1 :fail 0 :error 0}} {})]
+    (is (seq u) "unrecorded")
+    (is (re-find #"no root recorded them \(port 1\): :refused" (:message (first u))) (pr-str u))))

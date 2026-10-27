@@ -164,7 +164,8 @@
 (defn stored-results
   "{digest result} of the results db holds at digests (:seon.proof/ facts, results-tx's): one AVET
   seek and one EAVT seek per digest. A green is {:digest :pass 1 :fail 0 :error 0}; a red is its status
-  counted once, with the failures it recorded (:failures [{:type :message :expected :actual}]); a
+  counted once, with the failures it recorded (:failures [{:type :message :expected :actual}]) and, for
+  a cost proof, the verdict it was judged by (:cost {:rows :verdict}); a
   digest recorded both green (:seon.proof/green) and red (:seon.proof/red) is flaky, whichever came
   last. A test's verdict is a function of its digest (one per-test tick bound everywhere), so a red
   is reused as a green is."
@@ -173,11 +174,12 @@
   (into {} (for [dg (distinct digests) :let [e (:e (first (d/datoms db :avet :seon.proof/digest dg)))]
                  :when e
                  ;; the entity's datoms, one EAVT seek (a pull costs several times it)
-                 :let [{g :seon.proof/green red-s :seon.proof/red fs :seon.proof/failures}
-                       (into {} (comp (filter #(#{:seon.proof/green :seon.proof/red :seon.proof/failures} (:a %))) (map (juxt :a :v))) (d/datoms db :eavt e))
+                 :let [{g :seon.proof/green red-s :seon.proof/red fs :seon.proof/failures cost :seon.proof/cost}
+                       (into {} (comp (filter #(#{:seon.proof/green :seon.proof/red :seon.proof/failures :seon.proof/cost} (:a %))) (map (juxt :a :v))) (d/datoms db :eavt e))
                        green (when g {:digest dg :pass 1 :fail 0 :error 0})
-                       red (when red-s {:digest dg :pass 0 :fail (if (= :fail red-s) 1 0) :error (if (= :error red-s) 1 0)
-                                        :failures (vec (remove :flaky fs))})
+                       red (when red-s (cond-> {:digest dg :pass 0 :fail (if (= :fail red-s) 1 0) :error (if (= :error red-s) 1 0)
+                                                :failures (vec (remove :flaky fs))}
+                                         cost (assoc :cost cost)))
                        r (verdict dg green red)]
                  :when r]
              [dg r])))
@@ -243,19 +245,18 @@
 
 (defn results-tx
   "The facts that record ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes
-  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change; :kept, the
-  file it waited in while no root took it}): one
+  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change}): one
   :seon.proof/ result per digest that ran, with failures ({key [assertion]}, seon.proofs/failures),
   and the run's entity, holding its detail (what each test's functions cost: detail, one value).
   A flaky result (judged, not run) and an :unreported one (its namespace threw before it reported:
   no verdict of its own) record nothing, as no result with no :digest does; a reused one is never
   in ran. When nothing ran, nothing at all."
   {:malli/schema [:=> [:cat [:map [:id :string] [:tree {:optional true} :string] [:branch {:optional true} [:or :keyword :string]]
-                              [:t {:optional true} :int] [:change {:optional true} :map] [:kept {:optional true} :string]]
+                              [:t {:optional true} :int] [:change {:optional true} :map]]
                        [:map-of :any [:map [:digest {:optional true} :string] [:test {:optional true} :qualified-symbol] [:step {:optional true} :string]
                                       [:pass {:optional true} nat-int?] [:fail {:optional true} nat-int?] [:error {:optional true} nat-int?]
                                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
-                                      [:fns {:optional true} [:sequential :seon.profile/fn-cost]]]]
+                                      [:fns {:optional true} [:sequential :seon.profile/fn-cost]] [:cost {:optional true} :seon.cost/report]]]
                        [:map-of :any [:sequential :map]]]
                   [:vector :map]]}
   [run ran failures]
@@ -270,7 +271,6 @@
              (:tree run) (assoc :seon.proof.run/tree (:tree run))
              (:branch run) (assoc :seon.proof.run/branch (name (:branch run)))
              (:t run) (assoc :seon.proof.run/t (:t run))
-             (:kept run) (assoc :seon.proof.run/kept (:kept run))
              (seq dt) (assoc :seon.proof.run/detail dt))])
           (for [[k r] ran :let [dg (:digest r) t (:test r)]]
             (cond-> (assoc where :seon.proof/digest dg :seon.proof/status (status-of r)
@@ -281,7 +281,8 @@
               (:ms r) (assoc :seon.proof/ms (long (:ms r)))
               (:ticks r) (assoc :seon.proof/ticks (:ticks r))
               (:bytes r) (assoc :seon.proof/bytes (:bytes r))
-              (seq (failures k)) (assoc :seon.proof/failures (vec (failures k))))))))
+              (seq (failures k)) (assoc :seon.proof/failures (vec (failures k)))
+              (:cost r) (assoc :seon.proof/cost (:cost r)))))))
 
 (defn answer-ran
   "What an agent's test run answer ({:reports :digests :fns}, seon.agent/run-tests-forked's) ran:
@@ -292,10 +293,12 @@
   [answer]
   (let [reports {:reports (vec (:reports answer))}
         died (set (keep #(when (:exit %) (test-symbol (:var %))) (:reports answer)))
-        reused (set (keep #(when (:reused %) (test-symbol (:var %))) (:reports answer)))]
+        reused (set (keep #(when (:reused %) (test-symbol (:var %))) (:reports answer)))
+        cost-of (costs reports)]
     {:ran (into {} (for [[t s] (results reports) :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]
-                     [t {:test t :digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)
-                         :fns (get-in answer [:fns t] [])}]))
+                     (cond-> [t {:test t :digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)
+                                 :fns (get-in answer [:fns t] [])}]
+                       (cost-of t) (assoc-in [1 :cost] (cost-of t)))))
      :failures (failures reports)}))
 
 (defn record-tx

@@ -215,7 +215,7 @@
          (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
-  ;; owner 2026-10-21 (notes/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
+  ;; owner 2026-10-21 (claude_scratch/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.
@@ -582,6 +582,18 @@
                     :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))}))
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
+
+(deftest a-proc-defect-names-where-it-threw
+  ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
+  ;; case meeting nil, with nothing saying in which function or on what message
+  (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
+        m (#'root/flow-error {:clojure.core.async.flow/pid :reconciler :clojure.core.async.flow/ex ex
+                              :clojure.core.async.flow/msg {:tag 7 :r nil}})
+        p (promise)
+        _ (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+    (is (= "seon.procs-test" (some-> (:in m) namespace)) (str "the fn it threw in: " (pr-str (:in m))))
+    (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
+    (is (= :state (:took (answer p))) "with what its step took")))
 
 (deftest a-throwing-step-answers-every-pending-request
   ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the

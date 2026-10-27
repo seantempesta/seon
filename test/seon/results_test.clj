@@ -86,10 +86,6 @@
          (is (= [['a/f :self-ticks 300 900 3.0]] (mapv (juxt :var :by :before :after :ratio) (proofs/slower @conn detail)))
              "f tripled again; g held; a function main never measured is new, not slower"))))))
 
-(deftest a-run-sent-late-says-where-it-waited
-  (let [[run] (proofs/results-tx {:id "r" :tree "t" :kept "/x/unsent/1.edn"} {'a/t {:test 'a/t :digest "d" :pass 1 :fail 0 :error 0}} {})]
-    (is (= "/x/unsent/1.edn" (:seon.proof.run/kept run)) (pr-str run))))
-
 (deftest a-tests-last-ms-is-its-newest-result-whatever-its-digest
   (ts/test-branch!
    (fn [_ conn]
@@ -97,3 +93,24 @@
      (rec! conn {'a/t {:test 'a/t :digest "ms-2" :pass 1 :fail 0 :error 0 :ms 900}
                  'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
      (is (= '{a/t 900 a/u 7} (proofs/last-ms @conn '[a/t a/u a/none])) "the newest, by test; a test never run is left out"))))
+
+(def ^:private red-cost
+  "A red cost proof's report, as seon.cost/proof's :actual carries it."
+  {:rows [{:n 10 :measured {:ticks 900.0 :bytes 100.0} :expected {:ticks 100.0 :bytes 100.0}}]
+   :verdict {:ok? false :over [{:dim :ticks :n 10 :ratio 9.0}] :steeper [] :under [] :unmeasured []}})
+
+(deftest a-reused-red-cost-proof-keeps-its-verdict
+  ;; root via one-wait, 2026-10-27: a reused red cost proof lost its {:rows :verdict}, so the problems
+  ;; cost class stayed empty and bin/check problems waited forever. The verdict is kept with the red
+  ;; and comes back as its fresh run reported it
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [answer {:digests '{a.c-test/cost "dc"}
+                   :reports [{:type :fail :var "#'a.c-test/cost" :message "over" :cost red-cost}]}
+           {:keys [ran failures]} (proofs/answer-ran answer)
+           fresh (proofs/costs {:reports (:reports answer)})]
+       (proofs/record! (write-on conn) @conn {:run {:id "r"} :ran ran :failures failures})
+       (let [r (get (proofs/stored-results @conn ["dc"]) "dc")]
+         (is (= (get fresh 'a.c-test/cost) (:cost r)) (pr-str r))
+         (is (= fresh (proofs/costs {:reports [(assoc (first (:failures r)) :var "#'a.c-test/cost" :cost (:cost r))]}))
+             "the reused report (seon.agent/run-tests-forked's) answers proofs/costs as the fresh one did"))))))

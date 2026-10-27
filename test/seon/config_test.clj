@@ -77,7 +77,7 @@
   ;; the scripted model's script is stated only under :scripted (checks and tests)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout :seon.config.source/gate-self} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
     (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
@@ -340,7 +340,7 @@
 (deftest thinking-on-refuses-reasoning-left-out
   ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
   ;; thinking :enabled and tools, DeepSeek answers 400 when earlier reasoning_content is left
-  ;; out (measured live, notes/step0/no-replay.edn), so that config is refused at load, naming
+  ;; out (measured live, claude_scratch/step0/no-replay.edn), so that config is refused at load, naming
   ;; each model and explained by m/explain; thinking off may leave it out
   (let [r (refused #(config/resolved (assoc config/config :seon.config.ai/thinking :enabled :seon.config.ai/replay-reasoning false)))]
     (is (= :seon.config/refused (:seon.error/type r)) (pr-str r))
@@ -352,11 +352,20 @@
 
 (deftest a-worktree-commits-its-merges-on-a-branch-of-its-own
   ;; worktrees share refs: a root in one that wrote jolt/seon-merges would move the main tree's merges branch
-  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). bin/env names the branch of what it starts
+  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). The config names it from the
+  ;; checkout (#seon/own-branch), not an env var (audit cut 11)
   (let [root (config/checkout)
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" root args))))
         worktree? (not= (git "rev-parse" "--git-dir") (git "rev-parse" "--git-common-dir"))
-        branch (fn [env] (str/trim (:out (clojure.java.shell/sh "zsh" "-c" (str "env -u SEON_SOURCE_BRANCH ROOT=" root " " env " zsh -c '. " root "/bin/env; print -r -- ${SEON_SOURCE_BRANCH:-unset}'")))))]
-    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "unset") (branch ""))
-        "a worktree's own, the main tree's none: its config's default stands"))
-)
+        own (fn [dir] (let [f (java.io.File/createTempFile "own-branch" ".edn")]
+                        (spit f "{:b #seon/own-branch \"jolt/seon-merges\"}")
+                        (try (:b (aero/read-config (str f) {:seon.config/checkout dir})) (finally (.delete f)))))
+        main-tree (str/replace (git "rev-parse" "--path-format=absolute" "--git-common-dir") #"/\.git$" "")]
+    (is (= (if worktree? (str "jolt/seon-merges-" (.getName (java.io.File. ^String root))) "jolt/seon-merges")
+           (:seon.config.source/branch config/config))
+        "this checkout's: a worktree's own")
+    (is (= "jolt/seon-merges" (own main-tree)) "the main tree's is the shipped name")
+    (let [wt (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/own-branch-" (System/nanoTime) "/x")) .mkdirs)]
+      (spit (java.io.File. wt ".git") (str "gitdir: " main-tree "/.git/worktrees/x\n"))
+      (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file")
+      (.delete (java.io.File. wt ".git")) (.delete wt) (.delete (.getParentFile wt)))))
