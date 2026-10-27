@@ -661,7 +661,7 @@
 
 (defn task-state
   "What happened to task id (:seon.task/state), from the index; its desired execution stays
-  on the task. The one derivation every task row reads (seon.render.proc/task-rows)."
+  on the task. The one derivation of a task's state."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.task/state]}
   [idx id]
   (let [x (get-in idx [:tasks id :seon.task/execution])]

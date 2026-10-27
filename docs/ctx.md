@@ -16,7 +16,7 @@ The map is the agent's entity pulled by a pattern: Datahike's pull syntax, held 
   - `:needs`, the tasks it waits on;
   - `:sections`, the wiki sections its text cites (``:seon.task/sections``, the section-address twin of `:seon.task/references`, written by the same producer from the same text by the one parser, ``seon.ref/addresses``), each with its heading and text.
 
-The page's walk reads the same declaration: ``seon.render/units`` is a schema pattern's joins ([render](render.md)).
+Every render of ctx reads what this declaration holds ([render](render.md#the-page)).
 
 ## Kept by the change, never rebuilt
 
