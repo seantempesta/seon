@@ -290,3 +290,29 @@
            (testing "the scratch note stays on the branch"
              (is (empty? (d/datoms after :avet :note/text "a platform-free scratch note")))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
+
+(deftest a-merge-carries-the-namespace-of-a-form-it-carries
+  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
+  ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
+  ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
+  ;; behind check never settled). The merge carries the namespace entity too.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [b (keyword (str (name (:branch cfg)) "-ns"))
+           _ (d/transact conn ((var-tx "f" "x") @conn))
+           _ (d/branch! conn (:branch cfg) b)
+           bc (d/connect (assoc cfg :branch b))
+           newns (fn [db] (program/record-tx db {:id "app.z/(defn z [x] x)" :src "(defn z [x] x)" :ns 'app.z :ns-form? false
+                                                  :defs [{:var 'app.z/z :kind :fn :contract "[:=> [:cat :int] :int]"}]
+                                                  :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}}))]
+       (try
+         (d/transact bc (newns @bc))
+         (let [base (pdb/branch-base conn (:branch cfg) b) head @bc main @conn
+               r (pm/delta-three-way base head main #{})
+               ks (keys (:ours r))
+               after (:db-after (d/merge-db conn #{b} (pm/merge-tx main base head ks #{}) (pdb/tx-meta (:branch cfg))))]
+           (is (some #(= :form (first %)) ks) "the form is a key to carry")
+           (is (= (pm/program-of head ks #{}) (pm/program-of after ks #{})) "main reads the branch's program at those keys, :ns included")
+           (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the form's namespace")
+           (is (= {} (:ours (pm/delta-three-way head after main #{}))) "and nothing differs between the two programs any more"))
+         (finally (d/release bc) (d/delete-branch! conn b)))))))

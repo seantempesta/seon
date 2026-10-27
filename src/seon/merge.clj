@@ -265,7 +265,7 @@
 (defn changed-vars
   "The vars changes ch add, redefine or remove (divergence's vars): what the branch changed."
   {:malli/schema [:=> [:cat :seon.merge/changes] [:set :qualified-symbol]]}
-  [ch] (into #{} (keep (fn [[[kind x]]] (when (= :var kind) x))) (keys ch)))
+  [ch] (into #{} (keep (fn [[kind x]] (when (= :var kind) x))) (keys ch)))
 
 ;; ---- verbatim merges: a merged datom is the same datom ------------------------------
 
@@ -286,10 +286,14 @@
   store's, issued once (docs/storage.md#ids), so on any other branch they name the same
   entities and transactions: a merge adds what the branch wrote, never a copy. Platform
   records ride on no key, so they stay where they were written. Datahike keeps a carried
-  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom)."
+  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom). A carried form's
+  namespace entity is carried with it."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
+        ;; a carried form names its namespace by ref: the namespace entity rides with it (a namespace made
+        ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
+        es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
         carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
