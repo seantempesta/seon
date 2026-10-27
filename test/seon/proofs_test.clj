@@ -6,7 +6,7 @@
   stored."
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
-            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
+            [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb] [my.agent]))
 
 (defn- prog []
   (record (ts/test-db)
@@ -457,3 +457,20 @@
                        {:type :error :var "#'a.b-test/died" :exit {:exit 1} :message "test process died: {:exit 1} while #'a.b-test/died ran"}]}]
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
+
+(deftest an-agents-prove-answers-its-reds-and-proofs-not-its-reports
+  ;; agent-repl, 2026-10-27 (the blind agent's turn 6): a bare (my.agent/prove) answered the whole
+  ;; test run, 25,000 characters, 15,000 of them its :selected names. It answers the counts, each
+  ;; test not green with its failures, each given proof, and how many it selected
+  (let [run {:key "k1" :pass 3 :fail 1 :error 0 :ran 3 :reused 1 :ms 12 :at-judge 4
+             :selected '[a-test/one a-test/two a-test/three b-test/four]
+             :digests '{a-test/one "d1" a-test/two "d2" a-test/three "d3" b-test/four "d4"}
+             :reports [{:type :pass :var "#'a-test/one"} {:type :pass :var "#'a-test/two"}
+                       {:type :fail :var "#'a-test/three" :message "doubles" :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}
+                       {:type :pass :var "#'b-test/four" :reused true}]}
+        a (#'my.agent/prove-answer run '#{a-test/one b-test/five})]
+    (is (= '{a-test/one :pass a-test/three :fail b-test/five :none} (:results a)) "each red and each given proof, a proof with no result :none")
+    (is (= ['a-test/three] (keys (:failures a))) "each red's failing assertions")
+    (is (= 4 (:selected a)) "how many it selected, not their names")
+    (is (= "k1" (:key a)) "the run's key, which names its facts on main")
+    (is (not-any? a [:reports :digests]) "no reports or digests")))

@@ -184,19 +184,34 @@
            (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
            :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name) (take k)) r)})))))
 
+(defn- prove-answer
+  "Test run r as (prove) answers it, given proofs: its key, counts and time; :results, each test
+  not green and each of proofs ({test :pass|:fail|:error|:none}); :failures, each red's failing
+  assertions; :selected, how many it selected; :deferred and :why, the process tests left to the
+  judge. Its reports, digests and selected names stay in the run's facts on main, by :key (a bare
+  run answered 25,000 characters, 15,000 of them the selected names)."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
+  [r proofs]
+  (let [rs (proofs/results r)]
+    (-> (select-keys r [:key :pass :fail :error :ran :reused :ms :deferred :why :at-judge :unstored :exit])
+        (assoc :selected (count (:selected r))
+               :results (into (sorted-map-by #(compare (str %1) (str %2)))
+                              (concat (remove (comp #{:pass} val) rs) (for [p proofs] [p (rs p :none)]))))
+        (cond-> (seq (proofs/failures r)) (assoc :failures (proofs/failures r))))))
+
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
   :judge, so the run is recorded on main and is one run with any other asker's of this head):
   the task's proofs and every in-process test reaching what the branch changed since the main it
   forked from, each test with a result at its reach digest reused (a red as recorded), not run;
   given proofs, the tests of their namespaces. The process tests it reaches run at the judge,
-  before a merge (:deferred). Answers that test run ({:pass :fail :error :reports :ran :reused
-  :ms ...}) with :results {test :pass|:fail|:error}."
+  before a merge (:deferred). Answers the run as prove-answer reads it: {:key :pass :fail :error
+  :ran :reused :ms :selected :results :failures ...}, :results each test not green and each given proof."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
    (let [test-run (agent/prove! :judge (into #{} (map (comp symbol namespace)) proofs))]
-     (cond-> test-run (not (contract/error? test-run)) (assoc :results (proofs/results test-run))))))
+     (if (contract/error? test-run) test-run (prove-answer test-run proofs)))))
 
 (defn grep
   "The program vars whose recorded definition on this branch holds the string s, best first, each
