@@ -97,9 +97,10 @@
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however
   it ended; what a test starts runs under bin/held, which ends it then (task
-  seon.check/a-test-root-names-its-store-and-main). Removed when the process ends or is
-  terminated (a shutdown hook); a SIGKILLed one's is reclaimed by the next process's first use
-  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo.
+  seon.check/a-test-root-names-its-store-and-main). Removed by the next process's first use
+  (bin/held --reclaim: its pid is no process) - task seon.check/a-killed-starter-leaves-no-fifo -
+  never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
+  (shared-roots), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
   (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
@@ -107,7 +108,6 @@
            (sh/sh "bin/held" "--reclaim" dir)
            (sh/sh "rm" "-f" path)
            (sh/sh "mkfifo" path)
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (.delete (java.io.File. path)))))
            [path (java.io.RandomAccessFile. path "rw")])))
 
 (defn binary-sh
@@ -236,7 +236,8 @@
             store (process-store checkout)
             root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
         (.addShutdownHook (Runtime/getRuntime)
-                          (Thread. ^Runnable (fn [] (stop-root! root) (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+                          (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
+                                                   (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
         root))))
 
 (defn shared-root!

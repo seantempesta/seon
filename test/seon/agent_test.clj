@@ -60,7 +60,7 @@
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
         ;; what the test made goes with it, however it ended: on its own root, the root and its
-        ;; main; on the shared one, its agent (killed, its end awaited) and its task's branches
+        ;; main; on the shared one, its agent (killed, its end awaited), its tasks (cancelled) and their branches
         end! (fn []
                (let [agent @made]
                  (sh/sh "rm" "-rf" tasks)
@@ -71,6 +71,10 @@
                                                     "   (c/kill! sys a)"
                                                     "   (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur)))))"
                                                     " (clojure.core.async/untap (:events-mult sys) ev)"
+                                                    ;; its tasks cancelled: a run left :running keeps the reconciler from
+                                                    ;; ever being quiet, and a later test's await-quiet waits on it
+                                                    " (my.root/cancel! sys (filterv #(clojure.string/starts-with? % \"" tns "/\")"
+                                                    "   (datahike.api/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @(:conn sys))))"
                                                     " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
                                                     "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
                                                     "   (datahike.api/delete-branch! (:conn sys) b)))")))))

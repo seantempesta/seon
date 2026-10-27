@@ -151,16 +151,17 @@
 ;; ---- the proof root asks for: one run for a session and an agent's turn ----------------------
 
 (deftest a-session-and-an-agents-turn-for-one-digest-end-in-one-run
-  ;; a real root and agent a1. The agent's turn asks the service (seon.agent/prove!, what
+  ;; a real root and an agent of it. The agent's turn asks the service (seon.agent/prove!, what
   ;; seon.turn/observe calls) while a session asks for the same branch's head (seon.root/prove!,
   ;; the server's :prove op / seon_prove): the service runs it once, for both, and a session asking
   ;; again after the eval that asked recorded itself (the tx moved, nothing the run reads did) gets that run.
-  (let [code #(str "(let [ap (c/submit! sys :" % " \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
+  (let [code #(str "(let [runs0 (set (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys)))"
+                   "      ap (c/submit! sys :" % " \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
                    "      sp (c/prove! sys :" % ")"
                    "      s (select-keys @sp [:key :pass :fail :error])"
                    "      a @ap"
                    "      again (select-keys @(c/prove! sys :" % ") [:key])"
-                  "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))]"
+                  "      runs (remove runs0 (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys)))]"
                   "  (pr-str {:session s :agent (:text a) :again again :runs (vec runs)}))")
         [r] (at/in-agent #(vector {:op :eval :agent "root" :code (code (:agent %))}))
         v (clojure.edn/read-string (:value r))]
@@ -174,9 +175,10 @@
   ;; main has no agent: the service spawns one on the tests branch, loads the checkout's tests there,
   ;; runs the namespace asked for, kills the agent, and records a fact per test digest on main.
   ;; The facts are read by a form of their own: a form reads the db as it began.
-  (let [ask (str "(let [r @(c/prove! sys nil '#{seon.patterns-test})"
+  (let [ask (str "(let [runs0 (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
+                 "      r @(c/prove! sys nil '#{seon.patterns-test})"
                  "      again @(c/prove! sys nil '#{seon.patterns-test})]"
-                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r) :refused (when (seon.contract/error? r) r)}))")
+                 "  (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r) :ran (:ran r) :key (:key r) :again (:key again) :red (:red r) :runs0 (vec runs0) :refused (when (seon.contract/error? r) r)}))")
         read (str "(let [facts (d/q '[:find ?t ?s ?dg :where [?e :seon.proof/digest ?dg] [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] @(:conn sys))"
                   "      runs (d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] @(:conn sys))"
                   "      green (filter seon.proofs/green? (vals (seon.proofs/stored-results @(:conn sys) (map last facts))))]"
@@ -188,7 +190,7 @@
     (is (= [0 0 true []] ((juxt :fail :error :ran :red) v)))
     (is (pos? (:pass v)))
     (is (= (:key v) (:again v)) "asked again: the same run's answer, nothing runs")
-    (is (= [(:key v)] (:runs v)) "one run fact")
+    (is (= [(:key v)] (remove (set (:runs0 v)) (:runs v))) "one run fact")
     (is (= '[[seon.patterns-test/a-backlog-is-the-unread-queue :pass] [seon.patterns-test/workers-compete-for-one-shared-in-port :pass]] (:facts v))
         "a result fact per test, by digest")
     (is (= '["seon.patterns-test/a-backlog-is-the-unread-queue" "seon.patterns-test/workers-compete-for-one-shared-in-port"] (:latest v)) "and main's newest result per test")
