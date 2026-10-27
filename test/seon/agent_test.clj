@@ -249,8 +249,9 @@
                   " (deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
                   " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) "))))) :defined)")
         defined (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str held) "))"))
-        ;; the test service proves a1's branch (seon.root/run-tests!): it asks the idle agent for :tests
-        _ (eval-root "(def held-run (future @(c/run-tests! sys :a1)))")
+        ;; the test service proves a1's branch as its turn does (mode :turn: the tests the branch changed,
+        ;; held-proof/h among them): it asks the idle agent for :tests
+        _ (eval-root "(def held-run (future @(c/prove! sys :a1 #{} :turn)))")
         in (java.io.FileInputStream. ^String began)
         in-test (.read in)
         ;; the child holds in its test: the agent answers an eval meanwhile
