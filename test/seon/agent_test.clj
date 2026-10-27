@@ -301,6 +301,16 @@
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
+(deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
+  ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
+  ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
+  (let [[sent proved taken] (in-agent [{:op :message :agent "a1" :body "while proving"}
+                                       "(select-keys (prove) [:results])"
+                                       "(my.agent/messages)"])]
+    (is (true? (:ok sent)))
+    (is (map? (:value proved)))
+    (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
+
 (deftest a-wide-reach-reuses-unchanged-results
   ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
