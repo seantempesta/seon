@@ -97,6 +97,31 @@ The same method as §4, in this worktree after merging main, with `stages.clj` (
 - **A Jolt bump still moves 45% of digests** (451 of 997). That is all tests whose reach touches a Jolt-pinned namespace. Whether 451 is honest (they do reach Jolt code) is reuse's call.
 - `ask-root` answered `:refused` once in four tries while root was up, and then said "nothing is reused". A refused connection reads as "no results", with no retry or error fact.
 
+### Per-merge watch (owner: "stay on top of the perf and the lines of code")
+
+| Merge (main) | src delta | Names what it replaced | Perf change |
+|---|---|---|---|
+| 04359bea96 agent-repl (tip) | +13 −5 | n/a (small) | none measured |
+| 964414bb18, c6b36bac67 one-ms-record | +18 −3 | yes: ms recorded once (cut D) | warm selection 0.98 s, same |
+| e0b2437872 wiki-reads-agents-and-readme | +10 −6, 1 key | n/a | none measured |
+| 558224bbf9 an-outside-agent-lives-until-done | +20 −10 | n/a | none measured |
+| 49f8c4e2de a-daily-full-run-is-the-net | **+192 −18, new ns seon.cron, 1 key** | nothing (fills audit gap F; seon.cron is AGENTS §4's one cron proc) | no common op touched |
+
+### Common ops, baseline at main c6b36bac67 (2026-10-27 20:50, load 9–17, the worktree's own root)
+
+| Op | Measured |
+|---|---|
+| Selection, warm | 0.98 s plan-of (69 M ticks, 426 MB); reach-graph-of 0.21 s; **reuse 833 of 893** (main ran this tree) |
+| Selection after 6 merges (22 program files changed) | **program-db refresh 10.5 s, 2.19 G ticks, 11.7 GB, 1.49 M calls**: two thirds of a full import (3.3 G) for 22 files, against 84 M for one commit's change |
+| Selection, cold (new program-schema digest) | 24.1 s, 3.3 G ticks (19:56) |
+| An eval, `(+ 1 2)` at root | 8.8 k ticks, 56 KB |
+| The agent's ctx pull (`:context`, task seon.proofs/prove-runs-what-a-change-reaches) | first, with attach and fork: 7.1 s, 46.6 KB; then 0.37–0.39 s, 3.1–5.7 KB (ticks not read: the op returns none) |
+| `(my.agent/prove)`, no change | 144 ms, 40 M ticks first; then 11 ms, 1.8 M ticks; 15 reused |
+| `(my.agent/prove)` after a one-function change (seon.profile/ms-since) | 8.7 s, 62 M ticks in the agent; 48 ran, 14 reused, 62 process tests to the judge |
+| `bin/build seon`, no-op | 1.0 s |
+| `bin/build seon`, one file (a comment in src/seon/profile.clj) | **37.7 s** (user 33.7) |
+| `bin/build seon` back to a tree built a minute before | **32.2 s**: no binary is kept by tree, so every return rebuilds |
+
 ## 7. Independent audit of today's merges (AGENTS §2: every 10 merges or daily)
 
 **What was read.** Main took 190 first-parent commits today. src, test and bin went +9,495 / −4,320 lines, net +5,175. Two Sonnet auditors that had not seen the work read 36 merges against §1, §3 (earns its place, value review) and §9:
