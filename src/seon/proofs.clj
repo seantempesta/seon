@@ -91,7 +91,7 @@
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
   forks (bin/forks: the forks' own suites on Jolt) runs no function: its key is :env alone, so a
-  pin bump selects it and a change to Seon's program does not."
+  pin bump selects it and a change to Seon's .clj program does not."
   '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "forks" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]

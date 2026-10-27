@@ -6,10 +6,11 @@
 # (it failed to load, or died), is FAILED; the run ends on FORKS OK or FORKS FAILED.
 #
 # Its key is the pins (seon.proofs/check-steps "forks" []: the checkout's :env, which holds every
-# submodule's pin, bin/ and test/forks/), so a bump of datahike, konserve, persistent-sorted-set or
-# jolt runs it, and a Seon-only change does not. A unit's counts moving is a change to the fork's
+# submodule's pin, bin/, test/forks/ and the config files), so a bump of datahike, konserve,
+# persistent-sorted-set or jolt runs it, and a change to Seon's .clj program or its prose does not. A unit's counts moving is a change to the fork's
 # semantics or to its tests: the commit that moves them records the new counts here, with why.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+[[ -x $ROOT/target/jolt/jolt ]] || { echo "FORKS FAILED (no target/jolt/jolt; run bin/build jolt first)"; exit 1 }
 . "$ROOT/bin/env"
 export JOLT_PWD=$ROOT
 mkdir -p "$ROOT/target/tmp"; TMP=$(mktemp -d "$ROOT/target/tmp/forks-XXXXXX")
@@ -20,7 +21,7 @@ while read -r unit want; do
   n=$((n + 1))
   mkdir -p "$TMP/$n"
   got=$(cd "$ROOT" && TMPDIR=$TMP/$n/ nice -n 15 target/jolt/jolt -A:dhtest run test/forks/run.jolt "$unit" < /dev/null 2>&1 | tee "$TMP/$n.log" | sed -n 's/^FORK [^ ]* //p' | tail -1)
-  if [[ $got == $want ]]; then echo "FORK $unit $got"
+  if [[ $got == "$want" ]]; then echo "FORK $unit $got"
   else bad=$((bad + 1)); echo "FORK $unit FAILED: ${got:-no counts} (baseline $want)"; tail -20 "$TMP/$n.log"; fi
 done < "$ROOT/test/forks/baseline.edn"
 (( n > 0 )) || { echo "FORKS FAILED (no units in test/forks/baseline.edn)"; exit 1 }
