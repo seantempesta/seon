@@ -21,9 +21,8 @@
 set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# main's merge verification goes first (bin/env's main_first), in a subshell: bin/env's
-# variables are the steps' to set, below
-( . "$ROOT/bin/env"; main_first )
+# A build never waits on main's merge verification (owner, 2026-10-27: "Keep the lock for tests
+# and checks, but bin/build never waits on it"): it runs niced beside it (docs/merging.md#main-goes-first)
 "$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 T=$ROOT/target
 RC=$ROOT/reference-code
