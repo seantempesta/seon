@@ -1,0 +1,6 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+ended seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+RED seon.agent-test/a-blocked-agent-ends-on-its-socket-eof {:pass 1, :fail 1, :error 0}
+started seon.agent-test/a-proof-run-ends-with-its-agent
+STALLED seon.agent-test/a-proof-run-ends-with-its-agent 134000 ms (bound 133356 ms, load 16.14, /Users/sean/src/seon-next/target/prove/shard-3.log)
