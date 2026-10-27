@@ -159,14 +159,6 @@
  ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
  ;; (each agent charged the system's measured free-memory drop per agent).
  :seon.config.machine/memory-mb 4096
- ;; Unit: runs. How many heavy runs (bin/prove, bin/test, bin/check, each with its shards) run at
- ;; once on the machine, across every checkout: each takes one of this many slots, a flock on
- ;; target/heavy-N.lock in the main checkout (bin/env's heavy_hold), and holds it for its whole
- ;; run. At the bound a further run waits on a slot (the kernel answers when one ends; no poll, no
- ;; clock). Owner, 2026-10-27: "It should never be this taxing just to get basic work done":
- ;; eleven worktree sessions' runs at once took the 18-core machine to load 34; a run is
- ;; :seon.config.proofs/jobs shards (4), so two runs are eight shards beside the standing root.
- :seon.config.machine/heavy-runs 2
  ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
  ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
  ;; it replaced was 729 MB. At the bound: seon.check/mcp-proof fails, so a relay that boots Seon
