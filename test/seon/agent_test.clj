@@ -334,9 +334,9 @@
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
-  (let [[sent proved taken] (in-agent [{:op :message :agent "a1" :body "while proving"}
-                                       "(select-keys (prove) [:results])"
-                                       "(my.agent/messages)"])]
+  (let [[sent proved taken] (in-agent (fn [{:keys [agent]}] [{:op :message :agent agent :body "while proving"}
+                                                  "(select-keys (prove) [:results])"
+                                                  "(my.agent/messages)"]))]
     (is (true? (:ok sent)))
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
