@@ -1,0 +1,32 @@
+COMMAND   PID USER   FD     TYPE             DEVICE  SIZE/OFF                NODE NAME
+seon    66127 sean  cwd      DIR               1,13        96          1115815674 /private/tmp/seon-agents
+seon    66127 sean  txt      REG               1,13 246546277          1172012831 /Users/sean/src/seon-next/.worktrees/relevance-lab/target/seon
+seon    66127 sean  txt      REG               1,13   4129840 1152921500312609216 /usr/lib/dyld
+seon    66127 sean  txt      REG               1,13      8192          1164519754 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/lock.mdb
+seon    66127 sean  txt      REG               1,13    177504          1164496257 /Users/sean/src/seon-next/.worktrees/relevance-lab/target/lib/liblz4.dylib
+seon    66127 sean  txt      REG               1,13      4096          1164519792 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/ids
+seon    66127 sean  txt      REG               1,13     34656          1164496229 /Users/sean/src/seon-next/.worktrees/relevance-lab/target/lib/libprobe.dylib
+seon    66127 sean  txt      REG               1,13    130816          1171979299 /Users/sean/src/seon-next/.worktrees/relevance-lab/target/lib/liblmdb.dylib
+seon    66127 sean  txt      REG               1,13    633920          1164496258 /Users/sean/src/seon-next/.worktrees/relevance-lab/target/lib/libzstd.dylib
+seon    66127 sean  txt      REG               1,13    884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+seon    66127 sean  txt      REG               1,13   4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+seon    66127 sean  txt      REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean    0     PIPE 0x6bcde4bd65f3ec90     16384                     ->0x5c9df715cc881b9
+seon    66127 sean    1     PIPE 0x252645ad19059679     16384                     ->0xd7b0c6a9f1ab3c
+seon    66127 sean    2w     REG               1,13         0          1171439073 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store-agents/main/a3.err
+seon    66127 sean    3r     CHR               17,1 0t1187504                 612 /dev/urandom
+seon    66127 sean    4u     REG               1,13      8192          1164519754 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/lock.mdb
+seon    66127 sean    5u     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean    6w     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean    7u     REG               1,13      8192          1164519754 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/lock.mdb
+seon    66127 sean    8u     REG               1,13      8192          1164519754 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/lock.mdb
+seon    66127 sean    9u     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean   10     PIPE 0xa7568121d6dd965e     16384                     ->0x55e4bc2f6e1d3668
+seon    66127 sean   11w     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean   12u     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean   13u    unix 0xa4ed5d795ea1333a       0t0                     ->0xf5818519407d65ad
+seon    66127 sean   14w     REG               1,13 367984640          1164519755 /Users/sean/src/seon-next/.worktrees/relevance-lab/runs/store/data.mdb
+seon    66127 sean   15     PIPE 0x3e335b7f7fd2530e     16384                     ->0x9206648ee9b1ebf4
+seon    66127 sean   16     PIPE 0x9206648ee9b1ebf4     16384                     ->0x3e335b7f7fd2530e
+seon    66127 sean   17u  KQUEUE                                                  count=0, state=0xa
+seon    66127 sean   18u    unix  0xd3532a20a0e60b2       0t0                     ->(none)

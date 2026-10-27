@@ -1286,6 +1286,10 @@
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
+        ;; a test namespace's form walking a directory (file-seq) scans the checkout: what it judges is the
+        ;; files themselves, so the tests reaching it take the tree (seon.docs-test/no-text-uses-an-old-word
+        ;; judged two trees by one digest, red in one and green in the other, and was marked flaky)
+        scans (flag :scans #(and (test-nss (:ns %)) (contains? (:refs %) 'clojure.core/file-seq)))
         ;; a form that starts a process (a process var, the binary) reaches what that process runs
         ;; for it, over a socket and as a quoted form it is sent, edges no reference shows: the
         ;; entry vars' forms (the agent's turn) and, of an entry multimethod (the server's
@@ -1341,7 +1345,7 @@
                                           any (fn [k fs] (boolean (or (some fs c) (some #(get-in fl [% k]) kids))))]
                                       [(reduce #(assoc! %1 %2 n) comp-of c)
                                        (assoc! cd n (error/digest (str (str/join " " (sort (map own c))) "|" (str/join " " (sort (map cd kids))))))
-                                       (assoc! fl n {:reads (any :reads reads) :proc (any :proc proc) :bin (any :bin bin)
+                                       (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
                                                     :config (let [own (map (comp :config rows) c)
@@ -1355,7 +1359,7 @@
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
     (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
-           :reads reads :proc proc :bin bin :plain plain :own own
+           :reads reads :scans scans :proc proc :bin bin :plain plain :own own
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))))
 
 (defn reach-graph
@@ -1371,7 +1375,7 @@
         sid #(str "schema " %)
         live (live-ids db)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
-                 :reads #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
+                 :reads #{} :scans #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
                  :data-refs data-refs :schemas schemas :schema-config (schema-config-keys schemas) :live live}
                 db []
                 (into (reach-rows db (set (vals live)) true)
@@ -1398,9 +1402,11 @@
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
   roots, {key [var ...]}): a key's digest is of its name, :env, :tree when it is a root (a
-  check step) and what it reaches reads the tree (a test never takes the tree: it is digested by
-  what it reaches, a file it reads or a binary it runs not in its reach is the full run's to
-  catch, bin/test --all, docs/merging.md), its starting forms' components' digests (its forms and their
+  check step) and what it reaches reads the tree, or when it reaches a test namespace's form that
+  walks a directory (a scan of the checkout, :scans: what it judges is the files themselves); any
+  other test never takes the tree: it is digested by what it reaches, a file it reads or a binary
+  it runs not in its reach is the full run's to catch, bin/test --all, docs/merging.md), its
+  starting forms' components' digests (its forms and their
   namespaces' plain forms) and the values in inputs' :config of the config keys those
   components read (config-reads); :process? and :binary?, whether one of those components uses a
   process or a binary var. A root naming a var with no form in g gets none."
@@ -1418,7 +1424,7 @@
                        kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
                              (into kvs (filter (fn [[ck]] (= "seon.env" (namespace ck)))) config)
                              kvs)]
-                   {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
+                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots (:reads f)))) cs) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
                     :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
     (if roots

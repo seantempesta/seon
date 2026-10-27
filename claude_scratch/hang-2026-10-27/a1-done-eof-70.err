@@ -1,0 +1,10 @@
+{:jolt.error/kind :read/eof,
+ :jolt.error/type :read-error,
+ :jolt.error/line 1,
+ :jolt.error/column 1835079,
+ :clojure.error/line 1,
+ :clojure.error/column 1835079,
+ :seon.error/type :seon.agent/eval-error,
+ :seon.error/operation seon.repl/serve!,
+ :seon.error/message "EOF while reading",
+ :class "class java.lang.RuntimeException"}

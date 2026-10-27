@@ -72,6 +72,9 @@
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
+ ;; a line the agent's test process sent does not read (a value that prints as no EDN in it): its test
+ ;; ends :error with the line's head, and the agent goes on (seon.agent/child-line)
+ :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
  :seon.lib/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/unwatched]] [:fd :int] [:pid :int]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]

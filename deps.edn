@@ -30,7 +30,7 @@
         ;; konserve and datahike require it (the same pin datahike declares); core.async is
         ;; excluded because Jolt ships its own
         org.replikativ/superv.async {:git/url "https://github.com/seantempesta/superv.async"
-                                     :git/sha "501b42945693804fd3e57276cc2a07ed4fe1d602"
+                                     :git/sha "6f6c8231db8f2da45c600c2b0f5a3606b83a6cb6"
                                      :exclusions [org.clojure/clojurescript org.clojure/core.async]}
         ;; the model provider's JSON (N1's P5: data.json 2.5.1 runs on Jolt with jolt-lang/time)
         org.clojure/data.json {:mvn/version "2.5.1"}
