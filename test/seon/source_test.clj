@@ -759,7 +759,7 @@
                            (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
                            (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
+               :env {"SEON_RUN_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
         args ["--set" (str ":seon.config.source/root=" (pr-str wb))
               "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
         root (atom nil)
