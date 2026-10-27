@@ -142,7 +142,7 @@
 
 (deftest the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
   ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
-  ;; cron proc's request (no asker) runs in a lane of its own (a full run takes most of an hour and
+  ;; cron proc's request (no asker) runs in a track of its own (a full run takes most of an hour and
   ;; can stall: an agent's turn never waits on it); its executor is the :tests effect (bin/test --all
   ;; in a worktree of main, an OS child), its answer recorded as the facts every run leaves, on main,
   ;; so a red test is a :test-red row
@@ -171,7 +171,7 @@
         (is (every? #(= "main" (:seon.proof/branch %)) (filter :seon.proof/status facts)))
         (is (= #{"a.b-test/t" "a.c-test/u"} (set (keep :seon.proof/latest facts))) "main's newest result of each test: what :test-red reads")
         (let [[st4 o4] (feed st3 [(answer-of w {:ok true :t 6})])]
-          (is (nil? (:full st4)) "the lane is free")
+          (is (nil? (:full st4)) "the track is free")
           (is (empty? (filter :req o4)))
           (is (empty? (filter #(= :problem (:op %)) o4)) "a red test is not a platform defect: it is a :test-red row")
           (testing "the day again: answered by its run, nothing runs"
@@ -183,7 +183,7 @@
               (is (= [{:type :fail :message "boom" :expected "1" :actual "2"}]
                      (:seon.proof/failures (first (filter #(= "a.c-test/u" (:seon.proof/latest %)) facts))))
                   "with why it is red: the failures its run recorded"))))))
-    (testing "an effect that failed is a platform problem, and the lane is free for the next day"
+    (testing "an effect that failed is a platform problem, and the track is free for the next day"
       (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/full-run-tx "bin/worktree --at exited 1" {})
             [st5 o5] (feed st [(answer-of fx err)])]
         (is (nil? (:full st5)))

@@ -301,7 +301,7 @@
   ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live
   ;; agent :a7", an agent the caller never attached. A context read of a task no agent works attaches
   ;; one (the :context op); the caller's attach after it is the same outside run: it answers that
-  ;; agent, never a refusal. A task another task's agent holds the branch of is refused, naming the
+  ;; agent, never a refused answer. A task another task's agent holds the branch of is refused, naming the
   ;; agent and the task it works
   (let [[ctx attached again other]
         (at/in-agent (fn [{:keys [ns]}]
