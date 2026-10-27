@@ -89,22 +89,66 @@
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
   only once it exists are its env, the release and the run written, in one transaction,
   so a refused spawn writes nothing and the reconciler never sees a release with no run
-  (it would spawn a second agent for it). Answers {:agent :task :run}."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
-  [sys id]
+  (it would spawn a second agent for it). The session's agent continues (its key) unless fresh?:
+  a reset, the task's branch a new one cut from main and its conversation empty (the run on the
+  old branch is killed as its env changed; that branch and its runs stay, the record). A task
+  whose run is live answers that run's agent.
+  Answers {:agent :task :run}."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/id] :map]
+                  [:=> [:cat :seon.root/sys :seon.task/id [:map [:fresh? {:optional true} :boolean]]] :map]]}
+  ([sys id] (attach! sys id {}))
+  ([sys id {:keys [fresh?]}]
   (let [db @(:conn sys)
-        t (task/task db id)]
-    (if-not t
-      (refused (str "no task " id))
-      (let [env (assoc (r/desired-env t) :model "outside")
-            aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
+        t (task/task db id)
+        live (when-not fresh? (some #(when (= id (:seon.run/task %)) %) (task/running db)))]
+    (cond
+      (not t) (refused (str "no task " id))
+      ;; its run is live: its agent is the one to work it (a second spawn on its branch is refused)
+      live {:agent (:seon.run/agent live) :task id :run (:seon.run/id live)}
+      :else
+      (let [n (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db)))))
+            env (cond-> (assoc (r/desired-env t) :model "outside")
+                  fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" n))))
+            aid (task/run-id id n)
             ;; the session's agent continues (design agent-loop section 1)
-            k (task/session-key db id)
+            k (when-not fresh? (task/session-key db id))
             ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
         @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
+                                            (when fresh? [{:seon.task/id id :seon.task/branch (:branch env)}])
                                             (task/run-start-tx aid id (:boot sys) ag env (System/currentTimeMillis)
                                                                    (:plan (:seon.task/accumulated t)) k))))
-        {:agent ag :task id :run aid}))))
+        {:agent ag :task id :run aid})))))
+
+(defn- fork!
+  "A fork of live agent from: a sibling of its task, <name>-fork-<n> (its plan, proofs and kind),
+  worked by a clone of the agent (seon.root/clone!: live values and all, on a branch of its branch
+  cut once its writes commit), so the fork goes on from the agent's program and branch while the
+  agent goes on on its own. The clone is an agent of its own, its own key and conversation: an
+  agent's entity on main is its key's, and two live agents of one key overwrite each other's facts.
+  Each is judged and merged on its own; root cancels the one not wanted. Answers {:agent :task :run}."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword] :map]}
+  [sys from]
+  (let [a (get (:agents (c/state sys)) from)
+        db @(:conn sys)
+        t (some->> (:task a) (task/task db))]
+    (if-not t
+      (refused (str from " works no task: nothing to fork"))
+      (let [nm (first (for [i (iterate inc 1) :let [nm (str (:seon.task/name t) "-fork-" i)]
+                            :when (not (task/task db (str (:seon.task/ns t) "/" nm)))] nm))
+            id (str (:seon.task/ns t) "/" nm)
+            env (assoc (r/desired-env t) :model "outside" :branch (task/default-branch id))
+            aid (task/run-id id 1)
+            ;; the clone first, as attach! spawns first: a refused one writes nothing
+            cl @(c/clone! sys from {:branch (:branch env) :task id :run aid})
+            made (when-not (contract/error? cl)
+                   @(c/transact-main! sys (task/create-tx db [(assoc (select-keys t [:seon.task/plan :seon.task/proofs :seon.task/kind :seon.task/instructions])
+                                                                     :seon.task/ns (symbol (:seon.task/ns t)) :seon.task/name nm :seon.task/branch (:branch env))])))]
+        (cond (contract/error? cl) cl
+              (contract/error? made) made
+              :else (do @(c/transact-main! sys (vec (concat (task/execution-tx [id] :running)
+                                                            (task/run-start-tx aid id (:boot sys) (:id cl) env (System/currentTimeMillis)
+                                                                               (:plan (:seon.task/accumulated (task/task @(:conn sys) id)))))))
+                        {:agent (:id cl) :task id :run aid}))))))
 
 (defn- run-of
   "The live run agent ag works, from main: {:run :task :env}, or nil."
@@ -162,9 +206,10 @@
    :message {:doc "Send an agent a message (the owner's words): an entry on main to the run it works (refused when it works none), which its next turn takes onto its branch and reads, and which wakes a parked session. The page's message bar sends the same request (seon.root/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}} :required ["agent" "body"]
              :answer (fn [sys ag req] @(c/message! sys ag (:body req)))}
-   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id."
-            :args {:task {:type "string" :description "ns/name"}} :required ["task"]
-            :answer (fn [sys _ req] (attach! sys (:task req)))}
+   :attach {:doc "Work a task as a Seon agent: root starts an agent on the task's branch (model outside) and answers its id. fresh: reset it, a new branch from main and an empty conversation (the old branch kept). from: fork that agent, a clone of it on a branch of its head working a sibling task."
+            :args {:task {:type "string" :description "ns/name"} :fresh {:type "boolean" :description "reset: start the task again from main"}
+                   :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}
+            :answer (fn [sys _ req] (if-let [from (:from req)] (fork! sys (keyword from)) (attach! sys (:task req) {:fresh? (true? (:fresh req))})))}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
                   :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}

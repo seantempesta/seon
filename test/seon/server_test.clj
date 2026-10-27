@@ -120,6 +120,37 @@
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
 
+(defn- in-run
+  "Root-REPL code that evaluates form in the agent run rid works, answering its value (read back
+  from the response's text, as the server's reader does)."
+  [rid form]
+  (str "(let [a (some #(when (= " (pr-str rid) " (:seon.run/id %)) (:seon.run/agent %)) (seon.task/running @(:conn sys)))]"
+       " (:value (clojure.edn/read-string {:default tagged-literal} (:text @(c/submit! sys a " (pr-str form) ")))))"))
+
+(deftest a-reset-starts-the-task-again-from-main
+  ;; the owner (2026-10-27): reset an agent easily. seon_attach {:fresh true}: a new branch cut from
+  ;; main and an empty conversation; the old branch and its runs stay, the record
+  (let [[_ reset branch seen] (at/in-agent (fn [{:keys [ns task]}]
+                                             [(str "(ns " ns ") (def x 41)")
+                                              {:op :attach :task task :fresh true}
+                                              {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
+                                              {:op :eval :agent "root" :code (in-run (str task "#2") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}]))]
+    (is (clojure.string/ends-with? (:run reset) "#2") (pr-str reset))
+    (is (clojure.string/ends-with? (name (:value branch)) "-r2") "the task's branch is a new one")
+    (is (= [nil 0] (:value seen)) "whose agent holds nothing the old one defined, and no conversation")))
+
+(deftest a-fork-goes-on-from-an-agents-head
+  ;; the owner (2026-10-27): fork an agent easily. seon_attach {:from a}: a clone of the agent on a
+  ;; branch of its head, working a sibling task, so it tries an alternative from where it stood
+  (let [[_ fork plan seen] (at/in-agent (fn [{:keys [ns agent]}]
+                                          [(str "(ns " ns ") (def x 41)")
+                                           {:op :attach :from agent}
+                                           {:op :eval :agent "root" :code (str "(:seon.task/plan (seon.task/task @(:conn sys) \"" ns "/t-fork-1\"))")}
+                                           {:op :eval :agent "root" :code (in-run (str ns "/t-fork-1#1") (str "[(some-> (find-ns '" ns ") (ns-resolve 'x) deref) (some? (datahike.api/entity (seon.agent/db) [:var/name '" ns "/x]))]"))}]))]
+    (is (clojure.string/ends-with? (str (:task fork)) "/t-fork-1") (pr-str fork))
+    (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
+    (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message

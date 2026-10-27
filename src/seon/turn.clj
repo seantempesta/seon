@@ -40,11 +40,11 @@
   [task run]
   (if (= run (get-in @agent/state [:turn :run]))
     (:turn @agent/state)
-    (let [db (agent/db)]
-      ;; the run is this session's on its own branch too (seon.agent/begin-run!)
-      (agent/begin-run! task run)
-      (:turn (swap! agent/state assoc :turn {:run run
-                                             :plan-before (:plan (:seon.task/accumulated (task/task db task)))})))))
+    ;; the run is this session's on its own branch too (seon.agent/begin-run!), and a fork's task
+    ;; with it, read after that write
+    (do (agent/begin-run! task run)
+        (:turn (swap! agent/state assoc :turn {:run run
+                                               :plan-before (:plan (:seon.task/accumulated (task/task (agent/db) task)))})))))
 
 (defn last-evals
   "The responses of this process's last model turn, one per eval call, in order, each with its

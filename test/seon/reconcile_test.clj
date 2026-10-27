@@ -127,6 +127,8 @@
   ;; configured: "no model provider", the task held); a lost run was ended by nobody
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :lost :model "outside")))]
     (is (= [(spawn "x" 2 :model "outside")] (actions-for db)) "a lost outside run's next run is outside"))
+  (let [db (db-of [(decl "x" :model "m1")] :extra (run "x" 1 :running :model "outside" :boot "boot-0"))]
+    (is (some #{(spawn "x" 2 :model "outside")} (actions-for db)) "and so is the next run of one the restart reaps in the same pass"))
   (testing "root cannot take back a task that is done: merged work keeps :running"
     (let [db (db-of [(decl "z")] :extra (run "z" 1 :merged :outcome :green :results {(t "z") :pass}))
           {:keys [taken not-running]} (my.root/take-back-tx db ["demo/z"] "x")]
