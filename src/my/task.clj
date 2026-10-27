@@ -48,14 +48,15 @@
 (defn status
   "This agent's task now, as its turn reads it: each proof's status (a red one with its
   failures, source and calls), what else the done rule refuses, a failed test run, the turn of
-  how many, what happened to its last reply, its unmerged entries, the stale wiki sections, the
-  tests run (seon.context/turn-state), as this turn's observe measured them; what the branch's
-  merge carries is my.branch/changes. Before any turn (a model's, or an outside agent's context
+  how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as
+  this turn's observe measured them; what the branch's merge carries, whether it can merge, the
+  stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view,
+  merge-view, caused-view, tests-view). Before any turn (a model's, or an outside agent's context
   read) has observed the task in this process: :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
   {:malli/schema [:=> [:cat] :any]}
   []
   (if-let [{:keys [input]} (turn/input)]
-    (dissoc (context/turn-state (agent/db) (current) input) :will-merge)
+    (context/turn-state (agent/db) (current) input)
     (contract/error :seon.turn/not-observed #'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
 
 (defn related
