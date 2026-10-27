@@ -335,10 +335,10 @@
   ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
   ;; line at its end, so a death anywhere lost every report before it (the test service's run of
   ;; main: 344 tests, one death, 0 results). Each test's reports go as it ends; a death is the
-  ;; one :error on the test it interrupted, and the rest run in a new child
-  (let [tests "'#{app.die-test/a-first app.die-test/b-dies app.die-test/c-last}"
-        [_ r] (in-agent ["(ns app.die-test (:require [clojure.test :refer [deftest is]])) (deftest a-first (is (= 1 1))) (deftest b-dies (seon.lib/c-exit 7)) (deftest c-last (is (= 2 2)))"
-                         (str "(let [r (seon.agent/run-tests-forked 100000000 " tests " :turn)]"
+  ;; one :error on the test it interrupted, and the rest run in a new child. Run as the service
+  ;; runs main (mode :main, the namespace named)
+  (let [[_ r] (in-agent ["(ns app.die-test (:require [clojure.test :refer [deftest is]])) (deftest a-first (is (= 1 1))) (deftest b-dies (seon.lib/c-exit 7)) (deftest c-last (is (= 2 2)))"
+                         (str "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{app.die-test})]"
                               " (pr-str {:pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
                               "          :passed (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")])
         v (some-> (:value r) clojure.edn/read-string)]
