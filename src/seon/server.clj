@@ -44,14 +44,15 @@
   "What is live on main db, as an outside agent reads it: :tasks, each task running or with runs
   (task-summaries), newest run first; :others, every other task counted by its execution; :all,
   the form that lists them all at root's REPL. Main holds hundreds of held tasks with no run
-  (580 on the standing root, 2026-10-27), which listed whole hid what runs."
+  (580 on the standing root), which listed whole hid what runs. A running task whose run has not
+  started yet comes last."
   {:malli/schema [:=> [:cat :seon.host/db] [:map [:tasks :map] [:others :map] [:all :any]]]}
   [db]
   (let [idx (r/index db)
-        started (fn [id] (reduce max 0 (keep #(:seon.run/start-ms ((:runs idx) %)) (get-in idx [:by-task id]))))
+        started (fn [id] (some->> (seq (keep #(:seon.run/start-ms ((:runs idx) %)) (get-in idx [:by-task id]))) (apply max)))
         all (task-summaries db)
         live? (fn [[_ s]] (or (= :running (:execution s)) (seq (:runs s))))]
-    {:tasks (apply array-map (mapcat identity (sort-by (comp - started key) (filter live? all))))
+    {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (filter live? all))))
      :others (frequencies (map (comp :execution val) (remove live? all)))
      :all '(seon.server/task-summaries @(:conn sys))}))
 

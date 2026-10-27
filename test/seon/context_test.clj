@@ -519,8 +519,7 @@
     (is (= 'demo-test/unwritten-test (:test r)))
     (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
     (is (re-find #"run-test" (pr-str (:do r))) (pr-str r)))
-  ;; agent-repl, 2026-10-27 (the blind agent's turn 8): a proof written but with no result counted
-  ;; was offered the same template, which would overwrite the finished deftest with (is false ...)
+  ;; a proof written but with no result was offered the same template, which overwrites it
   ;; (the fixture's program defines demo-test/f-test)
   (let [db (db-with-program)
         r (first (:refused (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})))]

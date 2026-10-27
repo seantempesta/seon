@@ -487,8 +487,7 @@
                        :else (recur more (inc n) m taken (conj acc id))))
         spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id)
                                      run (task/run-id id (inc (count (get-in idx [:by-task id]))))
-                                     ;; a run a root restart lost was ended by nobody: an outside agent's
-                                     ;; (attach) is the outside agent's again, not the task's own model
+                                     ;; a run a root restart lost was ended by nobody: an outside one stays outside
                                      newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
                                      env (cond-> (desired-env t)
                                            (and (= :lost (:seon.run/status newest)) (outside? (:seon.run/env newest))) (assoc :model "outside"))]]
