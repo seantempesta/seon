@@ -95,7 +95,7 @@ What is stored (all `:db/noHistory` via `:seon.db/no-history?`, overwritten in p
   test's `seon.profile` epoch, seon.fx/details' 5-number rows), plus `:seon.fn/form-digest`; a changed form resets them.
 - A red test's full output, when kept, is a value on the test (stored out of line by Datahike's large-value store when
   ≥ 1 KB), retracted on green.
-- Nothing per run. A run's logs stay in `target/prove/<run-id>` (pruned by :seon.config.proofs/runs-kept).
+- Nothing per run. A run's logs stay in `target/prove/<run-id>` while it is red or killed (a green run's directory is removed with it).
 
 Who writes:
 - `bin/test` / `bin/prove` shards: through root's server (restore the `:record` op path from before 8564dea1d5:

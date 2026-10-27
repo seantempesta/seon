@@ -80,7 +80,6 @@
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
   [:seon.config.proofs/full-run-at :seon.config.proofs/full-run-at]
-  [:seon.config.proofs/runs-kept :seon.config.proofs/runs-kept]
   [:seon.config.proofs/prove-main-on-commit :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]
