@@ -95,7 +95,12 @@
           db (d/db-with db [[:db/add s :seon.section/text "changed while its round was out"]])
           db (d/db-with db (vector/tx-data [s] [t] (vectors 4 1 1 768) [10] "m"))]
       (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
-    (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")))
+    (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")
+    (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
+                            {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/record {:code "(f)" :response {} :line "1"}}])
+          ev (:e (first (d/datoms db :avet :seon.eval/id "e1")))]
+      (is (= [[ev "task: search result | query: (f)\n1"]] (mapv pop (filterv (comp #{ev} first) (vector/due db "m"))))
+          "an eval is embedded as a search asks: its code and its result's line"))))
 
 (defn- db-due-only
   "The test store's seed with every text but form x/1's already embedded: x/1 alone is due."

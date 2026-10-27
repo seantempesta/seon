@@ -127,6 +127,8 @@
   [:seon.config.render/relevance-calibration :seon.config.render/relevance-calibration]
   [:seon.config.render/relevance-summary :seon.config.render/relevance-summary]
   [:seon.config.render/relevance-doc :seon.config.render/relevance-doc]
+  [:seon.config.render/relevance-budget :seon.config.render/relevance-budget]
+  [:seon.config.render/relevance-half-life :seon.config.render/relevance-half-life]
   [:seon.config.render/relevance-pool :seon.config.render/relevance-pool]
   [:seon.config.render/relevance-eps :seon.config.render/relevance-eps]
   [:seon.config.render/search :seon.config.render/search]

@@ -999,6 +999,38 @@
   (let [[x y] (#'seon.context/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}])]
     (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
 
+(deftest the-page-follows-the-work-and-only-grows
+  ;; seon.context/focus and selected (docs/vector.md#relevance): the focus is the plan plus the agent's
+  ;; evals, decayed; what the page shows enters in order and stays (the owner, 2026-10-27: pay the
+  ;; context up front, then refine as the task goes on), so each turn's page diff only adds
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
+                          ;; every unit at doc depth here, where every chance is low (a corpus of five)
+                          [:db/add te :seon.config.render/relevance-doc 0.0]])
+        a (pdb/eid db :seon.agent/key "demo/a1")
+        sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
+        cos (fn [u v] (reduce + (map * u v)))
+        far (vector/vector-of db (sec "what-the-work-is-likely-to-need-as-an-eval"))
+        f0 (context/focus db te a)
+        db (d/db-with db [{:db/id "e" :seon.eval/id "e1" :seon.eval/agent a :seon.eval/by "a1"
+                           :seon.eval/record {:code "(the-last-section)" :response {} :line "x"}}])
+        e (pdb/eid db :seon.eval/id "e1")
+        db (d/db-with db (vector/tx-data [e] [1] [(dir 1.0 0.5)] [10] "m"))
+        f1 (context/focus db te a)]
+    (is (= (vector/vector-of db te) (:vector f0)) "before any eval is embedded, the plan's alone")
+    (is (> (cos (:vector f1) far) (cos (:vector f0) far)) "the focus follows the agent's evals")
+    (is (= "(the-last-section)" (:words f1)) "and their words")
+    (let [saved @agent/state]
+      (try
+        (reset! agent/state {:id :a1 :selected {:te te :units [["docs/vector.md#the-pyramid" 0.9]]}})
+        (let [r (context/selected db te a)]
+          (is (= "docs/vector.md#the-pyramid" (first (:sections r))) "a unit shown before stays first")
+          (is (= 0.9 ((:relevance r) "docs/vector.md#the-pyramid")) "with the chance it entered at")
+          (is (< 1 (count (:sections r))) "what enters now is appended after it")
+          (is (= (:doc r) (set (concat (:sections r) (:functions r) (:schemas r)))) "each at doc depth")
+          (is (= (count (get-in @agent/state [:selected :units])) (count (:relevance r))) "and kept for the next turn"))
+        (finally (reset! agent/state saved))))))
+
 (deftest a-tokens-words-are-its-identifiers-parts
   (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
       "split at what is no letter or digit and at a case change, one-letter parts dropped"))

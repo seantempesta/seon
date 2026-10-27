@@ -164,7 +164,10 @@
    ;; a schema's form, so the related part's schema keys are found by meaning too
    ;; (docs/vector.md#what-the-work-is-likely-to-need-as-an-eval)
    :schema/form (fn [title form] (document title form))
-   :seon.task/plan (fn [_ plan] (str query-prompt plan))})
+   :seon.task/plan (fn [_ plan] (str query-prompt plan))
+   ;; an eval: what the agent asked and what it got, as a search asks, so the agent's recent work is a
+   ;; direction a page can follow (seon.context/selected; docs/vector.md#relevance)
+   :seon.eval/record (fn [_ record] (str query-prompt (:code record) "\n" (:line record)))})
 
 (defn- titles
   "Each titled entity's title on db, {e title}: a form's by the first of its vars' names, a

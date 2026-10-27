@@ -732,9 +732,21 @@
  :seon.config.render/relevance-summary 0.4
  ;; Unit: chance (0-1). An item shown at this relevance or more is shown at doc depth: a section's
  ;; whole lead, a function's whole doc. Provenance: the judge's labels, cross-fitted: at 0.6 the lines
- ;; were worth reading 0.73 (functions), 0.80 (sections) and 0.80 (keys) of the time. At the bound: an
- ;; item at exactly this chance is shown at doc depth.
+ ;; were worth reading 0.73 (functions), 0.80 (sections) and 0.80 (keys) of the time. It is also the
+ ;; page's selection cut (seon.context/selected). A task may set its own (its :seon.task/config). At
+ ;; the bound: an item at exactly this chance is shown at doc depth.
  :seon.config.render/relevance-doc 0.6
+ ;; Unit: tokens (chars/4 of a line as drawn). How much the page's selected units may take
+ ;; (seon.context/selected): each enters in the order it first reaches relevance-doc, while its line
+ ;; fits. Provenance: on 44 recorded turns of 10 runs, recall of what the agent read next rose to
+ ;; 0.48-0.56 by 800 tokens and little after (0.48-0.58 at 1,600), plan alone and plan plus its evals'
+ ;; trajectory (notes/relevance-replay-2026-10-27.md); revisit when 1,600 is measured on live turns.
+ ;; At the bound: a unit that does not fit is counted in :hidden, not shown.
+ :seon.config.render/relevance-budget 800
+ ;; Unit: evals. How fast an eval's weight in the work's focus (seon.context/focus) fades: it halves
+ ;; every this many of the agent's later evals. Provenance: the replay above, 1 and 3 ranked alike
+ ;; (R@10 0.441 both on the trajectory alone); 1 follows the agent's newest turn. At the bound: none.
+ :seon.config.render/relevance-half-life 1.0
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
  ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
  ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing

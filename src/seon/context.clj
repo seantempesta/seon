@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.program :as program] [clojure.edn] [clojure.walk :as walk]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [clojure.edn] [clojure.walk :as walk]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -424,21 +424,23 @@
   :hidden {kind n}}, :doc those at :seon.config.render/relevance-doc or more, what the plan cites left out (the task's
   data shows it); nil when the count is 0 (none shown) or the plan has no vector yet. opts: :touched
   the vars the branch changed, :cut a cut in place of the configured one, which then lists every
-  item at or above it, uncounted (0: every item scored).
+  item at or above it, uncounted (0: every item scored), :focus a vector to rank by in place of the
+  plan's and :words more text to match beside the plan's (`selected`'s trajectory).
   Unlike before relevance, nothing below the cut fills the count: the owner's \"expose more of it but
   not if it's not related\" (docs/vector.md#relevance)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :int] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]
-                  [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:cut {:optional true} number?]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
+                  [:=> [:cat :seon.host/db :int [:map [:touched {:optional true} [:set :qualified-symbol]] [:cut {:optional true} number?]
+                                                   [:focus {:optional true} [:vector number?]] [:words {:optional true} :string]]] [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
                                   [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword pos-int?]]]]]]}
   ([db te] (related db te {}))
-  ([db te {:keys [touched cut] :or {touched #{}}}]
+  ([db te {:keys [touched cut focus words] :or {touched #{}}}]
    (let [k (related-count db te)
-         qv (vector/vector-of db te)]
+         qv (or focus (vector/vector-of db te))]
      (when (and (pos? k) qv)
-       (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary] te)
+       (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary :seon.config.render/relevance-doc] te)
              depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
-                    :doc (cfg/value :seon.config.render/relevance-doc)}
+                    :doc (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)})}
              {:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
              cites (ref/references db plan)
              fns (into #{} (keep :seon.ref/name) (program-vars db cites))
@@ -463,7 +465,7 @@
              seeds (into touched-forms (remove nil?) (concat (map form-of (concat defined seeded))
                                                              (map #(pdb/eid db :seon.section/address %) secs)
                                                              (map #(pdb/eid db :schema/key %) named-keys)))
-             scored (relevance db {:qv qv :text plan :seeds seeds :touched touched-forms} (set (keys relevance-kinds))
+             scored (relevance db {:qv qv :text (str plan (some->> words (str " "))) :seeds seeds :touched touched-forms} (set (keys relevance-kinds))
                                (fn [kind e] (or (not= :function kind) (seq (functions-of e)))))
              name-of {:function functions-of
                       :section #(vector (:seon.section/address (d/entity db %)))
@@ -622,6 +624,69 @@
                   shown)
       (seq left) (conj {:kind :more :left (count left) :counts (frequencies (map (comp first key) left))
                         :more (str "(my.agent/search " (pr-str q) " " (pr-str (assoc opts :k (+ k (count left)) :min 0.0)) ") returns them; a narrower :kinds or :ns finds fewer")}))))
+
+(declare records related-view)
+
+(defn- unit
+  "v as a unit vector, or nil when it has no length."
+  {:malli/schema [:=> [:cat [:sequential number?]] [:maybe [:vector number?]]]}
+  [v] (let [n (Math/sqrt (reduce + 0.0 (map #(* % %) v)))] (when (pos? n) (mapv #(/ % n) v))))
+
+(defn focus
+  "Where agent a's work on task entity te points now, on db: the plan's vector plus the decayed sum of
+  the agent's evals' vectors (each eval's weight halving every :seon.config.render/relevance-half-life
+  of its evals since), both unit length, and the words of its last three evals. {:vector :words}; the
+  plan's alone before any eval is embedded, nil when the plan has no vector. Measured on 44 recorded
+  turns of 10 runs (notes/relevance-replay-2026-10-27.md): the plan plus the trajectory found 0.49 of
+  what the agent read next within 800 tokens against 0.48 by the plan alone, and keeps finding past it."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:map [:vector [:vector number?]] [:words :string]]]]}
+  [db te a]
+  (when-let [pv (some-> (vector/vector-of db te) unit)]
+    (let [h (cfg/value :seon.config.render/relevance-half-life)
+          evs (into [] (keep (fn [[_ v]] (when-let [id (:seon.eval/id v)]
+                                          (when-let [e (pdb/eid db :seon.eval/id id)]
+                                            [(vector/vector-of db e) (get-in v [:seon.eval/record :code])]))))
+                    (records db a))
+          vs (filterv first evs)
+          n (count vs)
+          decayed (when (seq vs)
+                    (unit (reduce (fn [acc [i [v _]]] (mapv + acc (map #(* % (Math/pow 0.5 (/ (- n 1 i) h))) v)))
+                                  (vec (repeat (count pv) 0.0)) (map-indexed vector vs))))]
+      {:vector (if decayed (unit (mapv + pv decayed)) pv)
+       :words (str/join " " (map second (take-last 3 evs)))})))
+
+(defn selected
+  "What the page shows beside agent a's work on task entity te: the units `related` scores at
+  :seon.config.render/relevance-doc or more against the work's `focus`, appended in the order they
+  first reached it, each at doc depth, while their lines fit :seon.config.render/relevance-budget
+  tokens; a unit once shown stays (its chance as it entered), so a turn's page grows by what newly
+  entered and every earlier byte of it holds for the model's prompt cache (the owner, 2026-10-27:
+  pay the context up front, then refine as the task goes on; docs/render.md#the-models-context-a-cached-prefix-then-the-turn).
+  What was shown is the agent process's, kept beside its other per-db reads (seon.agent/state
+  :selected, by task); a process that holds none starts from what enters now. Answers related's map
+  over the units shown, :doc every one of them, :hidden what scored past the cut and did not fit."
+  {:malli/schema [:=> [:cat :seon.host/db :int :int]
+                  [:maybe [:map [:sections [:vector :string]] [:functions [:vector :qualified-symbol]] [:schemas [:vector :qualified-keyword]]
+                           [:relevance [:map-of :any number?]] [:doc [:set :any]] [:hidden [:map-of :keyword nat-int?]]]]]}
+  [db te a]
+  (when-let [{fv :vector words :words} (focus db te a)]
+    (when-let [r (related db te {:cut (let [t (d/pull db [:seon.task/model :seon.config.render/relevance-doc] te)]
+                                        (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)}))
+                                 :focus fv :words words})]
+      (let [prior (let [s (:selected @agent/state)] (if (= te (:te s)) (:units s) []))
+            kind-of (fn [x] (cond (string? x) :sections (keyword? x) :schemas :else :functions))
+            fresh (sort-by (comp - second) (remove (comp (set (map first prior)) first) (:relevance r)))
+            cost (fn [x] (quot (count (str (first (vals (dissoc (related-view db {(kind-of x) [x] :relevance {x 1.0} :doc #{x}}) :read :more))))) 4))
+            budget (cfg/value :seon.config.render/relevance-budget)
+            [units _ left] (reduce (fn [[us used left] [x p]]
+                                     (let [c (cost x)]
+                                       (if (<= (+ used c) budget) [(conj us [x p]) (+ used c) left] [us used (update left (kind-of x) (fnil inc 0))])))
+                                   [prior (reduce + 0 (map (comp cost first) prior)) {}] fresh)]
+        (when (seq @agent/state) (swap! agent/state assoc :selected {:te te :units units}))
+        {:sections (vec (for [[x] units :when (string? x)] x))
+         :functions (vec (for [[x] units :when (symbol? x)] x))
+         :schemas (vec (for [[x] units :when (keyword? x)] x))
+         :relevance (into {} units) :doc (set (map first units)) :hidden left}))))
 
 (defn related-view
   "What `related` answers, each a line: a section its address and its lead's first sentence

@@ -22,6 +22,8 @@
                                            [:function [:vector {:min 2} [:tuple number? number?]]] [:section [:vector {:min 2} [:tuple number? number?]]] [:schema [:vector {:min 2} [:tuple number? number?]]]]
  :seon.config.render/relevance-summary [:double {:min 0.0 :max 1.0 :seon.config/unit "chance" :description "The relevance at which related shows an item, a line with its chance; below it, counted."}]
  :seon.config.render/relevance-doc [:double {:min 0.0 :max 1.0 :seon.config/unit "chance" :description "The relevance at which related shows an item at doc depth."}]
+ :seon.config.render/relevance-budget [:int {:min 0 :seon.config/unit "tokens" :description "How much the page's selected units may take: each enters while its line fits."}]
+ :seon.config.render/relevance-half-life [:double {:min 0.1 :seon.config/unit "evals" :description "How many of the agent's later evals halve an eval's weight in the work's focus."}]
  :seon.config.render/relevance-pool [:int {:min 1 :seon.config/unit "items of each kind" :description "How many of the nearest by meaning relevance scores, beside the seeds and their neighbourhood."}]
  :seon.config.render/relevance-eps [:double {:min 1.0E-6 :seon.config/unit "residual mass per neighbour" :description "The local push's threshold for relevance's personalized PageRank: at most 1/(alpha x this) pushes; above 0, or the push never ends."}]
  :seon.config.render/search [:int {:min 1 :seon.config/unit "hits" :description "How many hits (my.agent/search) answers when its options give no :k, the best of exact text, meaning and references fused by reciprocal rank."}]

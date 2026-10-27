@@ -144,6 +144,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.context/search`, `my.agent/related`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
 - `seon.context/names-in`: a keyword's name out of the query's text (`subs` off its colon), to seed a search's references.
 - `seon.context/item-text`, `seon.context/tokens`: a text's identifier tokens for relevance's lexical feature (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
+- `seon.context/focus`: the words of the agent's last three evals (`take-last`), matched beside the plan's by relevance's lexical feature: an input to a score, never shown.
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
