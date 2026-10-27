@@ -125,6 +125,7 @@
   [:seon.config.render/history-budget :seon.config.render/history-budget]
   [:seon.config.ctx/window :seon.config.ctx/window]
   [:seon.config.ctx/callers :seon.config.ctx/callers]
+  [:seon.config.ctx/cited-by :seon.config.ctx/cited-by]
   [:seon.config.render/similar :seon.config.render/similar]
   [:seon.config.render/related :seon.config.render/related]
   [:seon.config.render/search :seon.config.render/search]

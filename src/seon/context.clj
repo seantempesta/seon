@@ -476,7 +476,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :map]}
   [db v]
   (let [r (docs/resolve-ref db v :code)]
-    (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (assoc r :callers (docs/callers db v)))))
+    (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (docs/citing-sections db v)]
+                                                (cond-> (assoc r :callers (docs/callers db v)) (seq secs) (assoc :sections secs))))))
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from

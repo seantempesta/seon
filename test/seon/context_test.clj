@@ -790,6 +790,20 @@
     (is (= ":scripted" (:message rep)))
     (is (= [":scripted"] (map :message (get (proofs/failures {:reports [rep]}) 'demo-test/t))))))
 
+(deftest a-cited-var-carries-the-sections-that-cite-it
+  ;; root's coverage gap 7: the wiki sections reached the agent only through the task's own citations; a
+  ;; cited var now carries the sections that cite it (seon.docs/citing-sections), bounded by
+  ;; :seon.config.ctx/cited-by, the decisions page last
+  (let [db (d/db-with (db-with-program) (program-facts '[[demo/area "(defn area [x] (demo/f x))" [demo/f]]]))
+        pages {"docs/a.md" "# A\n\nThe a page.\n\n## One\n\nWhat f does: ```demo/f``` doubles.\n"
+               "docs/b.md" "# B\n\nThe b page.\n\n## Two\n\nAlso `demo/f`.\n"
+               "docs/decisions.md" "# D\n\nRulings.\n\n## Ruled\n\nOwner chose `demo/f`.\n"}
+        db (d/db-with db (seon.docs/load-tx db "docs" pages))]
+    (is (= ["docs/a.md#one" "docs/b.md#two" "docs/decisions.md#ruled"] (seon.docs/citing-sections db 'demo/f)) "the sections citing it, the decisions page last")
+    (is (= [] (seon.docs/citing-sections db 'demo/area)) "none cite it")
+    (is (= ["docs/a.md#one" "docs/b.md#two" "docs/decisions.md#ruled"] (:sections (context/cited db 'demo/f))) "the write set's entry for it carries them")
+    (is (not (contains? (context/cited db 'demo/area) :sections)) "and an uncited var carries none")))
+
 (deftest the-task-data-is-plan-write-set-and-proofs
   ;; task seon.render/a-page-is-its-entitys-view (4d): the task's data is the plan, the write set (each
   ;; cited var's source and callers), and each proof's run form or what it should assert; no
