@@ -50,8 +50,10 @@ datahike.test.query-input-pull-test {:test 1, :pass 4, :fail 0, :error 0}
 datahike.test.query-ir-test {:test 32, :pass 86, :fail 0, :error 0}
 datahike.test.query-not-test {:test 6, :pass 28, :fail 0, :error 0}
 datahike.test.query-or-test {:test 6, :pass 24, :fail 0, :error 0}
+datahike.test.query-planner-temporal-test {:test 24, :pass 430, :fail 0, :error 0}
 datahike.test.query-predicate-pushdown-test {:test 1, :pass 2, :fail 0, :error 0}
 datahike.test.query-pull-test {:test 8, :pass 22, :fail 0, :error 0}
+datahike.test.query-rules-test {:test 4, :pass 19, :fail 0, :error 0}
 datahike.test.query-single-flight-test {:test 12, :pass 94, :fail 0, :error 0}
 datahike.test.query-stats-test {:test 4, :pass 5, :fail 0, :error 0}
 datahike.test.reference-test {:test 6, :pass 54, :fail 0, :error 0}
