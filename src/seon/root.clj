@@ -1066,7 +1066,9 @@
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
-      run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
+      ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
+      ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
+      run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
       message! {:op :message :id id :from :owner :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
