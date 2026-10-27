@@ -8,6 +8,17 @@
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
+(defn- end-agent!
+  "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
+  in the state, reactions on @ctx that run at every write of it) disposed, then the state reset. A
+  walk left behind makes every later write of the record in this process cost its reactions
+  (seon.ctx-test/a-swap-costs-what-it-changed read 52 calls after this test, not 39)."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
+  (reset! seon.agent/state nil)
+  nil)
+
 (defn- aid "The test agent's entity on db." {:malli/schema [:=> [:cat :seon.host/db] [:maybe pos-int?]]}
   [db] (:db/id (d/entity db [:seon.agent/key k])))
 
@@ -203,7 +214,7 @@
       (is (= (:tree (ctx/build (:db-after rep) (aid (:db-after rep)) :b)) @ctx/ctx))
       (swap! seon.agent/state assoc :db db)
       (is (= (:tree (ctx/build db (aid db) :b)) @ctx/ctx) "a move with no transaction is patched by the difference")
-      (finally (reset! seon.agent/state nil)))))
+      (finally (end-agent!)))))
 
 (deftest the-record-holds-what-the-agent-heard-of-main
   ;; main's head as the agent last read it and its branch's merge base, from the agent's state
@@ -220,7 +231,7 @@
           (is (= #{[:main-commit] [:main-t] [:base-commit] [:base-t]} (set (keys (ctx/diff c0 c1)))) "each a path that changed, alone")
           (swap! seon.agent/state assoc :db (:db-after (d/with db (eval-tx 11))))
           (is (= (d/commit-id m) (:main-commit @ctx/ctx)) "kept as the record is patched")))
-      (finally (reset! seon.agent/state nil)))))
+      (finally (end-agent!)))))
 
 (defn new-eval
   "The input of size n: the record of a session of n evals, built, and one more eval's
@@ -269,6 +280,37 @@
   (let [db (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit n :reverse true] [(symbol "*")]}]]]))
         c (ctx/build db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
+
+(defn errored
+  "The input of size n: the agent's record built on a store whose history holds n recorded errors
+  last raised in the agent's task, and n errors of other tasks: [db agent-id branch]. The store grows;
+  what the agent's record reads of it is the task's newest few."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db pos-int? :keyword]]}
+  [n]
+  (let [db (:db-after (d/with (seeded 20)
+                              (vec (for [i (range n)]
+                                     (cond-> {:seon.error/signature (format "%016d" i) :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
+                                              :seon.error/first-ms i :seon.error/last-ms i :seon.error/type :seon.agent/eval-error
+                                              :seon.error/message (str "boom " i) :seon.error/last-task (if (even? i) "lab/ctx" "lab/other")})))))]
+    [db (aid db) :b]))
+
+(deftest a-pull-costs-what-the-task-cites-not-the-stores-history
+  ;; the agent's record reads the errors last raised in its task (a lookup by the task's id, newest
+  ;; first, :seon.config.ctx/errors) and not the store's history of them: its bytes and datoms read
+  ;; stay flat as the store holds 10, 100, 1,000 recorded errors of the task (measured: 541k, 543k
+  ;; and 548k ticks, 2.39 MB and 292 calls at each, against 408k ticks, 1.89 MB and 263 calls before
+  ;; the join). The members are the task's own and the newest, never another task's
+  (let [[db a b] (errored 20) c (ctx/build db a b)
+        errs (:errors (:task (val (first (:runs (:tree c))))))]
+    (is (= #{"boom 18" "boom 16" "boom 14" "boom 12" "boom 10"} (set (map :seon.error/message (vals errs)))) "the newest errors raised in the task: five of its ten")
+    (is (every? #(= #{:db/id :seon.error/signature :seon.error/class :seon.error/type :seon.error/message :seon.error/count :seon.error/first-ms :seon.error/last-ms :seon.error/last-task} (set (keys %))) (vals errs)) "each a few attributes (what the scorer reads, docs/ctx.md), not the example's whole map"))
+  (cost/proof
+    {:of 'seon.ctx/build :input 'seon.ctx-test/errored
+     :n "recorded errors in the store, half of them last raised in the agent's task"
+     :work "the agent's pull as ever, and the task's errors join: an index seek of the task's id on :seon.error/last-task, the newest :seon.config.ctx/errors members pulled, whatever the history holds"
+     :growth :constant
+     :fixed {:calls 292 :bytes 2400000}
+     :sizes [10 100 1000]}))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
@@ -503,7 +545,7 @@
                                   {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x/g :var/form "g"}])
-        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
         cited (part "cited-")
         task (pr-str (part "task-data-"))]
@@ -519,7 +561,7 @@
   ;; source and the rest are each a call of the printer under its own budget, the source read by id
   (let [db (d/db-with (seeded 3) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x/f1 :var/form "f1"}])
-        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (reset! seon.agent/state nil)))
+        page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
         calls (fn [h] (filterv #(and (vector? %) (= #'seon.render/html (first %))) h))]
     (is (= "(defn f1 [] (f0 1))" (:seon.print/code (nth (first (calls (part "app.x_2Ff1"))) 2)))
@@ -534,7 +576,7 @@
   ;; class, its render's name; the page's html adds the Tailwind classes its render's var states
   ;; (:seon.render/style), and what the model reads holds the name only
   (let [db (seeded 3)
-        as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (reset! seon.agent/state nil)))
+        as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
         task-id (some #(when (str/starts-with? % "task-data-") %) (keys hiccup))
@@ -586,9 +628,9 @@
           db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/steps ["read the plan" "write the test" "read the plan"]}]))
           tree (:tree (ctx/build db (aid db) :b))
           c (with-meta tree {:seon.render/schema :seon.ctx/ctx :seon.render/basis {:t (:t tree) :branch :b}})
-          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (reset! seon.agent/state nil))))
+          as-agent (fn [f] (try (reset! seon.agent/state {:db db}) (f) (finally (end-agent!))))
           rec (as-agent #(seon.repl/record-details db "@ctx" {:handle 'result/e9 :value c} {} nil))
-          drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (reset! seon.agent/state nil)))
+          drawn (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
           ;; the keys it added, one component (ctx-keys) holding each key's own
           steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
@@ -599,7 +641,7 @@
           "the agent draws its key, a component of its page, by the render its branch names, recording nothing")
       (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
         (let [[parts page] (try (reset! seon.agent/state {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
-                                (finally (reset! seon.agent/state nil)))
+                                (finally (end-agent!)))
               shown (:units parts)]
           (is (= (map :id shown) (keys page)) "every component, the conversation's too, in order: nothing left out")
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
@@ -617,7 +659,7 @@
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/html seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
-              r (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (reset! seon.agent/state nil)))
+              r (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
               keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
           (is (re-find #"cannot draw this" keys-html) "the render's throw, as its error's render in its component's place")
           (is (re-find #"<ol><li>read the plan" keys-html) "and every other component drawn"))))))
@@ -640,7 +682,7 @@
   (try (reset! seon.agent/state {:db db :key k :branch :b :mode :test})
        ;; under the branch's schemas, as the agent's REPL evaluates a form
        [(#'seon.repl/with-branch-schemas f) (:db @seon.agent/state)]
-       (finally (reset! seon.agent/state nil))))
+       (finally (end-agent!))))
 
 (deftest a-tasks-record-holds-what-its-work-needs
   ;; the 20-turn context (shared note context-for-20-turns): the cited sections' text (D3), the

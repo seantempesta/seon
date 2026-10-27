@@ -63,6 +63,14 @@
   [opts _tag value]
   (str (::checkout opts) "/" value))
 
+(defmethod aero/reader 'seon/own-branch
+  ;; #seon/own-branch "jolt/seon-merges": the branch as named in the main tree, and in a git
+  ;; worktree (its .git a file, not a directory) the branch with -<worktree> appended: worktrees
+  ;; share refs, so each commits on a branch of its own (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1)
+  [opts _tag value]
+  (let [co (java.io.File. ^String (::checkout opts))]
+    (if (.isFile (java.io.File. co ".git")) (str value "-" (.getName co)) value)))
+
 ;; ---- the schemas: read once, when this namespace compiles --------------------------------
 
 (def schemas-dir
@@ -273,6 +281,16 @@
   {:malli/schema [:function [:=> [:cat :qualified-keyword] :any] [:=> [:cat :qualified-keyword :seon.config/context] :any]]}
   ([k] (value k {}))
   ([k ctx] (:value (resolve k ctx))))
+
+(defn pin-class
+  "The :seon.pin class of path p, a submodule or a source group inside one as
+  :seon.config.source/pin-namespaces names it: its path under reference-code/ with / as .
+  (reference-code/datahike is :seon.pin/datahike, reference-code/jolt/jolt-core/jolt/ir.clj
+  :seon.pin/jolt.jolt-core.jolt.ir.clj). seon.fx/inputs digests each one, and a test's reach
+  takes the classes of the namespaces it references (seon.program/config-reads)."
+  {:malli/schema [:=> [:cat :string] :qualified-keyword]}
+  [p]
+  (keyword "seon.pin" (str/replace (str/replace-first p #"^reference-code/" "") "/" ".")))
 
 ;; ---- the model provider, as the config states it --------------------------------------------
 

@@ -924,7 +924,9 @@
         ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
         ;; held before the task cites them: a name in a namespace the program does not hold is not cited
         db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan}]))
+        ;; every item scored is shown (its cut 0), so these tests read relevance's whole order
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan
+                                              :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.section/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) (repeat 6 10) "m"))
@@ -942,19 +944,114 @@
   (let [[db te] (sections-near "Make the page say one thing (docs/vector.md#what-is-embedded) of `:demo/thing`.")
         rel (context/related db te)
         v (context/related-view db rel)]
-    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"] (:sections rel))
-        "the sections nearest first, the section the plan cites left out")
+    ;; ranked by relevance: the words the plan shares with a section (here "is", in its cited
+    ;; section's address and in what-the-work-is-likely...) weigh beside meaning
+    (is (= ["docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" "docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"] (:sections rel))
+        "the sections it most likely needs first, by meaning, its words and references, the section the plan cites left out")
+    (is (every? #(< 0 % 1) (vals (:relevance rel))) "each shown with its chance")
     (is (= ['demo/g] (:functions rel)) "the functions nearest it")
     (is (= [:demo/thing] (:schemas rel)) "and the schema keys its plan cites")
-    (is (= [["demo/g: Gets it." [:demo/thing]]] (:functions v))
-        "a function a line: its name, its doc's first sentence and the registry keys it operates on (its :form/keywords)")
-    (is (= ["docs/vector.md#the-model: Section 0 says one thing." "docs/vector.md#the-pyramid: Section 2 says one thing."
-            "docs/vector.md#fused-with-the-call-graph: Section 3 says one thing." "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing."]
+    (is (= [[(str "demo/g " (Math/round (* 100.0 ((:relevance rel) 'demo/g))) "%: " (if ((:doc rel) 'demo/g) "Gets it. More." "Gets it.")) [:demo/thing]]] (:functions v))
+        "a function a line: its name, its chance, its doc (whole at doc depth, else its first sentence) and the registry keys it operates on (its :form/keywords)")
+    (is (= (mapv #(str % " " (Math/round (* 100.0 ((:relevance rel) %))) "%: Section " ({"docs/vector.md#the-model" 0 "docs/vector.md#the-pyramid" 2
+                                                                                              "docs/vector.md#fused-with-the-call-graph" 3
+                                                                                              "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" 4} %)
+                        " says one thing.")
+                 (:sections rel))
            (:sections v))
-        "each at summary depth: its address and its lead's first sentence")
+        "each below doc depth a line: its address, its chance and its lead's first sentence")
+    (is (= {:counts {:sections 1} :all "(my.task/related 0): every item scored, with its chance"}
+           (:hidden (context/related-view db (assoc rel :hidden {:sections 1}))))
+        "what the cut hid is counted, with the form that lists it")
+    (is (= ["docs/vector.md#the-model 30%: Section 0 says one thing. And more."]
+           (:sections (context/related-view db {:sections ["docs/vector.md#the-model"] :relevance {"docs/vector.md#the-model" 0.3} :doc #{"docs/vector.md#the-model"}})))
+        "one at doc depth: its whole lead")
     (is (str/includes? (:read v) "(:seon.ref/text (my.agent/help ") "with the form that reads one whole, its text's key named")
     (is (str/includes? (:more v) "my.agent/search") "and the form that searches further")
     (is (nil? (context/related (ts/test-db) (pdb/eid db :seon.task/id "demo/r"))) "a plan with no vector shows none")))
+
+(deftest relevance-is-a-chance-that-follows-the-context
+  ;; seon.context/relevance (docs/vector.md#relevance): each item near a context scored as a chance,
+  ;; best first; the touched items left out, and what is near them lifted (zt)
+  (let [[db te] (sections-near "Make the page say one thing.")
+        qv (vector/vector-of db te)
+        sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
+        score (fn [touched] (into {} (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds touched :touched touched}
+                                                                  #{:section} (constantly true)))))
+        cold (:section (context/relevance db {:qv qv :text "Make the page say one thing." :seeds #{} :touched #{}} #{:section} (constantly true)))]
+    (is (= 5 (count cold)) "every section near it scored")
+    (is (every? (fn [[_ p]] (<= 0.0 p 1.0)) cold) "each a chance")
+    (is (apply >= (map second cold)) "best first")
+    (is (= (sec "the-model") (ffirst cold)) "the nearest first, all else equal")
+    (let [warm (score #{(sec "what-the-work-is-likely-to-need-as-an-eval")}) cold (into {} cold)
+          gap (fn [m] (- (m (sec "fused-with-the-call-graph")) (m (sec "the-model"))))]
+      (is (not (contains? warm (sec "what-the-work-is-likely-to-need-as-an-eval"))) "a touched item is not offered again")
+      (is (> (gap warm) (gap cold))
+          "the section nearest the touched one gains on the one farthest from it"))))
+
+(deftest a-cut-lists-past-the-count-and-a-hidden-count-is-shown
+  ;; (my.task/related 0) is every item scored: a cut asked for lifts the count; and what the cut hid
+  ;; is shown even when nothing passed it
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        db (d/db-with db (vec (for [i (range 3)] {:seon.section/address (str "docs/vector.md#more-" i) :seon.section/heading (str "M" i)
+                                                  :seon.section/lead "More. Still." :seon.section/text "More. Still."})))
+        db (d/db-with db (vector/tx-data (vec (for [i (range 3)] (pdb/eid db :seon.section/address (str "docs/vector.md#more-" i))))
+                                         (repeat 3 1) (for [i (range 3)] (dir 1.0 (* 0.2 (inc i)))) (repeat 3 10) "m"))]
+    (is (= 5 (count (:sections (context/related db te)))) "the count, :seon.config.render/related")
+    (is (= 8 (count (:sections (context/related db te {:cut 0.0})))) "a cut asked for: every section scored")
+    (is (= {:counts {:sections 8} :all "(my.task/related 0): every item scored, with its chance"}
+           (:hidden (context/related-view db {:sections [] :functions [] :schemas [] :hidden {:sections 8}})))
+        "all hidden: the count is shown, not nothing")))
+
+(deftest relevances-parts-at-their-bounds
+  (let [knots [[-2.0 0.0] [0.0 0.1] [2.0 0.5]]]
+    (is (= [0.0 0.0 0.05 0.1 0.5 0.5] (mapv #(#'seon.context/percent knots %) [-9.0 -2.0 -1.0 0.0 2.0 9.0]))
+        "a logit's chance: flat past either end, linear between knots"))
+  (is (= [0.0 0.0] (#'seon.context/z [3.0 3.0])) "no spread, no evidence")
+  (is (= [1.0 0.0 -1.0] (#'seon.context/z [2.0 nil 0.0])) "a missing value is no evidence; the rest over the values there are")
+  (is (= [] (#'seon.context/bm25 #{"a"} [])) "an empty pool scores nothing")
+  (is (= [0.0 0.0] (#'seon.context/bm25 #{} [{"a" 1} {"b" 2}])) "an empty query scores every text 0")
+  (let [[x y] (#'seon.context/bm25 #{"near"} [{"near" 1 "of" 1} {"of" 2}])]
+    (is (and (pos? x) (zero? y)) "a text holding the query's word scores above one that does not")))
+
+(deftest the-page-follows-the-work-and-only-grows
+  ;; seon.context/focus and selected (docs/vector.md#relevance): the focus is the plan plus the agent's
+  ;; evals, decayed; what the page shows enters in order and stays (the owner, 2026-10-27: pay the
+  ;; context up front, then refine as the task goes on), so each turn's page diff only adds
+  (let [[db te dir] (sections-near "Make the page say one thing.")
+        db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
+                          ;; every unit shown, at doc depth, here, where every chance is low (a corpus of five)
+                          [:db/add te :seon.config.render/relevance-doc 0.0]])
+        a (pdb/eid db :seon.agent/key "demo/a1")
+        sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
+        cos (fn [u v] (reduce + (map * u v)))
+        far (vector/vector-of db (sec "what-the-work-is-likely-to-need-as-an-eval"))
+        f0 (context/focus db te a)
+        db (d/db-with db [{:db/id "e" :seon.eval/id "e1" :seon.eval/agent a :seon.eval/by "a1"
+                           :seon.eval/record {:code "(the-last-section)" :response {} :line "x"}}])
+        e (pdb/eid db :seon.eval/id "e1")
+        db (d/db-with db (vector/tx-data [e] [1] [(dir 1.0 0.5)] [10] "m"))
+        f1 (context/focus db te a)]
+    (is (< (Math/abs (- 1.0 (cos (:vector f0) (vector/vector-of db te)))) 1e-6) "before any eval is embedded, the plan's alone")
+    (is (= "Make the page say one thing." (:words f0)) "and its words")
+    (is (> (cos (:vector f1) far) (cos (:vector f0) far)) "the focus follows the agent's evals")
+    (is (> (cos (:vector f1) (vector/vector-of db e)) (cos (:vector f1) (vector/vector-of db te))) "the newest eval outweighs the plan, which decays")
+    (is (= "(the-last-section)" (:words f1)) "and the words are the evals'")
+    (let [saved @agent/state]
+      (try
+        (reset! agent/state {:id :a1 :selected {:te te :units [["docs/vector.md#the-pyramid" 0.9 false]]}})
+        (let [r (context/selected db te a)]
+          (is (= "docs/vector.md#the-pyramid" (first (:sections r))) "a unit shown before stays first")
+          (is (= 0.9 ((:relevance r) "docs/vector.md#the-pyramid")) "with the chance it entered at")
+          (is (< 1 (count (:sections r))) "what enters now is appended after it")
+          (is (not ((:doc r) "docs/vector.md#the-pyramid")) "at the depth it entered at")
+          (is (= (:doc r) (set (concat (rest (:sections r)) (:functions r) (:schemas r)))) "what enters now at doc depth (its cut 0 here)")
+          (is (= (count (get-in @agent/state [:selected :units])) (count (:relevance r))) "and kept for the next turn"))
+        (finally (reset! agent/state saved))))))
+
+(deftest a-tokens-words-are-its-identifiers-parts
+  (is (= ["seon" "vector" "near" "of" "foo" "bar"] (context/tokens "seon.vector/near-of fooBar a"))
+      "split at what is no letter or digit and at a case change, one-letter parts dropped"))
 
 (deftest related-sections-follow-a-rewritten-plan
   ;; related is a render over the plan's vectors (seon.context/related): the plan rewritten and
@@ -964,8 +1061,11 @@
         _ (is (= "docs/vector.md#the-model" (first (:sections (context/related db te)))))
         db (d/db-with db [[:db/add te :seon.task/plan "Make the last section say it."]])
         t (:tx (first (d/datoms db :eavt te :seon.task/plan)))
-        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))]
-    (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" (first (:sections (context/related db te)))) "the sections follow it: the one nearest the new plan first")
+        before (:relevance (context/related db te))
+        db (d/db-with db (vector/tx-data [te] [t] [(dir 1.0 0.5)] [10] "m"))
+        after (:relevance (context/related db te))
+        nearest "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
+    (is (> (after nearest) (before nearest)) "the sections follow it: the one nearest the new plan more likely needed")
     (let [s (d/db-with db [{:seon.section/address "docs/vector.md#the-pyramid-b" :seon.section/heading "B" :seon.section/lead "New. More."}])
           se (pdb/eid s :seon.section/address "docs/vector.md#the-pyramid-b")
           s (d/db-with s (vector/tx-data [se] [1] [(dir 1.0 0.5)] [10] "m"))]
@@ -1069,24 +1169,27 @@
                           {:seon.section/address "docs/vector.md#the-pyramid-c" :seon.section/heading "C" :seon.section/lead "Names h. More."
                            :seon.section/names #{'demo/h}}])
         rel (context/related db te)]
-    (is (= ['demo/g 'demo/k] (:functions rel)) "the caller of the cited var beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
-    (is (= ["docs/vector.md#the-model" "docs/vector.md#the-pyramid-c" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"
-            "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"]
-           (:sections rel))
-        "the section naming the cited var fused at its rank with the nearest by meaning; the cited section left out")
+    (is (= ['demo/k 'demo/g] (:functions rel)) "the caller of the cited var (no vector: the graph alone finds it) beside the nearest by meaning; the cited var, the test, a test namespace's helper and a test/ helper of any name left out")
+    (is (= "docs/vector.md#the-pyramid-c" (first (:sections rel))) "the section naming the cited var (no vector) first")
+    (is (= #{"docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph" "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval"}
+           (set (rest (:sections rel))))
+        "then the nearest by meaning and words; the cited section left out")
     (is (nil? (context/related-view db {:sections [] :functions [] :schemas []})) "nothing related, nothing shown")
     ;; task seon.context/related-weighs-a-neighbour-by-its-rarity: h calls demo/plumb, which twenty
     ;; forms name, and demo/rare, which only h names; by plain counts the two tie and the name put
     ;; plumbing first
     (let [db (d/db-with db (into [{:db/id "h" :form/id "demo/h" :form/refs #{'demo/plumb 'demo/rare}}
-                                  {:db/id "pv" :var/name 'demo/plumb :var/kind :fn} {:db/id "rv" :var/name 'demo/rare :var/kind :fn}]
-                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))]
-      (is (= ['demo/g 'demo/k 'demo/rare 'demo/plumb] (:functions (context/related db te)))
-          "a neighbour few forms name before one every form names")
+                                  {:db/id "pf" :form/id "demo/plumb" :form/src "(defn plumb [])"} {:db/id "pv" :var/name 'demo/plumb :var/kind :fn :var/form "pf"}
+                                  {:db/id "rf" :form/id "demo/rare" :form/src "(defn rare [])"} {:db/id "rv" :var/name 'demo/rare :var/kind :fn :var/form "rf"}]
+                                 (for [i (range 20)] {:form/id (str "demo/p" i) :form/src "(plumb)" :form/refs #{'demo/plumb}})))
+          p (:relevance (context/related db te {:cut 0.0}))]
+      ;; both link the cited h once; weighed alike they would tie
+      (is (> (p 'demo/rare) (* 1.5 (p 'demo/plumb)))
+          (str "a neighbour few forms name before one twenty forms name (a link weighs by its rarity): " (pr-str (select-keys p ['demo/rare 'demo/plumb]))))
       ;; a namespace with no file yet: what the agent wrote at its REPL, its new work, shown
       (let [db (d/db-with db [{:ns/name 'agent.app} {:db/id "z" :form/id "agent.app/z" :form/src "(defn z [] (h))" :form/refs #{'demo/h} :form/defines #{"zv"}}
                               {:db/id "zv" :var/name 'agent.app/z :var/form "z" :var/kind :fn}])]
-        (is (= 'agent.app/z (first (:functions (context/related db te)))) "a caller in a namespace with no file is shown")))))
+        (is (some #{'agent.app/z} (:functions (context/related db te))) "a caller in a namespace with no file is shown")))))
 
 (deftest a-prose-requests-functions-come-from-its-nearest-and-their-neighbours
   ;; task seon.context/a-prose-request-finds-its-functions: a plan citing no defined var (a user's
@@ -1163,7 +1266,9 @@
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
   (let [db (d/db-with (seon.docs-test/corpus-db)
                       [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
-        s (fn ([q] (context/search db q {} nil)) ([q o] (context/search db q o nil)))
+        ;; :min 0 unless a test asks its own: on a corpus of a few texts every chance is low, and the
+        ;; page's cut (seon.config.render/relevance-summary) would hide them
+        s (fn ([q] (context/search db q {:min 0.0} nil)) ([q o] (context/search db q (merge {:min 0.0} o) nil)))
         shown (fn [hits] (remove #(= :more (:kind %)) hits))
         kind (fn [hits k] (filter #(= k (:kind %)) hits))]
     (is (= #{:var :section} (set (map :kind (shown (s "fusing"))))) "functions and sections by default")
@@ -1171,9 +1276,13 @@
     (is (every? #(and (number? (:score %)) (set? (:by %)) (:e %)) (shown (s "fusing"))) "plain data: kind, name, entity, score, by")
     (is (= [:section :section] (map :kind (s "fusing" {:kinds #{:section} :min 0.0}))) "kinds focus it")
     (is (every? #(= #{:text} (:by %)) (shown (s "fusing" {:by #{:text}}))))
-    (is (every? #(<= 0.0 (:relevance %) 1.0) (filter :relevance (s "fusing" {:min 0.0}))) "a text hit's relevance")
+    (is (seq (filter :relevance (s "fusing"))) "a function's or a section's relevance")
+    (is (every? #(<= 0.0 (:relevance %) 1.0) (filter :relevance (s "fusing"))) "each a chance")
     (is (= (s "fusing") (s "fusing")) "deterministic")
-    (is (apply >= (map :score (shown (s "fusing")))) "best first")
+    (let [hs (shown (s "fusing")) [known unknown] ((juxt filter remove) :relevance hs)]
+      (is (= hs (concat known unknown)) "best first: the hits with a relevance first")
+      (is (every? (fn [[a b]] (>= a b)) (partition 2 1 (map :relevance known))) "by it")
+      (is (every? (fn [[a b]] (>= a b)) (partition 2 1 (map :score unknown))) "then the rest by the fused score"))
     (let [two (s "fusing" {:k 1 :min 0.0})]
       (is (= 2 (count two)) "k bounds it, and a last entry counts what it left")
       (is (= :more (:kind (last two))))
@@ -1197,23 +1306,16 @@
         n (Math/sqrt (reduce + (map #(* % %) raw)))]
     (mapv #(/ % n) raw)))
 
-(deftest search-ranks-meaning-across-kinds-by-score-and-weights-the-rankings
+(deftest search-ranks-meaning-across-kinds-by-score
   (let [with-vec (fn [m i] (merge m (vector/pack (unit-vec i)) {:seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 4}))
         db (d/db-with (ts/test-db)
                       [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
                        (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
                        {:db/id "v" :var/name 'm/f :var/form "f"}
                        (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)])
-        hits (context/search db "zzz" {:by #{:meaning} :k 10} (unit-vec 0))]
-    (is (= "m.md#a" (:name (first hits))) "the nearest of all kinds first, whichever kind it is")
+        hits (context/search db "zzz" {:by #{:meaning} :k 10 :min 0.0} (unit-vec 0))]
+    (is (= ["m.md#a" "m.md#b"] (map :name (filter #(= :section (:kind %)) hits))) "the nearer section first")
     (is (= #{:section :var} (set (map :kind hits))))
     (is (every? #(= #{:meaning} (:by %)) hits))
-    (is (apply >= (map :score hits)) "ranked by one list, best first")
-    (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section}} (unit-vec 0))))))))
-
-(deftest rrf-scores-weigh-each-ranking
-  (let [plain (vector/rrf-scores [[:a] [:b]])
-        weighed (vector/rrf-scores [[:a] [:b]] [1.0 3.0])]
-    (is (= (:a plain) (:b plain)) "two firsts weigh alike")
-    (is (< (:a weighed) (:b weighed)) "a ranking's weight scales its share")
-    (is (< (Math/abs (- (:b weighed) (* 3.0 (:a weighed)))) 1e-12))))
+    (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
+    (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))

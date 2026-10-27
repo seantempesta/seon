@@ -58,9 +58,11 @@
                 "datom once with two lookups, and one sort of what is due (n log n, the scans dominate)")
      :growth :linear
      ;; measured 2026-10-23: 0.25M ticks / 1.5 MB at 100, 0.43M / 2.6 MB at 300, 0.98M / 6.1 MB at
-     ;; 1,000 (the seed's own texts are the fixed part): ~790 ticks and 5 KB a text
+     ;; 1,000 (the seed's own texts are the fixed part): ~790 ticks and 5 KB a text. 2026-10-27:
+     ;; 0.48M / 2.92 MB at 100, the titles (seon.vector/titles: one scan each of the vars' names and
+     ;; forms, the sections' headings and the schema keys, mostly the seed's) a fixed ~1.5 MB more
      :per-n {:ticks 900.0 :bytes 5500.0}
-     :fixed {:ticks 150000.0 :bytes 900000.0}
+     :fixed {:ticks 400000.0 :bytes 2450000.0}
      :sizes [100 300 1000]}))
 
 (defn similar-of
@@ -126,8 +128,10 @@
        ;; measured 2026-10-27 on LMDB: 127k ticks / 245 KB / 8 calls at 100 texts, 162k / 273 KB at 300, 178k / 366 KB
        ;; at 1,000 (the leaves datoms-diff reads grow slowly with the store): ~60 ticks and ~140 bytes a text, where
        ;; a scan of every text read ~790 ticks and 5 KB a text (what-is-due-reads-each-fact-once)
+       ;; 2026-10-27: 130k / 263 KB / 12 calls at 100: the written text's title by seeks (seon.vector/title,
+       ;; its stored read), two contracted calls more
        :per-n {:ticks 70.0 :bytes 150.0}
-       :fixed {:ticks 130000.0 :bytes 190000.0 :calls 10}
+       :fixed {:ticks 130000.0 :bytes 250000.0 :calls 12}
        :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]

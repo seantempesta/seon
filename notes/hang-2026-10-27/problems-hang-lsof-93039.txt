@@ -1,0 +1,28 @@
+COMMAND   PID USER   FD     TYPE             DEVICE   SIZE/OFF                NODE NAME
+seon    93039 sean  cwd      DIR               1,13       2656          1165015944 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target
+seon    93039 sean  txt      REG               1,13  243787303          1171027579 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/seon
+seon    93039 sean  txt      REG               1,13    4129840 1152921500312609216 /usr/lib/dyld
+seon    93039 sean  txt      REG               1,13       8192          1165015948 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/lock.mdb
+seon    93039 sean  txt      REG               1,13     177504          1165016744 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/lib/liblz4.dylib
+seon    93039 sean  txt      REG               1,13       4096          1165015949 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/ids
+seon    93039 sean  txt      REG               1,13      34656          1165016732 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/lib/libprobe.dylib
+seon    93039 sean  txt      REG               1,13     130880          1165016734 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/lib/liblmdb.dylib
+seon    93039 sean  txt      REG               1,13     633920          1165016745 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/lib/libzstd.dylib
+seon    93039 sean  txt      REG               1,13     884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+seon    93039 sean  txt      REG               1,13    4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+seon    93039 sean  txt      REG               1,13 2226077696          1165015950 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/data.mdb
+seon    93039 sean    0r     CHR                3,2        0t0                 336 /dev/null
+seon    93039 sean    1w     REG               1,13      19754          1170942147 /private/tmp/claude-501/problems-check.log
+seon    93039 sean    2w     REG               1,13      19754          1170942147 /private/tmp/claude-501/problems-check.log
+seon    93039 sean    3r     CHR               17,1    0t40384                 612 /dev/urandom
+seon    93039 sean    4u     REG               1,13       8192          1165015948 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/lock.mdb
+seon    93039 sean    5u     REG               1,13 2226077696          1165015950 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/data.mdb
+seon    93039 sean    6w     REG               1,13 2226077696          1165015950 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/check-store/data.mdb
+seon    93039 sean    7u    unix 0xfadf4e0cda620316        0t0                     ->0xf8cda8b5d27f6ba0
+seon    93039 sean    8u    unix 0x11293893f4998150        0t0                     ->0x87bfd4b5db7d7628
+seon    93039 sean    9u    unix 0xfd86588ffd43636d        0t0                     ->0x38d467aa2fd17401
+seon    93039 sean   10u    unix 0xb6c3f15340c39be2        0t0                     ->0x7555fc1b2104d0ec
+seon    93039 sean   11     PIPE 0xabca52dae9173314      16384                     ->0x637c11ff5c3112d4
+seon    93039 sean   12     PIPE 0x637c11ff5c3112d4      16384                     ->0xabca52dae9173314
+seon    93039 sean   13u  KQUEUE                                                   count=0, state=0xa
+seon    93039 sean   15u    unix  0x5fa041c8342ec83        0t0                     ->0x94f1bdb48054e770

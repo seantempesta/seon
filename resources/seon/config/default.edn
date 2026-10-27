@@ -346,37 +346,46 @@
  ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
  ;; (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
- ;; Unit: vars. The vars the processes a test starts run from: a form using a process var or a binary
- ;; var reaches them, so a test that starts a root or an agent is digested by the program those
- ;; processes run. -main reaches root, the server and the agent's init (1,485 vars, measured
- ;; 2026-10-27); seon.turn/work! is what root sends an agent as a quoted form, which no reference
- ;; shows. Provenance: ctx-atom's evidence (2026-10-27): seon.server-test's in-agent tests kept one
- ;; reach digest across two fixes to code their agent runs (a green and a red shared it, bin/test
- ;; listed them flaky), because the agent's code is reached through a socket and a keyword :op.
- :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
- ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
+ ;; Unit: vars. What the processes a test starts run for it: a form using a process var or a binary
+ ;; var reaches them. seon.server/op-answer, the server's answer, a multimethod on a request's :op:
+ ;; a form reaches only the methods of the ops it sends (its :form/ops), so a change to the :done
+ ;; answer moves the tests that send :done and no other. seon.turn/work! is the agent's turn loop,
+ ;; which root sends an agent as a quoted form, which no reference shows. Provenance: ctx-atom's
+ ;; evidence (2026-10-27): seon.server-test's in-agent tests kept one reach digest across two fixes
+ ;; to code their agent runs. Not seon.main/-main (1,512 vars): a root's boot is every process
+ ;; test's, so each change deferred all 116 to the merge (owner, 2026-10-27: "no tests should
+ ;; include all of src … the daily full run is the net"); a change to the boot alone is the merge's
+ ;; run's and the daily run's to catch.
+ :seon.config.source/process-entry #{seon.server/op-answer seon.turn/work!}
+ ;; Unit: namespace prefix -> submodules, or source groups inside one (a path under a
+ ;; submodule: a file or a directory). The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
- ;; reach datahike.*, not every test. Every submodule is in a set: Jolt and Chez (the runtime and its
- ;; compiler) are taken by a test reaching one of Jolt's library namespaces (its analyzer, IR, deps,
- ;; nREPL, HTTP client, async remote), not its host layer (jolt.host, jolt.scheme, jolt.ffi,
- ;; jolt.io-poller), which every form runs on as it runs on clojure.core (a class by jolt.* or
- ;; jolt.scheme narrows nothing: 937 and 913 of 977 tests reach them, through seon.lib and seon.db);
- ;; lmdb and zstd by a test reaching konserve.jolt.lmdb and konserve.jolt.zstd (359 and 348 of 977
- ;; tests), llama.cpp by one reaching seon.vector, awesome-jolt (prose and examples) by none. A test
- ;; that reads files or runs a process takes every pin. What a test runs on without naming it (every
- ;; test runs clojure.core on Jolt) is the forks' own suites' and the daily full run's to catch
- ;; (owner, 2026-10-27: "no test digests the whole tree"). Measured 2026-10-27: a Jolt bump moves 444
- ;; of 977 tests (all before). Provenance: root's task (2026-10-27): pins moved every digest in 3 of
- ;; the last 12 --merge batches (datahike 3, konserve 2, jolt 2), and the Jolt pin, in every test's
- ;; :env, moved 15 times in 3 days: worktrees on one Jolt pin shared 84% of digests, on two pins 0%;
- ;; the libraries' own suites run on a bump (bin/check forks, 4cdd5625f5).
+ ;; reach datahike.*, not every test. Each submodule and each group is a class (seon.config/pin-class),
+ ;; taken by reach alone, by a test that reads files or runs a process too. Jolt is keyed by source
+ ;; group: its analyzer and IR by jolt.analyzer and jolt.ir, deps and nREPL by theirs, core.async by
+ ;; clojure.core.async and jolt.async (its Clojure and its host fibers); lmdb and zstd by
+ ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none. What
+ ;; no prefix names takes no pin: Chez and Jolt's runtime core (its host layer, clojure.core, the
+ ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing; their classes are
+ ;; recorded in the inputs and read by no test's digest). The trade: a
+ ;; change there in a Jolt or Chez bump is caught by the forks' own suites (bin/check forks) and the
+ ;; full run the merge session runs after every pin bump, not by the bump's own prove (owner, 2026-10-27:
+ ;; "no test digests the whole tree"). Measured 2026-10-27 over the last 15 Jolt bumps: 122 tests a
+ ;; bump (0 on 5 of them, 203 on the 10 that touch async), against 451 on every bump as one pin.
+ ;; Provenance: root's task (2026-10-27): pins moved every digest in 3 of the last 12 --merge
+ ;; batches (datahike 3, konserve 2, jolt 2), and the Jolt pin, in every test's :env, moved 15 times
+ ;; in 3 days; root's ruling D (2026-10-27).
  :seon.config.source/pin-namespaces
- {jolt.analyzer #{"reference-code/jolt" "reference-code/chez"}
-  jolt.ir #{"reference-code/jolt" "reference-code/chez"}
-  jolt.deps #{"reference-code/jolt" "reference-code/chez"}
-  jolt.nrepl #{"reference-code/jolt" "reference-code/chez"}
-  jolt.http #{"reference-code/jolt" "reference-code/chez"}
-  jolt.async #{"reference-code/jolt" "reference-code/chez"}
+ {jolt.analyzer #{"reference-code/jolt/jolt-core/jolt/analyzer.clj" "reference-code/jolt/jolt-core/jolt/ir.clj"
+                  "reference-code/jolt/jolt-core/jolt/passes" "reference-code/jolt/jolt-core/jolt/passes.clj"
+                  "reference-code/jolt/jolt-core/jolt/backend_scheme.clj" "reference-code/jolt/jolt-core/jolt/op_registry.clj"}
+  jolt.ir #{"reference-code/jolt/jolt-core/jolt/ir.clj"}
+  jolt.deps #{"reference-code/jolt/jolt-core/jolt/deps.clj" "reference-code/jolt/jolt-core/jolt/deps"
+              "reference-code/jolt/jolt-core/clojurestar/deps.cljc"}
+  jolt.nrepl #{"reference-code/jolt/jolt-core/jolt/nrepl.clj"}
+  clojure.core.async #{"reference-code/jolt/stdlib/clojure/core/async.clj" "reference-code/jolt/stdlib/clojure/core/async"
+                       "reference-code/jolt/host/chez/java/async.ss" "reference-code/jolt/host/chez/java/fibers-async.ss"}
+  jolt.async #{"reference-code/jolt/stdlib/jolt/async"}
   datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
              "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
   konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
@@ -401,9 +410,10 @@
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
- ;; bin/env names a worktree's own, jolt/seon-merges-<worktree>, in SEON_SOURCE_BRANCH (task
- ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1).
- :seon.config.source/branch #or [#env SEON_SOURCE_BRANCH "jolt/seon-merges"]
+ ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task
+ ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
+ ;; an env var bin/env set, outside the config).
+ :seon.config.source/branch #seon/own-branch "jolt/seon-merges"
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
  ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
  ;; 2026-10-23). At the bound: n/a.
@@ -718,6 +728,16 @@
  ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
  ;; the most), 801 past 5.
  :seon.config.ctx/callers 50
+ ;; Unit: errors. The newest recorded errors last raised in a task (seon.problems: one entity per
+ ;; signature, :seon.error/last-task its id) that its record holds, newest first, read by an index
+ ;; seek of the task's id: the errors its agent's work raised, so the agent reads them where it works
+ ;; (the owner, 2026-10-27: "fast and lightweight, don't pull the entire database"). At the bound the
+ ;; older ones stay in the store (seon.problems reads them all). Provenance: measured cost, one
+ ;; member about 27k ticks and 98 KB in the record's build (seon.ctx-test/a-pull-costs-what-the-task-
+ ;; cites-not-the-stores-history: 10 members 678k ticks and 2.87 MB against 408k and 1.89 MB with
+ ;; none), so 5 keeps the join under a third of the pull; how many errors a turn can act on is not
+ ;; measured.
+ :seon.config.ctx/errors 5
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
@@ -728,51 +748,103 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
- ;; Unit: lines of each kind. The wiki sections, program functions and schema keys nearest the
- ;; task's plan (seon.context/related: its references and seon.vector/near on its vector, fused by
- ;; seon.vector/rrf) that the plan does not cite, each a line at summary depth in the page's related part
- ;; and (my.task/related), made again when the plan's vector changes; 0 shows none. Not
- ;; :seon.config.render/similar: that counts program functions in the task's data, the run's fixed
- ;; part (for the prompt cache), and is off by step 6's measurement; these follow the plan as it is
- ;; rewritten. Provenance: the owner, 2026-10-25 ("embeddings on our docs ... pulling in related
- ;; concepts that we can refine over the session"); 5 each found 0.51 of what 31 merged tasks
- ;; changed in functions, 0.71 in sections and 0.56 in schema keys, at about 370 + 370 + 33 tokens a
- ;; turn (docs/vector.md#what-was-compared-and-what-it-left-out).
+ ;; Unit: lines of each kind. The wiki sections, program functions and schema keys the task's plan
+ ;; is likely to need (seon.context/related, ranked by seon.context/relevance) that the plan does
+ ;; not cite, at most this many of each in the page's related part and (my.task/related), those at
+ ;; :seon.config.render/relevance-summary or more; 0 shows none. Not :seon.config.render/similar:
+ ;; that counts program functions in the task's data, the run's fixed part (for the prompt cache),
+ ;; and is off by step 6's measurement; these follow the plan as it is rewritten. Provenance: the
+ ;; owner, 2026-10-25 ("embeddings on our docs ... pulling in related concepts that we can refine
+ ;; over the session"); 5 each found 0.427 of what 57 merged tasks' plans changed in functions,
+ ;; 0.798 in sections and 0.403 in schema keys (docs/vector.md#relevance).
  :seon.config.render/related 5
+ ;; Relevance (seon.context/relevance, docs/vector.md#relevance): a logistic over five features of
+ ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25
+ ;; for the query's words, zt its cosine with the touched items' mean vector (each a z-score over
+ ;; the pool), g1 log(1 + the seeds it neighbours x its rarity), ppr log(1 + scale x its
+ ;; personalized PageRank from the seeds), the constants :seon.config.render/relevance-features. Weighing a link by its rarity took plumbing
+ ;; (seon.contract/checked, seon.db/eid ...) from 20 to 1 of 570 function lines at the same recall. Provenance: fitted (scikit-learn, L2 C=1) on 220 merges' commit subjects as queries
+ ;; and what each merge changed as the relevant items, cold and with three of them touched;
+ ;; judged on 57 merged tasks' plans held out (the relevance-lab worktree, 2026-10-27). They hold
+ ;; only with :seon.config.render/relevance-features as fitted: change one, fit them again
+ ;; (notes/relevance-lab/). At the bound: none; each kind's set is required.
+ :seon.config.render/relevance-weights {:function {:zc 0.382 :zb 0.568 :zt 0.267 :g1 1.527 :ppr 0.112 :intercept -3.881}
+                                        :section {:zc 0.162 :zb 0.816 :zt 0.101 :g1 0.690 :ppr 0.255 :intercept -4.100}
+                                        :schema {:zc 0.517 :zb 0.318 :zt 0.332 :g1 0.382 :ppr 0.435 :intercept -4.991}}
+ ;; The constants relevance's features were fitted with (seon.context/relevance): :alpha the share a
+ ;; PageRank push keeps (the field's 0.15, Andersen, Chung and Lang 2006); :bm25-k1 and :bm25-b
+ ;; BM25's saturation and length normalization (the field's 1.2 and 0.75, Robertson and Zaragoza
+ ;; 2009); :rarity-cap the degree a link's rarity, (1 + cap)/(1 + degree), counts to (16, as the
+ ;; rank fusion's measured cap was: no plumbing lines at 16, 64 and 256 alike), which is also the most
+ ;; datoms that count reads; :ppr-scale the rank's scale inside its log (10^4: a rank of 1e-4, a
+ ;; seed's typical neighbour, reads log 2); :hub the degree from which a node never pushes and is
+ ;; never read whole (64 ranked the 57 held-out plans exactly as no bound, while the bound keeps a
+ ;; push from counting seon.contract/checked's thousands of callers: each datom read costs ~1.4 KB
+ ;; here). Provenance: the weights were fitted with these; no others were measured but :hub's.
+ ;; At the bound: none; each is required.
+ :seon.config.render/relevance-features {:alpha 0.15 :bm25-k1 1.2 :bm25-b 0.75 :rarity-cap 16 :ppr-scale 10000.0 :hub 64}
+ ;; Unit: [logit chance] knots a kind, read piecewise linearly. What a relevance logit means: the
+ ;; chance an item is worth reading for the work now, as an independent judge (Sonnet) labelled 1,905
+ ;; lines useful or noise: the first five of each kind on 59 merged tasks' pages and 20 search
+ ;; queries (the plan's focus, 1,185 lines), and at 48 moments of 10 recorded runs under the work's
+ ;; focus (the plan decaying into the agent's evals, 720 lines; notes/relevance-lab/). Fitted per kind
+ ;; as sigmoid(a log c + b) over both, c the item's chance that its merge changes it, and cross-fitted
+ ;; by halves of the moments: at 60% or more the plan's pages predicted 0.78 / 0.82 / 0.73 and found
+ ;; 0.76 / 0.86 / 0.70 (functions, sections, schema keys), the work's 0.64 / 0.85 / 0.71 and found
+ ;; 0.76 / 0.81 / 0.67; a term for the state moved nothing at the cut. Below each kind's fifth item it
+ ;; is extrapolated: no label is there. At the bound: a logit past either end reads its end's chance.
+ :seon.config.render/relevance-calibration {:function [[-6.51 0.16] [-5.17 0.169] [-3.83 0.243] [-3.3 0.312] [-2.78 0.362] [-1.95 0.433] [-1.12 0.485] [-0.6 0.554] [-0.07 0.602] [0.62 0.701] [1.32 0.753] [2.56 0.77] [3.81 0.784]]
+                                            :section [[-6.16 0.0] [-4.98 0.0] [-3.8 0.002] [-3.3 0.004] [-2.81 0.007] [-2.63 0.022] [-2.45 0.045] [-2.19 0.127] [-1.92 0.232] [-1.55 0.373] [-1.19 0.497] [-0.94 0.582] [-0.69 0.651] [-0.54 0.765] [-0.4 0.834] [2.12 0.913] [4.65 0.948]]
+                                            :schema [[-8.67 0.014] [-6.58 0.02] [-4.49 0.043] [-4.14 0.07] [-3.79 0.096] [-3.36 0.17] [-2.93 0.237] [-2.39 0.401] [-1.84 0.515] [-1.68 0.591] [-1.52 0.648] [-0.61 0.72] [0.29 0.769] [0.65 0.769] [1.0 0.769]]}
+ ;; Unit: chance (0-1). An item related ranks at this relevance or more is shown, a line with its
+ ;; chance; below it, counted (:hidden) with the form that lists it. A task may set its own (its
+ ;; :seon.task/config). Provenance: the judge's labels, cross-fitted: at 0.4 the lines shown were
+ ;; worth reading 0.57 (functions), 0.66 (sections) and 0.68 (schema keys) of the time, about 3.6,
+ ;; 2.3 and 1.6 a page of the first five; at 0.05 (the merge-change scale's cut before) functions
+ ;; were starved and sections and keys half noise (docs/vector.md#relevance). At the bound: an item at
+ ;; exactly this chance is shown.
+ :seon.config.render/relevance-summary 0.4
+ ;; Unit: chance (0-1). An item shown at this relevance or more is shown at doc depth: a section's
+ ;; whole lead, a function's whole doc. Provenance: the judge's labels, cross-fitted: at 0.6 the lines
+ ;; were worth reading 0.73 (functions), 0.80 (sections) and 0.80 (keys) of the time. It is the page's
+ ;; entry cut too (seon.context/selected: nothing below it is shown). A task may set its own (its
+ ;; :seon.task/config). At the bound: an item at exactly this chance is shown at doc depth.
+ :seon.config.render/relevance-doc 0.6
+ ;; Unit: tokens (chars/4 of a line as drawn). How much the page's selected units may take
+ ;; (seon.context/selected): each enters, best first, when it first reaches relevance-doc, while its
+ ;; line (whole) fits. Provenance: on 44 recorded turns of 10 runs, recall of what the agent read next rose to
+ ;; 0.48-0.56 by 800 tokens and little after (0.48-0.58 at 1,600), plan alone and plan plus its evals'
+ ;; trajectory (notes/relevance-replay-2026-10-27.md); revisit when 1,600 is measured on live turns.
+ ;; At the bound: a unit that does not fit is counted in :hidden, not shown.
+ :seon.config.render/relevance-budget 800
+ ;; Unit: evals. How fast an eval's weight in the work's focus (seon.context/focus) fades: it halves
+ ;; every this many of the agent's later evals. Provenance: the replay above, 1 and 3 ranked alike
+ ;; (R@10 0.441 both on the trajectory alone); 1 follows the agent's newest turn. At the bound: none.
+ :seon.config.render/relevance-half-life 1.0
+ ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
+ ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
+ ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing
+ ;; seon.config/value would pool its hundreds of callers). Provenance: 100, 200 and 400 ranked
+ ;; alike on the held-out plans (functions R@5 0.433 / 0.436 / 0.451, sections 0.764 / 0.766 /
+ ;; 0.766); the pool's texts are tokenized each call, so the smallest. At the bound: an item past
+ ;; it and outside the seeds' first neighbours is never scored.
+ :seon.config.render/relevance-pool 100
+ ;; Unit: residual mass per neighbour. The local push's threshold for relevance's personalized
+ ;; PageRank (seon.context/pushed): at most 1/(alpha x this) pushes, whatever the store's size.
+ ;; Provenance: 1e-3 pushed 37 nodes a plan and ranked as well as 1e-4 (376 nodes; functions R@5 0.434
+ ;; and 0.430 on the held-out plans). At the bound: a node holding less than this per neighbour is not pushed.
+ :seon.config.render/relevance-eps 0.001
  ;; Unit: hits. How many hits (my.agent/search) answers when its options give no :k: the best of the
  ;; exact text, meaning and references fused by seon.vector/rrf. Provenance: the literal 10 that
  ;; my.agent/similar took (owner, 2026-10-27: "fix the search so it includes docs ... params to
  ;; specify what to focus on"). At the bound: the hits past it are not answered; ask a larger :k.
  :seon.config.render/search 10
- ;; How much each ranking weighs in my.agent/search's fusion: a hit scores the sum, over the rankings it
- ;; is in, of the ranking's weight / (:seon.config.vector/rrf-k + its rank). 1.0 each is plain reciprocal
- ;; rank fusion, as related's. Provenance: none measured for search yet (an embeddings eval of exact
- ;; text against meaning against references is under way, owner 2026-10-27); change it by a measurement.
- ;; At 0 a ranking only decides which hits are listed, never their order.
- :seon.config.render/search-weights {:text 1.0 :meaning 1.0 :refs 1.0}
  ;; Unit: standard deviations. my.agent/search keeps a text hit (BM25 over the query's identifier-split
  ;; words) only when its score is this many standard deviations above the mean of every text's score for
  ;; that query. Provenance: embeddings lab, 2026-10-27 (20 hand-checked queries; scratchpad
  ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
  ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
  :seon.config.render/search-token-z 2.0
- ;; Unit: [z precision] pairs, z ascending. How a hit's score in standard deviations above its query's mean
- ;; becomes its :relevance in my.agent/search, linearly between the pairs (below the first: 0, past the
- ;; last: its precision). Provenance: the observed precision at each z over the 20 queries of the embeddings
- ;; lab (z 3.0 .13, 3.5 .24, 4.0 .34, 4.5 .50, 5.0 .73; a lower bound, the truth lists 2-8 items a query);
- ;; the lab replaces it by a fit on the search log.
- :seon.config.render/search-relevance [[2.0 0.05] [3.0 0.13] [3.5 0.24] [4.0 0.34] [4.5 0.5] [5.0 0.73]]
- ;; Unit: relevance, 0 to 1. The :min of my.agent/search when its options give none: a hit whose
- ;; :relevance is known and below it is left out (and counted in the :more entry). A hit found by meaning
- ;; alone has no relevance yet and is kept. Provenance: root's spec, 2026-10-27. At the bound: a hit at
- ;; exactly it is kept.
- :seon.config.render/search-min 0.25
- ;; How far related counts the forms naming a call-graph neighbour, weighing it 1/(1 + that count):
- ;; past the cap a neighbour is plumbing every form names. Provenance: on 31 merged tasks the
- ;; fused top 5 held 26 plumbing lines of 155 by plain counts and none weighed so, at caps 16, 64
- ;; and 256 alike (R@5 0.343 -> 0.346; seon.context/related-weighs-a-neighbour-by-its-rarity). At
- ;; the bound: at most this many :form/refs datoms read a neighbour.
- :seon.config.render/related-rarity 16
  ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
  ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
  ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the

@@ -1,0 +1,2373 @@
+[
+ {
+  "task": "seon.source/writeback-order",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/source.md#mains-program-follows-the-tree",
+    "pct": 33,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#a-merge-loads-in-place",
+    "pct": 11,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#compiled-code",
+    "pct": 9,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 8,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/account-diff-tx",
+    "pct": 5,
+    "label": "useful",
+    "why": "account-tx at file order and lead"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/form-row",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed; form row shape for write order"
+   },
+   {
+    "kind": "function",
+    "name": "seon.source/text-tx",
+    "pct": 4,
+    "label": "useful",
+    "why": "writes file forms in file order; mirror"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/octopus-merge",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.source/refresh-tx",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/state",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related-seeds-near",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ctx/callers",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/root",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":form/refs",
+    "pct": 3,
+    "label": "useful",
+    "why": "load-order edges come from form refs"
+   }
+  ],
+  "missing": [
+   "seon.merge/key-content",
+   ":form/lead"
+  ]
+ },
+ {
+  "task": "query: where is a merge refused when the branch is behind",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/tasks.md#task-content-reaches-main-at-the-runs-end",
+    "pct": 23,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#what-a-branch-caused",
+    "pct": 22,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/root.md#runs-and-judging",
+    "pct": 12,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/tasks.md#a-refused-run-is-held-for-root",
+    "pct": 8,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program",
+    "pct": 5,
+    "label": "useful",
+    "why": "explains merge mechanism"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/octopus-merge",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed; refuses behind branches"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/merge-refused",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed; the refusal itself"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fx/follow-main",
+    "pct": 5,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/misaligned",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/lost-write-back",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/behind",
+    "pct": 8,
+    "label": "useful",
+    "why": "the error type of the refusal"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/tests-dir",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/main",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/gate-checkout",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.merge/max-conflicts",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.reconcile/behind?"
+  ]
+ },
+ {
+  "task": "query: what writes :seon.run/outcome",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/root.md#runs-and-judging",
+    "pct": 40,
+    "label": "useful",
+    "why": "explains how outcome is judged"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#two-kinds-of-problem",
+    "pct": 24,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#what-a-turn-takes-from-main",
+    "pct": 21,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map",
+    "pct": 12,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/turn.md#one-run-from-release-to-judge",
+    "pct": 12,
+    "label": "useful",
+    "why": "run lifecycle to end"
+   },
+   {
+    "kind": "function",
+    "name": "seon.turn/end!",
+    "pct": 12,
+    "label": "useful",
+    "why": "writes the run's end"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/write-end!",
+    "pct": 5,
+    "label": "useful",
+    "why": "records outcome on branch"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/run-pull",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/kept?",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.reconcile/advance",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed; writes outcome"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/outcome",
+    "pct": 38,
+    "label": "useful",
+    "why": "the attribute itself"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.end/end-fact",
+    "pct": 26,
+    "label": "useful",
+    "why": "end fact carrying outcome"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.run/run",
+    "pct": 5,
+    "label": "useful",
+    "why": "the run entity schema"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/stopped",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/previous-end",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.task/end-members",
+   "seon.reconcile/dead-tx",
+   "seon.reconcile/start"
+  ]
+ },
+ {
+  "task": "query: how does the render cache a component",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#components",
+    "pct": 22,
+    "label": "useful",
+    "why": "explains component caching"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#render-what-a-person-or-a-model-reads",
+    "pct": 19,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#changes-arrive-as-messages-the-eval-response-says-only-what-the-eval-caused-owner-2026-10-26",
+    "pct": 15,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 14,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#shared-build-caches",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/render!",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed; keeps output in cache"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/placed-units",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/walker",
+    "pct": 3,
+    "label": "useful",
+    "why": "holds the walk cache"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/reads",
+    "pct": 3,
+    "label": "useful",
+    "why": "declares component reads"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render/frame!",
+    "pct": 3,
+    "label": "useful",
+    "why": "redraws changed components"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/cache-block-tokens",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/node-cache-bytes",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/render-ctx",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/root-ctx",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/root-input",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "docs/render.md#reactive-renders"
+  ]
+ },
+ {
+  "task": "query: parse markdown headings and the names a text cites",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/references.md#one-parse",
+    "pct": 66,
+    "label": "useful",
+    "why": "in changed; the parser"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#references",
+    "pct": 30,
+    "label": "useful",
+    "why": "what a citation is"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#the-wiki-in-the-store",
+    "pct": 20,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#files-and-namespaces-on-demand",
+    "pct": 15,
+    "label": "useful",
+    "why": "citation kinds read"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#files-namespaces-and-symbols-are-plain-markdown-read-by-one-reader-only-seons-own-docs-are-stored",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/parse",
+    "pct": 5,
+    "label": "useful",
+    "why": "the markdown parser"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/names",
+    "pct": 4,
+    "label": "useful",
+    "why": "names a text cites"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/addresses",
+    "pct": 4,
+    "label": "useful",
+    "why": "sections a text cites"
+   },
+   {
+    "kind": "function",
+    "name": "seon.task/references-of",
+    "pct": 3,
+    "label": "useful",
+    "why": "caller of the parser"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/names-something?",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.section/fact",
+    "pct": 7,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ref/view",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.section/parsed",
+    "pct": 5,
+    "label": "useful",
+    "why": "parse output shape"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.program/meaning-change",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ref/document",
+    "pct": 3,
+    "label": "useful",
+    "why": "parse document shape"
+   }
+  ],
+  "missing": [
+   "seon.ref/scan"
+  ]
+ },
+ {
+  "task": "query: retry a model request after the provider rate limits it",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/model.md#failures",
+    "pct": 64,
+    "label": "useful",
+    "why": "in changed; 429 handling"
+   },
+   {
+    "kind": "section",
+    "name": "docs/clocks.md#time-decides-the-owners-exceptions",
+    "pct": 56,
+    "label": "useful",
+    "why": "names provider delayed retry"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct": 12,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/model.md#the-model",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/flow.md#idioms-for-seon",
+    "pct": 5,
+    "label": "useful",
+    "why": "delayed retry idiom"
+   },
+   {
+    "kind": "function",
+    "name": "seon.model/provider-error",
+    "pct": 9,
+    "label": "useful",
+    "why": "declares the rate-limited error"
+   },
+   {
+    "kind": "function",
+    "name": "seon.model/openai-compat",
+    "pct": 5,
+    "label": "useful",
+    "why": "reads the 429 response"
+   },
+   {
+    "kind": "function",
+    "name": "seon.model/retry-after-ms",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed; Retry-After"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fx/charge",
+    "pct": 3,
+    "label": "useful",
+    "why": "halves rate on rate-limit"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fx/model",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.model/rate-limited",
+    "pct": 32,
+    "label": "useful",
+    "why": "the error type"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.model/failure",
+    "pct": 15,
+    "label": "useful",
+    "why": "failure shape"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/rate",
+    "pct": 5,
+    "label": "useful",
+    "why": "rate config the outcome adjusts"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ai.model/provider-max-in-flight",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.model/no-provider",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: kill an agent's processes when root dies",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/machine.md#processes",
+    "pct": 32,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/processes.md#the-fork-server",
+    "pct": 19,
+    "label": "useful",
+    "why": "in changed; fork server lifecycle"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct": 18,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#processes-coreasyncflows-words",
+    "pct": 18,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/checks.md#modes",
+    "pct": 3,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.task/earlier-agents-tx",
+    "pct": 5,
+    "label": "useful",
+    "why": "detaches agents of earlier root"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/end-agent",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/kill!",
+    "pct": 3,
+    "label": "useful",
+    "why": "kills agent process"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/shown-status",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/stop!",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/max-agents",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/died",
+    "pct": 5,
+    "label": "useful",
+    "why": "agent death fact"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/ended",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/death-stderr-bytes",
+    "pct": 3,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/action",
+    "pct": 3,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.fork-server/lost",
+   "seon.fork-server/reaped"
+  ]
+ },
+ {
+  "task": "query: a wiki section with no lead sentence",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-section-with-no-lead",
+    "pct": 65,
+    "label": "useful",
+    "why": "in changed; the problem"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#a-section-read-at-a-depth-with-its-edges",
+    "pct": 31,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/README.md#how-the-wiki-is-kept",
+    "pct": 23,
+    "label": "useful",
+    "why": "states the lead rule"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#resolving-and-showing",
+    "pct": 23,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#sections-in-a-tasks-context",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/leadless-sections",
+    "pct": 9,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/lead-sentence",
+    "pct": 5,
+    "label": "useful",
+    "why": "computes the lead"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ref/shown",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/wiki-tx",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "my.agent/help",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/wiki-baseline",
+    "pct": 36,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ref/problem-kind",
+    "pct": 16,
+    "label": "useful",
+    "why": "problem kinds incl leadless"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related",
+    "pct": 15,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.section/fact",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.section/parsed",
+    "pct": 3,
+    "label": "useful",
+    "why": "parsed section holds lead"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: resolve a config value through the task, the model and the provider",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/config.md#the-resolver",
+    "pct": 64,
+    "label": "useful",
+    "why": "explains the resolver"
+   },
+   {
+    "kind": "section",
+    "name": "docs/model.md#the-model",
+    "pct": 20,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/config.md#the-model-manifest",
+    "pct": 17,
+    "label": "useful",
+    "why": "model and provider layers"
+   },
+   {
+    "kind": "section",
+    "name": "docs/model.md#no-default-model",
+    "pct": 13,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#a-config-key-does-what-it-says-a-providers-schema-refuses-a-combination-it-forbids",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.config/resolve-in",
+    "pct": 9,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.config/provider",
+    "pct": 4,
+    "label": "useful",
+    "why": "provider layer of resolver"
+   },
+   {
+    "kind": "function",
+    "name": "seon.config/resolve",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.context/related-count",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.config/invalid-pairs",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config/source",
+    "pct": 17,
+    "label": "useful",
+    "why": "resolver result source"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/providers",
+    "pct": 6,
+    "label": "useful",
+    "why": "provider layer rows"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ai.model/provider-fact",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/kind",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/model",
+    "pct": 4,
+    "label": "useful",
+    "why": "model layer rows"
+   }
+  ],
+  "missing": [
+   "seon.config/value"
+  ]
+ },
+ {
+  "task": "query: load the task files into the store",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/health.md#every-writer-root-loads-what-changed",
+    "pct": 23,
+    "label": "useful",
+    "why": "explains loader of task files"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#import-the-running-generations-source-as-mains-program",
+    "pct": 17,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#agent-facing-functions-my",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#edges-that-catch-each-names-its-one-variant",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#an-agent-changes-code-at-its-repl",
+    "pct": 6,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/load-tasks!",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.task/load-tx",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/load-answer",
+    "pct": 3,
+    "label": "useful",
+    "why": "answer of load-tasks!"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/watch!",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "my.root/load-kinds!",
+    "pct": 2,
+    "label": "useful",
+    "why": "runs the task loader"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/tasks-dir",
+    "pct": 9,
+    "label": "useful",
+    "why": "where task files live"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.db/cfg",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/need-ids",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.task/task",
+    "pct": 4,
+    "label": "useful",
+    "why": "task entity loaded"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/backend",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.task/file-declarations"
+  ]
+ },
+ {
+  "task": "query: reciprocal rank fusion of rankings",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/vector.md#fused-with-the-call-graph",
+    "pct": 84,
+    "label": "useful",
+    "why": "in changed; where rrf is used"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval",
+    "pct": 58,
+    "label": "useful",
+    "why": "shows fused related part"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#related-things-are-found-by-measured-search-over-every-kind-through-stored-edges",
+    "pct": 2,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#2026-10-27-day-rulings",
+    "pct": 2,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#not-built-a-merge-queue-on-root",
+    "pct": 1,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/rrf",
+    "pct": 35,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/member-rank",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/held-order",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.select/grow-values",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.context/related",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.vector/rrf-k",
+    "pct": 50,
+    "label": "useful",
+    "why": "the rrf constant"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/changes",
+    "pct": 3,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.catch-up/conflicts",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/program",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.vector/shortlist",
+    "pct": 2,
+    "label": "useful",
+    "why": "fusion shortlist size"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: group commit: when is a write durable",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#processes-coreasyncflows-words",
+    "pct": 59,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#storage",
+    "pct": 24,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#history",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/checks.md#modes",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#datahike",
+    "pct": 8,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/writer-proc",
+    "pct": 6,
+    "label": "useful",
+    "why": "the writer doing group commit"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/commit-batch",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed; the group commit"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/stored!",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/commit!",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/transact-main!",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/writer-batch",
+    "pct": 31,
+    "label": "useful",
+    "why": "batch bound of group commit"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/step",
+    "pct": 17,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/reconciler-buf",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/lmdb-map-bytes",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/root",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.writer/flusher-proc",
+   "docs/decisions.md#durability-is-continuous-group-commit"
+  ]
+ },
+ {
+  "task": "query: judge whether a cost grows faster than the work needs",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#done",
+    "pct": 57,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#how-growth-is-judged",
+    "pct": 31,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/cost.md#cost-proofs",
+    "pct": 26,
+    "label": "useful",
+    "why": "cost proof rules"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#correctness-and-performance-come-before-lines-of-code",
+    "pct": 20,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/machine.md#the-target-a-16-gb-macbook-m1",
+    "pct": 8,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/growth",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/verdict-lines",
+    "pct": 3,
+    "label": "useful",
+    "why": "renders verdict"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/run",
+    "pct": 2,
+    "label": "useful",
+    "why": "measures rows judged"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fx/charge",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/judge",
+    "pct": 2,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/estimate",
+    "pct": 9,
+    "label": "useful",
+    "why": "estimate judged against"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/sized",
+    "pct": 6,
+    "label": "useful",
+    "why": "sized rows"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.judge/cost-unknown",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/report",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/verdict",
+    "pct": 4,
+    "label": "useful",
+    "why": "verdict shape"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: reuse a test result whose inputs have not changed",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#reuse-every-unique-immutable-result-that-is-proven-the-same-and-expensive-to-make",
+    "pct": 31,
+    "label": "useful",
+    "why": "ruling for digest reuse"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#everything-is-fast-a-render-or-a-context-whose-inputs-have-not-changed-is-never-made-again",
+    "pct": 26,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/source.md#tests-run-by-reach",
+    "pct": 12,
+    "label": "useful",
+    "why": "reach-digest reuse"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#caching-is-never-an-excuse-for-slow-code-the-cold-path-is-fast-on-its-own-and-a-hit-is-visible",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#reuse-is-memoization--f-x-lookup-f-x-so-return-it",
+    "pct": 6,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.prove/result-tx",
+    "pct": 3,
+    "label": "useful",
+    "why": "records reused results"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/test-plan",
+    "pct": 2,
+    "label": "useful",
+    "why": "selects tests by digest"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/base-graph",
+    "pct": 1,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/reach-step",
+    "pct": 1,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.proofs/test-seed",
+    "pct": 1,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/proof-fact",
+    "pct": 6,
+    "label": "useful",
+    "why": "proof result fact"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.proof/result-fact",
+    "pct": 5,
+    "label": "useful",
+    "why": "result fact"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/result",
+    "pct": 4,
+    "label": "useful",
+    "why": "test result shape"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.fx/in-test",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/test-results-dir",
+    "pct": 4,
+    "label": "useful",
+    "why": "where results are stored"
+   }
+  ],
+  "missing": [
+   "seon.proofs/stored-results",
+   "docs/merging.md#the-test-service",
+   "docs/source.md#a-result-is-a-function-of-its-digest"
+  ]
+ },
+ {
+  "task": "query: fork a new agent process from the fork server",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/processes.md#the-fork-server",
+    "pct": 18,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/processes.md#processes",
+    "pct": 14,
+    "label": "useful",
+    "why": "fork model"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#compiled-code",
+    "pct": 13,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#processes-coreasyncflows-words",
+    "pct": 10,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/failure-points.md#physics-who-may-run-threads",
+    "pct": 6,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/spawn!",
+    "pct": 4,
+    "label": "useful",
+    "why": "asks fork server to fork"
+   },
+   {
+    "kind": "function",
+    "name": "seon.fork-server/main",
+    "pct": 4,
+    "label": "useful",
+    "why": "fork server loop"
+   },
+   {
+    "kind": "function",
+    "name": "seon.root/start-agent",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/clone!",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/init!",
+    "pct": 3,
+    "label": "useful",
+    "why": "forked process becomes agent"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/standby-every",
+    "pct": 10,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.render/process",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/gc-sweepers",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/fork-misaligned",
+    "pct": 5,
+    "label": "useful",
+    "why": "fork branch misalignment"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.test/fork-refused",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.fork-server/server-step",
+   "seon.fork-server/fork-carrying!"
+  ]
+ },
+ {
+  "task": "query: print a value without clipping it",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/render.md#no-clipping",
+    "pct": 58,
+    "label": "useful",
+    "why": "in changed rule"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#one-value-printer-nothing-cut-before-it-important-data-has-declared-ai-and-html-renders",
+    "pct": 28,
+    "label": "useful",
+    "why": "ruling for the printer"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#a-render-is-a-value-printed-once",
+    "pct": 14,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#one-printer",
+    "pct": 13,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#how-a-value-is-printed",
+    "pct": 12,
+    "label": "useful",
+    "why": "explains print passes"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print/print-value",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print.emit/literal",
+    "pct": 3,
+    "label": "useful",
+    "why": "emits values"
+   },
+   {
+    "kind": "function",
+    "name": "seon.contract/problems",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print/seen",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.print/response-text",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.error/problem",
+    "pct": 33,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/answer",
+    "pct": 17,
+    "label": "useful",
+    "why": "print answer shape"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/result",
+    "pct": 5,
+    "label": "useful",
+    "why": "print result shape"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.print/prose",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/value-budget",
+    "pct": 2,
+    "label": "useful",
+    "why": "print token budget"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: three-way merge of the program's definitions",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/storage.md#merges-read-what-changed",
+    "pct": 58,
+    "label": "useful",
+    "why": "delta three-way mechanism"
+   },
+   {
+    "kind": "section",
+    "name": "docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program",
+    "pct": 55,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/plan.md#now-2026-10-27-morning",
+    "pct": 18,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#tasks-merges-tests",
+    "pct": 16,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/vocabulary.md#tasks-task-chains-words",
+    "pct": 11,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/delta-three-way",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/three-way",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/readiness",
+    "pct": 5,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.source/unfiled-forms",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.writer/branch-merge",
+    "pct": 4,
+    "label": "useful",
+    "why": "calls three-way against main"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/program",
+    "pct": 10,
+    "label": "useful",
+    "why": "program map merged"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/changes",
+    "pct": 8,
+    "label": "useful",
+    "why": "ours/theirs changes"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/entry-members",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.merge/result",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.merge/max-running",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: embed only the texts a commit changed",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/vector.md#what-is-embedded",
+    "pct": 65,
+    "label": "useful",
+    "why": "explains embedded texts"
+   },
+   {
+    "kind": "section",
+    "name": "docs/decisions.md#a-turn-records-what-it-sent-as-refs-texts-are-read-as-of-the-turn",
+    "pct": 15,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/render.md#cuts-in-a-display-namespace-that-are-not-cuts-of-output",
+    "pct": 11,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-stale-section",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/agent.md#ctx",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/round",
+    "pct": 5,
+    "label": "useful",
+    "why": "picks due texts to embed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.agent/embed-written!",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/vectors-proc",
+    "pct": 2,
+    "label": "useful",
+    "why": "keeps vectors current"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/embed",
+    "pct": 2,
+    "label": "useful",
+    "why": "the embed effect"
+   },
+   {
+    "kind": "function",
+    "name": "my.docs/reviewed!",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.vector/texts",
+    "pct": 18,
+    "label": "useful",
+    "why": "texts per round"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.source/branch",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ctx/ctx",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/generation",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.reconcile/step",
+    "pct": 4,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.vector/written",
+   "seon.vector/due"
+  ]
+ },
+ {
+  "task": "query: who calls a function",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/agent.md#finding-your-way",
+    "pct": 26,
+    "label": "useful",
+    "why": "agent's where-things-are tools"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#provenance-who-made-each-fact",
+    "pct": 19,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/dashboard.md#callbacks-are-data",
+    "pct": 14,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/parity.md#the-agents-repl-my",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/resolution.md#resolution",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.render.ui/asked-by",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.profile/calls",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.repl/by",
+    "pct": 4,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.web/ui-call",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.cost/once",
+    "pct": 2,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.ai/script",
+    "pct": 24,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.proofs/cost-max-samples",
+    "pct": 20,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.cost/dim",
+    "pct": 9,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.step/step-fn",
+    "pct": 8,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.turn/calls",
+    "pct": 6,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.docs/callers",
+   "my.agent/callers"
+  ]
+ },
+ {
+  "task": "query: a wiki section whose code changed since it was written",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-stale-section",
+    "pct": 57,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#the-wiki-in-the-store",
+    "pct": 20,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/health.md#a-section-with-no-lead",
+    "pct": 13,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/README.md#how-the-wiki-is-kept",
+    "pct": 11,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/references.md#sections-in-a-tasks-context",
+    "pct": 7,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.problems/stale-sections",
+    "pct": 5,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.docs/baseline-reads",
+    "pct": 4,
+    "label": "useful",
+    "why": "baseline staleness compares"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/meaning-changes",
+    "pct": 3,
+    "label": "useful",
+    "why": "detects cited var changes"
+   },
+   {
+    "kind": "function",
+    "name": "seon.docs/children",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "function",
+    "name": "seon.docs/load-tx",
+    "pct": 3,
+    "label": "noise",
+    "why": "not needed for this change"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.root/wiki-baseline",
+    "pct": 50,
+    "label": "useful",
+    "why": "baseline for staleness"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.render/related",
+    "pct": 5,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.ref/kind",
+    "pct": 3,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.config.store/branching-factor",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.program/meaning-change",
+    "pct": 2,
+    "label": "useful",
+    "why": "meaning change shape"
+   }
+  ],
+  "missing": []
+ },
+ {
+  "task": "query: datoms-diff",
+  "items": [
+   {
+    "kind": "section",
+    "name": "docs/storage.md#merges-read-what-changed",
+    "pct": 40,
+    "label": "useful",
+    "why": "merges use datoms-diff"
+   },
+   {
+    "kind": "section",
+    "name": "docs/forks.md#datahike",
+    "pct": 30,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "section",
+    "name": "docs/storage.md#the-union",
+    "pct": 27,
+    "label": "useful",
+    "why": "union/changes reads diffs"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct": 20,
+    "label": "useful",
+    "why": "ctx/moved diffs"
+   },
+   {
+    "kind": "section",
+    "name": "docs/ctx.md#not-yet",
+    "pct": 8,
+    "label": "noise",
+    "why": "different subsystem or generic"
+   },
+   {
+    "kind": "function",
+    "name": "seon.union/changes",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.vector/written",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.program/diff-plan",
+    "pct": 4,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.ctx/moved",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "function",
+    "name": "seon.merge/touched-keys",
+    "pct": 3,
+    "label": "useful",
+    "why": "in changed"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/tx-result",
+    "pct": 50,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.root/collected",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":impl/form",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":ns/form",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   },
+   {
+    "kind": "schema",
+    "name": ":seon.agent/root",
+    "pct": 2,
+    "label": "noise",
+    "why": "unrelated key"
+   }
+  ],
+  "missing": [
+   "seon.reconcile/index",
+   "seon.merge/carried-tx",
+   "seon.render.proc/advance-main"
+  ]
+ }
+]
