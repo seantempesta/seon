@@ -7,8 +7,8 @@ How a fresh root picks up the work when every Claude session, memory and transcr
 What survives a restart on a fresh account: git, the disk and the repo's docs.
 
 - Git: `main`, every `jolt/*` and `claude/*` branch, and the forks on GitHub (``seantempesta/<lib>``). Every pin of main resolves there.
-- The disk: each worktree (`.worktrees/<name>`), committed or not, with its `notes/handoff-*.md` on its branch, and the standing store `runs/store`.
-- The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `notes/merge-log.md` (every merge the merge session made), and `notes/archive/` (the working papers whose facts the wiki now holds, kept as evidence). The rules root's old memories held are in AGENTS.md §8 and §9.
+- The disk: each worktree (`.worktrees/<name>`), committed or not, with its `claude_scratch/handoff-*.md` on its branch, and the standing store `runs/store`.
+- The repo's docs: AGENTS.md (the method and root's working rules), `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the owner's rulings), `claude_scratch/merge-log.md` (every merge the merge session made), and `claude_scratch/archive/` (the working papers whose facts the wiki now holds, kept as evidence). The rules root's old memories held are in AGENTS.md §8 and §9.
 
 Nothing else does: no Claude session, its sidebar group, a running agent or a queued message.
 
@@ -16,20 +16,20 @@ Nothing else does: no Claude session, its sidebar group, a running agent or a qu
 
 Start the root session in the main folder itself (`~/src/seon-next`; from any worktree it is `git rev-parse --path-format=absolute --git-common-dir`, minus `/.git`), not in an app-made worktree. Root edits main's docs and owns the merges, and an app worktree's hook blocks writes outside it. Worktree sessions get their worktree from `bin/worktree NAME`, not from the app.
 
-1. Read AGENTS.md whole, then `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand: the owner's direction changed several times, so read every entry of the last two days), this page, and the tail of `notes/merge-log.md`. The newest `notes/root-handoff-*.md` is the owner-facing detail of the day before; what it held that outlives the day is below.
+1. Read AGENTS.md whole, then `docs/plan.md` (Now, In flight, THE PLAN), `docs/decisions.md` (the newest entries stand: the owner's direction changed several times, so read every entry of the last two days), this page, and the tail of `claude_scratch/merge-log.md`. The newest `claude_scratch/root-handoff-*.md` is the owner-facing detail of the day before; what it held that outlives the day is below.
 2. Look at the state, without changing anything:
    - `git log --oneline -20`;
    - `uptime`;
    - `bin/root status`;
    - `git worktree list`;
    - the unmerged branches, with `git for-each-ref refs/heads/jolt/ refs/heads/claude/` and `git rev-list --count main..BRANCH`.
-3. Read each live branch's handoff note: `git show BRANCH:notes/handoff-NAME.md`.
+3. Read each live branch's handoff note: `git show BRANCH:claude_scratch/handoff-NAME.md`.
 4. Write the owner a five-line state summary.
 5. Start the sessions again, one per live branch below, in that branch's worktree, each briefed with its handoff note and AGENTS §3. Start one merge session in the main tree, briefed with AGENTS §3's merge paragraph and the queue. File them in one sidebar group, and use the model AGENTS §2 names for the task.
 
 ## What a resuming root checks
 
-A root resuming on the same account looks at the state once, in this order, then writes the owner five lines ([AGENTS](../AGENTS.md) §2): `git log --oneline --first-parent -15`, `uptime`, `bin/root status`, the sessions list, and the newest entries of `notes/merge-log.md`. Then the checks the earlier roots' mistakes taught:
+A root resuming on the same account looks at the state once, in this order, then writes the owner five lines ([AGENTS](../AGENTS.md) §2): `git log --oneline --first-parent -15`, `uptime`, `bin/root status`, the sessions list, and the newest entries of `claude_scratch/merge-log.md`. Then the checks the earlier roots' mistakes taught:
 - **After every merge, restart root with `bin/update`**, never `bin/root stop/start`, until the source tree follows main: the standing root imports main's program from the checkout `:seon.config.source/root` names, which only `bin/update` moves. Check `(seon.generation/generation)` and that a just-merged var's entity is on root's main.
 - **A merge is `bin/prove --merge`, never a list of tests named by hand** ([merging](merging.md#a-merge-runs-what-the-change-reaches)); read every red it names before keeping or reverting. One red comes and goes, a three-way merge's allocation, and a digest both green and red is marked `:flaky`.
 - **Main's verification goes first**: a worktree's heavy run waits on main's lock; no load-average gate stands in for it.
@@ -53,7 +53,7 @@ The sessions keep running: a new root does not restart them. They were started b
 ```
 You are root for Seon on Jolt, taking over from an earlier root on the same account. Work in ~/src/seon-next.
 
-Read first, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, the tail of notes/merge-log.md, and notes/perf-2026-10-24.md (yesterday's review: what regressed, what's slow). The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them.
+Read first, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, the tail of claude_scratch/merge-log.md, and claude_scratch/perf-2026-10-24.md (yesterday's review: what regressed, what's slow). The sessions in docs/plan.md "In flight" are still running: find them with list_sessions (group seon-jolt), ask each for one line on where it stands, and write me a five-line state summary. Do not restart them.
 
 Yesterday's lessons. Run the work this way from the start:
 
@@ -65,7 +65,7 @@ Yesterday's lessons. Run the work this way from the start:
 
 4. No regressions get through. The merge session runs bin/prove plus the process tests the change reaches, the cost proofs on any pin bump, and leaves greens stored at main's digest (check that bin/prove on main afterwards reuses everything). Once a day, and before any freeze or cutover, the full run (bin/test --all, bin/check 100) on a clean main checkout. A red on main gets an owner and a task within the hour, and nothing that touches its area merges until it is green. A flaky test is a defect: fix its cause, never re-run it.
 
-5. Measure before and after. Every perf or cost claim carries numbers from the same input before and after; every "faster" is checked by an independent run. Keep notes/perf-<date>.md current; a regression found there is a task the same day.
+5. Measure before and after. Every perf or cost claim carries numbers from the same input before and after; every "faster" is checked by an independent run. Keep claude_scratch/perf-<date>.md current; a regression found there is a task the same day.
 
 6. An independent audit every 10 merges or once a day, whichever comes first: an agent that hasn't seen the work reads the merges since the last audit, against the rules above, and files what to cut. You assign the cuts.
 
@@ -81,5 +81,5 @@ Start by writing rules 1–6 into AGENTS.md §2 and §3 (one short paragraph eac
 The prompt that starts a fresh root on a new account, in full.
 
 ```
-You are root for Seon on Jolt, restarting on a fresh account: no sessions, memory or transcripts carried over. Work in the repo's main folder (~/src/seon-next; if it does not exist, step R has not run: it is the folder `git rev-parse --path-format=absolute --git-common-dir` names, minus /.git). First read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of notes/merge-log.md. Then follow docs/restart.md "The first steps of a fresh root": look at the state, read each live branch's handoff note, write me a five-line state summary, then restart the sessions and the merge session. Delegate; investigate personally only what fits in a few tool calls.
+You are root for Seon on Jolt, restarting on a fresh account: no sessions, memory or transcripts carried over. Work in the repo's main folder (~/src/seon-next; if it does not exist, step R has not run: it is the folder `git rev-parse --path-format=absolute --git-common-dir` names, minus /.git). First read, in order: AGENTS.md (all of it), docs/restart.md, docs/plan.md, docs/decisions.md, and the tail of claude_scratch/merge-log.md. Then follow docs/restart.md "The first steps of a fresh root": look at the state, read each live branch's handoff note, write me a five-line state summary, then restart the sessions and the merge session. Delegate; investigate personally only what fits in a few tool calls.
 ```

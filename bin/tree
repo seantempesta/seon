@@ -3,7 +3,7 @@
 # a first commit) with every changed and untracked unignored file added, in an index of its own
 # (the repository's untouched; a copy of it, with its mtime, when it is HEAD's tree with no skipped entry). bin/build records it beside the binary (target/seon.tree);
 # bin/check compares it with that record before it runs the binary. seon.fx/tree-id computes the
-# same in Clojure. Top-level paths :seon.config.source/tree-excludes names (notes/: no read and no
+# same in Clojure. Top-level paths :seon.config.source/tree-excludes names (claude_scratch/: no read and no
 # build reads them) are left out, read from the shipped resources/seon/config/default.edn.
 # Prints nothing and exits 1 when git cannot name it.
 ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
