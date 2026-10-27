@@ -112,7 +112,9 @@
 (defn- finish
   "The running run ended with answer r: every waiter answered once, the next run started. A run
   that answered is remembered under its slot (a key asked again gets that answer, nothing runs);
-  an error is never remembered, so asking again retries, and it is recorded as a :platform problem
+  an error is never remembered, nor an answer whose test child died (a report with its :exit: a
+  death is no verdict, so asking again runs it again rather than answering the death), so asking
+  again retries, and it is recorded as a :platform problem
   (the api's :problem) as well as answered, but for :seon.root/ended: the agent it asked ended (a
   cancel, its run's end, its run's record), and the run ends with it, no fault of the
   platform (bin/check e2e-calc: a cancel killed an agent whose turn had asked for its tests); a
@@ -123,8 +125,9 @@
   (let [{:keys [key branch waiters] :as run} (:running st)
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
+        died? (and (not err?) (some :exit (:reports r)))
         st (cond-> (-> st (dissoc :running) (assoc :last branch))
-             (not err?) (assoc-in [:done (slot run)] {:key key :r r}))
+             (not (or err? died?)) (assoc-in [:done (slot run)] {:key key :r r}))
         [st more] (take-next st branch)]
     [st (cond-> (into (reply [] waiters r) more) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
