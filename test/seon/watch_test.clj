@@ -14,6 +14,21 @@
 
 (defn- watch-kinds "The kinds a batch loads (my.root/watch-loads' keys)." [co refs own batch] (set (keys (mr/watch-loads co refs own batch))))
 
+(deftest a-batch-of-edits-reads-only-the-files-it-changed
+  ;; task seon.source/an-import-reads-only-changed-files: the watcher's source batch names the files
+  ;; (my.root/source-changes) and the :source read gives just those, with the tree's id for the digest
+  (let [co (seon.config/checkout) refs "/g/refs" own "/g/refs/heads/jolt/health" p #(str co "/" %)]
+    (is (= #{"src/seon/watch.clj" "test/x.clj"} (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path (p "src/seon/watch.clj")] [:path (p "test/x.clj")] [:path (p "docs/x.md")]])) "the files, once each; a page is the wiki's")
+    (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path own]])) "the branch moved with them: the whole tree")
+    (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:rescan (p "src")]])) "a rescan: the whole tree")
+    (is (nil? (mr/source-changes co refs own [[:path (p "docs/x.md")]])) "no source file changed")
+    (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path (p "src/seon/gone")]])) "a directory made or removed: the whole tree"))
+  (let [r (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"] :paths #{"src/seon/watch.clj" "src/seon/gone.clj" "README.md"}}})]
+    (is (= #{"src/seon/watch.clj" "src/seon/gone.clj"} (set (keys (:value r)))) "the named source files only")
+    (is (nil? (get-in r [:value "src/seon/gone.clj"])) "a removed file is nil")
+    (is (string? (get-in r [:value "src/seon/watch.clj"])))
+    (is (string? (:tree r)) "the tree id, which stands for every file's content")))
+
 (deftest a-batch-loads-what-its-paths-loaders-read
   (let [co (seon.config/checkout) refs "/g/refs" own "/g/refs/heads/jolt/health" k #(watch-kinds co refs own %)]
     (is (= #{:docs} (k [[:path (str co "/docs/health.md")]])))

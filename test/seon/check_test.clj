@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib] [seon.contract :as contract]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -243,6 +243,21 @@
       (is (= {:no-unnamed-site true} (:checks (seon.check/branch-health base head [:unnamed-site])))))
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
       (is (thrown? Exception (seon.check/branch-health base head [:stale-section]))))))
+
+(deftest a-class-the-health-step-does-not-read-is-refused
+  (let [[base v] (cited-db)
+        head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
+    (doseq [c [:orphan-page :stalled :stale-pin :leadless-section :uncited-task :problem-unlinked]]
+      (is (thrown? Exception (seon.check/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
+
+(deftest the-health-steps-checks-are-the-classes-caused-reads
+  (let [[base v] (cited-db)
+        attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
+    (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
+           (set (keys (:checks (seon.check/branch-health base base nil))))))
+    (let [head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
+      (is (every? seon.problems/caused-classes (map :class (:rows (seon.problems/caused-split base head))))
+          "every class caused-split answers is one the health step judges"))))
 
 (deftest the-base-is-the-merge-base-or-the-previous-main
   ;; seon.fx/base-commit in a repository of its own: a branch is held to its merge base with main;

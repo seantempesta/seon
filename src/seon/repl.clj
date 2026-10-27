@@ -511,7 +511,7 @@
   as its render returned it, by its element id, in order: the hiccup render-ctx's html is written
   from, nothing left out."
   {:malli/schema [:=> [:cat] :map]}
-  [] (let [w (framed)] (apply array-map (mapcat #(mapcat identity (render/placed-hiccup w %)) ["#p-task" "#c-rows" "#p-tiles"]))))
+  [] (let [w (framed)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
