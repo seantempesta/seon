@@ -718,6 +718,16 @@
  ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
  ;; the most), 801 past 5.
  :seon.config.ctx/callers 50
+ ;; Unit: errors. The newest recorded errors last raised in a task (seon.problems: one entity per
+ ;; signature, :seon.error/last-task its id) that its record holds, newest first, read by an index
+ ;; seek of the task's id: the errors its agent's work raised, so the agent reads them where it works
+ ;; (the owner, 2026-10-27: "fast and lightweight, don't pull the entire database"). At the bound the
+ ;; older ones stay in the store (seon.problems reads them all). Provenance: measured cost, one
+ ;; member about 27k ticks and 98 KB in the record's build (seon.ctx-test/a-pull-costs-what-the-task-
+ ;; cites-not-the-stores-history: 10 members 678k ticks and 2.87 MB against 408k and 1.89 MB with
+ ;; none), so 5 keeps the join under a third of the pull; how many errors a turn can act on is not
+ ;; measured.
+ :seon.config.ctx/errors 5
  ;; Unit: functions. The program functions nearest the task's plan by meaning (seon.vector/near,
  ;; exact) that its write set and proofs do not name, each a line in its task data (:similar);
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the

@@ -14,6 +14,7 @@ The map is the agent's entity pulled by a pattern: Datahike's pull syntax, held 
   - `:cited`, the vars its text names, each with its `:form` whole (its source) and `:callers`, the newest ``:seon.config.ctx/callers`` forms naming it: the tests among them are the var's existing tests, for a render to join to their last result by name;
   - `:proved`, its proofs, each with its `:form`, whose `:form/refs` names every var the proof calls;
   - `:needs`, the tasks it waits on;
+  - `:errors`, the newest ``:seon.config.ctx/errors`` recorded errors last raised in this task (a lookup by the task's id on the indexed ``:seon.error/last-task``, newest first, a few attributes each, never the example's whole map), so the pull reads the task's errors where it works and not the store's history of them: 541k, 543k and 548k ticks and 292 contracted calls at 10, 100 and 1,000 errors in the store, against 408k ticks and 263 calls before the join (`seon.ctx-test/a-pull-costs-what-the-task-cites-not-the-stores-history`);
   - `:sections`, the wiki sections its text cites (``:seon.task/sections``, the section-address twin of `:seon.task/references`, written by the same producer from the same text by the one parser, ``seon.ref/addresses``), each with its heading and text.
 
 Every render of ctx reads what this declaration holds ([render](render.md#the-page)).
