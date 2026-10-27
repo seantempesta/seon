@@ -579,6 +579,13 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
   [n] (refresh-program n true))
 
+(defn ns-edit-of
+  "refresh-tx's arguments: a program of n forms in other files that all require rfc.c, and an edit of
+  rfc.c's ns form alone (a new require): what its dependents read of it is unchanged."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :string :string]]]}
+  [n] (let [[db ch] (hub-refresh-of n)]
+        [db {"src/rfc/c.clj" (str/replace (source/file-text db 'rfc.c) "(ns rfc.c)" "(ns rfc.c (:require [clojure.string]))")}]))
+
 (defn read-of
   "seon.source/read-nss's argument: refresh-of n's edited file."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
@@ -614,6 +621,10 @@
     (is (= [] (source/refresh-tx after ch)) "the same text again: nothing")
     (let [[hdb hch] (hub-refresh-of 10)]
       (is (= #{"ns rfc.c"} (written (source/refresh-tx hdb hch))) "a hub's body edit reads no dependent"))
+    (let [[hdb hch] (ns-edit-of 10)
+          tree {"src/rfc/c.clj" (hch "src/rfc/c.clj") "src/rfc/o0.clj" (source/file-text hdb 'rfc.o0)}]
+      (is (= (program-of (d/db-with hdb (source/replace-tx hdb tree))) (program-of (d/db-with hdb (source/refresh-tx hdb hch))))
+          "a changed ns form: the same program as the whole tree's replace, its dependents not read again"))
     (let [[hdb hch] (hub-refresh-of 10)
           renamed {"src/rfc/c.clj" (str/replace (hch "src/rfc/c.clj") "(defn f9 " "(defn g9 ")}]
       (is (= #{"ns rfc.c" "ns rfc.o0"} (written (source/refresh-tx hdb (assoc renamed "src/rfc/o0.clj" (str/replace (source/file-text hdb 'rfc.o0) "(c/f9 x)" "(c/f8 x)")))))
@@ -676,6 +687,13 @@
               ;; measured 2026-10-23: 1.80M -> 1.84M ticks, 6.62 -> 6.76 MB, 563 calls (6-8 ms CPU); was 822k
               ;; ticks at 10 namespaces of one function each, +350 ticks and +1.1 KB per namespace
               :fixed {:ticks 1900000 :bytes 6950000 :calls 563}
+              :sizes refresh-sizes}
+             {:of 'seon.source/refresh-tx :input 'seon.source-test/ns-edit-of
+              :n "forms in the program's other files, every file requiring the edited one"
+              :work "the edited file's read and analysis; the gate finds nothing lost (its names and macros are as they were: a dependent never reads another namespace's ns form), so no dependent is read"
+              :growth :constant
+              ;; measured 2026-10-27 at 10 forms: 1.28M ticks, 5.33 MB, 575 calls (the ns form re-read, no dependent)
+              :fixed {:ticks 1400000 :bytes 5600000 :calls 590}
               :sizes refresh-sizes}
              {:of 'seon.source/refresh-tx :input 'seon.source-test/hub-refresh-of
               :n "forms in the program's other files, every file requiring the edited one"
