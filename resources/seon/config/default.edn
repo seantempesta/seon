@@ -346,14 +346,15 @@
  ;; test time (pure-tests, 2026-10-23). A var missing here makes its tests run automatically
  ;; (slower, never wrong).
  :seon.config.source/process-vars #{seon.agent-test/in-agent seon.lib/fork! seon.test-store/binary-sh}
- ;; Unit: vars. The vars the processes a test starts run from: a form using a process var or a binary
- ;; var reaches them, so a test that starts a root or an agent is digested by the program those
- ;; processes run. -main reaches root, the server and the agent's init (1,485 vars, measured
+ ;; Unit: vars. What the processes a test starts run for it: a form using a process var or a binary
+ ;; var reaches them. seon.server/ops answers every request a test sends a root (431 vars, measured
  ;; 2026-10-27); seon.turn/work! is what root sends an agent as a quoted form, which no reference
- ;; shows. Provenance: ctx-atom's evidence (2026-10-27): seon.server-test's in-agent tests kept one
- ;; reach digest across two fixes to code their agent runs (a green and a red shared it, bin/test
- ;; listed them flaky), because the agent's code is reached through a socket and a keyword :op.
- :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
+ ;; shows (829 vars, seon.turn/observe among them). Provenance: ctx-atom's evidence (2026-10-27):
+ ;; seon.server-test's in-agent tests kept one reach digest across two fixes to code their agent runs.
+ ;; Not seon.main/-main (1,512 vars): a root's boot is every process test's, so each change deferred
+ ;; all 116 to the merge (owner, 2026-10-27: "no tests should include all of src … the daily full
+ ;; run is the net"); a change to the boot alone is the merge's run's and the daily run's to catch.
+ :seon.config.source/process-entry #{seon.server/ops seon.turn/work!}
  ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
  ;; reach datahike.*, not every test. Every submodule is in a set: Jolt and Chez (the runtime and its

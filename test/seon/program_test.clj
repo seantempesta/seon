@@ -539,20 +539,30 @@
     (is (every? reaching process) "every test that starts a process reaches the code the agent it starts runs")
     (is (every? #(get (:defs g) %) (cfg/value :seon.config.source/process-entry)) "and every configured entry var is in the program: a renamed one drops its edge in silence")
     (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
-    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")))
+    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")
+    ;; owner, 2026-10-27 ("no tests should include all of src"): the entry was seon.main/-main, a
+    ;; root's whole boot (1,512 vars), so a change anywhere in it deferred every process test to the
+    ;; merge. The entry is what the process runs for the test (the server's ops, the agent's turn)
+    ;; (this test names the var, quoted: an edge in a test's namespace, so it is left out)
+    (let [boot (remove #{'seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs}
+                       (filter process (program/tests-reaching g 'seon.generation/generation)))
+          ops (set (program/tests-reaching g 'seon.server/ops))]
+      (is (get (:defs g) 'seon.generation/generation) "the boot's var is in the program")
+      (is (empty? boot) (str "a change to a root's boot alone reaches no process test: " (count boot) " do, " (vec (take 5 boot))))
+      (is (every? ops process) "every process test reaches the server's ops"))))
 
 (deftest an-entry-var-redefined-moves-what-starts-a-process-by-an-update-too
   ;; the edge from a form using a process var to the entry vars (:seon.config.source/process-entry):
   ;; an update after the entry var is redefined, added or removed agrees with a rebuild
   (let [in {:env "e" :tree "t" :config {}}
-        with-main (fn [body] (-> (record (empty-db) 'user "(ns seon.main)" 'seon.main (str "(defn -main [] " body ")"))
+        with-entry (fn [body] (-> (record (empty-db) 'user "(ns seon.server)" 'seon.server (str "(def ops {:agents (fn [] " body ")})"))
                                  (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
                                          'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
                                          'app.pt-pe-test "(deftest pure-test (is (= 1 1)))")))
         db0 (-> (empty-db) (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
                                    'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
                                    'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"))
-        db1 (with-main "1") db2 (with-main "2")
+        db1 (with-entry "1") db2 (with-entry "2")
         dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
         rebuilt (fn [db] (dg (program/reach-graph db nil)))
         g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]

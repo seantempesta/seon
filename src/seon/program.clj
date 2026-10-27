@@ -1218,9 +1218,9 @@
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
-        ;; a form that starts a process (a process var, the binary) reaches the program that process
-        ;; runs: the entry vars' forms. The process's code is reached over a socket, by keyword ops
-        ;; and as a quoted form it is sent, edges no reference shows
+        ;; a form that starts a process (a process var, the binary) reaches what that process runs
+        ;; for it: the entry vars' forms (the server's ops, the agent's turn), reached over a socket,
+        ;; by keyword ops and as a quoted form it is sent, edges no reference shows
         entry (cfg/value :seon.config.source/process-entry)
         entry-ids (vec (keep var-form entry))
         edges (fn [f] (if (schema-row? f)
