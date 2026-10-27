@@ -106,6 +106,33 @@ The same method as §4, in this worktree after merging main, with `stages.clj` (
 | e0b2437872 wiki-reads-agents-and-readme | +10 −6, 1 key | n/a | none measured |
 | 558224bbf9 an-outside-agent-lives-until-done | +20 −10 | n/a | none measured |
 | 49f8c4e2de a-daily-full-run-is-the-net | **+192 −18, new ns seon.cron, 1 key** | nothing (fills audit gap F; seon.cron is AGENTS §4's one cron proc) | no common op touched |
+| **c10b0c19e1 relevance-lab** | **+526 −146 (net +380), 9 keys added, 3 removed** | nothing in the merge subject. It replaces search-relevance, search-min and related-rarity, but adds a second BM25 (seon.context/bm25) beside seon.docs/tokens | turn's request build 0.60 s, 53.5 M ticks, 250 MB (no earlier baseline) |
+| 85dbf9a6ce agent-repl | +139 −70 | not named | none measured apart |
+| 7177cc5899 process-tests-reach-their-ops | +143 −97, 1 key changed | yes (the seon.main/-main edge) | — |
+| 9079c82fd2 an-old-word-is-a-problem | +137 −17 | yes (docs-test's whole-tree scan) | — |
+| 7274786a42 an-outside-agent-proves-its-process-tests-at-the-judge | +77 −8 | not named | — |
+| 3dd370f760 gate-skips-the-test-that-started-its-root | +36 −9, 1 key (`#env SEON_GATE_SELF`) | not named | — |
+| 88130af42e refresh-reads-only-what-it-must; 3366b9a66e reach-step-builds-in-bulk | +32 −15; +39 −13 | yes; not named | **full program import 24.1 s / 3.3 G ticks → 10.0 s / 2.89 G**; reach-graph-of 0.21 → 0.19 s warm |
+| 2f254a45c9 unarmed-needs-no-rebinding; 86cc4c9e36 search-has-no-sibling…; 078a9caee9 one-path-or-fail-loudly | +2 −39; +24 −57; +4 −7 | yes (cut: contract alter-var-root; seon.docs/exact and grep; the unsent queue) | — |
+| 7eade14a94 jolt-keyed-by-source-group | +50 −26 | not named | Jolt digests are now keyed per source group. My bump simulation moves every group, so it no longer shows a real bump (769 of 1033) |
+| 33 other merges, c6b36bac67..ddcfa0be02 | each ≤ +43, most ±15 | mostly named | — |
+| **range total c6b36bac67..ddcfa0be02 (46 merges)** | **+1548 −678 = +870 src, 32 files; context.clj +578/−?, server.clj ±260, program.clj ±230** | relevance-lab is 44% of the growth | see the baseline below |
+
+### Common ops, re-measured at main ddcfa0be02 (2026-10-27 22:50, load 4–14, the worktree's own root on a fresh store)
+
+| Op | At c6b36bac67 | At ddcfa0be02 |
+|---|---|---|
+| Selection, warm (plan-of) | 0.98 s, 69 M ticks | 0.66 s, 73 M ticks, 459 MB; reach-graph-of 0.19 s, graph-index 84 ms |
+| Selection, cold (new program-schema digest 012c10f7) | 24.1 s, 3.3 G ticks | **10.0 s, 2.89 G ticks, 9.3 GB, 1.10 M calls** (a full import; −59% wall, −12% ticks) |
+| Reuse at main's tree | 833 of 893 | **228 of 910**: root's main holds 300 results at these digests, because no `--merge` has run since the Jolt bump 7627453d (the 21:25 full run was on an older tree) |
+| A turn's request build (seon.turn/context-block, in the agent, unchanged tree) | not measured | **0.60 s, 53.5 M ticks, 250 MB** for a 3.1 KB page |
+| The agent's ctx pull (`:context`) | 7.1 s first; 0.37–0.39 s after | 18.9 s first (a fresh store: attach, fork, first page); then 0.81 s and 0.54 s, 6.3 and 3.7 KB |
+| `(my.agent/prove)`, no change | 144 ms, then 11 ms | 128 ms, 42 M ticks; then 8.8 ms |
+| `(my.agent/prove)` after a one-function change (ms-since) | 8.7 s; 48 ran, 14 reused, green | **30.6 s, red: ran 51, deferred 125, reused 14; 44 errors, each OutOfMemoryError** (the heap ceiling of 2 044 014 496 bytes, live just above it: the agent's own heap plus `:seon.config.agent/heap-extra-bytes` 1 GiB, seon.agent at line 1154) |
+| `bin/build seon`, catch-up after the Jolt bump | 32.2 s (back to a built tree) | 50.0 s (a new Jolt) |
+| `bin/build seon`, no-op | 1.0 s | 0.99 s |
+
+The store from 20:52, made at c6b36bac67, broke `:context`: the agent answered `:transact/schema` "Bad entity attribute :form/ops", an attribute that 7177cc5899 added. On a fresh store it works. The old store is kept at runs/kept-2052 in this worktree.
 
 ### Common ops, baseline at main c6b36bac67 (2026-10-27 20:50, load 9–17, the worktree's own root)
 
