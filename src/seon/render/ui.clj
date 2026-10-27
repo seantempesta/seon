@@ -908,6 +908,15 @@
     [:section
      (render/html {:schema :seon.run/run-fact} (assoc (relevant :seon.run/run-fact run) :turns-taken (count (:turns run))))]))
 
+(defn own-problems
+  "The open problems of the agent's run (a component over its branch db, seon.problems/own: its run's,
+  its task's failure and the errors raised in its task), by the report's render, the one root's tile
+  draws; nothing when none is open."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{db :seon.db/db} rid]
+  (let [r (problems/own db rid)]
+    (when (seq (:classes r)) [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} r)])))
+
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
   its value by the key's render."
@@ -1023,6 +1032,7 @@
                                (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
+      (when rid [#'own-problems {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
       (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} rid id] :else [#'message-item {} rid id]))]

@@ -734,3 +734,22 @@
                                   [c {:n (count rows) :rows rows}]))]
     (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
                                           :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
+
+(defn own
+  "The open problems of one run, by class and shaped as `report` (so the one render draws it, an
+  agent's page and root's alike): the run with entity run-e on db (an agent's branch), its task's
+  failure, and the recorded errors last raised in its task. Cost: the run's pull, the task's, and the
+  error signatures' last-task datoms with a pull for each match; never main's history."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.problems/report]}
+  [db run-e]
+  (let [ans (answers db)
+        te (:v (first (d/datoms db :eavt run-e :seon.run/task)))
+        tid (:v (first (d/datoms db :eavt te :seon.task/id)))
+        open (fn [rows] (vec (remove #(false? (:open? %)) rows)))
+        by-class (merge-with into
+                             (run-rows db ans run-e)
+                             (when (seq (d/datoms db :eavt te :seon.task/failure)) {:failed [(failed-row db ans te)]})
+                             (group-by :class (for [{:keys [e v]} (d/datoms db :aevt :seon.error/last-task) :when (= tid v)] (error-row db ans e))))]
+    (vary-meta {:t (:max-tx db)
+                :classes (into {} (for [[c rows] by-class :let [rows (open rows)] :when (seq rows)] [c {:n (count rows) :rows rows}]))}
+               assoc :seon.render/schema :seon.problems/report)))

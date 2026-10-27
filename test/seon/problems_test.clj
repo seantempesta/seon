@@ -547,6 +547,19 @@
                                    :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green}])]
         [(problems/health base) base head (diff base head)]))
 
+(defn own-input
+  "The proof's input at k: a db with k finished tasks beside the run of one: [db run-entity]."
+  [k] (let [[_ base] (history-input k)] [base (pdb/eid base :seon.run/id "t/h0#1")]))
+
+(deftest an-agents-own-problems-cost-nothing-for-the-history
+  (cost/proof {:of 'seon.problems/own :input 'seon.problems-test/own-input
+               :n "finished tasks, each with a merged run, beside the run asked for"
+               :work "the run's pull, its task's, and the error signatures' last-task datoms: none per finished task"
+               :growth :constant
+               :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
+               :fixed {:ticks 85000 :bytes 320000 :calls 4}
+               :sizes [10 100 1000]}))
+
 (deftest problems-move-at-the-cost-of-what-changed
   ;; main moves by one run while its finished history grows: the health of the move reads the run it
   ;; touched, not the history (health-moved; report read every run's cost verdict and waste)

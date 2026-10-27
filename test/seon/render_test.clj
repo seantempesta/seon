@@ -366,6 +366,15 @@
     (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
+(deftest an-agents-page-draws-the-problems-of-its-own-run
+  ;; task seon.problems/health-in-context: its run's open problems, by the report's render, beside the
+  ;; run; none when none is open; another run's and main's classes are not drawn
+  (let [[_ branch _] (paged-dbs)
+        html (fn [db] (apply str (map :html (:units (drawn-parts db)))))
+        red (datahike.api/db-with branch [{:seon.run/id "demo/f#1" :seon.run/failures {'demo/f-test [{:type :fail :message "m" :expected "1" :actual "2"}]}}])]
+    (is (not (str/includes? (html branch) "red")) "no problem open: nothing drawn")
+    (is (str/includes? (html red) "red") "a red proof of its task, drawn as the report draws it")))
+
 (deftest root-and-an-agent-are-one-chrome
   (let [[main branch eid] (paged-dbs)
         st (root-state (proc-state main branch) main)
