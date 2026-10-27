@@ -17,8 +17,8 @@ An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clo
 ### bin/build never waits on main's lock (owner, 2026-10-27: "Keep the lock for tests and checks, but bin/build never waits on it")
 Stated: docs/merging.md#main-goes-first, bin/env.
 
-### A branch proves itself and main fast-forwards (owner, 2026-10-27: "Get rid of the double testing")
-The worktree merges main in and runs `bin/prove --merge` at its tip; the merge session checks the sha and fast-forwards, rerunning nothing. Stated: AGENTS §3, docs/merging.md#a-branch-proves-itself-main-fast-forwards.
+### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
+Worktrees run plain `bin/prove` and report ready; the merge session merges a batch and runs one `bin/build` and one `bin/prove --merge`, because per-branch fast-forwards after a branch's own `--merge` are about N² process-test runs. Heavy runs take one of two machine-wide slots. Stated: AGENTS §3, docs/merging.md#a-branch-proves-its-in-process-tests-mains-batch-runs-the-process-tests-once.
 
 ### Unused is not dead (owner, 2026-10-27)
 "Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
