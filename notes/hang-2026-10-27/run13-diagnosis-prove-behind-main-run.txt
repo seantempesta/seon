@@ -1,0 +1,27 @@
+# run 13 hang diagnosis (live shards of worktree tests-stream-and-continue, base main 36caaf61c8)
+== root on 60774
+{:agents {:a1 {:branch :shard-1db0671e-0704-4f66-a8ad-dc4a2acb1195/tests, :status :busy, :task nil}, :a2 {:branch :shard-1db0671e-0704-4f66-a8ad-dc4a2acb1195/task-t11a2d149-t, :status :busy, :task "t11a2d149/t"}}, :tasks {"root/stall-a2-t11a2d149-t-1" {:execution :held}, "t11a2d149/t" {:execution :running, :runs [["t11a2d149/t#1" :running nil nil nil]]}}}
+
+== root on 60873
+{:agents {:a2 {:branch :shard-3129987a-4cef-493b-b5e9-332b77c10886/task-tf94d91d2-t, :status :idle, :task "tf94d91d2/t"}, :a3 {:branch :shard-3129987a-4cef-493b-b5e9-332b77c10886/task-tf94d91d2-wr, :status :busy, :task "tf94d91d2/wr"}}, :tasks {"tf94d91d2/t" {:execution :running, :runs [["tf94d91d2/t#1" :running nil nil nil]]}, "tf94d91d2/wr" {:execution :running, :runs [["tf94d91d2/wr#1" :running nil nil nil]]}}}
+
+== root on 60816
+{:agents {:a2 {:branch :in-agent-374443a6-4215-4dec-aa70-79b9f8f83e7c/task-tdcc9e580-t, :status :idle, :task "tdcc9e580/t"}, :a3 {:branch :in-agent-374443a6-4215-4dec-aa70-79b9f8f83e7c/task-tdcc9e580-wg, :status :busy, :task "tdcc9e580/wg"}}, :tasks {"tdcc9e580/t" {:execution :running, :runs [["tdcc9e580/t#1" :running nil nil nil]]}, "tdcc9e580/wg" {:execution :running, :runs [["tdcc9e580/wg#1" :running nil nil nil]]}}}
+
+== shard children
+17547 81748 Us         00:00   2.5 /bin/zsh -c source /Users/sean/.claude/shell-snapshots/snapshot-zsh-1793072303560-0e07ir.sh 2>/dev/null || true && 
+17567 17547 S          00:00   0.1 /bin/zsh -c source /Users/sean/.claude/shell-snapshots/snapshot-zsh-1793072303560-0e07ir.sh 2>/dev/null || true && 
+17568 17547 R          00:00   0.0 /bin/zsh -c source /Users/sean/.claude/shell-snapshots/snapshot-zsh-1793072303560-0e07ir.sh 2>/dev/null || true && 
+72627 72622 SN         18:27   0.0 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+72628 72620 SN         18:27   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+72629 72625 SN         18:27   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+72630 72626 SN         18:27   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+82093 72628 SN         17:13   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 60774
+82425 72630 SN         17:08   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 60816
+84169 84164 SN         33:41   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+84173 84171 SN         33:41   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+84174 84170 SN         33:41   0.1 /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/target/jolt/jolt -A:test run -m test-runner --shard 
+88496 84174 SN         32:38   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 59935
+90123 84173 SN         32:21   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 59962
+90212 72629 SN         16:09   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 60873
+99816 84169 SN         30:11   0.0 /usr/bin/perl /Users/sean/src/seon-next/.worktrees/tests-stream-and-continue/bin/ask 60073

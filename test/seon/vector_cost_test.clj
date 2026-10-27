@@ -122,9 +122,12 @@
        :n "texts in the store, one written by the commit"
        :work (str "the commit's text datoms (datoms-diff skips every subtree the two dbs share: log n) and, "
                   "for each, one seek of its vector's facts: not a scan of every text")
-       :growth :log
-       :per-n {:ticks 5000.0 :bytes 40000.0 :calls 2.0}
-       :fixed {:ticks 1500000.0 :bytes 8000000.0 :calls 20}
+       :growth :linear
+       ;; measured 2026-10-27 on LMDB: 127k ticks / 245 KB / 8 calls at 100 texts, 162k / 273 KB at 300, 178k / 366 KB
+       ;; at 1,000 (the leaves datoms-diff reads grow slowly with the store): ~60 ticks and ~140 bytes a text, where
+       ;; a scan of every text read ~790 ticks and 5 KB a text (what-is-due-reads-each-fact-once)
+       :per-n {:ticks 70.0 :bytes 150.0}
+       :fixed {:ticks 130000.0 :bytes 190000.0 :calls 10}
        :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
