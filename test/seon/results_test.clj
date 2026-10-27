@@ -97,3 +97,7 @@
      (rec! conn {'a/t {:test 'a/t :digest "ms-2" :pass 1 :fail 0 :error 0 :ms 900}
                  'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
      (is (= '{a/t 900 a/u 7} (proofs/last-ms @conn '[a/t a/u a/none])) "the newest, by test; a test never run is left out"))))
+
+(deftest a-run-that-could-not-read-its-results-says-why
+  (let [[run] (proofs/results-tx {:id "unread 1" :unread "no results read from the root at port 1: :refused"} {} {})]
+    (is (= "no results read from the root at port 1: :refused" (:seon.proof.run/unread run)) (pr-str run))))

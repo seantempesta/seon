@@ -61,6 +61,9 @@
  :seon.proof.run/tree :string
  ;; the file a run's results waited in while no root took them (:seon.config.proofs/unsent-dir): sent late
  :seon.proof.run/kept :string
+ ;; a run that could not read its results (the results root refused, as it does while it restarts):
+ ;; why, recorded when the results root takes the kept request; it ran nothing
+ :seon.proof.run/unread :string
  ;; what each test of the run spent in each contracted function: one value, out of line (stored once
  ;; under its content key), {test {var [calls ticks self-ticks bytes self-bytes]}} (seon.proofs/detail)
  :seon.proof.run/detail [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]
@@ -68,10 +71,12 @@
  :seon.proof.run/skipped-process [:vector :qualified-symbol]
  :seon.proof.run/run-fact [:map {:seon.db/attributes true}
                            [:seon.proof.run/id :seon.proof.run/id] [:seon.proof.run/branch {:optional true} :seon.proof.run/branch] [:seon.proof.run/t {:optional true} :seon.proof.run/t]
-                           [:seon.proof.run/tree {:optional true} :seon.proof.run/tree] [:seon.proof.run/kept {:optional true} :seon.proof.run/kept] [:seon.proof.run/detail {:optional true} :seon.proof.run/detail]
+                           [:seon.proof.run/tree {:optional true} :seon.proof.run/tree] [:seon.proof.run/kept {:optional true} :seon.proof.run/kept] [:seon.proof.run/unread {:optional true} :seon.proof.run/unread] [:seon.proof.run/detail {:optional true} :seon.proof.run/detail]
                            [:seon.proof.run/pass {:optional true} :seon.proof.run/pass] [:seon.proof.run/fail {:optional true} :seon.proof.run/fail]
                            [:seon.proof.run/error {:optional true} :seon.proof.run/error] [:seon.proof.run/ms {:optional true} :seon.proof.run/ms]
                            [:seon.proof.run/skipped-process {:optional true} :seon.proof.run/skipped-process]]
+ ;; a run could not read the results at its digests (test-runner/read-results): why, never zero greens
+ :seon.proofs/unread [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unread]] [:port :int] [:why :any]]]
  ;; root's writer refused a run's results (seon.proofs/record!), or no root took them: they are not kept
  :seon.proofs/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.proofs/unrecorded]]]]
  ;; the request a session or an agent's turn makes of the service, and its answer
