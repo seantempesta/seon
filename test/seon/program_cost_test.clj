@@ -278,8 +278,8 @@
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
-     ;; per added form), 2026-10-27
-     :fixed {:ticks 350000 :bytes 4000000 :calls 18}
+     ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
+     :fixed {:ticks 350000 :bytes 4000000 :calls 19}
      :sizes [100 300 1000 10000]}))
 
 (defn- calls-form
@@ -319,7 +319,8 @@
      ;; invoked, datum: 354 B each armed, seon.cost/units :fn/armed-call); 10.9 KB, 1,157 ticks and 12.4
      ;; calls before
      :per-n {:ticks 750.0 :bytes 5950.0 :calls 9.6}
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     ;; 8 calls: the defn's metadata map ({:arglists ...}) is one :map node, its key read once for an :op
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 8.0}
      :sizes [100 300 1000 10000]}))
 
 (defn- keyword-form
@@ -355,7 +356,8 @@
      ;; 74.9k ticks, 278 KB and 967 calls at 100 (the quoted-collection filter as a contracted
      ;; predicate was 989: one call an element)
      :per-n {:ticks 760.0 :bytes 3150.0 :calls 9.6}
-     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 7.0}
+     ;; 8 calls: the defn's metadata map, as a-scalar-constant-costs-no-walk
+     :fixed {:ticks 2000.0 :bytes 12000.0 :calls 8.0}
      :sizes [100 300 1000 10000]}))
 
 (defn account-of

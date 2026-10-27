@@ -231,7 +231,8 @@
                                    (vswap! acc #(-> % (update :quoted into (quoted-names fs))
                                                     (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
          ;; a map built at run time names its op when its :op is a constant keyword ({:op :eval :code (str ...)})
-         :map (when-some [k (some (fn [[kn vn]] (let [v (datum vn)] (when (and (= :op (datum kn)) (keyword? v)) v))) (:pairs n))]
+         ;; (the key read first: a pair's value is read only under :op)
+         :map (when-some [k (some (fn [[kn vn]] (when (= :op (datum kn)) (let [v (datum vn)] (when (keyword? v) v)))) (:pairs n))]
                 (vswap! acc update :ops conj k))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (let [f (invoked n)]
@@ -1175,7 +1176,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
   (let [pins (pin-rules (cfg/value :seon.config.source/pin-namespaces))
-        declared (d/schema db)
+        declared (:schema db)
         at (fn [a es] (cond
                         (not (contains? declared a)) {}
                         scan?
