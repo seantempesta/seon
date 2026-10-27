@@ -743,6 +743,15 @@
           (is (not= main (git wb "rev-parse" "HEAD")) "unmoved")
           (is (not (contract/error? (read))))
           (is (= main (git wb "rev-parse" "HEAD")) "the clean tree follows")))
+      (testing "a read of named paths, behind main: the fast-forward moved other files, so the tree is read whole"
+        (commit! co "e.clj" "(ns e)")
+        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
+          (is (contains? (:value r) "src/e.clj") (pr-str (keys (:value r))))
+          (is (nil? (:paths r)) "and answers no :paths: root refreshes nothing by names")))
+      (testing "at main, the named paths are read by name"
+        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
+          (is (= ["src/a.clj"] (keys (:value r))))
+          (is (= #{"src/a.clj"} (:paths r)))))
       (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
         (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
           (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
