@@ -94,11 +94,21 @@
   "Pairs [[id node] …] as a collection: a map sorted by its members' ids, greatest (newest, for ids
   issued in time order) first; a key that is no id (a new member a swap! names) after them, by its
   printed name. Fixed, and a function of the keys alone, so a member joins or leaves by one assoc or
-  dissoc."
-  {:malli/schema [:=> [:cat [:sequential [:tuple :any :map]]] :map]}
-  [pairs]
-  (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b)))))
-        pairs))
+  dissoc. With by-position (a newest-first window of ids derived from content, whose order is not
+  their order of writing: a run's, a turn's, a message's), the pairs' own order instead, newest
+  first as members answers them, kept so by a comparator over their positions; such a map is marked
+  (:seon.ctx/by-position) and changes walks it by its keys, not in step."
+  {:malli/schema [:function [:=> [:cat [:sequential [:tuple :any :map]]] :map] [:=> [:cat [:sequential [:tuple :any :map]] :boolean] :map]]}
+  ([pairs] (members-map pairs false))
+  ([pairs by-position]
+   (if by-position
+     (let [pos (zipmap (map first pairs) (range))]
+       (into (with-meta (sorted-map-by (fn [a b] (let [pa (get pos a) pb (get pos b)]
+                                                  (cond (and pa pb) (compare pa pb) pa -1 pb 1 :else (compare (str a) (str b))))))
+                        {:seon.ctx/by-position true})
+             pairs))
+     (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b)))))
+           pairs))))
 
 (defn- stub?
   "Is x the {:db/id e} an entity held at another path is held as?"
@@ -217,7 +227,7 @@
           ;; the same members, each the same object: the map as it was
           [(if (and (= (count pairs) (count old-map)) (every? (fn [[x n]] (identical? n (get old-map x))) pairs))
              old-map
-             (members-map pairs))
+             (members-map pairs (boolean (and (:rev? j) (:reverse? j) (not (in-time-order? j)))))) 
            r]))
       (let [es (members db e m j) x (first es) o (when (and (map? old) (= x (:db/id old))) old)]
         (cond
@@ -665,6 +675,10 @@
                        (reduce-kv (fn [acc k v] (if (or (skip k) (contains? a k)) acc (walk acc (conj p k) nil v))) acc b))
                      ;; two collections, each sorted by its members' ids in one order: their entries in
                      ;; step, a member that is the same object passed by with no path made
+                     ;; a window ordered by position (members-map): its two sides are not in one order, so
+                     ;; their keys are walked, a member that is the same object passed by
+                     (and (collection? a) (collection? b) (or (:seon.ctx/by-position (meta a)) (:seon.ctx/by-position (meta b))))
+                     (reduce (fn [acc k] (walk acc (conj p k) (get a k) (get b k))) acc (distinct (concat (keys a) (keys b))))
                      (and (collection? a) (collection? b))
                      (loop [acc acc xs (seq a) ys (seq b)]
                        (cond (nil? xs) (reduce (fn [acc y] (walk acc (conj p (key y)) nil (val y))) acc ys)

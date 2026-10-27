@@ -728,6 +728,11 @@
  ;; tasks citing vars: 97 of the cited vars' 1,430 tests fall past 50 (12 hot helpers, seon.test-store/test-db
  ;; the most), 801 past 5.
  :seon.config.ctx/callers 50
+ ;; Unit: sections. The wiki sections that cite a var a task cites, shown with it (its :sections, seon.docs/
+ ;; citing-sections: the addresses, to read with (my.agent/help address)): the sections it owes an edit to
+ ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
+ ;; agent only through the task's own citations. At the bound: 0 shows none.
+ :seon.config.ctx/cited-by 3
  ;; Unit: errors. The newest recorded errors last raised in a task (seon.problems: one entity per
  ;; signature, :seon.error/last-task its id) that its record holds, newest first, read by an index
  ;; seek of the task's id: the errors its agent's work raised, so the agent reads them where it works

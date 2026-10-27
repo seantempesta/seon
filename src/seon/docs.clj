@@ -374,6 +374,18 @@
                          (if (keyword? x) [:form/keywords] [:form/refs :form/quoted]))
                    x))))
 
+(defn citing-sections
+  "The addresses of the wiki sections that cite name x (a var or a keyword: :seon.section/names),
+  at most :seon.config.ctx/cited-by of them, those of the decisions page last (a ruling cites what
+  it concerns; a page about the mechanism says what x does). So a var a task cites carries the
+  sections it owes an edit to and the sections that explain it. See docs/references.md#the-wiki-in-the-store."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :qualified-symbol :qualified-keyword]] [:vector :string]]}
+  [db x]
+  (->> (d/q '[:find [?a ...] :in $ ?n :where [?e :seon.section/names ?n] [?e :seon.section/address ?a]] db x)
+       (sort-by (juxt #(str/starts-with? % "docs/decisions.md") str))
+       (take (cfg/value :seon.config.ctx/cited-by))
+       vec))
+
 (def text-attrs
   "Each searchable kind of text and the attribute holding it, the kinds seon.vector embeds: a form's
   source names a :var (or a :test), a wiki section's text a :section, a task's plan a :task, a

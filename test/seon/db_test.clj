@@ -5,7 +5,8 @@
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib]
-            [datahike.datom :as dd] [datahike.index.persistent-set :as psi]))
+            [datahike.datom :as dd] [datahike.index.persistent-set :as psi]
+            [jolt.scheme :as scm] [superv.async :as sv]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -876,3 +877,22 @@
                 (is (= :owner (:state r)))
                 (is (identical? (:node-cache entry) (:node-cache r)) "the agent's first connect reads through its parent's cache"))))
           (finally (reset! cs before)))))))
+
+(deftest an-idle-store-sets-no-timer
+  ;; task seon.db/an-idle-store-sets-no-timer: superv.async's simple-supervisor (Datahike's, a
+  ;; top-level def, superv.async/S) re-armed a 10 s stale-exception sweep for the life of the
+  ;; process, so loading a store kept a timer pending forever: an idle root woke every 10 s, and a
+  ;; process whose every thread waited could never be told nothing would wake it (Jolt's all
+  ;; asleep). The sweep is armed while an exception is pending, and only then. Counted as the
+  ;; timers pending in this process, before and after
+  (let [pending (scm/eval-string "(lambda () (timeout-pending-count))")
+        n0 (pending)
+        s (sv/simple-supervisor :stale-timeout 60000 :error-fn (fn [_]))
+        a (ex-info "tracked" {}) b (ex-info "tracked too" {})]
+    (is (= n0 (pending)) "a supervisor with no exception pending sets no timer")
+    (sv/-track-exception s a)
+    (is (= (inc n0) (pending)) "an exception tracked arms its sweep")
+    (sv/-track-exception s b)
+    (is (= (inc n0) (pending)) "one sweep, however many are pending")
+    (sv/-free-exception s a)
+    (sv/-free-exception s b)))
