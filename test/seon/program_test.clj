@@ -587,21 +587,22 @@
         digests #(update-vals (program/graph-index g % nil) :digest)
         a (digests in)
         moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
-        width (moved :seon.config.render/width "999")
         ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
         ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
         ;; without it all 69 tests reaching pattern kept their digest when the window moved
         window (moved :seon.config.ctx/window "7")
-        readers (program/tests-reaching g 'seon.render/pattern)]
-    (is (seq width) "a key tests read moves theirs")
-    (is (< (count width) (quot (count a) 2)) (str (count width) " of " (count a) " tests read :seon.config.render/width: fewer than half"))
-    (is (not (width 'seon.program-test/only-a-test-reading-the-tree-takes-its-digest)) "a test that reaches no reader of the key keeps its digest")
-    (is (= #{} (moved :seon.config.no/such-key "1")) "a key no form names moves none")
+        readers (program/tests-reaching g 'seon.render/pattern)
+        ;; the tests that take a whole config map (root's boot, from-db): every key is theirs
+        whole (set (for [t (keys a) :when (= :all (get-in g [:flags (get-in g [:comp-of (peek (get (:defs g) t))]) :config]))] t))]
+    (is (< 0 (count window) (quot (count a) 2)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, fewer than half"))
+    (is (not (window 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
+    (is (seq whole) "a test booting a root reads every key")
+    (is (= whole (moved :seon.config.no/such-key "1")) "a key no form names moves only the tests reading every key")
     (is (seq readers) "tests reach the reader of a computed key")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
     ;; the reader list is complete: a form outside seon.config that calls the config's one reader
     ;; (value, resolve) naming no config key of its own reads a computed one, and is named
-    (is (= [] (sort (for [[_ r] (:rows g)
+    (is (= [] (sort-by str (for [[_ r] (:rows g)
                           :when (and (not= 'seon.config (:ns r)) (set? (:config r)) (empty? (:config r))
                                      (some (:refs r) '[seon.config/value seon.config/resolve]))]
                       (:defines r))))
