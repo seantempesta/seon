@@ -216,7 +216,7 @@
         (is (= dirs (set (butlast roots))) "the loaders' dirs, then the refs")
         (is (str/ends-with? (last roots) "/refs") (str roots))
         ;; its task dir is outside its checkout, and a task file there is the task loader's
-        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) nil nil [[:path \"" runs "/tasks/x.edn\"]])))")))
+        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) nil #{} [[:path \"" runs "/tasks/x.edn\"]])))")))
             "a task file in a task dir outside the checkout loads the tasks"))
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]
