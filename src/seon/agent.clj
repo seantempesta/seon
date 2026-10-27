@@ -18,7 +18,7 @@
             [malli.registry :as mr]))
 
 ;; One state map per agent process (this process is the agent). Fields:
-;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :results :n :pending :tx-seq :mode :ns :home :mismatch
+;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
@@ -106,6 +106,12 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
   [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
 
+(defn- heard-main
+  "Main's head as the store holds it now, held on the state as what this agent last heard of main
+  (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
+  {:malli/schema [:=> [:cat] :seon.host/db]}
+  [] (let [m (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))] (swap! state assoc :main m) m))
+
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
   names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
@@ -116,7 +122,7 @@
   O(the entries to the session's runs)."
   {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:kind :seon.message/kind] [:from :string] [:to :seon.run/id] [:body :string]]]]}
   []
-  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+  (let [main (heard-main)
         b (db)
         br (session-branch main)]
     (->> (when br (d/q '[:find ?tx ?id ?kind ?from ?rid ?body :in $ ?br
@@ -147,7 +153,7 @@
   runs and the opened evals on main)."
   {:malli/schema [:=> [:cat] :seon.db/tx-data]}
   []
-  (let [main (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))
+  (let [main (heard-main)
         b (db)
         pattern (into [:seon.run/id] taken-attributes)
         br (session-branch main)]
@@ -373,7 +379,7 @@
   (commit!)
   (let [conn (:store-conn @state)
         main-b (pdb/main-branch (:cfg @state))
-        main (pdb/head conn main-b)
+        main (heard-main)
         head @conn
         r (pm/delta-three-way (:base @state) head main data-attrs)]
     (if (empty? (:theirs r))
@@ -1091,7 +1097,7 @@
      ;; its key as root named it in its boot (seon.root's :spawn), never pulled from main here: that
      ;; pull cost what the inherited node cache lacked, 24-183 KB a spawn
      (reset! state (cond-> {:id id :key session :branch branch :task task :run run :fd fd :conn c :db @store-conn
-                   :base base :store-conn store-conn :cfg cfg :results {} :n 0
+                   :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
                    :ns nsx :interrupt-ok intr-ok :serve serve}
