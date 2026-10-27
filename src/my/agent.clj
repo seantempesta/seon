@@ -253,7 +253,7 @@
   child died (not counted: a death is no verdict), and what ran, was left to the judge and was
   reused; the lists behind it (:results :selected :deferred :why :reports) are r itself, the value
   under the eval's handle. A part of the run (a select-keys of it keeps its metadata) is that part,
-  printed as data. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6, 2026-10-27)."
+  printed as data. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6)."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
   (if-not (:reports r)
