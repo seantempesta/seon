@@ -21,7 +21,8 @@
     (is (= #{"src/seon/watch.clj" "test/x.clj"} (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path (p "src/seon/watch.clj")] [:path (p "test/x.clj")] [:path (p "docs/x.md")]])) "the files, once each; a page is the wiki's")
     (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path own]])) "the branch moved with them: the whole tree")
     (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:rescan (p "src")]])) "a rescan: the whole tree")
-    (is (nil? (mr/source-changes co refs own [[:path (p "docs/x.md")]])) "no source file changed"))
+    (is (nil? (mr/source-changes co refs own [[:path (p "docs/x.md")]])) "no source file changed")
+    (is (nil? (mr/source-changes co refs own [[:path (p "src/seon/watch.clj")] [:path (p "src/seon/gone")]])) "a directory made or removed: the whole tree"))
   (let [r (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"] :paths #{"src/seon/watch.clj" "src/seon/gone.clj" "README.md"}}})]
     (is (= #{"src/seon/watch.clj" "src/seon/gone.clj"} (set (keys (:value r)))) "the named source files only")
     (is (nil? (get-in r [:value "src/seon/gone.clj"])) "a removed file is nil")
