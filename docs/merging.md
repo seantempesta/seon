@@ -61,9 +61,13 @@ One proc, `:prove` (```seon.prove/prove-proc```, declared in `resources/seon/sys
 - **A red is a class,** `:test-red` ([health](health.md#a-red-test)), read from the newest result per test; a later green at a new digest closes it with nothing written.
 - **The writer's commit notice** (`:main`, a sliding buffer of one beside the reconciler's) tells the proc main's latest tx. A process test (```seon.program/process-tests```) is left out of a run that names nothing, unless it is a proof (```seon.agent/run-selection```): the answer lists it as deferred and the run's fact records it as `:seon.proof.run/skipped-process`.
 
-## Ready branches merge in batches
+## A branch proves itself, main fast-forwards
 
-Root merges ready branches in batches: three branches merged one at a time cost about 40 minutes of serial full checks, plus re-proving after every main move. Branches that are ready, reviewed and file-disjoint (or whose overlaps are both-sides additions) merge onto one integration branch from main and are proven together by one `bin/prove` there (each branch's own greens are reused; only what the combination moved runs); then main moves to it. A conflict stops the batch: it is resolved, or the branch leaves the batch, before anything else merges. Nothing merges into a batch while its proof runs, since the proof would then name a tree that no longer exists.
+One verification, at the branch's tip (owner, 2026-10-27: "Get rid of the double testing"). The writer refuses a `:behind` branch and a branch holding main's head is judged as the merged program, so the branch's own `bin/prove --merge` is the merge's proof.
+- The worktree merges main in, runs `nice -n 15 bin/prove --merge` and commits its merge-log line. The line names the sha it proved.
+- The merge session checks that main is an ancestor of the tip (`git merge-base --is-ancestor main <tip>`) and that `git diff --stat <sha> <tip>` shows only notes/merge-log.md, then `git merge --ff-only <tip>`, `bin/update`, and reruns nothing.
+- Main moved since: the branch goes back to merge main and rerun; every green at its digest is reused from the shared test-results, so only what the merge moved runs. Pin bumps and bin-only changes follow the same rule.
+- A merge resolved by hand (a conflict) is the one `bin/prove --merge` run on main.
 
 ## Every merge's `src` diff stat is read
 
