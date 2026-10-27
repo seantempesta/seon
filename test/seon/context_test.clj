@@ -1005,7 +1005,7 @@
   ;; context up front, then refine as the task goes on), so each turn's page diff only adds
   (let [[db te dir] (sections-near "Make the page say one thing.")
         db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1" :seon.agent/id :a1}
-                          ;; every unit at doc depth here, where every chance is low (a corpus of five)
+                          ;; every unit shown, at doc depth, here, where every chance is low (a corpus of five)
                           [:db/add te :seon.config.render/relevance-doc 0.0]])
         a (pdb/eid db :seon.agent/key "demo/a1")
         sec #(pdb/eid db :seon.section/address (str "docs/vector.md#" %))
@@ -1017,17 +1017,20 @@
         e (pdb/eid db :seon.eval/id "e1")
         db (d/db-with db (vector/tx-data [e] [1] [(dir 1.0 0.5)] [10] "m"))
         f1 (context/focus db te a)]
-    (is (= (vector/vector-of db te) (:vector f0)) "before any eval is embedded, the plan's alone")
+    (is (< (Math/abs (- 1.0 (cos (:vector f0) (vector/vector-of db te)))) 1e-6) "before any eval is embedded, the plan's alone")
+    (is (= "Make the page say one thing." (:words f0)) "and its words")
     (is (> (cos (:vector f1) far) (cos (:vector f0) far)) "the focus follows the agent's evals")
-    (is (= "(the-last-section)" (:words f1)) "and their words")
+    (is (> (cos (:vector f1) (vector/vector-of db e)) (cos (:vector f1) (vector/vector-of db te))) "the newest eval outweighs the plan, which decays")
+    (is (= "(the-last-section)" (:words f1)) "and the words are the evals'")
     (let [saved @agent/state]
       (try
-        (reset! agent/state {:id :a1 :selected {:te te :units [["docs/vector.md#the-pyramid" 0.9]]}})
+        (reset! agent/state {:id :a1 :selected {:te te :units [["docs/vector.md#the-pyramid" 0.9 false]]}})
         (let [r (context/selected db te a)]
           (is (= "docs/vector.md#the-pyramid" (first (:sections r))) "a unit shown before stays first")
           (is (= 0.9 ((:relevance r) "docs/vector.md#the-pyramid")) "with the chance it entered at")
           (is (< 1 (count (:sections r))) "what enters now is appended after it")
-          (is (= (:doc r) (set (concat (:sections r) (:functions r) (:schemas r)))) "each at doc depth")
+          (is (not ((:doc r) "docs/vector.md#the-pyramid")) "at the depth it entered at")
+          (is (= (:doc r) (set (concat (rest (:sections r)) (:functions r) (:schemas r)))) "what enters now at doc depth (its cut 0 here)")
           (is (= (count (get-in @agent/state [:selected :units])) (count (:relevance r))) "and kept for the next turn"))
         (finally (reset! agent/state saved))))))
 

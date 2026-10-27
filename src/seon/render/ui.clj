@@ -884,7 +884,10 @@
   [{c :seon.ctx/ctx db :seon.db/db} rid]
   (let [r (some->> (context/selected db (get-in c [:runs rid :task :db/id]) (:db/id c)) (context/related-view db))]
     [:section [:h2 "related"]
-     (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
+     ;; its budget the selection's (seon.context/selected fills relevance-budget) and a value's for the
+     ;; forms beside it, so the printer never cuts a unit the selection chose
+     (if r [#'render/html {:budget (+ (config/value :seon.config.render/relevance-budget) (config/value :seon.config.render/value-budget)) :handle '(my.task/related)} r]
+         [:p {:class "muted"} "nothing related yet"])]))
 
 (defn run-head
   "The run (a component over ctx): its relevant attributes and the turns it took, by its schema's

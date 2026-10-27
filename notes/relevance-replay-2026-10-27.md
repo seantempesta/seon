@@ -53,3 +53,13 @@ What the tables say:
 - Embedding each turn costs one `:embed` request a turn (~25 ms); the trajectory is a weighted sum of vectors already embedded.
 
 Scripts and data: `notes/relevance-lab/replay*.py`, `churn.py`, and the reads `r3.clj`-`r5.clj` (read only, root's REPL on the standing store).
+
+## The selector on a live REPL agent (2026-10-27, evening)
+
+Built as `seon.context/selected` (the page's related part and `(my.task/related)`): units at 60%+ against `seon.context/focus` (the plan, then each eval, decayed with a half-life of one item, so the plan is a prior the agent's work takes over), appended in entry order, never dropped, under 800 tokens. On a replay variant the plan-decaying-first focus scored R@10 0.441 and 0.55 within 800 tokens (plan alone 0.402 / 0.48; plan held at full weight 0.411 / 0.49).
+
+Worked through my root as an outside agent (a2) on `seon.ref/an-alias-is-resolved-in-its-namespace`, the blind agent's own first evals replayed:
+- **Cold** (the plan alone), two units entered: `docs/render.md#cuts-in-a-display-namespace-that-are-not-cuts-of-output` (69%) and `seon.context/similar` (60%), both noise for this task, and append-only keeps them.
+- **After two turns** (sources of `seon.ref/references`, `candidate`, `names`, `span-candidate`, `names-on-db?`), the focus followed the work: the best now were `seon.render.ui/cited-of` 55%, `seon.ref/names-on-db?` 54%, `seon.ref/alias-form?` 51%, `seon.ref/candidate` 48%. That is what the task needs; the blind agent found these by hand. None reached 60%, so the page added nothing.
+- **Cause:** the chance's calibration was fitted on plan-shaped queries (the judge's pages). A focus made of code-heavy evals scores lower on that scale, so a fixed 60% is too strict once the agent works, and too loose for the plan's cold guess.
+- **Next:** calibrate the chance under the trajectory focus itself, with the judge labelling each kind's first five at replayed turns, and fit it per kind as the plan-focused table was. Then re-test on this REPL agent, then live agents.
