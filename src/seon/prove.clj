@@ -49,9 +49,10 @@
   :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
   {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
   [run answer]
-  (let [statuses (proofs/results {:reports (:reports answer)})
+  (let [died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
+        ;; a died test has no result (proofs/results), but main's newest of it is an :error
+        statuses (merge (proofs/results {:reports (:reports answer)}) (zipmap died (repeat :error)))
         fails (proofs/failures {:reports (:reports answer)})
-        died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
         change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))]
     (into [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
             :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
