@@ -1088,11 +1088,12 @@
   #{"seon.env" "seon.pin"})
 
 (defn- pin-rules
-  "pins (:seon.config.source/pin-namespaces: prefix -> submodules) as [prefix prefix. [:seon.pin/NAME ...]]
-  rows, matched against a namespace by = and starts-with?."
+  "pins (:seon.config.source/pin-namespaces: prefix -> submodules or source groups) as [prefix
+  prefix. [:seon.pin/NAME ...]] rows (seon.config/pin-class), matched against a namespace by = and
+  starts-with?, and a qualified prefix (clojure.core/slurp) against a reference by =."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [pins]
-  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv #(keyword "seon.pin" (last (str/split % #"/"))) ms)])))
+  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv cfg/pin-class ms)])))
 
 (defn- pin-reads
   "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
@@ -1100,7 +1101,7 @@
   with no var reference is not seen: the daily full run is the net."
   {:malli/schema [:=> [:cat [:set :qualified-symbol] [:vector :any]] [:set :qualified-keyword]]}
   [refs rules]
-  (into #{} (for [r refs :let [n (namespace r)] [p p. ks] rules :when (or (= n p) (str/starts-with? n p.)) k ks] k)))
+  (into #{} (for [r refs :let [n (namespace r)] [p p. ks] rules :when (or (= n p) (= (str r) p) (str/starts-with? n p.)) k ks] k)))
 
 (defn config-reads
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords

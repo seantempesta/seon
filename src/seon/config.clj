@@ -274,6 +274,16 @@
   ([k] (value k {}))
   ([k ctx] (:value (resolve k ctx))))
 
+(defn pin-class
+  "The :seon.pin class of path p, a submodule or a source group inside one as
+  :seon.config.source/pin-namespaces names it: its path under reference-code/ with / as .
+  (reference-code/datahike is :seon.pin/datahike, reference-code/jolt/jolt-core/jolt/ir.clj
+  :seon.pin/jolt.jolt-core.jolt.ir.clj). seon.fx/inputs digests each one, and a test's reach
+  takes the classes of the namespaces it references (seon.program/config-reads)."
+  {:malli/schema [:=> [:cat :string] :qualified-keyword]}
+  [p]
+  (keyword "seon.pin" (str/replace (str/replace-first p #"^reference-code/" "") "/" ".")))
+
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
