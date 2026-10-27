@@ -8,7 +8,7 @@ A line opening `{"` is MCP's JSON-RPC; every other line is an EDN request, a key
 
 ## Ops
 
-The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description, its arguments as JSON Schema and its answer function, and nothing else lists them: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count.
+The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each entry holds its description and its arguments as JSON Schema, and its answer is the method of its key of ```seon.server/op-answer```, a multimethod on `:op` (one method per op, so a test's reach takes the answers of the ops it sends and no other: [source](source.md)); nothing else lists them, and `seon.server-test/each-op-has-its-answer` holds the table and the methods to one set of keys: a new op is a new MCP tool `seon_<op>` (`seon_agents`, `seon_eval`, `seon_context`, `seon_message`, `seon_attach`, `seon_done`, `seon_prove`), and `bin/check mcp` compares the tools the server lists with the table, never a count.
 
 `:prove` runs the tests a branch's change reaches, once per branch and tx however many ask ([merging](merging.md#the-test-service)): it names an agent (its branch at its head) or main, and optionally the test namespaces.
 
@@ -21,7 +21,7 @@ The ops are one table, ```seon.server/ops```, keyed by a request's `:op`; each e
 - `:prove`: the tests a branch's change reaches, run once per branch and tx however many ask, through the one test service (`seon.prove`, [merging](merging.md#the-test-service)); it names an agent's branch, else main.
 - `:done`: the agent ends its run as a turn loop does (```seon.turn/hand-back!```: its proofs run, its end `:green` or `:red` with the reasons, committed on its branch), then the run goes to the reconciler's `:judge` port and is judged ([root](root.md#runs-and-judging)). It answers the verdict once main holds it (```seon.server/verdict```, waiting on the fact with `seon.root/await-db`, a watch on main's connection, no clock): the run's status (`:done` or `:merged` when the done rule had no reason, `:closed` with its task held when it had some), outcome and reason, and for a held task the failure the judge wrote, which names the reasons; a defect of the reconciler that stopped the judge answers as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge: minutes), so a client's read timeout must allow it: the one-line `nc -w 10` of AGENTS.md section 6 is for the quick ops; `bin/mcp` sets none.
 
-```seon.server/answer``` dispatches one EDN request to its op; an unknown op answers the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).
+```seon.server/answer``` dispatches one EDN request to its op's method of ```seon.server/op-answer```; an unknown op is the `:default` method's, the one error map. A line that does not read, or an op that throws, answers that request as the typed `:seon.server/defect`: the server is an entrant boundary ([failure points](failure-points.md)).
 
 ## MCP
 
