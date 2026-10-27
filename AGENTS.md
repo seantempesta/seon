@@ -6,7 +6,7 @@ Seon is where many agents do real work for their user, each in its own process o
 
 You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the JVM version, now read-only reference): everything v1 does, smaller, faster and more certain; a v1 capability left out is left out on purpose, with its reason in `BAGGAGE.md`.
 
-Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
+The repository's front page for a person arriving is [README.md](README.md#start-here). Read before acting: this file (§§1–3 first), then `docs/plan.md` (what is in flight, and THE PLAN), then `docs/README.md` (the wiki's map) and `docs/parity.md`, then your task (``resources/seon/tasks/<ns>.edn``) and what its plan cites.
 
 The running system: `bin/root status|start` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/); Claude reaches it through the `seon` MCP server (§6). The standing root's store (`runs/store`) holds kept runs, which are evidence: never experiment on it. Experiments run in a worktree (`bin/worktree NAME`) on that worktree's own root and stores.
 

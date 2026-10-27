@@ -276,7 +276,7 @@
         (str "main proved at its boot, nobody asking: " (pr-str a)))))
 
 (deftest an-agents-run-leaves-every-process-test-to-the-judge
-  ;; root, 2026-10-27 (THE PLAN 0.7's first attempt): a child forked from an agent has no process
+  ;; root, 2026-10-27 (THE PLAN 0.7's first run): a child forked from an agent has no process
   ;; store, so a process test an agent ran there errored, named or a proof. It is left out and listed
   ;; whatever the request names, and runs at the judge's merge gate (bin/test, on a checkout, still
   ;; runs a named one: seon.proofs/left-out)
