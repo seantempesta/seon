@@ -1,0 +1,486 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.record-cost-test/a-protocol-call-costs-what-its-method-reads
+ended seon.record-cost-test/a-protocol-call-costs-what-its-method-reads
+started seon.ctx-test/a-lookups-patch-costs-its-change
+ended seon.ctx-test/a-lookups-patch-costs-its-change
+started seon.ctx-test/the-record-holds-what-the-agent-heard-of-main
+ended seon.ctx-test/the-record-holds-what-the-agent-heard-of-main
+started seon.ctx-test/ctx-is-the-record-after-every-transaction
+ended seon.ctx-test/ctx-is-the-record-after-every-transaction
+started seon.ctx-test/changes-holds-its-bound-on-generated-records
+ended seon.ctx-test/changes-holds-its-bound-on-generated-records
+started seon.ctx-test/a-swap-costs-what-it-changed
+ended seon.ctx-test/a-swap-costs-what-it-changed
+RED seon.ctx-test/a-swap-costs-what-it-changed {:pass 0, :fail 1, :error 0}
+started seon.ctx-test/the-patch-costs-the-change-not-the-session
+ended seon.ctx-test/the-patch-costs-the-change-not-the-session
+started seon.ctx-test/a-turns-diff-costs-its-changed-paths-not-the-record
+ended seon.ctx-test/a-turns-diff-costs-its-changed-paths-not-the-record
+started seon.ctx-test/a-write-costs-its-change-not-the-record
+ended seon.ctx-test/a-write-costs-its-change-not-the-record
+started seon.ctx-test/a-window-moves-by-its-change
+ended seon.ctx-test/a-window-moves-by-its-change
+started seon.ctx-test/changes-answers-what-every-pair-walked-answers
+ended seon.ctx-test/changes-answers-what-every-pair-walked-answers
+started seon.ctx-test/a-turns-diff-is-what-changed-between-its-ts
+ended seon.ctx-test/a-turns-diff-is-what-changed-between-its-ts
+started seon.ctx-test/a-callers-window-costs-its-forms
+ended seon.ctx-test/a-callers-window-costs-its-forms
+started seon.ctx-test/who-made-a-fact-costs-two-seeks-not-the-record
+ended seon.ctx-test/who-made-a-fact-costs-two-seeks-not-the-record
+started seon.ctx-test/a-swap-writes-the-record
+ended seon.ctx-test/a-swap-writes-the-record
+started seon.ctx-test/any-entitys-record-follows-mains-commits
+ended seon.ctx-test/any-entitys-record-follows-mains-commits
+started seon.ctx-test/changes-step-costs-are-current
+ended seon.ctx-test/changes-step-costs-are-current
+started seon.ctx-test/an-agent-adds-a-datum-and-its-render
+ended seon.ctx-test/an-agent-adds-a-datum-and-its-render
+started seon.ctx-test/a-cited-vars-tests-are-shown-past-its-callers-window
+ended seon.ctx-test/a-cited-vars-tests-are-shown-past-its-callers-window
+started seon.ctx-test/the-agents-state-keeps-ctx
+ended seon.ctx-test/the-agents-state-keeps-ctx
+started seon.ctx-test/a-component-is-styled-by-its-renders-name
+ended seon.ctx-test/a-component-is-styled-by-its-renders-name
+started seon.ctx-test/a-fresh-build-shares-what-it-did-not-change
+ended seon.ctx-test/a-fresh-build-shares-what-it-did-not-change
+started seon.ctx-test/a-ref-asserted-back-leaves-its-member-as-it-was
+ended seon.ctx-test/a-ref-asserted-back-leaves-its-member-as-it-was
+started seon.ctx-test/a-cited-part-shows-its-source-beside-its-tests
+ended seon.ctx-test/a-cited-part-shows-its-source-beside-its-tests
+started seon.ctx-test/an-agent-edits-its-pattern
+ended seon.ctx-test/an-agent-edits-its-pattern
+started seon.ctx-test/a-symbol-joins-by-name
+ended seon.ctx-test/a-symbol-joins-by-name
+started seon.ctx-test/the-page-draws-what-the-task-record-holds
+ended seon.ctx-test/the-page-draws-what-the-task-record-holds
+started seon.ctx-test/a-tasks-record-holds-what-its-work-needs
+ended seon.ctx-test/a-tasks-record-holds-what-its-work-needs
+started seon.ctx-test/a-change-names-its-eval
+ended seon.ctx-test/a-change-names-its-eval
+started seon.ctx-test/a-redefined-vars-record-holds-its-new-form
+ended seon.ctx-test/a-redefined-vars-record-holds-its-new-form
+started seon.ctx-test/a-key-renders-by-its-own-schema
+ended seon.ctx-test/a-key-renders-by-its-own-schema
+
+FAIL in (a-swap-costs-what-it-changed) (:)
+seon.ctx-test/one-swap, N = evals in the session's record. The work: the task's plan changed: edits finds the one attribute (the evals unit skipped by one identical?), one d/with, the datom applied to the agent's db, the patch of it (the task rebuilt where it is held), the record installed, and one-swap itself; measured 39 calls, 117k-122k ticks and 400-409 KB at 100, 300, 1,000 and 3,000 evals (constant).
+n: calls measured/estimate (x)
+100: 40/39 (1.03x)
+OVER ESTIMATE
+OVER: calls at n=100 is 1.03x its estimate (allowed 1.0x).
+3000 left out past :seon.config.proofs/cost-max-n 1000; the full run measures it
+expected: (within-estimate seon.ctx-test/one-swap :constant)
+  actual: {:rows [{:n 100, :measured {:ticks 111178.0, :ns 468208.0, :bytes 392224.0, :calls 40.0}, :expected {:calls 39.0}}], :verdict {:ok? false, :over [{:dim :calls, :n 100, :ratio 1.0256410256410255}], :steeper [], :under [], :unmeasured []}, :left-out [3000]}
+started seon.web-test/a-listener-that-cannot-bind-is-the-one-error-map
+ended seon.web-test/a-listener-that-cannot-bind-is-the-one-error-map
+started seon.web-test/a-refused-ui-call-reaches-the-stream-and-main
+ended seon.web-test/a-refused-ui-call-reaches-the-stream-and-main
+started seon.web-test/a-root-function-is-recorded-with-its-answer
+ended seon.web-test/a-root-function-is-recorded-with-its-answer
+started seon.web-test/a-vector-headed-by-a-function-is-a-call
+ended seon.web-test/a-vector-headed-by-a-function-is-a-call
+started seon.web-test/an-eval-opened-on-a-page-is-no-eval-of-roots
+ended seon.web-test/an-eval-opened-on-a-page-is-no-eval-of-roots
+started seon.web-test/an-unread-cut-form-never-reaches-the-render-proc
+ended seon.web-test/an-unread-cut-form-never-reaches-the-render-proc
+started seon.web-test/callbacks-are-data
+ended seon.web-test/callbacks-are-data
+started seon.web-test/calls-become-requests
+ended seon.web-test/calls-become-requests
+started seon.web-test/framing
+ended seon.web-test/framing
+started seon.web-test/tabs
+ended seon.web-test/tabs
+started seon.web-test/ui-call-allowlist
+ended seon.web-test/ui-call-allowlist
+started seon.main-test/git-is-read-through-fx
+2026-10-27T08:46:05.248Z :info datahike.query.estimate [42 5] :datahike/estimate-heuristic-fallback Index lacks precomputed subtree counts (old database format). Using heuristic estimates for query planning. Consider re-indexing for optimal performance.
+ended seon.main-test/git-is-read-through-fx
+started seon.main-test/a-bound-is-a-config-key
+ended seon.main-test/a-bound-is-a-config-key
+started seon.main-test/no-docstring-carries-a-date
+ended seon.main-test/no-docstring-carries-a-date
+started seon.main-test/an-error-names-its-raiser-by-its-var
+ended seon.main-test/an-error-names-its-raiser-by-its-var
+started seon.main-test/a-runs-lifecycle-is-read-once
+ended seon.main-test/a-runs-lifecycle-is-read-once
+started seon.main-test/an-errors-message-is-read-one-way
+ended seon.main-test/an-errors-message-is-read-one-way
+started seon.main-test/an-edge-asks-one-way
+ended seon.main-test/an-edge-asks-one-way
+started seon.main-test/only-measure-reads-the-tick-counter
+ended seon.main-test/only-measure-reads-the-tick-counter
+started seon.main-test/root-boots-without-test-fixtures
+ended seon.main-test/root-boots-without-test-fixtures
+started seon.main-test/warm-needs-no-seed
+ended seon.main-test/warm-needs-no-seed
+started seon.main-test/a-fresh-root-holds-no-program-it-was-not-given
+ended seon.main-test/a-fresh-root-holds-no-program-it-was-not-given
+started seon.vector-cost-test/similar-ranks-every-form-once
+ended seon.vector-cost-test/similar-ranks-every-form-once
+started seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed
+ended seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed
+RED seon.vector-cost-test/a-commit-is-embedded-for-what-it-changed {:pass 0, :fail 1, :error 0}
+started seon.vector-cost-test/a-search-reads-each-row-once
+ended seon.vector-cost-test/a-search-reads-each-row-once
+started seon.vector-cost-test/what-is-due-reads-each-fact-once
+ended seon.vector-cost-test/what-is-due-reads-each-fact-once
+
+FAIL in (a-commit-is-embedded-for-what-it-changed) (:)
+seon.vector/vectors-proc, N = texts in the store, one written by the commit. The work: the commit's text datoms (datoms-diff skips every subtree the two dbs share: log n) and, for each, one seek of its vector's facts: not a scan of every text (log).
+n: ticks measured/estimate (x)  bytes measured/estimate (x)  calls measured/estimate (x)
+100: 126.7k/1.53M (0.08x)  244.6k/8.27M (0.03x)  8/33 (0.24x)
+300: 162.5k/1.54M (0.11x)  274.1k/8.33M (0.03x)  8/36 (0.22x)
+1000: 178.2k/1.55M (0.11x)  367.5k/8.40M (0.04x)  8/40 (0.20x)
+OVER ESTIMATE
+STEEPER: bytes grew as n^1.19; log allows n^0.91. Something does more passes over the data than the work needs.
+LOOSE: ticks at n=1000 is 0.11x its estimate: tighten the estimate.
+LOOSE: bytes at n=1000 is 0.04x its estimate: tighten the estimate.
+LOOSE: calls at n=1000 is 0.20x its estimate: tighten the estimate.
+expected: (within-estimate seon.vector/vectors-proc :log)
+  actual: {:rows [{:n 100, :measured {:ticks 126656.0, :ns 335708.0, :bytes 244624.0, :calls 8.0}, :expected {:ticks 1533219.2809488736, :bytes 8265754.247590989, :calls 33.28771237954945}} {:n 300, :measured {:ticks 162518.0, :ns 411959.0, :bytes 274096.0, :calls 8.0}, :expected {:ticks 1541144.0934524795, :bytes 8329152.747619836, :calls 36.45763738099176}} {:n 1000, :measured {:ticks 178194.0, :ns 459417.0, :bytes 367472.0, :calls 8.0}, :expected {:ticks 1549828.9214233104, :bytes 8398631.371386483, :calls 39.93156856932417}}], :verdict {:ok? false, :over [], :steeper [{:dim :bytes, :exponent 1.185663956541531, :allowed 0.914619047018715}], :under [{:dim :ticks, :n 1000, :ratio 0.11497656130739428} {:dim :bytes, :n 1000, :ratio 0.04375379555911335} {:dim :calls, :n 1000, :ratio 0.20034274351410478}], :unmeasured []}, :left-out []}
+started seon.task-files-test/a-file-task-merges-itself
+ended seon.task-files-test/a-file-task-merges-itself
+started seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+ended seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+started seon.task-files-test/the-shipped-task-files-load
+ended seon.task-files-test/the-shipped-task-files-load
+started seon.task-files-test/a-removed-entry-is-cancelled-not-deleted
+ended seon.task-files-test/a-removed-entry-is-cancelled-not-deleted
+started seon.task-files-test/a-changed-entry-updates-what-it-states-and-retracts-what-it-dropped
+ended seon.task-files-test/a-changed-entry-updates-what-it-states-and-retracts-what-it-dropped
+started seon.task-files-test/an-unchanged-file-costs-nothing-and-keeps-what-main-learned
+ended seon.task-files-test/an-unchanged-file-costs-nothing-and-keeps-what-main-learned
+started seon.task-files-test/needs-that-form-a-cycle-or-name-nothing-are-refused
+ended seon.task-files-test/needs-that-form-a-cycle-or-name-nothing-are-refused
+started seon.task-files-test/new-entries-are-created-held-and-remember-their-declaration
+ended seon.task-files-test/new-entries-are-created-held-and-remember-their-declaration
+started seon.task-files-test/a-task-file-is-one-vector-of-declarations-named-by-its-namespace
+ended seon.task-files-test/a-task-file-is-one-vector-of-declarations-named-by-its-namespace
+started seon.fork-server-cost-test/a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+ended seon.fork-server-cost-test/a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+started seon.fork-server-cost-test/a-program-commit-moves-the-graph-to-the-new-program
+ended seon.fork-server-cost-test/a-program-commit-moves-the-graph-to-the-new-program
+started seon.fork-server-cost-test/a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+ended seon.fork-server-cost-test/a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+started seon.model-test/a-streamed-reply-ends-when-the-server-ends-it
+ended seon.model-test/a-streamed-reply-ends-when-the-server-ends-it
+started seon.model-test/a-cache-check-costs-its-shared-prefix-not-a-copy
+ended seon.model-test/a-cache-check-costs-its-shared-prefix-not-a-copy
+started seon.model-test/a-turn-whose-cache-misses-its-prefix-is-a-problem
+ended seon.model-test/a-turn-whose-cache-misses-its-prefix-is-a-problem
+started seon.model-test/a-dropped-connection-is-a-transport-failure
+ended seon.model-test/a-dropped-connection-is-a-transport-failure
+started seon.model-test/a-reply-calls-the-one-tool-eval
+ended seon.model-test/a-reply-calls-the-one-tool-eval
+started seon.model-test/a-reply-reports-its-cache-hit-and-miss-tokens
+ended seon.model-test/a-reply-reports-its-cache-hit-and-miss-tokens
+started seon.model-test/a-reply-without-usage-records-no-tokens
+ended seon.model-test/a-reply-without-usage-records-no-tokens
+started seon.model-test/a-request-lets-the-model-reply-in-prose
+ended seon.model-test/a-request-lets-the-model-reply-in-prose
+started seon.model-test/a-thinking-reply-sends-its-reasoning-back
+ended seon.model-test/a-thinking-reply-sends-its-reasoning-back
+started seon.model-test/a-transport-failure-is-answered-to-the-agent
+ended seon.model-test/a-transport-failure-is-answered-to-the-agent
+started seon.model-test/a-turn-records-what-the-provider-reported
+ended seon.model-test/a-turn-records-what-the-provider-reported
+started seon.model-test/cost-prices-a-turn-at-its-models-rates
+ended seon.model-test/cost-prices-a-turn-at-its-models-rates
+started seon.model-test/no-provider-answers-a-typed-error-never-a-reply
+ended seon.model-test/no-provider-answers-a-typed-error-never-a-reply
+started seon.context-cost-test/related-ranks-each-kind-by-one-search
+ended seon.context-cost-test/related-ranks-each-kind-by-one-search
+started seon.context-cost-test/a-sessions-records-cost-one-read-per-record
+ended seon.context-cost-test/a-sessions-records-cost-one-read-per-record
+started seon.context-cost-test/task-data-costs-what-the-plan-names
+ended seon.context-cost-test/task-data-costs-what-the-plan-names
+started seon.context-cost-test/a-turn-prints-its-new-records-flat-in-the-history
+ended seon.context-cost-test/a-turn-prints-its-new-records-flat-in-the-history
+started seon.context-cost-test/the-history-cut-is-one-walk-of-the-parts
+ended seon.context-cost-test/the-history-cut-is-one-walk-of-the-parts
+started datahike.transaction-test/a-keyword-attributes-two-values-are-two-values
+ended datahike.transaction-test/a-keyword-attributes-two-values-are-two-values
+started datahike.transaction-test/a-replaced-value-is-retracted-in-the-report
+ended datahike.transaction-test/a-replaced-value-is-retracted-in-the-report
+started seon.test-store-test/a-test-root-is-its-own
+ended seon.test-store-test/a-test-root-is-its-own
+started seon.test-store-test/n-roots-open-the-process-store-at-once
+ended seon.test-store-test/n-roots-open-the-process-store-at-once
+started seon.test-store-test/agent-tests-in-one-process-share-its-root
+ended seon.test-store-test/agent-tests-in-one-process-share-its-root
+started seon.test-store-test/a-kept-store-is-keyed-by-its-schema
+ended seon.test-store-test/a-kept-store-is-keyed-by-its-schema
+started seon.test-store-test/the-process-store-is-made-before-any-shard
+ended seon.test-store-test/the-process-store-is-made-before-any-shard
+started seon.ref-test/a-citation-naming-no-page-names-nothing
+ended seon.ref-test/a-citation-naming-no-page-names-nothing
+started seon.ref-test/one-parse-costs-one-pass
+ended seon.ref-test/one-parse-costs-one-pass
+started seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
+ended seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
+started seon.ref-test/a-name-is-shown-once-at-its-strongest-depth
+ended seon.ref-test/a-name-is-shown-once-at-its-strongest-depth
+started seon.ref-test/a-namespace-is-read-as-a-namespace
+ended seon.ref-test/a-namespace-is-read-as-a-namespace
+started seon.ref-test/a-task-name-is-a-reference-to-the-task
+ended seon.ref-test/a-task-name-is-a-reference-to-the-task
+started seon.ref-test/an-alias-form-in-a-code-span-is-code-not-a-reference
+ended seon.ref-test/an-alias-form-in-a-code-span-is-code-not-a-reference
+started seon.ref-test/commonmark-examples-for-the-subset
+ended seon.ref-test/commonmark-examples-for-the-subset
+started seon.ref-test/a-citation-ending-in-a-wildcard-is-prose
+ended seon.ref-test/a-citation-ending-in-a-wildcard-is-prose
+started seon.ref-test/a-line-citation-is-its-file-marked-line-reference
+ended seon.ref-test/a-line-citation-is-its-file-marked-line-reference
+started seon.ref-test/a-literal-and-fenced-code-are-not-references
+ended seon.ref-test/a-literal-and-fenced-code-are-not-references
+started seon.ref-test/a-section-doc-is-its-lead-and-headings-below
+ended seon.ref-test/a-section-doc-is-its-lead-and-headings-below
+started seon.ref-test/a-section-opening-with-a-list-has-no-lead
+ended seon.ref-test/a-section-opening-with-a-list-has-no-lead
+started seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+ended seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+started seon.ref-test/a-span-is-read-by-one-rule
+ended seon.ref-test/a-span-is-read-by-one-rule
+started seon.ref-test/a-span-of-a-name-and-more-words-is-prose
+ended seon.ref-test/a-span-of-a-name-and-more-words-is-prose
+started seon.ref-test/a-string-literal-in-prose-cites-nothing
+ended seon.ref-test/a-string-literal-in-prose-cites-nothing
+started seon.ref-test/a-summary-names-the-citation-that-reads-the-rest
+ended seon.ref-test/a-summary-names-the-citation-that-reads-the-rest
+started seon.ref-test/a-var-quoted-name-is-cited
+ended seon.ref-test/a-var-quoted-name-is-cited
+started seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
+ended seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
+started seon.ref-test/the-delimiter-picks-the-depth
+ended seon.ref-test/the-delimiter-picks-the-depth
+started seon.problems-test/the-catch-class-finds-the-sites-the-literal-scan-finds
+ended seon.problems-test/the-catch-class-finds-the-sites-the-literal-scan-finds
+started seon.problems-test/problems-reads-only-the-problems
+ended seon.problems-test/problems-reads-only-the-problems
+started seon.problems-test/caused-follows-what-changed
+ended seon.problems-test/caused-follows-what-changed
+RED seon.problems-test/caused-follows-what-changed {:pass 0, :fail 0, :error 1}
+started seon.problems-test/dead-citations-follow-the-citations
+ended seon.problems-test/dead-citations-follow-the-citations
+started seon.problems-test/problems-cost-nothing-for-a-clean-program
+ended seon.problems-test/problems-cost-nothing-for-a-clean-program
+started seon.problems-test/health-follows-what-is-recorded-and-cited
+ended seon.problems-test/health-follows-what-is-recorded-and-cited
+RED seon.problems-test/health-follows-what-is-recorded-and-cited {:pass 0, :fail 0, :error 1}
+started seon.problems-test/unnamed-sites-follow-the-catch-forms
+ended seon.problems-test/unnamed-sites-follow-the-catch-forms
+started seon.problems-test/stale-sections-follow-the-recorded-names
+ended seon.problems-test/stale-sections-follow-the-recorded-names
+started seon.problems-test/every-problem-class-points-at-a-section-of-the-real-wiki
+ended seon.problems-test/every-problem-class-points-at-a-section-of-the-real-wiki
+started seon.problems-test/uncited-tasks-follow-the-ready-implement-steps
+ended seon.problems-test/uncited-tasks-follow-the-ready-implement-steps
+started seon.problems-test/stale-pins-follow-the-pin-page
+ended seon.problems-test/stale-pins-follow-the-pin-page
+started seon.problems-test/leadless-sections-follow-the-sections
+ended seon.problems-test/leadless-sections-follow-the-sections
+started seon.problems-test/orphan-pages-follow-the-sections
+ended seon.problems-test/orphan-pages-follow-the-sections
+started seon.problems-test/problems-lists-every-class-with-what-a-declaration-needs
+ended seon.problems-test/problems-lists-every-class-with-what-a-declaration-needs
+started seon.problems-test/a-merge-with-its-process-tests-unrun-is-an-open-problem
+ended seon.problems-test/a-merge-with-its-process-tests-unrun-is-an-open-problem
+started seon.problems-test/caused-agrees-with-the-full-reading
+ended seon.problems-test/caused-agrees-with-the-full-reading
+RED seon.problems-test/caused-agrees-with-the-full-reading {:pass 4, :fail 0, :error 6}
+started seon.problems-test/a-written-signature-is-not-written-again
+ended seon.problems-test/a-written-signature-is-not-written-again
+started seon.problems-test/a-platform-error-is-written-once
+ended seon.problems-test/a-platform-error-is-written-once
+started seon.problems-test/a-storm-is-one-write-per-window
+ended seon.problems-test/a-storm-is-one-write-per-window
+started seon.problems-test/a-section-is-stale-when-the-code-it-cites-changed-after-its-text
+ended seon.problems-test/a-section-is-stale-when-the-code-it-cites-changed-after-its-text
+RED seon.problems-test/a-section-is-stale-when-the-code-it-cites-changed-after-its-text {:pass 14, :fail 0, :error 1}
+started seon.problems-test/a-cancelled-tasks-run-problems-close
+ended seon.problems-test/a-cancelled-tasks-run-problems-close
+started seon.problems-test/a-ready-implement-task-that-cites-nothing-is-a-problem
+ended seon.problems-test/a-ready-implement-task-that-cites-nothing-is-a-problem
+started seon.problems-test/health-reads-each-part-once
+ended seon.problems-test/health-reads-each-part-once
+started seon.problems-test/a-lost-run-is-a-death
+ended seon.problems-test/a-lost-run-is-a-death
+started seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself
+ended seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself
+RED seon.problems-test/a-defect-in-the-reconciler-does-not-feed-itself {:pass 1, :fail 0, :error 1}
+started seon.problems-test/a-deleted-var-makes-its-citation-dead-until-it-is-back
+ended seon.problems-test/a-deleted-var-makes-its-citation-dead-until-it-is-back
+started seon.problems-test/caused-is-what-the-branch-made-true
+ended seon.problems-test/caused-is-what-the-branch-made-true
+RED seon.problems-test/caused-is-what-the-branch-made-true {:pass 1, :fail 0, :error 2}
+started seon.problems-test/problem-unlinked-follows-the-classes-not-their-rows
+ended seon.problems-test/problem-unlinked-follows-the-classes-not-their-rows
+started seon.problems-test/a-catch-its-page-does-not-name-is-a-law-problem
+ended seon.problems-test/a-catch-its-page-does-not-name-is-a-law-problem
+started seon.problems-test/a-page-nothing-links-to-is-an-orphan-until-something-does
+ended seon.problems-test/a-page-nothing-links-to-is-an-orphan-until-something-does
+started seon.problems-test/a-pin-the-wiki-states-is-the-recorded-gitlink
+ended seon.problems-test/a-pin-the-wiki-states-is-the-recorded-gitlink
+started seon.problems-test/a-stalled-agent-is-an-open-problem-while-the-fact-holds
+ended seon.problems-test/a-stalled-agent-is-an-open-problem-while-the-fact-holds
+started seon.problems-test/an-askers-failed-effect-is-one-row-closed-by-its-next-good-outcome
+ended seon.problems-test/an-askers-failed-effect-is-one-row-closed-by-its-next-good-outcome
+started seon.problems-test/an-error-closes-when-its-subject-changes
+ended seon.problems-test/an-error-closes-when-its-subject-changes
+started seon.problems-test/an-issue-with-no-page-is-a-problem
+ended seon.problems-test/an-issue-with-no-page-is-a-problem
+started seon.problems-test/another-tasks-unfinished-proof-is-not-a-problem
+ended seon.problems-test/another-tasks-unfinished-proof-is-not-a-problem
+started seon.problems-test/attention-survives-a-store-write
+ended seon.problems-test/attention-survives-a-store-write
+RED seon.problems-test/attention-survives-a-store-write {:pass 0, :fail 0, :error 1}
+started seon.problems-test/a-section-with-no-lead-is-a-problem
+ended seon.problems-test/a-section-with-no-lead-is-a-problem
+started seon.problems-test/a-flaky-result-is-its-own-class
+ended seon.problems-test/a-flaky-result-is-its-own-class
+started seon.problems-test/a-new-boot-ends-an-earlier-boots-live-agents
+ended seon.problems-test/a-new-boot-ends-an-earlier-boots-live-agents
+started seon.problems-test/a-red-assertion-is-persisted
+ended seon.problems-test/a-red-assertion-is-persisted
+started seon.problems-test/a-stall-in-a-live-run-makes-one-task-for-root
+ended seon.problems-test/a-stall-in-a-live-run-makes-one-task-for-root
+started seon.problems-test/a-stall-tasks-evidence-is-captured-while-it-is-stuck
+ended seon.problems-test/a-stall-tasks-evidence-is-captured-while-it-is-stuck
+started seon.problems-test/an-agent-death-is-recorded-with-its-cause
+ended seon.problems-test/an-agent-death-is-recorded-with-its-cause
+started seon.problems-test/a-late-live-status-leaves-a-gone-agent-gone
+ended seon.problems-test/a-late-live-status-leaves-a-gone-agent-gone
+started seon.problems-test/a-reply-carries-what-it-cost-and-an-eaten-reply-is-a-problem
+ended seon.problems-test/a-reply-carries-what-it-cost-and-an-eaten-reply-is-a-problem
+started seon.problems-test/a-reply-cut-at-max-tokens-is-marked-cut
+ended seon.problems-test/a-reply-cut-at-max-tokens-is-marked-cut
+started seon.problems-test/a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
+ended seon.problems-test/a-stall-is-a-fact-on-the-agent-until-it-speaks-or-ends
+started seon.problems-test/a-stall-is-observed-by-the-agent-proc
+ended seon.problems-test/a-stall-is-observed-by-the-agent-proc
+started seon.problems-test/a-stopped-agents-exit-is-recorded-on-it
+ended seon.problems-test/a-stopped-agents-exit-is-recorded-on-it
+started seon.problems-test/an-effect-error-is-counted-by-root
+ended seon.problems-test/an-effect-error-is-counted-by-root
+started seon.problems-test/an-ending-agents-every-request-is-answered
+ended seon.problems-test/an-ending-agents-every-request-is-answered
+started seon.problems-test/an-eval-error-is-recorded-as-data
+ended seon.problems-test/an-eval-error-is-recorded-as-data
+started seon.problems-test/an-exit-goes-to-the-death-waiting-on-its-pid
+ended seon.problems-test/an-exit-goes-to-the-death-waiting-on-its-pid
+started seon.problems-test/one-cause-one-signature
+ended seon.problems-test/one-cause-one-signature
+started seon.problems-test/root-records-what-went-wrong-in-an-agent
+ended seon.problems-test/root-records-what-went-wrong-in-an-agent
+started seon.problems-test/the-hello-answers-the-spawn-whatever-its-status
+ended seon.problems-test/the-hello-answers-the-spawn-whatever-its-status
+started seon.problems-test/the-request-sets-thinking-only-when-the-provider-does
+ended seon.problems-test/the-request-sets-thinking-only-when-the-provider-does
+
+ERROR in (caused-follows-what-changed) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (health-follows-what-is-recorded-and-cited) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: clojure.lang.ExceptionInfo: a call allocated fewer bytes than its least for 10 calls only in 60 calls (cost-settled 16) {:calls 60, :least 56336112, :seon.error/type :seon.cost/unsettled, :seon.error/operation seon.cost/measure, :seon.error/message the call's bytes did not settle in 60 calls: its least so far 56336112 B was last lowered at call 50}
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:887)
+a var both sections cite is deleted
+expected: (= (caused-full base head) (problems/caused base head))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:887)
+the var is back
+expected: (= (caused-full base head) (problems/caused base head))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:887)
+a catch site is added
+expected: (= (caused-full base head) (problems/caused base head))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:887)
+the page names it, then a var it cites is deleted
+expected: (= (caused-full base head) (problems/caused base head))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:889)
+and the cases are not all empty
+expected: (seq (problems/caused base (get scenarios "a var both sections cite is deleted")))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-agrees-with-the-full-reading) (problems_test.clj:890)
+and the cases are not all empty
+expected: (seq (problems/caused base (get scenarios "a catch site is added")))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (a-section-is-stale-when-the-code-it-cites-changed-after-its-text) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (a-defect-in-the-reconciler-does-not-feed-itself) (problems_test.clj:91)
+the step fails in the task owner's contract, each round
+expected: (= [(quote seon.task/entity-value)] (map (fn* [p__27#] (get-in p__27# [:example :seon.error/operation])) (vals (reduce round {} (range 10)))))
+  actual: clojure.lang.ExceptionInfo: seon.agent/error-map invalid-input: its arguments do not satisfy its contract {:seon.error/type :seon.instrument/contract-error, :seon.error/operation seon.agent/error-map, :seon.error/member :malli.core/invalid-input, :seon.error/message seon.agent/error-map invalid-input: its arguments do not satisfy its contract, :seon.error/fix Call seon.agent/error-map with arguments its contract declares., :seon.error/problems [{:path [0], :in [0], :expected :seon.host/throwable, :value {:seon.print/code nil}}]}
+
+ERROR in (caused-is-what-the-branch-made-true) (problems_test.clj:692)
+the branch deleted v: the citation of v is its; the one base had is not
+expected: (= #{(str "demo/p.md#p cites " v ", which names nothing")} (problems/caused base head))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (caused-is-what-the-branch-made-true) (problems_test.clj:694)
+the branch deleted v: the citation of v is its; the one base had is not and fixed it by restoring v: nothing
+expected: (= #{} (problems/caused base (d/db-with head [#:var{:name v}])))
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+
+ERROR in (attention-survives-a-store-write) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.UnsupportedOperationException: nth not supported on this type: Keyword
+started seon.profile-test/a-measure-is-one-number-beside-another-thread
+ended seon.profile-test/a-measure-is-one-number-beside-another-thread
+started seon.profile-test/a-measure-is-the-call-at-its-steady-state
+ended seon.profile-test/a-measure-is-the-call-at-its-steady-state
+started seon.profile-test/a-measure-that-never-settles-is-an-error-not-a-number
+ended seon.profile-test/a-measure-that-never-settles-is-an-error-not-a-number
+started seon.profile-test/a-threads-allocation-is-its-own
+ended seon.profile-test/a-threads-allocation-is-its-own
+started seon.profile-test/a-new-stack-is-not-the-calls-bytes
+ended seon.profile-test/a-new-stack-is-not-the-calls-bytes
+started seon.profile-test/a-collection-in-a-measured-call-is-not-its-bytes
+ended seon.profile-test/a-collection-in-a-measured-call-is-not-its-bytes
+started seon.profile-test/a-measures-time-is-what-its-thread-does
+ended seon.profile-test/a-measures-time-is-what-its-thread-does
+started seon.profile-test/a-measure-is-the-same-beside-another-thread
+ended seon.profile-test/a-measure-is-the-same-beside-another-thread
+started seon.profile-test/a-call-is-measured-one-way
+ended seon.profile-test/a-call-is-measured-one-way
+started seon.profile-test/an-evals-record-carries-its-costliest-functions
+ended seon.profile-test/an-evals-record-carries-its-costliest-functions
+started seon.profile-test/calls-is-the-epochs-total
+ended seon.profile-test/calls-is-the-epochs-total
+started seon.profile-test/every-call-of-a-contracted-function-is-counted
+ended seon.profile-test/every-call-of-a-contracted-function-is-counted
+started seon.profile-test/every-touched-function-has-an-estimated-time
+ended seon.profile-test/every-touched-function-has-an-estimated-time
+started seon.profile-test/reading-the-clock-allocates-nothing
+ended seon.profile-test/reading-the-clock-allocates-nothing
+started seon.profile-test/the-clock-is-the-one-every-process-reads
+ended seon.profile-test/the-clock-is-the-one-every-process-reads
+started seon.profile-test/top-orders-by-time-then-calls
+ended seon.profile-test/top-orders-by-time-then-calls
+started seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+ended seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+started seon.agent-test/a-blocked-agent-ends-with-its-root
+ended seon.agent-test/a-blocked-agent-ends-with-its-root
+RED seon.agent-test/a-blocked-agent-ends-with-its-root {:pass 1, :fail 1, :error 0}
+started seon.agent-test/a-wide-reach-reuses-unchanged-results
+jolt fiber dump: 0 live fibers of 116 held, on thread 0
+sults 103000 ms (bound 102552 ms, load 13.09, /Users/sean/src/seon-next/target/prove/shard-1.log)

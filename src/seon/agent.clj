@@ -106,7 +106,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.run/branch]]}
   [main] (some->> (:run @state) (vector :seon.run/id) (d/entity main) :seon.run/branch))
 
-(defn- heard-main
+(defn heard-main
   "Main's head as the store holds it now, held on the state as what this agent last heard of main
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
   {:malli/schema [:=> [:cat] :seon.host/db]}
@@ -403,18 +403,6 @@
           (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
           (seq errs) (assoc :load-errors errs))))))
 
-(defn merge-readiness
-  "Whether this branch can merge into main now, as merge-main! would find it, read only: what
-  main changed since the merge base (:main-moved, its program keys) and which of those this
-  branch changed too (:conflicts, the keys a merge of main would leave unmerged). The same
-  three-way merge-main! runs (seon.merge/delta-three-way), so it costs what changed on each
-  side since the base, not the program."
-  {:malli/schema [:=> [:cat] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]}
-  []
-  (let [conn (:store-conn @state)
-        r (pm/delta-three-way (:base @state) (db) (pdb/head conn (pdb/main-branch (:cfg @state))) #{})]
-    {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
-
 ;; ---- evaluation -----------------------------------------------------------------
 
 
@@ -608,12 +596,19 @@
   are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
   (:removed {test src}): main's tests judge a branch whether or not it still holds them (owner:
-  \"deleting the old test doesn't stop the old test from running\")."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
-                  [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
+  \"deleting the old test doesn't stop the old test from running\"). Given main (its db), the
+  results the test service recorded there are found too: results land on main."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol]]
+                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
                    [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]
-                   [:removed [:map-of :qualified-symbol :string]]]]}
-  [db base proofs]
+                   [:removed [:map-of :qualified-symbol :string]]]]
+                  [:=> [:cat :seon.host/db [:maybe :seon.host/db] [:set :qualified-symbol] [:maybe :seon.host/db]]
+                   [:map [:selected [:vector :qualified-symbol]] [:run [:vector :qualified-symbol]] [:reused [:map-of :qualified-symbol :map]]
+                   [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]
+                   [:removed [:map-of :qualified-symbol :string]]]]]}
+  ([db base proofs] (test-plan db base proofs nil))
+  ([db base proofs main]
   (let [[shared in] (test-inputs db)
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
         b (when base (base-graph base in))
@@ -634,11 +629,16 @@
                               :when (= :test (:var/kind e))]
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
-    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (proofs/found (if dir (proofs/verdicts dir (vec (vals cd))) {}) (proofs/stored-results db (vec (vals cd)))) proofs)
+    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd
+                     (proofs/found (if dir (proofs/verdicts dir (vec (vals cd))) {})
+                                   ;; the test service records results on main (seon.prove/result-tx): main's, over
+                                   ;; what the branch holds of them since it last merged main
+                                   (merge (proofs/stored-results db (vec (vals cd))) (some-> main (proofs/stored-results (vec (vals cd))))))
+                     proofs)
         (update :selected into (concat unrecorded (keys removed)))
         (update :run into (concat unrecorded (keys removed)))
         (assoc :digests cd :dir dir :graph g :removed removed
-               :process (into (program/process-tests idx) removed-process)))))
+               :process (into (program/process-tests idx) removed-process))))))
 
 (declare handle!)
 
@@ -855,7 +855,7 @@
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs)
+  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has
