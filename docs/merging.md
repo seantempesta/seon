@@ -63,11 +63,12 @@ One proc, `:prove` (```seon.prove/prove-proc```, declared in `resources/seon/sys
 
 ## A branch proves its in-process tests, main's batch runs the process tests once
 
-Owner, 2026-10-27: "Get rid of the double testing". Process tests read the whole tree, so one branch's merge moves every other branch's digest. If each branch ran `bin/prove --merge` and fast-forwarded, every fast-forward would send every other branch back to rerun all ~120 process tests: N branches cost about N² full runs.
-- **The worktree** merges main in, runs plain `nice -n 15 bin/prove` (the in-process tests its change reaches, each reused by digest from the shared test-results/) and reports ready. It runs no `--merge`.
-- **The merge session** merges every ready branch into main, then runs one `nice -n 15 bin/build` and one `nice -n 15 bin/prove --merge` for the batch. In-process greens come back by digest wherever the batch did not move them, so the process tests run once for the whole batch. It does not wait for a batch to fill: it merges what is ready whenever no batch is verifying.
-- **A red** names its test. Revert only the branch whose change reaches it (`(my.agent/tests-reaching ...)`, or its diff against the test), send it back with the log, keep the rest, and reverify only if what was reverted moved something. Then `bin/update`.
-- Pin bumps and bin-only changes ride in a batch; `--merge` runs the cost proofs.
+Owner, 2026-10-27: "Why are we reverifying on main? Don't do unnecessary work if the agent on the worktree can validate the merge." Process tests read the whole tree, so one branch's merge moves every other branch's digest.
+- **A ready branch that already contains current main**, and whose own plain `bin/prove` ran at that tip (with `bin/test` of the process-test namespaces its change reaches, or its `--merge`), is merged `--ff-only` with no run on main: its tree is the one it proved. Prefer this: ask a branch that is one merge behind to merge main and re-prove (every green at its digest is reused) rather than verifying on main.
+- **A `bin/prove --merge` on main** runs only when branches are combined into a tree nobody has tested (two or more ready at once, or one that does not contain main). One run covers the batch, after one `bin/build`. A red names its test: revert only the branch whose change reaches it (`(my.agent/tests-reaching ...)`, or its diff against the test), send it back with the log, keep the rest. Then `bin/update`.
+- **Fast lane** (owner, 2026-10-27: "Don't wait for fixes that should just be merged and tested later"): the dev-speed branches (reuse, the shared test root, tree-id) merge as soon as their own targeted tests (the namespaces they changed plus their proofs) are green. Their first full run is the next one main does anyway; a red the branch caused is fixed forward within the hour, and reverted only if it breaks main for everyone. Each is reported to root in one line.
+- **A pin bump** goes in a batch of its own, and the main tree's submodule checkouts must be moved to the new pins before `bin/build` (`git -C reference-code/<lib> checkout --detach <pin>` in the main tree; a merge moves the recorded pin, not the checkout, and a run on the old checkout says nothing about the bump: seen 2026-10-27). For a datahike, persistent-sorted-set or konserve bump its diff and index tests run too.
+- Heavy runs: no slot lock (owner, 2026-10-27: "I want a lock free system").
 
 ## Every merge's `src` diff stat is read
 
