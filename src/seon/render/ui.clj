@@ -989,7 +989,7 @@
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
   (let [failures (proofs/failures r)
-        died (into (sorted-set-by #(compare (str %1) (str %2))) (keep #(when (:exit %) (proofs/test-symbol (:var %)))) (:reports r))]
+        died (into (sorted-set-by #(compare (str %1) (str %2))) (proofs/died r))]
     [:section [:h2 "prove"]
      [:p (str (:value (render/summarized (with-meta r {:seon.render/schema :seon.test/proved}))))]
      (when (seq (:proofs r))

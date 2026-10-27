@@ -427,11 +427,11 @@
         basis (when (and (contains? resp :value) (not (contains? resp :values))) (:seon.render/basis (meta (:value resp))))
         data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
     (cond-> (if data?
-              ;; data that names its render schema (a prove's run, :seon.test/proved) keeps it: the page draws the value by it
-              (cond-> {:code code :response resp}
-                (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp)))))
+              {:code code :response resp}
               (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
-                basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
+                basis (assoc :basis basis)))
+      ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
+      (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))

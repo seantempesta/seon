@@ -243,14 +243,12 @@
   is no verdict: not counted). What it found (each proof's status, the reds with their first failing
   assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
   html render); the run whole is the value under the eval's handle. A part of the run (a select-keys
-  of it keeps its metadata) is that part, as data. A run of 275 tests answered 25k chars printed
-  whole (the blind agent's turn 6, 2026-10-27; the owner, 2026-10-27: \"the prove stuff should be
-  in the context render not the eval\")."
+  of it keeps its metadata) is that part, as data. See docs/agent.md#done."
   {:malli/schema [:=> [:cat :map] :any]}
   [r]
   (if-not (:reports r)
     (with-meta r nil)
-    (let [died (count (into #{} (keep #(when (:exit %) (:var %))) (:reports r)))
+    (let [died (count (proofs/died r))
           red (pos? (+ (:fail r 0) (:error r 0)))]
       (str (cond red "red" (pos? died) "died" :else "green")
            ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died))))

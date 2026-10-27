@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -59,11 +59,16 @@
     (let [t (current)
           ;; each proof's result at its reach digest now, wherever it was recorded and whichever call
           ;; measured it (a named prove, a bare one, a turn's, root's judge)
-          stored (agent/stored-statuses (:proofs (:seon.task/accumulated t)))
+          results (agent/stored-results (:proofs (:seon.task/accumulated t)))
+          stored (update-vals results #(cond (proofs/green? %) :pass (pos? (:error % 0)) :error :else :fail))
           known (set (keys stored))]
       (context/turn-state (agent/db) t
                           (-> input
                               (update :results merge stored)
+                              ;; a red proof's failing assertions as its stored run kept them (seon.proofs/red-reports' shape)
+                              (update :reds (fn [rs] (into (vec (remove #(known (:test %)) rs))
+                                                           (for [[p r] (sort-by (comp str key) results) :when (not= :pass (stored p)) f (:failures r)]
+                                                             (-> (select-keys f [:type :message :expected :actual :got]) (assoc :test p))))))
                               ;; the done rule's reasons about those proofs as the turn saw them, replaced by what they are now
                               (update :reasons (fn [rs] (into (vec (remove #(and (#{:proof-unknown :proof-red} (:reason %)) (known (:symbol %))) rs))
                                                               (for [[p s] (sort-by (comp str key) stored) :when (not= :pass s)] {:reason :proof-red :symbol p})))))))
