@@ -1112,11 +1112,12 @@
   [:section (render/html {:schema :seon.root/root-fact} (relevant :seon.root/root-fact c))])
 
 (defn problems-tile
-  "Main's open problems (a component over the db): seon.problems/health by its render, every class's
-  rows; it runs again when a transaction touches what health read."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
-  [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} (problems/health db))])
+  "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
+  with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!):
+  every class's rows by the report's render. It runs again only when :health changes."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}]
+  [:section [:h2 "problems"] (when-let [h (:health c)] (render/html {:schema :seon.problems/report} (ratom/realize h)))])
 
 (defn runs-tile
   "Main's runs (a component over the db): how many by status and each running one (runs-of)."

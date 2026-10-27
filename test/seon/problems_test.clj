@@ -977,7 +977,7 @@
                             :seon.run/start-ms 1 :seon.run/end-ms n :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status status})]
     (is (same? db1 db1) "nothing moved")
     (testing "a run that died opens a problem, and a later run that finished its task closes it"
-      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/outcome :died)])
+      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
             db3 (d/db-with db2 [(assoc (run 2 :merged) :seon.run/outcome :green)])]
         (is (same? db1 db2))
         (is (pos? (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :dead :n])))
@@ -1006,7 +1006,7 @@
         (is (same? db1 linking))
         (is (same? linking both))))
     (testing "an answer added to an untouched run's row is carried current"
-      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/outcome :died)])
+      (let [db2 (d/db-with db1 [task (assoc (run 1 :dead) :seon.run/reason "its agent died" :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1}))])
             db3 (d/db-with db2 [{:seon.task/id "fix/x" :seon.task/ns 'fix :seon.task/name "x" :seon.task/plan "p" :seon.task/execution :held
                                  :seon.task/branch :f :seon.task/kind :work :seon.task/evidence {:kind :run :from "t/x#1"}}])
             moved (problems/health-moved (problems/health db2) db2 db3 (diff db2 db3))
