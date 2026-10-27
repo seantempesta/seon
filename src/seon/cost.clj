@@ -439,7 +439,10 @@
    :fn/call {:ticks 5.16 :ns 7.4 :bytes 0.0 :what "a reduce step calling one plain function, both defined at the REPL"}
    ;; 353.53 B before malli's total arms went unguarded (task seon.contract/an-armed-call-costs-its-checks:
    ;; two try's a call, 2026-10-23); a total arm is checked bare
-   :fn/armed-call {:ticks 10.2 :ns 20.3 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
+   ;; 14.16 ticks since seon.profile's wrapper counts each call's ticks and bytes (task seon.proofs/tests-are-facts:
+   ;; a test's record holds what its contracted functions cost): 10.2 when it counted calls alone, measured by the bisect
+   ;; of tonight's merges (jolt/tests-are-facts moved it, nothing before it); the ns is the same wrapper's, 62-76 on a loaded machine
+   :fn/armed-call {:ticks 14.16 :ns 62.4 :bytes 0.02 :what "a reduce step calling one contracted function ([:=> [:cat :int] :int])"}
    :vec/nth {:ticks 8.15 :ns 12.4 :bytes 0.0 :what "nth of a vector"}
    :vec/conj {:ticks 29.18 :ns 30.7 :bytes 245.99 :what "conj onto a persistent vector"}
    :vec/conj! {:ticks 7.49 :ns 12.3 :bytes 43.28 :what "conj! onto a transient vector"}
