@@ -1266,3 +1266,13 @@
     (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
     (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0} false) [:reports 0 :type]))
         "a last line that does not read is the run's :error, not the agent's death")))
+
+(deftest a-tests-ended-line-keeps-the-live-heap-it-left
+  ;; docs/cost.md#what-a-test-run-measures (root, 2026-10-28): 23 of 191 tests of a forked run ran
+  ;; out of memory at the agent's heap ceiling with no stack; the heap each test leaves, after a
+  ;; collection, is on its ended line and kept per test, so the one that holds memory is named
+  (let [enc seon.edn/encode
+        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {} :heap {}}
+                    [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
+                     (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
+    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
