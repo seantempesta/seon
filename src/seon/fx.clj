@@ -524,9 +524,10 @@
 (defn test-command
   "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
   entry, each named namespace's tests with no green at their reach
-  digest run, the rest reused."
-  {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
-  [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
+  digest run, the rest reused, its run written under out (bin/prove --out: the effect reads the
+  plan there, never from a path the run did not name)."
+  {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
+  [nss out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str nss)))
 
 (defn test-results
   "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
@@ -568,8 +569,9 @@
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
         ;; the tree's shards store into this root's results directory, named to them, so the
         ;; verdicts read below are the ones its run wrote
-        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
-              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
+        (let [out (str dir "/target/prove/run")
+              r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests))) out) [:dir dir]))
+              plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
           (spit log (str (:out r) (:err r)))
           {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
