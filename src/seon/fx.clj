@@ -592,6 +592,16 @@
       (:results r)
       (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (pr-str r)) {:path (str port)}))))
 
+(defn branch-head
+  "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
+  there yet: the rule git-commit starts a new branch by (it starts at dir's HEAD), so a merge gated
+  before its first write-back runs on the tree that write-back would branch from. nil when neither
+  names a commit (no commit at all)."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [repo branch]
+  (or (git-try repo ["rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
+      (git-try repo ["rev-parse" "--verify" "--quiet" "HEAD^{commit}"])))
+
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
@@ -609,7 +619,7 @@
         repo (or repo (when all? (str (cfg/checkout))))
         branch (or branch (when all? (cfg/value :seon.config.source/main)))
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
-        sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
+        sha (try (or (branch-head repo branch)
                      (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
