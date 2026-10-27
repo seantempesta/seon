@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs]))
+            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -270,6 +270,34 @@
       (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
           "and the run's answer names the held pipe beside what the child wrote"))
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
+
+(deftest a-test-childs-read-lets-the-agents-other-fibers-run
+  ;; the recipe hang of 2026-10-28 (claude_scratch/hang-2026-10-28-a1-prove): agent a1's test child
+  ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
+  ;; its one main carrier, so the fiber that would answer never ran. The poller's ready is a hint:
+  ;; a stale one, left by the read before, ends the next park at once, and the read's wait then
+  ;; blocked. The reader here is a main carrier, as an agent is (a pool's other carriers would run
+  ;; the fiber and hide it); its writer writes one line, then waits for a go that another fiber of
+  ;; the reader sends when it sees that line. A regression waits for ever (no clock may end it): a
+  ;; hang is this test's red
+  (let [reader (fn []
+                 (let [[r w] (sock/socketpair)
+                       [gr gw] (sock/socketpair)
+                       pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                                       :child (fn []
+                                                (lib/c-close r) (lib/c-close gw)
+                                                (sock/write-line! w "1")
+                                                (let [rd (sock/line-reader gr)] (loop [] (when (= [] (rd)) (recur))))
+                                                (sock/write-line! w "2"))})
+                       _ (do (lib/c-close w) (lib/c-close gr))
+                       sent (promise)
+                       res (agent/read-to-exit r pid #(when (= "1" %)
+                                                        (clojure.core.async/go (deliver sent (sock/write-line! gw "go")))))]
+                   (lib/c-exit (if (and (= {:line "2" :held? false} res) (= true @sent) (= {:exit 0} (lib/wait-status pid))) 0 3))))
+        pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
+                        :child (fn [] (jolt.host/main-carrier-run! reader))})]
+    (is (= {:exit 0} (lib/wait-status pid))
+        "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
 
 (deftest a-blocked-agent-ends-on-its-socket-eof
   ;; task seon.intr/a-signal-wakes-a-blocked-wait: an agent blocked in a channel take, its fork

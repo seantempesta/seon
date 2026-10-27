@@ -52,11 +52,24 @@ long e13_kq_watch(int kq, int pid) {
 }
 // fd watched for input on kq (EVFILT_READ, level-triggered), so a wait on kq's own descriptor (a
 // fiber's park in the io poller, seon.agent/read-to-exit) wakes for it as for a watched child's exit;
-// e13_wait then answers which, at once. 0, or -2 on an error.
+// e13_kq_poll then answers which, with no wait. 0, or -2 on an error.
 long e13_kq_watch_fd(int kq, int fd) {
   struct kevent ev;
   EV_SET(&ev, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
   return kevent(kq, &ev, 1, NULL, 0, NULL) == 0 ? 0 : -2;
+}
+// What kq holds now, never waiting (a zero timeout): the pid of a watched child that exited, 0
+// when fd's input is there, -3 when nothing is (a fiber's park on kq ended for a ready that was
+// stale, so it parks again: seon.lib/wait-fd-or-exit), -1 on an error. Its caller parks in the
+// io poller, never here: a main carrier blocked in a kevent runs none of its process's fibers.
+long e13_kq_poll(int kq) {
+  struct kevent ev;
+  struct timespec zero = {0, 0};
+  int r;
+  do r = kevent(kq, NULL, 0, &ev, 1, &zero); while (r < 0 && errno == EINTR);
+  if (r < 0 || (r == 1 && (ev.flags & EV_ERROR))) return -1;
+  if (r == 0) return -3;
+  return ev.filter == EVFILT_PROC ? (long)ev.ident : 0;
 }
 long e13_wait(int kq, int fd) {
   struct kevent ch, ev;
