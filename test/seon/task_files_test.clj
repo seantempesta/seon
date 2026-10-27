@@ -98,7 +98,9 @@
   ;; task seon.task/merged-work-leaves-the-task-files: the merge that merges a task's work removes its
   ;; entry in the same commit (git keeps the plan, test/ keeps the proofs); a task Seon agents work keeps
   ;; its derived state. A worktree session's branch is named for its task, so an entry whose name is a
-  ;; "Merge jolt/<name>" commit on main's first-parent history is merged work left in the files
+  ;; "Merge jolt/<name>" (or "Land jolt/<name>") commit on main's first-parent history is merged work left
+  ;; in the files. It sees only that convention, and main as this repository holds it: the next branch's
+  ;; run names an entry a merge left behind (the merge's own run precedes its commit)
   (let [root (config/checkout)
         merged (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "log" "--first-parent" "--format=%s" "main")))
                           :let [m (re-find #"^Merge jolt/([^\s:]+)" l)] :when m]

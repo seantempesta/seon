@@ -1,7 +1,18 @@
-[{:seon.task/name "the-shipped-task-files-load"
+[{:seon.task/name "a-task-cites-what-it-needs"
+  :seon.task/plan "What exists (merged): the task writer derives `:seon.task/references`, the names a plan and instructions cite (`seon.ref/names`), in `seon.task/create-tx` (so in `seon.task/load-tx` and `my.root/create!`), never authored; `seon.task/citation-problems` answers each citation resolving to nothing on a db as {:task :name :problem :unresolved}, and `my.root/create!` and `my.root/load-tasks!` carry them as :problems while the write still happens; the context's entry for an unresolved name (`seon.docs/resolve-ref`) says what it means and what to do (two backticks mention a name without citing it). Before, a citation to nothing showed only as `:unresolved true` in the context, and nobody was told when the task was written: a default plan citing `app.m/a`, a var that did not exist, cost a real run 24 model calls and 69k tokens. v1: an unresolved reference is a problem on whatever cites it and never rejects the write (~/src/seon/src/seon/task.clj `with-references`, ~/src/seon/src/my/task.clj `update!`'s :my.task/problems). Lesson in docs/references.md."
+  :seon.task/kind :work
+  :seon.task/needs #{}
+  :seon.task/proofs #{seon.task-test/the-writer-derives-a-tasks-references
+                      seon.task-test/unresolved-citations-are-answered-not-refused
+                      seon.context-test/an-unresolved-citation-says-what-to-do}}
+ {:seon.task/name "the-shipped-task-files-load"
   :seon.task/plan "What exists (merged): `seon.task-files-test/the-shipped-task-files-load` loads resources/seon/tasks into a test branch with `seon.task/load-tx` and expects no error. Before, an unescaped double quote inside one plan string made `(my.root/load-tasks! sys dir)` answer :seon.task/refused (\"not readable EDN: Map literal must contain an even number of forms\") and no task file loaded, unseen because no test read the shipped directory. An error names the file; its line (from the reader's ex-data) would help."
   :seon.task/kind :work
   :seon.task/proofs #{seon.task-files-test/the-shipped-task-files-load}}
+ {:seon.task/name "a-file-task-reaches-main"
+  :seon.task/plan "What exists (merged): `my.root/task-files` applies `seon.template/with-merge` over all the files' declarations, so each work task loaded from a file gets its merge task (derived at load, never written in the file) and a need on a work task, in any file, is a need on its merge; the merge task is declared, changed and cancelled with its work task. `seon.task/load-tx` is unchanged (the task writer does not depend on step templates) and stays incremental: an unchanged file writes nothing. Before, a done file task's change never reached main. v1: a single task is followed by a merge task when it should reach main."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.task-files-test/a-file-task-reaches-main-through-its-merge-task}}
  {:seon.task/name "an-agent-reads-its-task-as-main-holds-it"
   :seon.task/plan "What exists: `my.task/current` reads the agent's task on its own branch (`seon.agent/db`), forked before the run was written, so it reads its execution as held while main reads running. Correct: the execution an agent reads is main's at its turn's basis, or the render says which db it read."
   :seon.task/kind :work

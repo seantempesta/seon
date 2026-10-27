@@ -15,6 +15,11 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/render-rebuilds-no-index-per-commit
                       seon.render-test/render-main-commit-cost}}
+ {:seon.task/name "a-design-step-designs"
+  :seon.task/plan "What exists: a :design run is never done at its start; it is done only when its task's accumulated plan differs from the plan it began with (read from the run's facts, :plan and :plan-before in `seon.reconcile/done-input`), else `seon.reconcile/done-explain` refuses it :no-design, shown in the context with the instruction it lacks (`seon.template/instructions` :design). Before, a design step capped at 0 turns ended green with no model call and the implement step got the failed plan unchanged. The other kinds' rule is unchanged."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.reconcile-test/a-design-step-is-not-done-at-its-start
+                      seon.reconcile-test/a-design-step-is-done-when-it-improved-the-plan}}
  {:seon.task/name "a-refused-spawn-is-recorded"
   :seon.task/plan "What exists: when root refuses a spawn (`seon.root` answers :spawn with :seon.root/refused: the branch is held by a live agent, or `:seon.config.root/max-agents` are live), the reconciler's :spawned step in `seon.reconcile/advance` writes the error as a run through `seon.task/run-start-tx`, status :refused, no agent (:seon.run/agent is optional), root's message as :seon.run/reason and the error map; `seon.reconcile/root-causes` names a task whose latest run is refused as a root cause. A refused task waits in the proc's :refused until main moves for another reason (`seon.reconcile/reconciler-proc`'s :main clears it on a commit that is not only refused runs): asking again at once was a hot loop that grew main without bound. Owed elsewhere: `seon.e2e/agents-reused` counts runs by agent and would count a refused one's absent agent."
   :seon.task/kind :work
