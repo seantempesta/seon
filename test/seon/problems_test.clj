@@ -1042,8 +1042,9 @@
                :work "one lookup per class with an open row, found at the first row"
                :growth :constant
                :per-n {:ns 0 :bytes 0 :calls 0}
-               ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up
-               :fixed {:ns 3000000 :bytes 4000000 :calls 47}
+               ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
+               ;; 49: :flaky (seon.proofs/flaky) one more
+               :fixed {:ns 3000000 :bytes 4000000 :calls 49}
                :sizes [10 100 1000]}))
 
 (deftest attention-survives-a-store-write
@@ -1118,3 +1119,18 @@
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
         (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
+(deftest a-flaky-result-is-its-own-class
+  ;; seon.proofs/flaky's red, recorded as a test's newest result on main, is class :flaky, not
+  ;; :test-red: a defect at its cause, open until a change moves the test's digest
+  (let [latest (fn [t s fs] (cond-> {:seon.proof/latest t :seon.proof/status s :seon.proof/run "r" :seon.proof/branch "main" :seon.proof/t 1}
+                              (seq fs) (assoc :seon.proof/failures fs)))
+        db (d/db-with (ts/test-db) [(latest "app.f-test/flaky" :fail [{:type :fail :flaky true :message "flaky: green and red at digest d"}
+                                                                     {:type :fail :message "1 is not 2"}])
+                                    (latest "app.f-test/red" :fail [{:type :fail :message "1 is not 2"}])
+                                    (latest "app.f-test/green" :pass nil)])
+        classes (:classes (problems/report db))]
+    (is (= ['app.f-test/flaky] (mapv :test (get-in classes [:flaky :rows]))))
+    (is (= ['app.f-test/red] (mapv :test (get-in classes [:test-red :rows]))) "a red that judged one way stays :test-red")
+    (is (= "flaky app.f-test/flaky" (get-in classes [:flaky :rows 0 :signature])))
+    (is (true? (get-in classes [:flaky :rows 0 :evidence :flaky])))))

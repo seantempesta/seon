@@ -1057,7 +1057,7 @@
      seon.fork-server/dev-classpath! ;; deps.edn, in :env
      seon.fx/declared-refs ;; resources/seon/system.edn, in :env
      seon.web/handler ;; web/public, in :env
-     seon.proofs/greens}) ;; the results directory, outside the tree, by digest
+     seon.proofs/verdicts}) ;; the results directory, outside the tree, by digest
 
 (defn- tree-reading?
   "Does form f read the tree (a tree-reader referenced, by a form defining no env-reader)?"

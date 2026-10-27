@@ -360,9 +360,9 @@
   (let [db (calc-db)
         dir (scratch-dir "results")
         digests (select-keys (program/reach-digests db {:env "e" :tree "t"}) calc-tests)
-        plan #(proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{})
+        plan #(proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{})
         first-plan (plan)
-        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-greens! #(fx/write-file {:req %}) dir)))
+        ran (doto (proofs/run-tests! (:run first-plan) digests (fn [_])) (->> (proofs/store-verdicts! #(fx/write-file {:req %}) dir)))
         second-plan (plan)]
     (is (= calc-tests (set (:run first-plan))) "nothing recorded: every test runs")
     (is (= {:pass 1 :fail 0 :error 0} (select-keys (ran 'app.pt-calc-test/add-test) [:pass :fail :error])))
@@ -371,7 +371,7 @@
     (is (= (digests 'app.pt-calc-test/neg-test) (:digest ((:reused second-plan) 'app.pt-calc-test/neg-test))))))
 
 (defn- run-plan "bin/test's plan of digests against the results in dir." [digests dir]
-  (proofs/plan nil digests (proofs/greens dir (vec (vals digests))) #{}))
+  (proofs/plan nil digests (proofs/verdicts dir (vec (vals digests))) #{}))
 
 (defn- checkout!
   "A git checkout at a new directory holding files ({relative path text}), all added."
@@ -391,7 +391,7 @@
         in-a (fx/inputs a)
         da (select-keys (program/reach-digests db in-a) calc-tests)]
     (is (= in-a (fx/inputs b)) "the same content at another path: the same inputs")
-    (proofs/store-greens! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (proofs/run-tests! (:run (run-plan da dir)) da (fn [_])))
     (is (= [] (:run (run-plan (select-keys (program/reach-digests db (fx/inputs b)) calc-tests) dir)))
         "checkout b reuses every result checkout a recorded")
     (spit (str b "/docs/a.md") "# a, edited")
@@ -566,7 +566,7 @@
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= [] (:run (run-plan a (let [dir (scratch-dir "same-tree")]
-                                  (proofs/store-greens! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+                                  (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] a] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
                                   dir))))
         "with each green stored, a second run on the unchanged tree runs nothing")))
 

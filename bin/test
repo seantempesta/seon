@@ -65,5 +65,7 @@ for (( i = 1; i <= ${#F}; i++ )); do
   fi
 done
 [[ -n $W ]] && kill $W 2>/dev/null
+# a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
+[[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
 if (( st == 0 )); then echo "TEST OK"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st
