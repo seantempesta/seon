@@ -1030,12 +1030,14 @@
                        [#'related {} rid]
                        (when (seq (:turns run)) [#'status {} rid])
                        ;; what the turn no longer computes, drawn when what it reads moves: main's and the
-                       ;; merge base's commits (ctx's environment) are their children
-                       [#'tests-view {} rid (:main-commit c) (:base-commit c)]
-                       [#'caused-view {} (:base-commit c)]
-                       [#'gaps-view {} (:base-commit c)]
-                       [#'divergence-view {} (:base-commit c)]
-                       [#'merge-view {} (:main-commit c) (:base-commit c)]))
+                       ;; merge base's commits (ctx's :main-commit :base-commit) are their children; a
+                       ;; record that has heard neither yet has no such views (nothing measured)
+                       (when (and (:main-commit c) (:base-commit c))
+                         (list [#'tests-view {} rid (:main-commit c) (:base-commit c)]
+                               [#'caused-view {} (:base-commit c)]
+                               [#'gaps-view {} (:base-commit c)]
+                               [#'divergence-view {} (:base-commit c)]
+                               [#'merge-view {} (:main-commit c) (:base-commit c)]))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
