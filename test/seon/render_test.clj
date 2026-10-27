@@ -34,7 +34,7 @@
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
 (deftest a-render-is-opts-then-children
-  ;; Reagent's form (notes/archive/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
+  ;; Reagent's form (claude_scratch/archive/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
   (testing "every render a schema declares takes [opts v]: its contract's first argument is :seon.render/opts"
     (let [declared (distinct (keep #(r/declared %) (keys seon.contract/forms)))
@@ -943,8 +943,8 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
-        "the task, what is related, what its newest turn observed, the run (and the keys the agent added, when it added one): each keyed by what it shows")
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, what is related, what its newest turn observed, the run, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
       (is (str/includes? h ":fail"))

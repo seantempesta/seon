@@ -183,7 +183,7 @@
 
 (deftest a-refused-commit-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
-  ;; throw went only to printed output with a guessed message; the store's refusal is
+  ;; throw went only to printed output with a guessed message; the store's refused write is
   ;; :seon.proofs/unrecorded, never read as recorded
   (prog)
   (record (ts/test-db) 'user "(ns app.pv-fx-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
@@ -459,4 +459,12 @@
                        {:type :pass :var "#'a.b-test/died"}
                        {:type :error :var "#'a.b-test/died" :exit {:exit 1} :message "test process died: {:exit 1} while #'a.b-test/died ran"}]}]
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
+
+(deftest a-results-read-that-fails-is-an-error-never-zero-greens
+  ;; root, 2026-10-27 (test-audit's re-measure): an ask refused while the standing root restarted
+  ;; (bin/update after a merge: 20:00:21 down, 20:00:46 listening) read as "nothing is reused", a
+  ;; failed read taken for zero greens. A port nothing listens on refuses as a restarting root does
+  (let [r (runner/read-results 1 ["d-any"])]
+    (is (= :seon.proofs/unread (:seon.error/type r)) (pr-str r))
+    (is (= :refused (:why r)))))
 

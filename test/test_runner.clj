@@ -11,7 +11,7 @@
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
-            [seon.edn :as sedn] [seon.error :as error] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]))
+            [seon.edn :as sedn] [seon.error :as error] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]))
 
 (defn- test-namespaces
   "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
@@ -34,7 +34,7 @@
 ;; ---- reach -----------------------------------------------------------------------------
 
 ;; The program db is a function of the git tree (owner via root, 2026-10-23, option B of
-;; notes/archive/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
+;; claude_scratch/archive/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
 (defn- tree-prefix
@@ -200,23 +200,36 @@
   (.getCanonicalPath (.getParentFile (io/file (str/trim (:out (sh/sh "git" "-C" (str (config/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))))))
 
 (defn- ask-root
-  "One request m to the standing root's server (:seon.config.proofs/results-port, bin/ask: one line,
-  one reply line): its answer as data, or {:error ...} naming why none came (no port, refused, the
-  connection closed), each a failure point a caller reports."
-  [m]
-  (let [port (config/value :seon.config.proofs/results-port)]
-    (if (zero? port)
-      {:error :no-results-port}
-      (let [{:keys [out]} (sh/sh (str (config/checkout) "/bin/ask") (str port) :in (str (sedn/encode m) "\n"))]
-        (if (str/blank? out)
-          {:error :no-answer}
-          (try (edn/read-string {:default tagged-literal} out)
-               (catch Exception e {:error :unreadable :message (ex-message e)})))))))
+  "One request m to the standing root's server (port: default :seon.config.proofs/results-port;
+  bin/ask: one line, one reply line): its answer as data, or {:error ...} naming why none came (no
+  port, refused, the connection closed), each a failure point a caller reports."
+  ([m] (ask-root (config/value :seon.config.proofs/results-port) m))
+  ([port m]
+   (if (zero? port)
+     {:error :no-results-port}
+     (let [{:keys [out]} (sh/sh (str (config/checkout) "/bin/ask") (str port) :in (str (sedn/encode m) "\n"))]
+       (if (str/blank? out)
+         {:error :no-answer}
+         (try (edn/read-string {:default tagged-literal} out)
+              (catch Exception e {:error :unreadable :message (ex-message e)})))))))
 
 (def ^:private no-root
   "What ask-root answers when no root answered: bin/ask's (refused, closed, reset) and its own (no
   port, no reply, a reply that does not read)."
   #{:refused :eof :reset :no-results-port :no-answer :unreadable})
+
+(defn read-results
+  "The results the root at port holds at digests (its :results op): {digest result}, or the typed
+  :seon.proofs/unread naming why none came (:why, ask-root's: the root refused the connection, as
+  it does while it restarts, closed it, or answered no results), never {} for a read that failed:
+  zero greens is an answer, a failed read is not."
+  [port digests]
+  (let [asked (ask-root port {:op :results :digests (vec digests)})]
+    (if (map? (:results asked))
+      (:results asked)
+      (contract/error :seon.proofs/unread 'test-runner/read-results
+                      (str "no results read from the root at port " port ": " (pr-str (or (:error asked) (:seon.error/message asked))))
+                      {:port port :why (or (:error asked) (:seon.error/type asked))}))))
 
 (defn- unrecorded?
   "Did the standing root not record a :record request's answer r?"
@@ -358,18 +371,18 @@
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
-  (the policy a root's service shares). Answers its plan."
+  (the policy a root's service shares). Answers its plan, with :unread, the typed
+  :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
-  (proofs/plan-of (tests-of root names store) what all? names
+  (let [unread (volatile! nil)
+        p (proofs/plan-of (tests-of root names store) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
-                  ;; the results main holds at the candidates' digests, from the standing root (none
-                  ;; reachable: none, said)
+                  ;; the results main holds at the candidates' digests, from the standing root; a read
+                  ;; that failed is the plan's :unread (prove! stops on it), never zero greens
                   (fn [digests]
-                    (let [asked (ask-root {:op :results :digests digests})]
-                      (or (:results asked)
-                          (do (println (str "prove: no results read from the standing root (port " (config/value :seon.config.proofs/results-port) "): "
-                                            (pr-str (or (:error asked) (:seon.error/message asked))) "; nothing is reused"))
-                              {}))))))
+                    (let [r (read-results (config/value :seon.config.proofs/results-port) digests)]
+                      (if (contract/error? r) (do (vreset! unread r) {}) r))))]
+    (cond-> p @unread (assoc :unread @unread))))
 
 (defn- prune-runs!
   "Remove the oldest run directories beside out (target/prove/<timestamp>-<pid>: the names sort by
@@ -394,12 +407,19 @@
   [what all? out names]
   (if-let [bad (refused-names names)]
     (do (println (str "TEST FAILED: " bad)) 1)
+  (let [unsent (send-unsent!)
+        plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+  (if-let [u (:unread plan)]
+    ;; a read that failed is not zero greens: nothing runs, and the failure is kept for the results
+    ;; root to record when it takes the kept requests (a run's :seon.proof.run/unread)
+    (do (keep-unsent! {:op :record :run {:id (str "unread " (random-uuid)) :unread (:seon.error/message u)} :ran {}} (:why u))
+        (println (str "TEST FAILED: " (:seon.error/message u) " (the standing root restarting refuses until it listens: bin/root status)"))
+        1)
   (let [t0 (profile/now-ns)
         dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
-        unsent (send-unsent!)
         _ (when (pos? unsent) (println (str "prove: " unsent " runs' results still unsent in " (config/value :seon.config.proofs/unsent-dir))))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))
+        {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} plan
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
         ;; be selected, so a run would say OK of tests it never saw
         no-test (when tests? (seq no-test))
@@ -447,7 +467,7 @@
       1
       (do (when (and (empty? run-tests) (empty? run-steps))
             (println (str "prove: nothing to run: " (count reused) " reused green at their digest")))
-          0)))))
+          0)))))))
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green

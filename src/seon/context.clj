@@ -537,8 +537,7 @@
   calls it, whom it calls and the sections naming it; or a schema key, whose readers and writers it
   finds), as a vector of hits best first, each {:kind :name :e :score :by :relevance :line :at}:
   :kind one of search-kinds, :name the var, section address, task id or schema key, :e its entity,
-  :score the weighted reciprocal-rank score of seon.vector/rrf-scores over the rankings below
-  (:seon.config.render/search-weights), :by the set of them it is in (:text :meaning :refs),
+  :score the reciprocal-rank score of seon.vector/rrf-scores over the rankings below, :by the set of them it is in (:text :meaning :refs),
   :relevance the chance it is worth reading (seon.context/relevance, over q's vector, words and the
   names it holds, the first k x :seon.config.render/related-near hits by the fused score joined to its
   pool; a function, section or schema key, not yet a test or task),
@@ -564,7 +563,6 @@
         by (or by #{:text :meaning :refs})
         k (or k (cfg/value :seon.config.render/search))
         minimum (or minimum (cfg/value :seon.config.render/relevance-summary))
-        weights (cfg/value :seon.config.render/search-weights)
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (str/starts-with? (str n) prefix)))
         toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (docs/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
@@ -587,7 +585,7 @@
                              (for [s seeds :when (keyword? s) c (docs/callers db s) :let [kd (kind-of db c)] :when (kinds kd)] [kd c])))
                [])
         rankings (select-keys {:text (mapv (juxt :kind :name) toks) :meaning meaning :refs refs} (seq by))
-        scores (vector/rrf-scores (vec (vals rankings)) (vec (map weights (keys rankings))))
+        scores (vector/rrf-scores (vec (vals rankings)))
         in (fn [h] (into #{} (keep (fn [[m r]] (when (some #{h} r) m))) rankings))
         first-line (fn [[kind n]] (case kind
                                     (:var :test) (or (some-> (d/entity db [:var/name n]) :var/doc ref/lead-sentence) "")
@@ -643,7 +641,7 @@
   agent's own work takes over from (the owner, 2026-10-27: \"the plan will often be fairly empty
   ... we need to adapt to whatever they are doing\"); and the words of its last three evals, the
   plan's before any. {:vector :words}, nil when neither the plan nor any eval has a vector yet.
-  Measured on 44 recorded turns of 10 runs (notes/relevance-replay-2026-10-27.md): R@10 0.441 and
+  Measured on 44 recorded turns of 10 runs (claude_scratch/relevance-replay-2026-10-27.md): R@10 0.441 and
   0.55 within 800 tokens of what the agent read next, against 0.402 and 0.48 by the plan alone and
   0.411 and 0.49 with the plan held at full weight beside the evals."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:map [:vector [:vector number?]] [:words :string]]]]}

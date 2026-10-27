@@ -279,7 +279,7 @@
   ;; context showed only the previous turn's evaluations (2026-10-21); a REPL keeps its
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
-  ;; into one assistant message (notes/archive/design-agent-view-2026-10-24.md §3, the request is a render)
+  ;; into one assistant message (claude_scratch/archive/design-agent-view-2026-10-24.md §3, the request is a render)
   (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
@@ -342,7 +342,7 @@
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
   ;; prefix, so each request starts with the whole of the one before, even after the program the
   ;; task cites, or the task's plan, changed: the page is read whole at the session's first turn
-  ;; and as what changed of it at each later one, by part key (notes/archive/one-derivation-design-rev42.md
+  ;; and as what changed of it at each later one, by part key (claude_scratch/archive/one-derivation-design-rev42.md
   ;; §7), each re-derived from the branch at that turn's commit
   (ts/test-branch!
     (fn [_ conn]
@@ -479,7 +479,7 @@
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.context/records), rendered by the message fact's
-  ;; own messages (seon.context/eval-messages; notes/archive/design-agent-view-2026-10-24.md §3)
+  ;; own messages (seon.context/eval-messages; claude_scratch/archive/design-agent-view-2026-10-24.md §3)
   (let [[m] (context/message-messages {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"} {})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
@@ -501,7 +501,7 @@
 
 (deftest a-turns-reasoning-goes-back-with-its-reply
   ;; DeepSeek's thinking mode with tools needs each earlier reply's reasoning_content sent back
-  ;; (a 400 otherwise, measured: notes/step0/no-replay.edn): the reply's first eval carries it,
+  ;; (a 400 otherwise, measured: claude_scratch/step0/no-replay.edn): the reply's first eval carries it,
   ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
   (let [ms (context/eval-messages {:seon.eval/by "a1" :seon.eval/record {:code "(f 3)" :response {:value 9} :call-id "c1" :call 0 :prose "f triples." :reasoning "Square it first."}} {})
         assistant (first ms)]
@@ -745,7 +745,7 @@
         (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
 
 (deftest the-request-is-a-conversation-of-evals-and-the-page
-  ;; notes/archive/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
+  ;; claude_scratch/archive/one-derivation-design-rev42.md §4: each turn's prose and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and at each model
   ;; turn the page: whole at the first, what changed of it after (a turn taken moves the status
   ;; alone); the prefix stays byte-identical
@@ -1129,7 +1129,7 @@
     (render/dispose-walk! w)))
 
 (deftest the-task-draws-what-it-needs
-  ;; notes/context-for-20-turns-2026-10-26.md (D1-D4): the task's list draws the whole plan (D4),
+  ;; claude_scratch/context-for-20-turns-2026-10-26.md (D1-D4): the task's list draws the whole plan (D4),
   ;; each proof written with its source (D1; its last result is the status's), each var the plan cites
   ;; with its source (D2, a component of its own) and each section the plan cites with its text (D3)
   (let [[db te] (sections-near "Make ```demo/g``` say one thing (docs/vector.md#what-is-embedded).")
@@ -1320,7 +1320,7 @@
         n (Math/sqrt (reduce + (map #(* % %) raw)))]
     (mapv #(/ % n) raw)))
 
-(deftest search-ranks-meaning-across-kinds-by-score-and-weights-the-rankings
+(deftest search-ranks-meaning-across-kinds-by-score
   (let [with-vec (fn [m i] (merge m (vector/pack (unit-vec i)) {:seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 4}))
         db (d/db-with (ts/test-db)
                       [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
@@ -1333,10 +1333,3 @@
     (is (every? #(= #{:meaning} (:by %)) hits))
     (is (apply >= (map :relevance hits)) "ranked by one scale, best first")
     (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section} :min 0.0} (unit-vec 0))))))))
-
-(deftest rrf-scores-weigh-each-ranking
-  (let [plain (vector/rrf-scores [[:a] [:b]])
-        weighed (vector/rrf-scores [[:a] [:b]] [1.0 3.0])]
-    (is (= (:a plain) (:b plain)) "two firsts weigh alike")
-    (is (< (:a weighed) (:b weighed)) "a ranking's weight scales its share")
-    (is (< (Math/abs (- (:b weighed) (* 3.0 (:a weighed)))) 1e-12))))

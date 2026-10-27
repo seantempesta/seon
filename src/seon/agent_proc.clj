@@ -191,7 +191,7 @@
                (step/out! o :to-api (status st {:mem-mb (:mem-mb (:result m)) :status (busy st)}))
                st)
       ;; what a test run of the agent's ran (seon.agent/run-tests-forked: seon.proofs/results-tx),
-      ;; recorded on main by root's writer: a refusal is this agent's problem, as its other facts' are
+      ;; recorded on main by root's writer: a refused request is this agent's problem, as its other facts' are
       :record (do (step/out! o :to-writer {:op :tx :branch :db :tx-data (:tx-data m) :dest {:agent-facts [id]}}) st)
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it

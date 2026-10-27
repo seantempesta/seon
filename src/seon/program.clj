@@ -25,7 +25,7 @@
     platform's own source has the same facts (seon.source)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :refer [defn defn-] :as contract] [datahike.api :as d] [jolt.ir :as ir] [jolt.analyzer]
-            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch]))
+            [seon.schema.datahike :as sd] [seon.edn :as sedn] [malli.registry :as mr] [seon.error :as error] [seon.db :as pdb] [seon.config :as cfg] [clojure.string :as str] [hasch.core :as hasch] [seon.reader :as reader]))
 
 (defn scratch-ns?
   "Is namespace nsx scratch (never program): `user`, or declared ^:scratch."
@@ -191,14 +191,15 @@
   host statics (Class/member) it references (:refs, with each var a literal name passed to
   resolve, ns-resolve or requiring-resolve looks up; in a macro, also the names its template
   quotes, which its expansion calls), the qualified names its quoted data holds (:quoted:
-  quoted-names, data, not references), the qualified keywords its constants name (:keywords: the attributes, config keys
+  quoted-names, data, not references; a string that opens a form is code sent to a REPL, read
+  as one), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references, the
   calls it bounds by a clock (:timeouts: deref with a timeout), its catch clauses
   (:catches, each {:class :answers}), the namespaces it requires, and whether it changes its
   namespace's environment (:env?)."
   {:malli/schema [:=> [:cat :map] :map]}
   [node]
-  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :banned #{} :requires #{} :env? false
+  (let [acc (volatile! {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
                         :timeouts #{} :catches #{}})]
     ((fn walk [n in-fn?]
        (case (:op n)
@@ -218,8 +219,20 @@
                            (cond (qualified-keyword? x) (vswap! acc update :keywords conj x)
                                  (qualified-symbol? x) (vswap! acc update :quoted conj x)
                                  ;; a quoted collection: its names (one quoted-names) and its keywords
+                                 ;; (a request it sends, {:op k}, names its op: :ops)
                                  (coll? x) (vswap! acc #(-> % (update :quoted into (quoted-names x))
-                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))))
+                                                            (update :ops into (keep (fn [m] (when (and (map? m) (keyword? (:op m))) (:op m)))) (tree-seq coll? seq x))
+                                                            (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq x))))
+                                 ;; a string that opens a form is code sent to a REPL (an agent's eval, a
+                                 ;; root's): read by the one reader, its delimiters repaired (a str of
+                                 ;; fragments), its names are data as a quoted form's are
+                                 (and (string? x) (str/starts-with? (str/triml x) "("))
+                                 (let [fs (reader/read-text (:text (reader/forgive x)) 'user)]
+                                   (vswap! acc #(-> % (update :quoted into (quoted-names fs))
+                                                    (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
+         ;; a map built at run time names its op when its :op is a constant keyword ({:op :eval :code (str ...)})
+         :map (when-some [k (some (fn [[kn vn]] (let [v (datum vn)] (when (and (= :op (datum kn)) (keyword? v)) v))) (:pairs n))]
+                (vswap! acc update :ops conj k))
          :try (vswap! acc update :catches into (map sedn/encode) (catches n))
          :invoke (let [f (invoked n)]
                    (when (and (= 'clojure.core/deref f) (= 3 (count (:args n))))
@@ -262,7 +275,7 @@
   {:malli/schema [:=> [:cat [:sequential :map]] :map]}
   [as]
   (reduce (fn [a b] (merge-with (fn [x y] (if (boolean? x) (or x y) (into x y))) a b))
-          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :banned #{} :requires #{} :env? false
+          {:defs [] :inline-defs #{} :methods [] :impls [] :multis #{} :refs #{} :quoted #{} :keywords #{} :ops #{} :banned #{} :requires #{} :env? false
            :timeouts #{} :catches #{}}
           as))
 
@@ -394,7 +407,7 @@
                (or ns-form? (seq defs) (seq declares) (seq methods) (seq impls) (:env? a)))
       (cond-> {:id (form-id nsym src k) :src src :ns nsym :ns-form? (boolean ns-form?)
                :defs defs :declares declares :methods (or methods []) :impls (or impls [])
-               :refs (into (:refs a) (macro-uses nsx form)) :quoted (:quoted a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
+               :refs (into (:refs a) (macro-uses nsx form)) :quoted (:quoted a) :ops (:ops a) :requires (:requires a) :banned (:banned a) :inline-defs (:inline-defs a)
                ;; its code's keywords and its contracts': the data it operates on, read once here
                :keywords (into (:keywords a) (comp (keep :contract) (mapcat (comp names sedn/decode))) defs)
                :timeouts (:timeouts a) :catches (:catches a)}
@@ -434,7 +447,7 @@
 
 (def ^:private form-sets
   "A form's card-many facts, as stored and as its row (form-row) and its account name them."
-  [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
+  [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/ops :ops] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (defn- form-of
@@ -1165,7 +1178,7 @@
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
-        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es)
+        id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es) ov (at :form/ops es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
         key-of (merge ;; definition-key's order: the earlier kind wins
@@ -1174,7 +1187,7 @@
                  (update-vals (at :method/key ds) (fn [[v]] (into [:method] (sedn/decode v))))
                  (update-vals (at :var/name ds) (fn [[v]] [:var v])))]
     (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
-           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
+           {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e)) :ops (set (ov e))
             :defines (into #{} (keep key-of) (dv e))
             :keywords (set (kv e))
             :config (config-reads (set (kv e)) refs nsym pins)}))))
@@ -1257,7 +1270,11 @@
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
         test-nss (if (identical? tests (:tests g)) (:test-nss g #{}) (into #{} (map (comp symbol namespace)) tests))
-        named (fn [f] (if (test-nss (:ns f)) (into (:refs f) (:quoted f)) (:refs f)))
+        ;; and so is one a method of an entry multimethod (seon.server/op-answer) quotes: the form
+        ;; it sends the process it answers for ('seon.turn/hand-back!)
+        entry (cfg/value :seon.config.source/process-entry)
+        entry-method? (fn [f] (some (fn [[k m]] (and (= :method k) (entry m))) (:defines f)))
+        named (fn [f] (if (or (test-nss (:ns f)) (entry-method? f)) (into (:refs f) (:quoted f)) (:refs f)))
         refd (if bulk?
                (indexed (for [f added r (named f)] [r (:id f)]) true)
                (reduce (fn [m f] (reduce #(update %1 %2 (fnil conj #{}) (:id f)) m (named f)))
@@ -1269,21 +1286,29 @@
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
-        ;; a form that starts a process (a process var, the binary) reaches the program that process
-        ;; runs: the entry vars' forms. The process's code is reached over a socket, by keyword ops
-        ;; and as a quoted form it is sent, edges no reference shows
-        entry (cfg/value :seon.config.source/process-entry)
-        entry-ids (vec (keep var-form entry))
+        ;; a form that starts a process (a process var, the binary) reaches what that process runs
+        ;; for it, over a socket and as a quoted form it is sent, edges no reference shows: the
+        ;; entry vars' forms (the agent's turn) and, of an entry multimethod (the server's
+        ;; op-answer), only the methods of the ops the form sends (its :ops; any form of a test's
+        ;; namespace, which talks to a root it started), not the multimethod, which reaches every method
+        entry-ids (vec (keep var-form (remove #(seq (get methods %)) entry)))
+        op-ids (fn [f] (for [m entry :when (seq (get methods m)) id (get methods m)
+                             :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
+                         id))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
                         (vec (concat (remove test-ids (keep var-form (named f)))
                                      (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
+                                     ;; a request a test's code builds goes to a root's server (in-agent's ask)
+                                     (when (or (proc (:id f)) (bin (:id f)) (test-nss (:ns f))) (op-ids f))
                                      (filter rows (:sedges f))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
         holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
-        starters (when (some V entry) (concat proc bin))
+        ;; an entry var or method changed: every form whose edges go to them (one that starts a
+        ;; process, or sends an op from a test's namespace) is re-edged
+        starters (when (some (into V M) entry) (concat proc bin (filter #(seq (:ops (rows %))) (keys rows))))
         dirty (-> (set (map :id added))
                   (into (mapcat #(get refd %)) V)
                   (into (keep var-form) (concat V M P))
