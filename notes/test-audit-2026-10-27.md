@@ -96,3 +96,36 @@ The same method as §4, in this worktree after merging main, with `stages.clj` (
 - **Reuse is 0 after `tests-are-facts`.** The results' home moved to root's main, and nothing carried the old greens over. Until main runs this tree, every checkout runs about 880 tests. Neither main's verification nor a migration-free reseed has run yet. A results gap like this should be expected at every switch of the results home, and stated in the merge.
 - **A Jolt bump still moves 45% of digests** (451 of 997). That is all tests whose reach touches a Jolt-pinned namespace. Whether 451 is honest (they do reach Jolt code) is reuse's call.
 - `ask-root` answered `:refused` once in four tries while root was up, and then said "nothing is reused". A refused connection reads as "no results", with no retry or error fact.
+
+## 7. Independent audit of today's merges (AGENTS §2: every 10 merges or daily)
+
+**What was read.** Main took 190 first-parent commits today. src, test and bin went +9,495 / −4,320 lines, net +5,175. Two Sonnet auditors that had not seen the work read 36 merges against §1, §3 (earns its place, value review) and §9:
+- the 18 test-pipeline merges;
+- the 18 merges that grew src most outside the pipeline.
+
+I checked the cuts marked ✓ against the code myself. A claim I could not confirm is marked "unverified". There are no clocks and no old §7a words.
+
+**Ratings.**
+- **Overbuilt:** reach-graph-is-stored and cost-bytes-are-the-calls-own.
+- **Questionable:** tests-are-facts, jolt-pin-is-a-class, inputs-hash-only-what-changed, tests-stream-and-continue, a-process-tests-digest-moves…, a-test-result-is-reused…, a-write-back-is-never-lost, one-search, health-in-context, agent-repl, outside-repl-surface and an-outside-agent-is-a-first-class-worker.
+- **Worth it:** the rest, including render-walk (+679 lines: it deletes the parts layer, 9.5–21.8 M → 0.76 M ticks a new eval), test-plan-is-the-services (it deletes the selector twin), prove-is-the-one-runner (net 0 over 14 files) and observe-reads-are-renders (it deletes merge-readiness).
+
+**What to cut, ranked by value against risk:**
+
+| # | Cut | From | ≈ lines | Replaced by |
+|---|---|---|---|---|
+| 1 | test_runner's own `program-db` (test_runner.clj:83-125). Its stored graph file `builder-id`/`reach-graph-of` (126-156, keyed by a hand-rolled digest of seon.program's forms) is a stored copy beside a value, which exists only because the runner keeps a second program. ✓ | tests-are-facts, reach-graph-is-stored | −75 | root's program and fork-server graph, through the service (fix 1). This removes the 24 s cold import too. |
+| 2 | The **unsent queue**: `ask-root`/`no-root`/`unrecorded?`/`keep-unsent!`/`send-unsent!` (197-260), plus `unsent-dir`. When no root took the results the run stays green ("kept, not lost, so the run is not red", :254). That is a fallback instead of an error fact (§9), and a hand-built retry queue. A refused `:results` ask likewise answers "nothing is reused" with no fact, as measured in §6. ✓ | tests-are-facts | −60, 1 key | one request to the service; no root is a red run that names it |
+| 3 | `contract/disarm!` and `unarmed` (contract.clj:285-301): `alter-var-root` over every armed var, process-wide, to measure a cost proof's bytes. That is a §5 code smell, with a residual error the docstring admits. ✓ | cost-bytes-are-the-calls-own | −35 | the cost-proof harness measures under one declared arming state |
+| 4 | `problems/health-moved` (problems.clj:712) with `split-rows`, `touched-runs`, `health!`: a second, incremental health path beside `health`, with no number in its merge. ✓ (the code exists; "no number" is from the commit) | health-in-context | −150 | `health`, unless the branch's report shows the saving |
+| 5 | one-search's unmeasured keys: `search-weights` (all 1.0), `search-relevance`, `search-min`, `context/relevance` and the `:min` filter. `docs/exact` and `my.agent/grep` still sit beside `search`. ✓ (weights all 1.0) | one-search | −45 to −75, 3 keys | add them back with embed-lab's measured selector, and fold exact and grep into search |
+| 6 | `config-key-readers` (program.clj:1044), a hand-kept list of one reader. A reader that is not on it moves no digest, which is a silent hole. ✓ | a-process-tests-digest…, a-test-result-is-reused… | −25 | the key declared at the reader's definition (reuse's area) |
+| 7 | `server/fork!` and the `:from`/`:fresh` MCP arguments repeat `attach!`'s run start (unverified) | agent-repl | −35 | `attach!` on a new task |
+| 8 | `:seon.render/summary`, `summarized`, `state-summary` for one value, and `repl/equip-ns!`, which fixes at the reader what `make-ns!` should produce (unverified) | outside-repl-surface | −55 | `agent/state` printing small at its producer; `make-ns!` |
+| 9 | `prune-runs!` (test_runner.clj:369) and `runs-kept`: a second disk-pruning beside docs/machine.md's | one-run-one-directory | −12, 1 key | machine.md's pruning |
+| 10 | The env expression repeated at reconcile.clj:281 and :494, fixed at the reader (unverified) | an-outside-agent-is-a-first-class-worker | −5 | `attach!` records the env |
+| 11 | `SEON_SOURCE_BRANCH` as `#env` in config (§9: an env var instead of config) | a-write-back-is-never-lost | −5 | a config key set per checkout by bin/worktree |
+| 12 | The twin prewalks `placed-units`/`placed-hiccup` (unverified) | render-walk | −15 | one walk |
+
+Not a cut: `my.root/hold!`/`take-back-tx` has no caller in src, but my.root is root's REPL surface, so its callers are root's evals. Process notes: watcher-source-reload was merged, reverted (5731149001) and merged again with the same diff, and the revert states no cause. Several merges from the 48d650df60 → 13605b6341 → f6ea4caf85 chain undid each other's config-read code within hours, which is the "half-baked plan that got built" of §9. **Total: about −540 lines and −5 config keys**, cuts 1 and 2 being most of the test pipeline's.
+
