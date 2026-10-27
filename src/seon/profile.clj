@@ -14,7 +14,7 @@
   in 64 by the wall clock, an estimate, inclusive only.
 
   Jolt-specific, and why (estimates before the probe, measured in the probe beside them):
-  - The wrapper is Scheme, not Clojure: no Clojure dispatch. Measured 2026-10-27 (load 30-50)
+  - The wrapper is Scheme, not Clojure: no Clojure dispatch. Measured (load 30-50)
     over 1M calls of a two-key predicate: the call alone 10 ticks; counting calls alone (the
     wrapper before) 11; calls, ticks and bytes 15 ticks, about 60 ns more a call in wall time
     (a jolt-ticks read about 26 ns, a bytes read 3 ns); the same predicate contracted, its

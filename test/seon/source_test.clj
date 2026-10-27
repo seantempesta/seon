@@ -343,6 +343,10 @@
           (let [kept (str here "/target/restart-test-" (random-uuid))]
             (.mkdirs (java.io.File. kept))
             (doseq [n (range 1 (inc @boots))] (sh/sh "cp" (str dir "/runs/boot-" n ".log") kept))
+            ;; and each merge gate's test-run log, which the failure names by its scratch path
+            (doseq [l (.listFiles (java.io.File. (str dir "/runs/merge-tests")))
+                    :when (str/ends-with? (.getName l) ".log")]
+              (sh/sh "cp" (.getPath l) kept))
             (println "the restart test's boot logs kept in" kept)))
         (doseq [g (.listFiles (java.io.File. (str dir "/runs/generations")))]
           (sh/sh (str here "/bin/worktree") "--remove-at" (.getPath g)))

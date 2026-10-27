@@ -56,7 +56,7 @@
   agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
   each is free and clojure.repl holds it (an agent's process interns source and pst there,
   seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its
-  own, and left). Done here, at the reader, on purpose (audit cut 8, 2026-10-27): this loop is the one
+  own, and left). Done here, at the reader, on purpose (audit cut 8): this loop is the one
   place that carries *ns* from form to form, so it is the owner of what follows the agent into a new
   one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
   every program namespace at load, which are not the agent's. Answers ns."
@@ -429,7 +429,9 @@
     (cond-> (if data?
               {:code code :response resp}
               (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
-                basis (assoc :schema (:seon.render/schema (meta (:value resp))) :basis basis)))
+                basis (assoc :basis basis)))
+      ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
+      (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
       (or (contains? r :value) (:ex r))
       (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))

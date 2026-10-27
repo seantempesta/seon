@@ -60,10 +60,8 @@
 (defc kq-watch "e13_kq_watch" [:int :int] :long)
 (defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
 
-;; blocking: the fork server's one wait, on a process with no fibers to run; a fiber's wait reads
-;; kq-poll after its park instead (docs/failure-points.md#physics-who-may-run-threads)
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
-(defc kq-poll "e13_kq_poll" [:int] :long)
+(defc kq-poll "e13_poll" [:int :int] :long)
 
 (defn wait-fd-or-exit
   "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
@@ -86,13 +84,11 @@
       (let [exited (volatile! (= -1 pid-watch))]
         {:wait (fn [] (if @exited
                         :exited
-                        ;; the poller's ready is a hint (a stale one ends the park at once), so what kq
-                        ;; holds is read without waiting, and nothing there parks again: a blocking
-                        ;; kevent here stopped every other fiber of a main carrier (the agent's answer
-                        ;; to its own test child, 2026-10-28)
                         (loop []
                           (poller/wait-ready kq :read)
-                          (let [r (kq-poll kq)]
+                          ;; e13_poll never waits: 0 for fd's input, the pid at its exit, -3 when kq's
+                          ;; readiness held no event yet (park again)
+                          (let [r (kq-poll kq fd)]
                             (cond (pos? r) (do (vreset! exited true) :exited)
                                   (zero? r) :input
                                   (= -3 r) (recur)

@@ -42,8 +42,8 @@
   or resolves (as the compiler does) to a var named def... (defn, deftest, defmethod, a
   library's defschema), or to a clojure.core form that changes the namespace's environment
   (ns, require, extend-type ...). An eval whose def sits beside calls, (let [r (f)] (def x r)), is
-  none: it stays the recorded eval, never program a later load runs again (root's ruling,
-  2026-10-27: one ran my.agent/prove at every load of its branch)."
+  none: it stays the recorded eval, never program a later load runs again (root's ruling:
+  one ran my.agent/prove at every load of its branch)."
   {:malli/schema [:=> [:cat :any :seon.host/namespace] :boolean]}
   [form nsx]
   (boolean
@@ -1156,7 +1156,7 @@
   of a seon.config.* namespace, the config's keys). A form that takes a whole config map (the
   config in force, seon.config/config, or the one root wrote on main, seon.config/from-db) reads
   the keys it names, no more: a key it reads by a value it computes is the daily full run's to
-  catch (owner, 2026-10-27: \"no test digests the whole tree\"; every config key a root's boot
+  catch (owner: \"no test digests the whole tree\"; every config key a root's boot
   took moved the tests that boot one, 57 of them, at every new key). seon.config's own readers
   (value, resolve) name no key of their own; every one of their callers names its key, but for
   computed-config-reader?'s. A form baking the schemas (referencing seon.config/baked-schema-forms:

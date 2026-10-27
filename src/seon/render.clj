@@ -60,7 +60,7 @@
   improves only through the one printer or such a render), and the printer's part is four lines (a
   render may answer {:value x} as well as {:text :html}, as its `call` clause already prints a value in
   place); the producer-side alternative, keeping host objects out of seon.agent/state, is a rewrite
-  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8, 2026-10-27)."
+  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v]
   (when-let [sym (summary-declared (:seon.render/schema (meta v)))]

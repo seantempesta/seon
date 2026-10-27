@@ -10,7 +10,7 @@
  :seon.agent/state [:map {:seon.render/summary seon.agent/state-summary}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
- :seon.test/proved [:map {:seon.render/summary my.agent/prove-summary}]
+ :seon.test/proved [:map {:seon.render/summary my.agent/prove-summary :seon.render/html seon.render.ui/proved}]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that
