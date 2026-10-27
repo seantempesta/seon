@@ -1235,3 +1235,24 @@
         (str "the swap! answered " (pr-str swapped) "; the units: " (pr-str (map :id (:units (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
+
+(deftest a-line-that-does-not-read-ends-its-test-and-the-run-goes-on
+  ;; task seon.agent/a-test-childs-line-always-reads (root, 2026-10-27): a report holding a value
+  ;; that prints as no EDN (an exception's #error {\n splits the line, a var's #'v does not read)
+  ;; killed its agent with exit 70. The line is that test's :error, once, and the next test's lines
+  ;; are taken as before
+  (let [enc seon.edn/encode
+        bad (enc {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]})
+        lines (concat [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]})
+                       (enc {:seon.test/started "#'app.t/b"})]
+                      (str/split-lines bad)
+                      [(enc {:seon.test/started "#'app.t/c"}) (enc {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]})])
+        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {}} lines)
+        errors (filter #(= :error (:type %)) (:streamed acc))]
+    (is (< 1 (count (str/split-lines bad))) "the exception's raw newline splits the line")
+    (is (= 1 (count errors)) "the unreadable line is one :error")
+    (is (= "#'app.t/b" (:var (first errors))) "on the test that was running")
+    (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
+    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
+    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0} false) [:reports 0 :type]))
+        "a last line that does not read is the run's :error, not the agent's death")))
