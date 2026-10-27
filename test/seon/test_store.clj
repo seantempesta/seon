@@ -173,6 +173,29 @@
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
       (nil? port) (assoc :log (if (.exists log) (slurp log) "")))))
 
+(def ^:private shared-roots
+  "This test process's shared roots, one per [checkout args] and started at the first test that
+  asks for it (shared-root!): a root boots once per shard, not once per test (9.5 s of a 15 s
+  in-agent test was the boot, 2026-10-27; an attach on a running root is 66 ms). Each on a main of
+  its own of the process store, stopped and its main dropped when the process ends (a shutdown
+  hook)."
+  (memoize
+    (fn [checkout args]
+      (let [main (str "shard-" (random-uuid))
+            store (process-store checkout)
+            root (start-root! {:store store :main main :runs (str checkout "/target/runs/" main "-runs") :args args})]
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable (fn [] (stop-root! root) (drop-main! store main) (sh/sh "rm" "-rf" (:runs root)))))
+        root))))
+
+(defn shared-root!
+  "The root this test process shares among its tests for root arguments args (shared-roots):
+  start-root!'s answer, started at the first call. A test sharing it works on branches of its
+  main and deletes them when it ends (seon.agent-test/in-agent); a test whose subject is a root's
+  life (boot, stop, kill, a generation) or main itself starts a root of its own."
+  {:malli/schema [:=> [:cat [:sequential :string]] :map]}
+  [args] (shared-roots (.getCanonicalPath (java.io.File. ".")) (vec args)))
+
 (defn next-root!
   "bin/root next on root: the running root's next generation started on the same store and main.
   Answers root with that one's :port."

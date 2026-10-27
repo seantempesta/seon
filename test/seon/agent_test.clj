@@ -24,53 +24,68 @@
 (def value-of "seon.test-store/value-of, as this namespace's callers name it." ts/value-of)
 
 (defn in-agent
-  "A root on the checkout's src (its source root), one agent on a task of its own, each of
-  forms evaluated in that agent (a string) or sent to the server as it is (a map): every
-  reply's response with its value read back (:value, value-of), or the answer that holds no
-  response, in order. The root works on a
-  main of its own, a branch of the one test store (target/runs/test-store), deleted with
-  every branch under it when the root has stopped (seon.check/drop-mains).
+  "One agent on a task of its own in this test process's shared root on the checkout's src (its
+  source root; seon.test-store/shared-root!, booted once per shard and root arguments), each of
+  forms evaluated in that agent (a string) or sent to the server as it is (a map): every reply's
+  response with its value read back (:value, value-of), or the answer that holds no response, in
+  order. forms is a vector, or a function of the test's names {:ns :task :run :agent} (its task's
+  namespace, a fresh one per test, its task \"<ns>/t\", that task's first run and the attached
+  agent's id, \"a7\") answering one: a test names what it made by these, never by a counter's
+  value. Its task and the task's branches are its own (the namespace is), and its agent is ended
+  and its branches deleted when it ends; its main-side facts go with the shard's main.
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
-  :sets, more --set config overrides for the root (e.g. its scripted model); :decls, more
-  task declarations in demo's file beside demo/t."
+  :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
+  :dirs and :sets; :decls, more task declarations in the task's file beside t (a function of the
+  names, or a vector); :own-root?, a root of its own for this test (its main dropped with it): a
+  test whose agent merges into main, which would move the program every later test runs."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets decls] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls own-root?] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
-        main (str "in-agent-" (random-uuid))
-        store (ts/process-store checkout)
-        path (str checkout "/target/runs/" main)
-        _ (.mkdirs (java.io.File. (str path "-tasks")))
-        _ (spit (str path "-tasks/demo.edn") (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
+        tns (str "t" (subs (str (random-uuid)) 0 8))
+        names {:ns tns :task (str tns "/t") :run (str tns "/t#1")}
+        tasks (str checkout "/target/runs/" tns "-tasks")
+        _ (.mkdirs (java.io.File. tasks))
+        decls (if (fn? decls) (decls names) decls)
+        _ (spit (str tasks "/" tns ".edn") (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
+        args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
+                   (mapcat (fn [x] ["--set" x])) sets)
         ;; its store and main named (seon.test-store/start-root!), never inherited
-        root (ts/start-root! {:store store :main main :runs (str path "-runs")
-                              :args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
-                                          (mapcat (fn [x] ["--set" x])) sets)})
+        root (if own-root?
+               (let [main (str "in-agent-" (random-uuid))]
+                 (ts/start-root! {:store (ts/process-store checkout) :main main :runs (str checkout "/target/runs/" main "-runs") :args args}))
+               (ts/shared-root! args))
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
-        out (if (:port root)
-              (do
-                (eval-root (str "(my.root/load-tasks! sys " (pr-str (str path "-tasks")) ")"))
-                ;; the agent's :ready event, tapped before the attach that spawns it and awaited
-                ;; after: its hello (a ping of :agents until idle was a poll)
-                (eval-root "(def ready-ev (c/events sys))")
-                ;; an attach answers its agent ({:agent :task :run}); one that made none (refused:
-                ;; its fork server lost) ends the test with that answer once the root is stopped,
-                ;; never a wait for a hello that cannot come, nor an answer a caller could read as
-                ;; an agent's
-                (let [attach (ask {:op :attach :task "demo/t"})]
-                  (if-not (:agent attach)
-                    {::attach-made-no-agent attach}
-                    (do (eval-root "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :a1 (:agent e))) :ready (recur))))")
-                        (mapv #(ask (if (map? %) % {:op :eval :agent "a1" :code %})) forms)))))
-              [{:error :root-did-not-listen :log (let [f (java.io.File. (str path "-runs/root.log"))] (if (.exists f) (slurp f) ""))}])]
-    (let [stopped (ts/stop-root! root)]
-      (ts/drop-main! store main)
-      (sh/sh "rm" "-rf" (str path "-runs") (str path "-tasks"))
-      ;; root's log (its fork server's stderr says why it died) is read at its stop, before the
-      ;; runs directory goes
-      (when-let [a (and (map? out) (::attach-made-no-agent out))]
-        (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) "\nroot's log:\n" (:log stopped))
-                        {:attach a :log (:log stopped)}))))
+        attach (when (:port root)
+                 (eval-root (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
+                 ;; the agent's :ready event, tapped before the attach that spawns it and awaited
+                 ;; after: its hello (a ping of :agents until idle was a poll)
+                 (eval-root "(def ready-ev (c/events sys))")
+                 (ask {:op :attach :task (:task names)}))
+        agent (some-> (:agent attach) name)
+        names (assoc names :agent agent)
+        out (cond
+              (nil? (:port root)) [{:error :root-did-not-listen :log (:log root)}]
+              ;; an attach that made no agent (refused: its fork server lost) ends the test with
+              ;; that answer, never a wait for a hello that cannot come
+              (nil? agent) {::attach-made-no-agent attach}
+              :else (do (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :" agent " (:agent e))) (clojure.core.async/untap (:events-mult sys) ready-ev) (recur))))"))
+                        (mapv #(ask (if (map? %) % {:op :eval :agent agent :code %})) (if (fn? forms) (forms names) forms))))
+        ;; what the test made goes with it: on its own root, the root and its main; on the shared
+        ;; one, its agent (killed, its end awaited) and its task's branches
+        stopped (cond own-root? (let [s (ts/stop-root! root)] (ts/drop-main! (:store root) (:main root)) (sh/sh "rm" "-rf" (:runs root)) s)
+                      (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
+                                                   " (when (and a (get (:agents (c/state sys)) a))"
+                                                   "   (c/kill! sys a)"
+                                                   "   (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur)))))"
+                                                   " (clojure.core.async/untap (:events-mult sys) ev)"
+                                                   " (doseq [b (datahike.api/branches (:conn sys)) :when (and (= (namespace b) (name (:main (:store (c/state sys)))))"
+                                                   "                                                       (clojure.string/starts-with? (name b) " (pr-str (str "task-" tns "-")) "))]"
+                                                   "   (datahike.api/delete-branch! (:conn sys) b)))")))]
+    (sh/sh "rm" "-rf" tasks)
+    (when-let [a (and (map? out) (::attach-made-no-agent out))]
+      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) (when own-root? (str "\nroot's log:\n" (:log stopped))))
+                      {:attach a})))
     (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %) out))))
 
 (defn- root-ended
