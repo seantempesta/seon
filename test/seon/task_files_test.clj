@@ -83,7 +83,8 @@
 
 (deftest the-shipped-task-files-load
   ;; task seon.task/the-shipped-task-files-load: every file in the shipped task directory
-  ;; reads and loads onto a test branch with no error
+  ;; reads and loads onto a test branch with no error (a task file is no input of the digest: an edit
+  ;; to one is found by the full run, bin/test --all)
   (let [files (root/task-files)]
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
@@ -105,7 +106,8 @@
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 
 (deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
-  ;; every shipped declaration is one :whole task, none a merge task
+  ;; every shipped declaration is one :whole task, none a merge task (found by the full run when a
+  ;; task file changes: the file is no input of the digest)
   (let [ds (mapcat val (root/task-files))]
     (is (seq ds))
     (is (every? #(= :whole (:seon.task/kind %)) ds))
