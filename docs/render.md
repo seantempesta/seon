@@ -144,7 +144,6 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
-- `my.root/source-changes`: a changed file's path relative to its checkout (`subs` off the checkout's prefix).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
 - `seon.context/near`: the whole line a repaired delimiter is on, the printer budgets it.
