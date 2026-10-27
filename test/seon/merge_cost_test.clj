@@ -97,10 +97,11 @@
                   "asked whether its attribute is data: never the schema, so never the attributes' count")
        :growth :constant
        ;; measured, 5 repeats a size: 562 KB / 39 calls at 100, 592 KB at 300, 585 KB at 1,000
-       ;; (an attribute filter in touched-keys, a def and not a contracted function, adds none; as a
-       ;; contracted function it made 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
+       ;; (43 calls since touched-keys asks each of the 4 differing datoms' attributes whether a key
+       ;; reads it, one call apiece: measured with the filter inline, in a def and as a contracted
+       ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
        ;; 8,126 calls
-       :fixed {:bytes 650000 :calls 39}
+       :fixed {:bytes 650000 :calls 43}
        :sizes [100 300 1000]})
     (finally (when (realized? data-store)
                (let [path (get-in @@data-store [:config :store :path])]

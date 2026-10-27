@@ -201,13 +201,6 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(def ^:private content-attr?
-  "As a predicate of an attribute, whether it is one a program key's content reads: the program's
-  (program/attr-namespaces) or a data attribute (das, data-attr?'s predicate or a set). A def, not
-  a contracted function: a merge asks it of each differing datom, and a contract per datom would
-  make its calls grow with them."
-  (fn [das] (fn [a] (boolean (or (program/attr-namespaces (namespace a)) (das a))))))
-
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs: the keys borne,
   on base or on that db, by each entity a datom of which one holds and the other does not
@@ -217,14 +210,14 @@
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
-  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr? db data-attrs)])
+  (let [read (fn [db] (let [das (data-attr? db data-attrs)]
+                        [db (get-in db [:rschema :db.cardinality/many] #{}) das
+                         (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
                           d (read db)
-                          bc (content-attr? (nth b 2))
-                          dc (content-attr? (nth d 2))
-                          content? (fn [{:keys [a]}] (or (bc a) (dc a)))]
+                          content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
                     e (into #{} (comp (filter content?) (map :e)) (concat gone added))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
@@ -270,8 +263,7 @@
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
         das (data-attr? src data-attrs)
-        carry-attr (content-attr? das)
-        carry? (fn [d] (and (es (:e d)) (carry-attr (:a d))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)
