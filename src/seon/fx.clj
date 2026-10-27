@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn]))
+            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn] [seon.proofs :as proofs]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -445,18 +445,19 @@
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
 
 (defn test-results
-  "Each of tests' status from prove's output out and its exit status: :fail or :error where a
-  RED line names it (its counts say which), :pass only when the run reached its tests, exited
-  0 and named it in no RED line (it ran green, or was green at its digest), and :error for
-  every other one: a run that never reached its tests (its plan or its build failed), or that
-  exited non-zero without naming it (a check step, a crash after the shard), says nothing of it
-  passing."
-  {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
-  [out exit tests]
-  (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
-                       [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
-        reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
-    (into {} (for [t tests] [t (or (red t) (if (and reached? (zero? exit)) :pass :error))]))))
+  "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
+  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), dir the
+  results directory its shards store into (seon.proofs/store-verdicts!). :pass when a green is
+  stored there (it ran green, or was green at its digest), :fail when a red is (flaky, or a red
+  alone), :error with none: a run that never reached it (its plan or its build failed, it died)
+  says nothing of it passing. The record read, never prove's printed output."
+  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :string [:sequential :qualified-symbol]]
+                  [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
+  [plan dir tests]
+  (into {} (for [t tests :let [dg (get-in plan [:digests t]) v (when dg (get (proofs/verdicts dir [dg]) dg))]]
+             [t (cond (and v (proofs/green? v)) :pass
+                      (or v (and dg (.isFile (java.io.File. ^String (proofs/result-path dir dg false))))) :fail
+                      :else :error)])))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -483,9 +484,9 @@
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
         (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
-              out (str (:out r) (:err r))]
-          (spit log out)
-          {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
+              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
+          (spit log (str (:out r) (:err r)))
+          {:value {:results (test-results plan (cfg/value :seon.config.source/test-results-dir) tests) :ms (profile/ms-since t0) :log log}})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))

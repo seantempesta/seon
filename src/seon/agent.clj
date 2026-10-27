@@ -627,13 +627,18 @@
   head, as seon.root/prove! takes it): a session's request and this ask are one run; when it is
   this agent's to run, root's :tests request arrives while it waits and is taken here. Other
   messages wait for the loop. :dead when root is gone (the process then ends). mode :turn (a
-  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request)."
-  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]]}
+  turn's observation, the default) or :judge (root's judge at the run's end: its :judge request);
+  names, the tests of those namespaces only (none: all it selects)."
+  {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:enum :turn :judge]] :map]
+                  [:=> [:cat [:enum :turn :judge] [:set :symbol]] :map]]}
   ([] (prove! :turn))
-  ([mode]
+  ([mode] (prove! mode #{}))
+  ([mode names]
   (commit!)
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode})) (lib/c-exit 0))
+    (when (= :dead (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
+                            (seq names) (assoc :names names))))
+      (lib/c-exit 0))
     (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
@@ -736,7 +741,7 @@
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (fn [t] (and (contains? (:process p) t) (not (seq names)) (not (contains? proofs t))))]
+        skip? (proofs/left-out (:selected p) (:process p) (boolean (seq names)) proofs)]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
@@ -760,7 +765,7 @@
   the test service's runs) selects the plan's tests. names (the test service's request: a set of
   namespaces) restricts either to the tests of those namespaces. A process test (the plan's
   :process: it reaches an agent, a fork, a root or the binary; a shell call is none) never runs here unless its namespace
-  is named (DECISIONS, Process tests are not automatic; root's gate, my.root/gate!, asks).
+  is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
   runs (:at-judge)."

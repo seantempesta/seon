@@ -378,8 +378,8 @@
       ;; since the merge base is merged in at the green (seon.turn/work!), so it is shown, never a reason
       merge (assoc :merge (assoc merge :ready (and (empty? reasons) (empty? (:conflicts merge)))))
       ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
-      ;; branch changed), those the judge runs at the run's end, the process tests run only
-      ;; when root asks (DECISIONS, Process tests are not automatic); a run its bound ended leaves
+      ;; branch changed), those the judge runs at the run's end, the process tests run at the
+      ;; judge's merge gate on a checkout (seon.reconcile's :gate); a run its bound ended leaves
       ;; the rest unknown, never red
       tests (assoc :tests (cond-> tests
                             (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))

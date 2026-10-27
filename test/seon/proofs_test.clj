@@ -118,7 +118,7 @@
     (is (= (program/reach-digests db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
            (update-vals idx :digest))
         "the walk's digests are reach-digests'")
-    (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (runner/automatic cand process))
+    (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (apply dissoc cand (proofs/left-out (keys cand) process false #{})))
         "a run that names nothing selects every key but it"))
   (testing "through the plan bin/prove and bin/test run (test-runner/plan-of), on a checkout of two tests"
     (let [d (scratch-dir)

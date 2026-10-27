@@ -43,7 +43,7 @@
   the one its run began with (or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
   proofs named in prose and never written: the live agents' rounds). A deferred proof (a process test, run
-  only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
+  at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
@@ -419,15 +419,15 @@
                                                                  (set (:seon.run/deferred a)))
                                                       :caused (:seon.run/caused a #{})))]
                      (cond
-                       ;; the process tests the branch's change reaches run before its merge
-                       ;; only when root asked (:seon.task/gate?, my.root/gate!; DECISIONS,
-                       ;; Process tests are not automatic), on a checkout (:gate, seon.fx/run-tests)
+                       ;; the process tests the branch's change reaches run before its merge, on a
+                       ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
+                       ;; 2026-10-27: process tests the change reaches run automatically at the judge)
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; unasked, or with no checkout declared (root's ruling (a)),
-                         ;; the merge goes on, its deferred tests unrun: an open :unrun problem
-                         (cond (or (empty? deferred) (not (:seon.task/gate? t)) (nil? (get-in idx [:root :gate-checkout])))
+                         ;; with no checkout declared (root's ruling (a)), the merge goes on, its
+                         ;; deferred tests unrun: an open :unrun problem
+                         (cond (or (empty? deferred) (nil? (get-in idx [:root :gate-checkout])))
                                {:op :ready-to-merge :run aid :task id}
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}

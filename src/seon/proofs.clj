@@ -229,6 +229,18 @@
              :let [w (write! (result-file dir r))] :when (:seon.error/type w)]
          {:key k :message (:seon.error/message w)})))
 
+(defn left-out
+  "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a
+  process of their own: a root, an agent, a fork, the binary; a shell call is none:
+  seon.program/reach-index's :process?), but none when the run asks for them (asked?: it names
+  their namespaces, or it is a merge's verification) and never one of proofs. Owner, 2026-10-23:
+  tests shouldn't be running agent turns, not automatically at least (DECISIONS, Process tests
+  are not automatic). The one filter bin/test's plan (test-runner/plan-of) and an agent's
+  (seon.agent/run-selection) apply."
+  {:malli/schema [:=> [:cat [:sequential :any] [:set :any] :boolean [:set :any]] [:set :any]]}
+  [ks process asked? proofs]
+  (if asked? #{} (into #{} (filter #(and (contains? process %) (not (contains? proofs %)))) ks)))
+
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
   nil: none), found ({digest result}, the results stored at cand's digests: found over verdicts and stored-results) and proofs
