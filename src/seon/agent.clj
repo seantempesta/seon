@@ -22,6 +22,7 @@
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
+;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
@@ -522,6 +523,32 @@
         (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
         v))))
 
+(defn test-inputs
+  "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
+  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\"} and
+  system.edn's declared refs)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :map] :seon.program/inputs]]}
+  [db]
+  (let [root (d/entity db [:seon.root/id :root])
+        source (:seon.root/source root)
+        shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))]
+    [shared (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
+
+(defn branch-graph
+  "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
+  updated to db (seon.program/reach-update), or db's own with no base; reused while db is the very
+  value it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
+  key lookup (a one-form update is 20-45 ms)."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
+  [db base in]
+  (let [{w-db :db g :graph w-in :inputs} (:branch-graph @state)]
+    (if (and g (identical? db w-db) (= in w-in))
+      g
+      (let [b (when base (base-graph base in))
+            g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))]
+        (swap! state assoc :branch-graph {:db db :graph g :inputs in})
+        g))))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
@@ -552,15 +579,12 @@
                    [:digests [:map-of :qualified-symbol :string]] [:dir [:maybe :string]] [:graph :map] [:process [:set :qualified-symbol]]
                    [:removed [:map-of :qualified-symbol :string]]]]}
   [db base proofs]
-  (let [root (d/entity db [:seon.root/id :root])
-        source (:seon.root/source root)
-        shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))
-        in (or shared {:env "" :tree "" :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})
+  (let [[shared in] (test-inputs db)
         dir (when shared (cfg/value :seon.config.source/test-results-dir))
         judges? (fn [t] (let [m (some-> (find-ns (symbol (namespace t))) (ns-resolve (symbol (name t))) meta)]
                           (and (:test m) (not (program/scratch-ns? (:ns m))))))
         b (when base (base-graph base in))
-        g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))
+        g (branch-graph db base in)
         idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))

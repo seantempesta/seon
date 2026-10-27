@@ -1092,6 +1092,21 @@
     {:id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f))
      :defines (into #{} (keep definition-key) (:form/defines f)) :refs (set (:form/refs f))}))
 
+(defn reached-by
+  "The forms that reach forms ids through a reach graph's reverse edges rev ({form [form ...]}),
+  nearest first, ids left out: what a change to ids moves (reach-step re-folds them, and a test
+  among them is one whose reach digest moves, the test a change to ids selects)."
+  {:malli/schema [:=> [:cat :map [:or [:sequential :any] [:set :any]]] [:vector :any]]}
+  [rev ids] (closure ids #(get rev %)))
+
+(defn tests-reaching
+  "The tests of reach graph g whose reach includes var v, nearest first: the tests a change to v
+  selects (reached-by over g's reverse edges, as the change's own re-fold walks them), v left out."
+  {:malli/schema [:=> [:cat :map :qualified-symbol] [:vector :qualified-symbol]]}
+  [{:keys [rows defs rev tests]} v]
+  (into [] (comp (mapcat #(keep (fn [[k s]] (when (and (= :var k) (tests s) (not= v s)) s)) (:defines (rows %)))) (distinct))
+        (reached-by rev (get defs v))))
+
 (defn- reach-step
   "Graph g after the forms removed (ids) and the rows added (reach-row's, live on db): each
   form's neighbours recomputed only where its edges can have changed (an added form; a form
@@ -1151,7 +1166,7 @@
                 (reduce (fn [pl f] (update pl (:ns f) (fnil conj #{}) (:id f))) pl (filter plain? added)))
         own (into (apply dissoc (:own g) removed) (for [f added] [(:id f) (error/digest (str (:ns f) "\n" (:src f)))]))
         changed (into dirty (map :id) added)
-        affected (into changed (closure changed #(get rev %)))
+        affected (into changed (reached-by rev changed))
         old-comp (:comp-of g)
         olds (keep old-comp affected)
         ;; the affected components re-folded sinks first (Bazel's and Nix's action keys): a

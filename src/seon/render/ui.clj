@@ -944,8 +944,9 @@
   form names v, read here by one query (ctx's callers window holds callers of any kind, so newer
   callers would push them out), each with its last result on main as db holds it (its
   :seon.proof/latest's status, which only main's runs write, so a branch holds main's as of its
-  base; :none when there is none); then ctx's other callers, v itself left out. nil when the task
-  cites no v. What the cited component draws, and the form its cut names."
+  base; :none when there is none), and the form that reads every test whose reach includes v
+  (:reaching, my.agent/tests-reaching); then ctx's other callers, v itself left out. nil when the
+  task cites no v. What the cited component draws, and the form its cut names."
   {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol] [:maybe :map]]}
   [db c v]
   (when-let [cv (some #(when (= v (:var/name %)) %) (vals (get-in (second (the-run c)) [:task :cited])))]
@@ -959,7 +960,9 @@
           tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
                      (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
           status (fn [s] (or (:seon.proof/status (d/pull db [:seon.proof/status] [:seon.proof/latest (str s)])) :none))]
-      (cond-> {:source (print/code (str (get-in cv [:form :form/src])))}
+      (cond-> {:source (print/code (str (get-in cv [:form :form/src])))
+               ;; the direct tests only: every test whose reach includes v is the agent's to ask
+               :reaching (list 'my.agent/tests-reaching (list 'quote v))}
         (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
