@@ -229,7 +229,9 @@
          (= m :dead) (lib/c-exit 0)
          (and (= op (:op m)) (= k (:k m))) m
          (arrived! m) (recur)
-         (and in-place (= in-place (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
+         ;; a request taken in place, and what this process's own fibers hand the loop (a test
+         ;; child's lines and its finished run: a wait on the test service's answer is answered by them)
+         (or (and in-place (= in-place (:op m))) (#{::testing ::ran} (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
          :else (do (swap! state update :pending conj m) (recur)))))))
 
 
@@ -808,13 +810,20 @@
   is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
-  runs (:at-judge)."
+  runs (:at-judge). Given handoff (root's :tests request, on a main carrier), the agent's loop
+  never waits on the child: once it is forked, (handoff read) is called and this answers
+  :seon.agent/running; read, called on a fiber of handoff's, reads the child to its end, giving
+  each line as it comes to its own seen, and answers the thunk that finishes the answer, which the
+  loop calls (its verdicts stored through root's :file owner: only the loop takes from the intake)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe :seon.host/fn]]
+                   [:or :seon.test/result :seon.test/fork-refused [:= :seon.agent/running]]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
-  ([ticks proofs mode forked names]
+  ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
+  ([ticks proofs mode forked names handoff]
   (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
@@ -832,6 +841,28 @@
                                         [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                                            (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
                               (assoc f :var (str "#'" t) :reused true)))
+        ;; the answer, once the run is read: its verdicts stored, the reused tests' reports joined
+        finish (fn [res]
+                 (let [unstored (when (and dir (not (contract/error? res)))
+                   ;; greens and reds; a test whose child died while it ran has no verdict
+                   (let [fails (proofs/failures res)
+                         died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports res)))]
+                     (proofs/store-verdicts! #(fx! :file % {}) dir
+                                             (into {} (for [[t status] (proofs/results res) :when (and (digests t) (not (died t)))]
+                                                        [t (cond-> {:test t :digest (digests t) :pass (if (= :pass status) 1 0)
+                                                                    :fail (if (= :fail status) 1 0) :error (if (= :error status) 1 0)}
+                                                             (fails t) (assoc :failures (fails t)))])))))]
+      (if (contract/error? res)
+        res
+        (-> res
+          (cond-> (seq unstored) (assoc :unstored unstored))
+          (update :reports into reused-reports)
+          (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
+          (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
+          (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
+                 :selected selected :deferred deferred :at-judge (count judge))
+          ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
+          (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)]))))))))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
@@ -863,33 +894,21 @@
                  :parent (fn [pid]
                            (lib/c-close w)
                            (forked pid)
-                           ;; each test as it starts goes to root: what this agent waits on, which a stall names
-                           (let [read (read-to-exit r pid #(when-let [t (:seon.test/started (sedn/decode %))] (send! {:op :testing :test t})))
-                                 st (lib/wait-status pid)]
-                             (lib/c-close r)
-                             (if (contract/error? read)
-                               read
-                               (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))})))
-        unstored (when (and dir (not (contract/error? res)))
-                   ;; greens and reds; a test whose child died while it ran has no verdict
-                   (let [fails (proofs/failures res)
-                         died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports res)))]
-                     (proofs/store-verdicts! #(fx! :file % {}) dir
-                                             (into {} (for [[t status] (proofs/results res) :when (and (digests t) (not (died t)))]
-                                                        [t (cond-> {:test t :digest (digests t) :pass (if (= :pass status) 1 0)
-                                                                    :fail (if (= :fail status) 1 0) :error (if (= :error status) 1 0)}
-                                                             (fails t) (assoc :failures (fails t)))])))))]
-    (if (contract/error? res)
-      res
-      (-> res
-        (cond-> (seq unstored) (assoc :unstored unstored))
-        (update :reports into reused-reports)
-        (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
-        (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
-        (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
-               :selected selected :deferred deferred :at-judge (count judge))
-        ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
-        (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))))
+                           (let [answer (fn [seen]
+                                          (let [read (read-to-exit r pid seen)
+                                                ;; a child it could not watch is ended before it is reaped: a reap of a live one waits
+                                                _ (when (contract/error? read) (lib/c-kill pid 9))
+                                                st (lib/wait-status pid)]
+                                            (lib/c-close r)
+                                            (if (contract/error? read)
+                                              read
+                                              (assoc (test-run-answer (:line read) st (:held? read)) :ms (profile/ms-since t0) :pid pid :exit st))))]
+                             (if handoff
+                               ;; the loop goes on: a later fork must not hold this pipe, or this child would never see its agent go
+                               (do (sock/clofork! r) (handoff (fn [seen] (let [res (answer seen)] #(finish res)))) ::running)
+                               ;; each test as it starts goes to root: what this agent waits on, which a stall names
+                               (answer #(when-let [t (:seon.test/started (sedn/decode %))] (send! {:op :testing :test t}))))))})))]
+    (if (= ::running res) res (finish res)))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -941,12 +960,23 @@
     ;; root's judge at a run's end: the test service proves this branch (prove! :judge), so the
     ;; run is recorded on main and joins any other asker's of its key; answered as :tests is
     :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
-    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
-                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                                                              (or (:mode m) :judge)
-                                                              #(send! {:op :tests-started :id (:id m) :pid %})
-                                                              (some-> (:names m) set))
-             :mem-mb (mem-mb)}]
+    ;; the loop never waits on the child (on a main carrier): a fiber reads it and hands the loop
+    ;; each test as it starts and then the thunk that finishes the answer (::testing, ::ran)
+    :tests (let [ch (intake)
+                 r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
+                                     (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                     (or (:mode m) :judge)
+                                     #(send! {:op :tests-started :id (:id m) :pid %})
+                                     (some-> (:names m) set)
+                                     (when ch
+                                       (fn [read]
+                                         (a/io-thread
+                                           (let [done (read #(a/>!! ch {:op ::testing :line %}))]
+                                             (a/>!! ch {:op ::ran :id (:id m) :finish done}))))))]
+             (when-not (= ::running r) [{:op :tests :id (:id m) :result r :mem-mb (mem-mb)}]))
+    ;; a test as it starts goes to root: what this agent waits on, which a stall names
+    ::testing (when-let [t (:seon.test/started (sedn/decode (:line m)))] [{:op :testing :test t}])
+    ::ran [{:op :tests :id (:id m) :result ((:finish m)) :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-record! (:k m) r) :body r})

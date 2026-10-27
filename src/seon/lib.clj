@@ -63,6 +63,7 @@
 (defc kq-watch-fd "e13_kq_watch_fd" [:int :int] :long)
 
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
+(defc kq-poll "e13_poll" [:int :int] :long)
 
 (defn wait-fd-or-exit
   "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
@@ -85,12 +86,15 @@
       (let [exited (volatile! (= -1 pid-watch))]
         {:wait (fn [] (if @exited
                         :exited
-                        (do (poller/wait-ready kq :read)
-                            ;; kq is readable, so e13_wait answers at once: 0 for fd's input, the pid at its exit
-                            (let [r (kq-wait kq fd)]
-                              (cond (pos? r) (do (vreset! exited true) :exited)
-                                    (zero? r) :input
-                                    :else (unwatched "the wait failed"))))))
+                        (loop []
+                          (poller/wait-ready kq :read)
+                          ;; e13_poll never waits: 0 for fd's input, the pid at its exit, -3 when kq's
+                          ;; readiness held no event yet (park again)
+                          (let [r (kq-poll kq fd)]
+                            (cond (pos? r) (do (vreset! exited true) :exited)
+                                  (zero? r) :input
+                                  (= -3 r) (recur)
+                                  :else (unwatched "the wait failed"))))))
          :close (fn [] (poller/forget! kq) (c-close kq))}))))
 (defc mp-probe* "mp_probe" [:pointer :long] :long)
 (defc nthreads "e13_nthreads" [] :long)
