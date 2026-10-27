@@ -1148,3 +1148,33 @@
     (is (str/includes? (html) "1 vars added") "the next frame shows the var the branch added")
     (is (= 2 (runs)) "the component ran again")
     (r/dispose-walk! w)))
+
+;; ---- what a turn no longer computes: the task render's views (task seon.turn/observe-reads-are-renders) ----
+
+(defn- defn-facts
+  "Program facts for var v defined by source src, as an import records them: its namespace (src/),
+  its form, its var."
+  [v src]
+  (let [n (namespace v)]
+    [{:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str "src/" (str/replace n "-" "_") ".clj")}
+     {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
+     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v)}]))
+
+(deftest the-merge-views-draw-what-the-merge-functions-answer
+  ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
+  ;; moves; a view of main and the merge base takes their commits as children (ctx's :main-commit
+  ;; :base-commit) and reads them from the branch's own store, so it is a function of its args
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
+      (let [base (d/commit-id @conn)
+            _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
+            main (d/commit-id @conn)
+            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
+            merge (h/html (ui/merge-view {:seon.db/db ours} main base))
+            carries (h/html (ui/divergence-view {:seon.db/db ours} base))]
+        (is (str/includes? merge "demo/k") "what main changed since the base")
+        (is (= (seon.merge/readiness (d/commit-as-db conn base) ours (d/commit-as-db conn main)) {:main-moved [[:var 'demo/k]] :conflicts []})
+            "the view draws seon.merge/readiness's answer")
+        (is (str/includes? carries "demo/h") "what the branch's merge carries")
+        (is (not (str/includes? carries "demo/k")) "never main's change")))))

@@ -1031,11 +1031,11 @@
                        (when (seq (:turns run)) [#'status {} rid])
                        ;; what the turn no longer computes, drawn when what it reads moves: main's and the
                        ;; merge base's commits (ctx's environment) are their children
-                       [#'tests-view {} rid (:main c) (:base c)]
-                       [#'caused-view {} (:base c)]
-                       [#'gaps-view {} (:base c)]
-                       [#'divergence-view {} (:base c)]
-                       [#'merge-view {} (:main c) (:base c)]))
+                       [#'tests-view {} rid (:main-commit c) (:base-commit c)]
+                       [#'caused-view {} (:base-commit c)]
+                       [#'gaps-view {} (:base-commit c)]
+                       [#'divergence-view {} (:base-commit c)]
+                       [#'merge-view {} (:main-commit c) (:base-commit c)]))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
