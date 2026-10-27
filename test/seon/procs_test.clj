@@ -583,6 +583,18 @@
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
 
+(deftest a-proc-defect-names-where-it-threw
+  ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
+  ;; case meeting nil, with nothing saying in which function or on what message
+  (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
+        m (#'root/flow-error {:clojure.core.async.flow/pid :reconciler :clojure.core.async.flow/ex ex
+                              :clojure.core.async.flow/msg {:tag 7 :r nil}})
+        p (promise)
+        _ (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+    (is (= "seon.procs-test" (some-> (:in m) namespace)) (str "the fn it threw in: " (pr-str (:in m))))
+    (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
+    (is (= :state (:took (answer p))) "with what its step took")))
+
 (deftest a-throwing-step-answers-every-pending-request
   ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
   ;; message the step took (::flow/msg), which the pipe from Flow's error channel carries as :msg

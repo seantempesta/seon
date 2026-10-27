@@ -15,10 +15,14 @@
 # it is, and root answers its defect (docs/failure-points.md).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 exec perl -MIO::Socket::INET -MJSON::PP -e '
-  $| = 1; my ($port, $portf) = @ARGV;
+  $| = 1; my ($port, $portf) = @ARGV; my $client = "mcp-$$-" . time();
   while (my $line = <STDIN>) {
     $line .= "\n" unless $line =~ /\n\z/;
-    my $id = eval { decode_json($line)->{id} };   # undef for a line that is not JSON: root answers it
+    my $msg = eval { decode_json($line) };
+    my $id = ref $msg eq "HASH" ? $msg->{id} : undef;   # undef for a line that is not JSON: root answers it
+    # who asks: the client id of this session on every message (seon.server/held: an agent it attached
+    # answers its own requests, or ones that name the task of the agent)
+    if (ref $msg eq "HASH") { $msg->{"seon/client"} = $client; $line = encode_json($msg) . "\n" }
     my $p = $port;
     if ($p eq "") { if (open my $f, "<", $portf) { chomp($p = <$f> // ""); close $f } }
     my ($s, $why) = (undef, "no root running for this checkout ($portf is missing): bin/root start");

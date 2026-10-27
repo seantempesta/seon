@@ -1,0 +1,24 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+
+FAIL in (background-gc-invokable-cross-platform) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$background_gc_invokable_cross_platform$fn__1.invoke(background_gc_test.cljc:90)
+expected: false
+  actual: false
+
+FAIL in (guard-spares-unreferenced-writes) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$guard_spares_unreferenced_writes$fn__1.invoke(background_gc_test.cljc:145)
+expected: false
+  actual: false
+
+FAIL in (commit-holds-the-guard) (background_gc_test.cljc:)
+deftest-async error: jolt-chan-lock!: #object[clojure.lang.IObj$reify__0] is not of type #<record type async-chan-v4>
+datahike.test.background_gc_test$commit_holds_the_guard$fn__1.invoke(background_gc_test.cljc:188)
+expected: false
+  actual: false
+
+ERROR in (background-gc-under-pipelined-writes) (:)
+Uncaught exception, not in assertion.
+expected: nil
+  actual: java.lang.IllegalArgumentException: No matching ctor found for class java.util.concurrent.Semaphore

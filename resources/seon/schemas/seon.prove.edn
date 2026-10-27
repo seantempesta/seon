@@ -5,6 +5,9 @@
  :seon.proof/digest [:and {:seon.db/identity true} :string]
  ;; the failing assertions of a red result (seon.proofs/failures), as data
  :seon.proof/failures [:vector :map]
+ ;; a cost proof's verdict ({:rows :verdict}, its report's :cost): kept with the result, so a reused red
+ ;; reports the rows it was judged by, as its fresh run did (seon.proofs/costs reads it back)
+ :seon.proof/cost :seon.cost/report
  :seon.proof/ms :int
  ;; the work the test did (seon.profile/measure!): engine ticks and this thread's bytes
  ;; what a digest was ever judged, kept beside its newest status: green at least once, and the red
@@ -44,12 +47,12 @@
                           [:seon.proof/green {:optional true} :seon.proof/green] [:seon.proof/red {:optional true} :seon.proof/red]
                           [:seon.proof/branch {:optional true} :seon.proof/branch] [:seon.proof/t {:optional true} :seon.proof/t]
                           [:seon.proof/ms {:optional true} :seon.proof/ms] [:seon.proof/ticks {:optional true} :seon.proof/ticks] [:seon.proof/bytes {:optional true} :seon.proof/bytes]
-                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.proof/change {:optional true} :seon.proof/change]]
+                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.proof/cost {:optional true} :seon.proof/cost] [:seon.proof/change {:optional true} :seon.proof/change]]
  ;; one fact per run: its key is (branch, tx), so one request per digest is one run
  :seon.proof/latest-fact [:map {:seon.db/attributes true}
                           [:seon.proof/latest :seon.proof/latest] [:seon.proof/status :seon.proof/status] [:seon.proof/run :seon.proof/run]
                           [:seon.proof/branch :seon.proof/branch] [:seon.proof/t :seon.proof/t] [:seon.proof/change {:optional true} :seon.proof/change]
-                          [:seon.proof/failures {:optional true} :seon.proof/failures]]
+                          [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.proof/cost {:optional true} :seon.proof/cost]]
  :seon.proof.run/id [:and {:seon.db/identity true} :string]
  :seon.proof.run/branch :string
  :seon.proof.run/t :int

@@ -191,12 +191,21 @@
 
 ;; ---- the facts a run leaves, and the class they make true ------------------------------------
 
+(defn- run-tx
+  "The facts a run of answer leaves on main, as its two writers write them: the agent's record of
+  what ran (seon.proofs/answer-ran and results-tx, seon.agent/run-tests-forked's :record) and the
+  test service's run and main's newest results (seon.prove/result-tx, db nil: no function's facts)."
+  [run answer]
+  (let [{:keys [ran failures]} (proofs/answer-ran answer)]
+    (into (proofs/results-tx {:id (str (name (:branch run)) " record") :branch (:branch run)} ran failures)
+          (prove/result-tx nil run answer))))
+
 (deftest a-run-leaves-a-fact-per-digest-and-a-red-closes-with-a-later-green
   (let [db0 (ts/test-db)
         red {:pass 0 :fail 1 :error 0 :ms 7 :digests {'a.b-test/t "dred"}
              :reports [{:type :fail :var "#'a.b-test/t" :message "boom" :expected "1" :actual "2"}]}
         run {:key "main@7" :branch :main :t 7 :agent :a3}
-        db1 (d/db-with db0 (prove/result-tx run red))
+        db1 (d/db-with db0 (run-tx run red))
         reds #(get-in (problems/report %) [:classes :test-red :rows])]
     (testing "a red result is a fact keyed by its digest, and an open :test-red row naming the test, the branch, the tx and who asked"
       (is (= "dred" (:seon.proof/digest (d/pull db1 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
@@ -210,7 +219,7 @@
         (is (= [] (:run p)) "and runs nothing")
         (is (= 1 (:fail (get (:reused p) 'a.b-test/t))))))
     (let [green (assoc red :pass 1 :fail 0 :digests {'a.b-test/t "dgreen"} :reports [{:type :pass :var "#'a.b-test/t"}])
-          db2 (d/db-with db1 (prove/result-tx (assoc run :key "main@8" :t 8) green))]
+          db2 (d/db-with db1 (run-tx (assoc run :key "main@8" :t 8) green))]
       (testing "a later green at a new digest closes the red: nothing written, the row is gone, the red fact is kept"
         (is (= [] (reds db2)))
         (is (some? (d/pull db2 [:seon.proof/digest] [:seon.proof/digest "dred"]))))
@@ -219,7 +228,7 @@
       (testing "a test whose child died has no result at its digest, only main's newest: a death is no verdict to reuse"
         (let [dead {:pass 0 :fail 0 :error 1 :digests {'a.b-test/t "ddead"}
                     :reports [{:type :error :var "#'a.b-test/t" :exit 9 :message "test process died: 9 while #'a.b-test/t ran"}]}
-              db3 (d/db-with db2 (prove/result-tx (assoc run :key "main@9" :t 9) dead))]
+              db3 (d/db-with db2 (run-tx (assoc run :key "main@9" :t 9) dead))]
           (is (= {} (proofs/stored-results db3 ["ddead"])))
           (is (= ['a.b-test/t] (mapv :test (reds db3))) "main's red is still shown")))
       (testing "the run is a fact too"
@@ -251,14 +260,14 @@
 (deftest main-is-proved-at-boot-with-the-config-on-nobody-asking
   ;; task seon.proofs/main-is-proved-in-a-fork: with :seon.config.proofs/prove-main-on-commit a root
   ;; whose program holds seon.patterns-test proves main at its boot with no one asking (a prove
-  ;; agent forked from the fork server's main, no tests loaded from the checkout), leaving a result
-  ;; fact per test digest. Open (task seon.proofs/an-agent-forked-after-finds-mains-results): an agent
+  ;; agent forked from the fork server's main, no tests loaded from the checkout), leaving main's
+  ;; newest result of each test (:seon.proof/latest; the results at their digests are its agent's record). Open (task seon.proofs/an-agent-forked-after-finds-mains-results): an agent
   ;; forked after does not find them at its digests, and a named run after a program commit does not
   ;; reuse them (measured: [false false], :reused 0)
   (let [booted (str "(let [k #(seon.prove/run-key :main (seon.program/program-digest %) nil :main)"
                     "      db (seon.root/await-db sys nil #(d/entity % [:seon.proof.run/id (k %)]))]"
-                    "  (pr-str {:key (k db) :facts (vec (sort (d/q '[:find ?t ?s :in $ ?k :where [?e :seon.proof/run ?k] [?e :seon.proof/digest]"
-                    "                                                [?e :seon.proof/test ?t] [?e :seon.proof/status ?s]] db (k db))))}))")
+                    "  (pr-str {:key (k db) :facts (vec (sort (map (fn [[t s]] [(symbol t) s]) (d/q '[:find ?t ?s :in $ ?k :where [?e :seon.proof/run ?k]"
+                    "                                                [?e :seon.proof/latest ?t] [?e :seon.proof/status ?s]] db (k db)))))}))")
         [a] (at/in-agent [{:op :eval :agent "root" :code booted}]
                          {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true :sets [":seon.config.proofs/prove-main-on-commit=true"]})
         a' (some-> (:value a) clojure.edn/read-string)]
@@ -266,27 +275,35 @@
            (:facts a'))
         (str "main proved at its boot, nobody asking: " (pr-str a)))))
 
-(deftest a-run-naming-nothing-leaves-out-the-process-tests-and-a-run-naming-them-runs-them
+(deftest an-agents-run-leaves-every-process-test-to-the-judge
+  ;; root, 2026-10-27 (THE PLAN 0.7's first attempt): a child forked from an agent has no process
+  ;; store, so a process test an agent ran there errored, named or a proof. It is left out and listed
+  ;; whatever the request names, and runs at the judge's merge gate (bin/test, on a checkout, still
+  ;; runs a named one: seon.proofs/left-out)
   (let [plan {:selected '[a.b-test/plain a.p-test/proc a.p-test/other] :run '[a.b-test/plain a.p-test/proc a.p-test/other]
               :process '#{a.p-test/proc}}
         sel (fn [names proofs] (let [r (seon.agent/run-selection plan names proofs)] (select-keys r [:selected :run :skipped])))]
     (testing "naming nothing: the process test is skipped, and listed"
       (is (= '{:selected [a.b-test/plain a.p-test/other] :run [a.b-test/plain a.p-test/other] :skipped [a.p-test/proc]} (sel nil #{}))))
-    (testing "naming its namespace: it runs"
-      (is (= '{:selected [a.p-test/proc a.p-test/other] :run [a.p-test/proc a.p-test/other] :skipped []} (sel '#{a.p-test} #{}))))
+    (testing "naming its namespace: still skipped, and listed"
+      (is (= '{:selected [a.p-test/other] :run [a.p-test/other] :skipped [a.p-test/proc]} (sel '#{a.p-test} #{}))))
     (testing "naming another namespace: it is not in the run"
       (is (= '{:selected [a.b-test/plain] :run [a.b-test/plain] :skipped []} (sel '#{a.b-test} #{}))))
-    (testing "a task's proof that reaches a process is named by the task: it runs"
-      (is (= '[a.b-test/plain a.p-test/proc a.p-test/other] (:run (sel nil '#{a.p-test/proc})))))
+    (testing "a task's proof that reaches a process: still the judge's"
+      (is (= '[a.b-test/plain a.p-test/other] (:run (sel nil '#{a.p-test/proc}))))
+      (is (= '[a.p-test/proc] (:skipped (sel nil '#{a.p-test/proc})))))
+    (testing "bin/test's plan on a checkout runs a named or proof process test"
+      (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} true #{})))
+      (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))
     (testing "the run fact lists what was skipped"
-      (let [tx (prove/result-tx {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :deferred '[a.p-test/proc]})]
+      (let [tx (prove/result-tx nil {:key "main@1" :branch :main :t 1} {:pass 1 :reports [] :deferred '[a.p-test/proc]})]
         (is (= '[a.p-test/proc] (:seon.proof.run/skipped-process (first tx))))))))
 
 (deftest a-red-on-an-agents-branch-is-not-a-problem-of-main
   (let [db0 (ts/test-db)
         red {:pass 0 :fail 1 :error 0 :ms 7 :digests {'a.b-test/t "dagent"}
              :reports [{:type :fail :var "#'a.b-test/t" :message "boom" :expected "1" :actual "2"}]}
-        db (d/db-with db0 (prove/result-tx {:key "agent-3@7" :branch :agent-3 :t 7 :agent :a3} red))]
+        db (d/db-with db0 (run-tx {:key "agent-3@7" :branch :agent-3 :t 7 :agent :a3} red))]
     (is (some? (d/pull db [:seon.proof/digest] [:seon.proof/digest "dagent"])) "the result is kept by digest")
     (is (= [] (get-in (problems/report db) [:classes :test-red :rows])) "and is not main's problem")))
 
@@ -294,7 +311,7 @@
   "The cost proof's input at n: n tests with a newest result on main, a tenth of them red, each
   with nine older results in the history (kept by digest): the class must cost the tests."
   [n] (let [db0 (ts/test-db)
-            tx (vec (mapcat (fn [i] (prove/result-tx {:key (str "main@" i) :branch :main :t i}
+            tx (vec (mapcat (fn [i] (run-tx {:key (str "main@" i) :branch :main :t i}
                                                       {:pass (if (zero? (mod i 10)) 0 1) :fail (if (zero? (mod i 10)) 1 0) :ms 1
                                                        :digests {(symbol "a.b-test" (str "t" i)) (str "d" i)}
                                                        :reports [{:type (if (zero? (mod i 10)) :fail :pass) :var (str "#'a.b-test/t" i)
