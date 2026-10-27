@@ -465,33 +465,6 @@
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
 
-(deftest the-turn-names-what-the-merge-will-carry
-  ;; owner D4 (2026-10-22): the branch's divergence from main, compact, every turn; it changes
-  ;; as the agent works, so it is turn content, never the cached prefix
-  (let [db (db-with-program)
-        will {:added ['demo/h] :changed ['demo/f] :schemas [:demo/k]}
-        state (context/turn-state db (task-f db) {:turn 1 :max-turns 4 :will-merge will})]
-    (is (= will (:will-merge state)) "in the turn's state, which the page's [:status] prints")
-    (is (not (contains? (context/task-data db (task-f db)) :will-merge)) "not in the task's data")
-    (is (= {} (:will-merge (context/current-state db (task-f db) {:turn 1 :max-turns 4 :will-merge {}})))
-        "measured and nothing to carry says so")
-    (is (not (contains? (context/current-state db (task-f db) {:turn 1 :max-turns 4}) :will-merge))
-        "not measured (a basis from before it was) is no section, never an empty one")))
-
-(deftest a-task-that-merges-itself-sees-whether-it-can-merge
-  ;; owner, 2026-10-26: merge readiness on the page every turn, so the agent knows when it can
-  ;; merge: ready when the done rule passes and merging main conflicts nowhere; what main changed
-  ;; is shown, never a reason; a task that does not merge itself has no such section
-  (let [db (db-with-program)
-        state #(context/turn-state db (task-f db) (assoc % :turn 1 :max-turns 4))]
-    (is (= {:main-moved [[:var 'demo/g]] :conflicts [] :ready true}
-           (:merge (state {:merge {:main-moved [[:var 'demo/g]] :conflicts []} :reasons []}))) "green, main moved: ready")
-    (is (false? (get-in (state {:merge {:main-moved [[:var 'demo/f]] :conflicts [[:var 'demo/f]]} :reasons []}) [:merge :ready]))
-        "merging main would conflict: not ready")
-    (is (false? (get-in (state {:merge {:main-moved [] :conflicts []} :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}) [:merge :ready]))
-        "a red proof: not ready")
-    (is (not (contains? (state {:reasons []}) :merge)) "unmeasured: no section")))
-
 (deftest unresolved-names-share-one-problem
   ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
   ;; that resolves to nothing; it is said once, beside every such name
@@ -546,18 +519,6 @@
     (is (= 'demo-test/f-test (:test r)))
     (is (re-find #"deftest f-test" (pr-str (:do r))) (pr-str r))
     (is (re-find #"run-test" (pr-str (:do r))) (pr-str r))))
-
-(deftest a-turn-says-what-it-ran-what-the-judge-and-the-merge-run
-  ;; root's ruling (a), 2026-10-22: a turn runs the proofs and the tests the branch changed;
-  ;; the judge runs the reached in-process set at the run's end; the merge runs the
-  ;; process tests. The turn says each, and what runs the rest
-  (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4
-                                                  :tests {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1}})]
-    (is (= {:this-turn 2 :at-judge 40 :when-asked 3 :unfinished 1
-            :unfinished-run '(my.agent/prove) :judge-runs '(my.agent/prove) :root-runs '(my.agent/deferred)}
-           (:tests b)))
-    (is (nil? (:tests (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4}))) "not measured: nothing said")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's

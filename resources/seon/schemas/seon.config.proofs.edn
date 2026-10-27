@@ -1,6 +1,7 @@
 ;; Proof runs by reach digest (seon.proofs/prove: bin/prove, bin/test, bin/check without a run
 ;; size, an agent's test run). Values, units and provenance: resources/seon/config/default.edn.
-{:seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
+{:seon.config.proofs/prove-main-on-commit [:boolean {:seon.config/unit "boolean" :description "Whether each commit that moves main's program starts a run of main's tests in a prove agent forked from main (seon.prove)."}]
+ :seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
  :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the store is removed before it is opened and starts again from the run's tree."}]
  :seon.config.proofs/stall-factor [:int {:min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]
  :seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]

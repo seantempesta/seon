@@ -342,12 +342,12 @@
   "The turn sections of task t's current state as data, measured again each turn from
   observed: proofs with their status, red assertions, source and calls; what else the done
   rule refuses (regressions, stray reds, contract gaps), and a test run that failed as a whole;
-  the branch's unmerged entries (base, ours, theirs); what its merge will carry to main; the
-  wiki sections its changes made stale; the tests run; what happened to the last reply; turns
-  left; and, for a task that merges itself, whether it can merge now. The messages delivered
-  are the conversation's (`conversation`), not the block's."
+  the branch's unmerged entries (base, ours, theirs); what happened to the last reply; turns
+  left. What its merge carries, whether it can merge, what it changed under the wiki and its
+  tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view,
+  tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs will-merge tests attention merge]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -366,25 +366,7 @@
       (seq (refused (vec reasons) (vec reds) #(some? (docs/source-of db %)))) (assoc :refused (refused (vec reasons) (vec reds) #(some? (docs/source-of db %))))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
       (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
-      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
-      ;; the sections of the wiki this branch's code changes made stale (seon.problems/caused-split): to read and
-      ;; probably fix; never a reason to refuse done
-      (seq attention) (assoc :attention attention)
-      ;; owner D4: every change the branch's merge carries to main, every turn measured and
-      ;; empty ({}) says so; absent only when not measured (a basis before D4)
-      (some? will-merge) (assoc :will-merge will-merge)
-      ;; a task that merges itself (seon.task/merges?): ready when the done rule passes and
-      ;; merging main would conflict nowhere (seon.agent/merge-readiness); what main changed
-      ;; since the merge base is merged in at the green (seon.turn/work!), so it is shown, never a reason
-      merge (assoc :merge (assoc merge :ready (and (empty? reasons) (empty? (:conflicts merge)))))
-      ;; root's ruling (a): the tests this turn ran (the proofs and the tests the
-      ;; branch changed), those the judge runs at the run's end, the process tests run at the
-      ;; judge's merge gate on a checkout (seon.reconcile's :gate); a run its bound ended leaves
-      ;; the rest unknown, never red
-      tests (assoc :tests (cond-> tests
-                            (:unfinished tests) (assoc :unfinished-run '(my.agent/prove))
-                            (pos? (:at-judge tests 0)) (assoc :judge-runs '(my.agent/prove))
-                            (pos? (:when-asked tests 0)) (assoc :root-runs '(my.agent/deferred)))))))
+      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged)))))
 
 (defn current-state
   "The current-state block of task t as data: its run sections (`task-data`) and its turn
