@@ -67,7 +67,8 @@
 
 (defn- index!
   "The reconciler's index of db, observed from the one this process held for its db at the
-  turn before (seon.reconcile/index over what differs); listed whole only at its first turn."
+  turn before (seon.reconcile/index over what differs), at the first turn from main's as the
+  fork server handed it (seon.fork-server/index-at-fork); listed whole only when it holds none."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [{from :db idx :index} (:index @agent/state)
