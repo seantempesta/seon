@@ -24,6 +24,7 @@ way in [failure points](failure-points.md).
 The sites where time decides because the owner allowed it, the provider's delayed retry among them.
 
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by one core.async `timeout`.
+- `seon.cron/arm!`, with `seon.cron/cron-proc`, `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule (AGENTS section 4). At the time of day `:seon.config.proofs/full-run-at` names (UTC), one core.async `timeout` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
 
 ## Time decides (a check's measurement, and a check's ping)
 
@@ -63,7 +64,7 @@ Names that look like clock reads but are quoted as data, so no time decides at t
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
-- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (`target/prove/ms`), so they end together; a test never measured counts as the mean.
+- `test-runner/shards`: bin/test's shards are dealt by each test's last measured ms (its newest result's, ```seon.proofs/last-ms```), so they end together; a test never measured counts as the mean.
 - bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
 
 ## Time measured (recorded, never compared to decide)

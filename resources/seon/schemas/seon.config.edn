@@ -26,6 +26,7 @@
   [:seon.config.root/main :seon.config.root/main]
   [:seon.config.root/system-path :seon.config.root/system-path]
   [:seon.config.root/tasks-dir :seon.config.root/tasks-dir]
+  [:seon.config.root/wiki-dirs :seon.config.root/wiki-dirs]
   ;; the store
   [:seon.config.store/backend :seon.config.store/backend]
   [:seon.config.store/lmdb-map-bytes :seon.config.store/lmdb-map-bytes]
@@ -76,6 +77,7 @@
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
   [:seon.config.source/tests-dir :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs :seon.config.proofs/jobs]
+  [:seon.config.proofs/full-run-at :seon.config.proofs/full-run-at]
   [:seon.config.proofs/runs-kept :seon.config.proofs/runs-kept]
   [:seon.config.proofs/prove-main-on-commit :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
