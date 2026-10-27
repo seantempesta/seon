@@ -733,6 +733,17 @@
           (is (= t (:seon.error/type r)) (pr-str r))
           (is same "the record is the db's")
           (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
+    (testing "a cited var's source is refused, naming its definition as the way to change it"
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
+            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:runs r1 :task :cited f0 :form :form/src] "(defn f0 [x] (inc x))"))]
+        (is (= :seon.ctx/invalid (:seon.error/type r)))
+        (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
+        (is same)
+        (is (= (:max-tx db) (:max-tx db'))))
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
+            [[r] _] (step db #(swap! ctx/ctx update-in [:runs r1 :task :cited] dissoc f0))]
+        (is (= "a lookup's members follow :seon.task/references: change it" (:why (first (:invalid r))))
+            "no var changed in it (one gone): what the members follow, no definition named")))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
       (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
         (is (map? r))
@@ -766,6 +777,46 @@
      :growth :constant
      :fixed {:calls 5}
      :sizes [100 300 1000 3000]}))
+
+(defn swap-input
+  "The input of size n: a session of n evals as the agent's state and its record, and its run's
+  id: [state record rid], one-swap's."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [st {:db (seeded n) :key k :branch :b :mode :test}]
+    ;; the state's watch builds the record the swap! starts from (seon.ctx/on-state)
+    (reset! seon.agent/state st)
+    [st (ctx/record) (key (first (:runs (:tree (ctx/record)))))]))
+
+(defn one-swap
+  "One swap! of the task's plan through @ctx, from the session's state and record (set again
+  each call, the state's watch, seon.ctx's, off while it is: constant work, a share of what is
+  measured): write!'s edits, its d/with, the transaction applied in test mode and its patch, and
+  the record installed."
+  {:malli/schema [:=> [:cat :map :map :int] :nil]}
+  [st record rid]
+  (remove-watch seon.agent/state :seon.ctx/ctx)
+  (reset! seon.agent/state st)
+  (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
+  (#'seon.ctx/install! record)
+  (swap! ctx/ctx assoc-in [:runs rid :task :seon.task/plan] "Make app.x/f0 pass, then f1.")
+  nil)
+
+(deftest a-swap-costs-what-it-changed
+  ;; the owner, 2026-10-27: easy ops on the atom; a swap! of the plan costs the change, flat in
+  ;; the session, as the patch and edits it is made of are
+  (cost/proof
+    {:of 'seon.ctx-test/one-swap :input 'seon.ctx-test/swap-input
+     :n "evals in the session's record"
+     :work (str "the task's plan changed: edits finds the one attribute (the evals unit skipped by one "
+                "identical?), one d/with, the datom applied to the agent's db, the patch of it (the task "
+                "rebuilt where it is held), the record installed, and one-swap itself; measured 39 calls, 117k-122k ticks and "
+                "400-409 KB at 100, 300, 1,000 and 3,000 evals")
+     :growth :constant
+     :fixed {:calls 39}
+     :sizes [100 300 1000 3000]})
+  ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
+  (reset! seon.agent/state nil))
 
 (defn one-attribute
   "The input of size n: a session of n evals and one attribute of its agent: [db e a], seon.ctx/made-by's."
