@@ -833,9 +833,9 @@
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
-  Its answer carries :fns, what each test's contracted functions cost (the child streams them as
-  each test ends), which the test service records with the results on main (seon.prove/result-tx):
-  this records nothing itself. :ran is how many tests reported. (forked pid) runs here once the child exists.
+  What ran is recorded on main by root's writer, with what each test's contracted functions cost
+  (the child streams them as each test ends): one :record frame (seon.proofs/results-tx), whoever
+  asked for the run. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
@@ -893,6 +893,11 @@
                         (recur rest-todo reports (merge fns (:fns c)))
                         {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
                          :reports reports :fns (merge fns (:fns c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)}))))))]
+    ;; what ran, recorded on main by root's writer (the agent proc's :record), whoever asked for the run
+    (when-not (contract/error? res)
+      (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))
+            tx (proofs/results-tx {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state)} ran failures)]
+        (when (and (seq tx) (= :dead (send! {:op :record :tx-data tx}))) (lib/c-exit 0))))
     (if (contract/error? res)
       res
       (-> res

@@ -193,7 +193,8 @@
 
 (defn per-call
   "Each function's cost per call over the tests of a detail (detail's shape): {var {:calls n :ticks
-  :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls."
+  :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls. A
+  recursive function's inclusive ticks and bytes count its inner calls again; its self ones do not."
   {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]] [:map-of :qualified-symbol :map]]}
   [detail]
   (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
@@ -201,7 +202,8 @@
                [v {:calls calls :ticks (quot ticks calls) :self-ticks (quot self-ticks calls) :bytes (quot bytes calls) :self-bytes (quot self-bytes calls)}]))))
 
 (defn- moved?
-  "Has measure x moved from y by more than the noise ratio (:seon.config.proofs/fn-noise)?"
+  "Has measure x moved from y by more than the noise ratio (:seon.config.proofs/fn-noise)? A per-call
+  measure: how many calls it was over is not compared."
   {:malli/schema [:=> [:cat :int [:maybe :int] number?] :boolean]}
   [x y noise] (or (nil? y) (> (Math/abs (double (- x y))) (* noise (max 1 (Math/abs (double y)))))))
 
@@ -222,14 +224,15 @@
 
 (defn results-tx
   "The facts that record ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes
-  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change}): one
+  :fns} or a step's {:step :digest ...}) of run ({:id, and :tree, or :branch :t :change; :kept, the
+  file it waited in while no root took it}): one
   :seon.proof/ result per digest that ran, with failures ({key [assertion]}, seon.proofs/failures),
   and the run's entity, holding its detail (what each test's functions cost: detail, one value).
   A flaky result (judged, not run) and an :unreported one (its namespace threw before it reported:
   no verdict of its own) record nothing, as no result with no :digest does; a reused one is never
   in ran. When nothing ran, nothing at all."
   {:malli/schema [:=> [:cat [:map [:id :string] [:tree {:optional true} :string] [:branch {:optional true} [:or :keyword :string]]
-                              [:t {:optional true} :int] [:change {:optional true} :map]]
+                              [:t {:optional true} :int] [:change {:optional true} :map] [:kept {:optional true} :string]]
                        [:map-of :any [:map [:digest {:optional true} :string] [:test {:optional true} :qualified-symbol] [:step {:optional true} :string]
                                       [:pass {:optional true} nat-int?] [:fail {:optional true} nat-int?] [:error {:optional true} nat-int?]
                                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
@@ -238,7 +241,6 @@
                   [:vector :map]]}
   [run ran failures]
   (let [where (cond-> {:seon.proof/run (:id run)}
-                (:tree run) (assoc :seon.proof/tree (:tree run))
                 (:branch run) (assoc :seon.proof/branch (name (:branch run)))
                 (:t run) (assoc :seon.proof/t (:t run))
                 (:change run) (assoc :seon.proof/change (:change run)))
@@ -249,6 +251,7 @@
              (:tree run) (assoc :seon.proof.run/tree (:tree run))
              (:branch run) (assoc :seon.proof.run/branch (name (:branch run)))
              (:t run) (assoc :seon.proof.run/t (:t run))
+             (:kept run) (assoc :seon.proof.run/kept (:kept run))
              (seq dt) (assoc :seon.proof.run/detail dt))])
           (for [[k r] ran :let [dg (:digest r) t (:test r)]]
             (cond-> (assoc where :seon.proof/digest dg :seon.proof/status (status-of r)
@@ -260,6 +263,21 @@
               (:ticks r) (assoc :seon.proof/ticks (:ticks r))
               (:bytes r) (assoc :seon.proof/bytes (:bytes r))
               (seq (failures k)) (assoc :seon.proof/failures (vec (failures k))))))))
+
+(defn answer-ran
+  "What an agent's test run answer ({:reports :digests :fns}, seon.agent/run-tests-forked's) ran:
+  {:ran {test result} :failures {test [assertion]}}, results-tx's arguments. A test reused at its
+  digest ran nothing, and one whose child died while it ran (a report with its :exit) has no
+  verdict: a death is unknown, and a result at a digest is reused, so it would never run again."
+  {:malli/schema [:=> [:cat :map] [:map [:ran :map] [:failures :map]]]}
+  [answer]
+  (let [reports {:reports (vec (:reports answer))}
+        died (set (keep #(when (:exit %) (test-symbol (:var %))) (:reports answer)))
+        reused (set (keep #(when (:reused %) (test-symbol (:var %))) (:reports answer)))]
+    {:ran (into {} (for [[t s] (results reports) :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]
+                     [t {:test t :digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)
+                         :fns (get-in answer [:fns t] [])}]))
+     :failures (failures reports)}))
 
 (defn record-tx
   "The facts req's results leave on main ({:run :ran :failures :main?}, results-tx's arguments; :main?

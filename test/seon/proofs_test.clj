@@ -428,7 +428,7 @@
          (is (= [] (proofs/results-tx {:id "r"} {'app.f-test/u (assoc red :digest "d-unreported" :unreported true)} {}))
              "a test that never reported (its namespace's run threw first) has no verdict to keep"))))))
 
-(deftest the-results-store-keeps-every-verdict-a-digest-had
+(deftest the-results-keep-every-verdict-a-digest-had
   ;; :seon.proof/digest is an identity: a second result at it is the same entity, so its earlier
   ;; status lives in the history (:seon.config.store/keep-history?), which stored-results reads
   (ts/test-branch!

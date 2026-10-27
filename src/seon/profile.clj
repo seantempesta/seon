@@ -20,10 +20,13 @@
     (a jolt-ticks read about 26 ns, a bytes read 3 ns); the same predicate contracted, its
     schema checked, 48 ticks and 120 ns.
   - Nothing is allocated per call: every count is a fixnum in the cell's slots.
-  - Self is approximate where a call does not return: a throw skips its frame's update, so
-    the frame that catches it counts the thrower's callees as its own; and a call that parks
-    on a fiber counts the bytes others allocated on its thread meanwhile (its ticks are its
-    fiber's own).
+  - Self is exact on one thread that does not park: a test's run (seon.proofs/run-tests!, one
+    thread in its own process), an agent's eval. The callees' counters are process-wide, so
+    where calls interleave (a call that parks on a fiber while another runs contracted calls,
+    root's procs on several threads) a frame's self takes the other's work in or out, and can
+    read negative; root's counts are approximate (below), and nothing reads them as proof.
+    A throw skips its frame's update, so the frame that catches it counts the thrower's
+    callees as its own.
 
   The meter is not metered: seon.contract/wrap counts every armed function except this
   namespace's own (armed at boot with seon.contract), so reading a count adds no call.

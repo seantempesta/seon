@@ -327,7 +327,7 @@
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (str "(seon.proofs/results @(seon.root/run-tests! sys :" (:agent %) "))")})
-                          {:dirs ["src" "test"] :proofs #{proof} :own-root? true})]
+                          {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
 
@@ -377,7 +377,7 @@
                    {:op :eval :agent "root" :code stored}
                    {:op :eval :agent "root" :code (run (:agent %))}
                    own)
-                  {:dirs ["src" "test"] :proofs #{proof} :own-root? true})]
+                  {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are facts on root's main")
@@ -415,7 +415,7 @@
                    (deftest r (is true))"
                    "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
                    "(seon.agent/transact! [{:seon.proof/digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)
-                                           :seon.proof/test 'reds-test/r :seon.proof/status :fail :seon.proof/run \"main@1\" :seon.proof/branch \"main\" :seon.proof/t 1
+                                           :seon.proof/test 'reds-test/r :seon.proof/status :fail :seon.proof/red :fail :seon.proof/run \"main@1\" :seon.proof/branch \"main\" :seon.proof/t 1
                                            :seon.proof/failures [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]}])"
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
                       [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
@@ -436,17 +436,17 @@
         digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
         ;; the checkout's green for p1, as root's writer records one (a run nested in this test's
         ;; run would report through it)
-        record (str "(let [r (seon.proofs/record! (fn [tx] (datahike.api/transact (:conn sys) {:tx-data tx})) @(:conn sys) "
-                    (pr-str {:run {:id "agent-test"} :ran {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}}}) ")] (some? (:db-after r)))")
+        record (str "(let [r (seon.proofs/record! #(deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}})) @(:conn sys) (quote "
+                    (pr-str {:run {:id "agent-test"} :ran {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}}}) "))] r)")
         [_ recorded r after]
         (in-agent ["nil"
                    {:op :eval :agent "root" :code record}
                    "(select-keys (prove) [:results :ran :reused])"
                    {:op :eval :agent "root" :code (str "(seon.proofs/stored-results @(:conn sys) " (pr-str [(digests p2)]) ")")}]
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :own-root? true})
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2}})
         checkout (proofs/plan nil (select-keys digests [p2]) (:value after) #{})]
-    (is (true? (:value recorded)) "the checkout recorded its green for p1 on root's main")
+    (is (true? (:ok (:value recorded))) (str "the checkout recorded its green for p1 on root's main: " (pr-str recorded)))
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
     (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
@@ -456,8 +456,8 @@
   (let [inputs {:env "e" :tree "t" :config {} :data-refs {}}
         source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs inputs}
         db (fn [boot] (datahike.api/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot boot :seon.root/source source}]))]
-    (is (some? (:dir (agent/test-plan (db "b1") (db "b1") #{}))) "this boot's inputs: its results are kept")
-    (is (nil? (:dir (agent/test-plan (db "b2") (db "b2") #{}))) "an earlier boot's: nothing is shared or reused")))
+    (is (= inputs (first (agent/test-inputs (db "b1")))) "this boot's inputs: its results are keyed by them")
+    (is (nil? (first (agent/test-inputs (db "b2")))) "an earlier boot's: nothing keys by them, so nothing is reused")))
 
 (deftest a-forked-agent-knows-its-task
   ;; task seon.template/a-request-is-one-linked-transaction: root forks the agent for its

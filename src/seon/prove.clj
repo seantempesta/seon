@@ -40,32 +40,26 @@
 ;; ---- the facts of a run ------------------------------------------------------------------
 
 (defn result-tx
-  "The facts a finished run leaves on main, one transaction: the results of the tests that ran at
-  their digests, greens and reds, the run's entity with its counts and its detail (what each test's
-  functions cost, one value), and, for main's run, the functions whose cost per call moved
-  (seon.proofs/record-tx, the one builder, over db, main as the last commit notice brought it; none yet: no function's); and each test's newest result on main
-  (:seon.proof/latest, main's runs only), what :test-red reads. A test whose child died while it ran
-  (a report with its :exit, seon.agent/test-run-answer) has no result at its digest, only main's
-  newest: a death is unknown, and a result at a digest is reused (seon.proofs/stored-results), so it
-  would never run again. run: the run request {:key :branch :t :agent}; answer: the agent's tests
-  answer ({:reports :digests :fns :pass :fail :error :ms}). The change names who asked."
+  "The facts a finished run leaves on main, one transaction, beside the results its agent recorded
+  (seon.agent/run-tests-forked's :record: every agent test run's, whoever asked): the run's entity with
+  its counts; for main's run, each test's newest result on main (:seon.proof/latest, what :test-red
+  reads) and the functions whose cost per call moved (seon.proofs/fn-tx over the answer's detail,
+  against db, main as the last commit notice brought it; none yet: no function's). run: the run
+  request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports :digests :fns :pass
+  :fail :error :ms}). The change names who asked."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :map] [:vector :map]]}
   [db run answer]
   (let [statuses (proofs/results {:reports (:reports answer)})
         fails (proofs/failures {:reports (:reports answer)})
-        died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
-        reused (set (keep #(when (:reused %) (proofs/test-symbol (:var %))) (:reports answer)))
         change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))
-        ;; what ran: a test reused at its digest writes nothing
-        ran (into {} (for [[t s] statuses :let [dg (get-in answer [:digests t])] :when (and dg (not (died t)) (not (reused t)))]
-                       [t {:test t :digest dg :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0)
-                           :fns (get-in answer [:fns t] [])}]))]
-    (-> (proofs/record-tx db {:run {:id (:key run) :branch (:branch run) :t (:t run) :change change} :ran ran :failures fails
-                              :main? (boolean (and db (= :main (:branch run))))})
-        (update 0 merge (cond-> {:seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
-                                 :seon.proof.run/ms (long (:ms answer 0))}
-                          (seq (:deferred answer)) (assoc :seon.proof.run/skipped-process (vec (:deferred answer)))))
-        (into (when (= :main (:branch run))
+        main? (= :main (:branch run))
+        dt (proofs/detail (:ran (proofs/answer-ran answer)))]
+    (-> [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
+                  :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
+                  :seon.proof.run/ms (long (:ms answer 0))}
+           (seq (:deferred answer)) (assoc :seon.proof.run/skipped-process (vec (:deferred answer))))]
+        (into (when (and main? db (seq dt)) (proofs/fn-tx db (:key run) dt)))
+        (into (when main?
                 (for [[t s] statuses :when (get-in answer [:digests t])]
                   (cond-> {:seon.proof/latest (str t) :seon.proof/status s :seon.proof/run (:key run) :seon.proof/branch (name (:branch run))
                            :seon.proof/t (:t run) :seon.proof/change change}

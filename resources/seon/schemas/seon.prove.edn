@@ -15,8 +15,6 @@
  :seon.proof/bytes :int
  ;; a bin/check step's result (seon.proofs/check-steps names it), where a test's names its var
  :seon.proof/step :string
- ;; the git tree a bin/test or bin/prove run planned (seon.fx/tree-id), where a root's run names its branch and t
- :seon.proof/tree :string
  ;; a contracted function's cost per call, as the newest run of main's tree that moved it measured it
  ;; (seon.proofs/fn-tx): written only when its self ticks or bytes per call move past
  ;; :seon.config.proofs/fn-noise, so a run that changes nothing writes nothing
@@ -44,7 +42,7 @@
                           [:seon.proof/digest :seon.proof/digest] [:seon.proof/test {:optional true} :seon.proof/test] [:seon.proof/step {:optional true} :seon.proof/step]
                           [:seon.proof/status :seon.proof/status] [:seon.proof/run :seon.proof/run]
                           [:seon.proof/green {:optional true} :seon.proof/green] [:seon.proof/red {:optional true} :seon.proof/red]
-                          [:seon.proof/branch {:optional true} :seon.proof/branch] [:seon.proof/t {:optional true} :seon.proof/t] [:seon.proof/tree {:optional true} :seon.proof/tree]
+                          [:seon.proof/branch {:optional true} :seon.proof/branch] [:seon.proof/t {:optional true} :seon.proof/t]
                           [:seon.proof/ms {:optional true} :seon.proof/ms] [:seon.proof/ticks {:optional true} :seon.proof/ticks] [:seon.proof/bytes {:optional true} :seon.proof/bytes]
                           [:seon.proof/failures {:optional true} :seon.proof/failures] [:seon.proof/change {:optional true} :seon.proof/change]]
  ;; one fact per run: its key is (branch, tx), so one request per digest is one run
@@ -61,6 +59,8 @@
  :seon.proof.run/ms :int
  ;; the git tree a bin/test or bin/prove run planned
  :seon.proof.run/tree :string
+ ;; the file a run's results waited in while no root took them (:seon.config.proofs/unsent-dir): sent late
+ :seon.proof.run/kept :string
  ;; what each test of the run spent in each contracted function: one value, out of line (stored once
  ;; under its content key), {test {var [calls ticks self-ticks bytes self-bytes]}} (seon.proofs/detail)
  :seon.proof.run/detail [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]
@@ -68,7 +68,7 @@
  :seon.proof.run/skipped-process [:vector :qualified-symbol]
  :seon.proof.run/run-fact [:map {:seon.db/attributes true}
                            [:seon.proof.run/id :seon.proof.run/id] [:seon.proof.run/branch {:optional true} :seon.proof.run/branch] [:seon.proof.run/t {:optional true} :seon.proof.run/t]
-                           [:seon.proof.run/tree {:optional true} :seon.proof.run/tree] [:seon.proof.run/detail {:optional true} :seon.proof.run/detail]
+                           [:seon.proof.run/tree {:optional true} :seon.proof.run/tree] [:seon.proof.run/kept {:optional true} :seon.proof.run/kept] [:seon.proof.run/detail {:optional true} :seon.proof.run/detail]
                            [:seon.proof.run/pass {:optional true} :seon.proof.run/pass] [:seon.proof.run/fail {:optional true} :seon.proof.run/fail]
                            [:seon.proof.run/error {:optional true} :seon.proof.run/error] [:seon.proof.run/ms {:optional true} :seon.proof.run/ms]
                            [:seon.proof.run/skipped-process {:optional true} :seon.proof.run/skipped-process]]

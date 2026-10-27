@@ -266,11 +266,11 @@
         tree (str dir "/tree")
         ;; its root's own store and main, named (seon.test-store/start-root!: an inherited
         ;; SEON_STORE or SEON_MAIN opened a store whose main already held these merges)
-        ;; and its own results directory: a proof that resolves its var at run time
+        ;; and its own results (no results root: its gate's results land on its own main): a proof that resolves its var at run time
         ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
         ;; stored there closed its task with no turn and merged nothing
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_TEST_RESULTS" (str dir "/test-results")}}
+               :env {"SEON_RESULTS_PORT" "0"}}
         ;; any failure or error in this test keeps its boot logs: each report passes through
         red (volatile! false)
         report clojure.test/report
@@ -777,7 +777,7 @@
                            (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
                            (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
         root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_RUN_CHECKOUT" main "SEON_TEST_RESULTS" (str dir "/test-results")}}
+               :env {"SEON_RUN_CHECKOUT" main "SEON_RESULTS_PORT" "0"}}
         args ["--set" (str ":seon.config.source/root=" (pr-str wb))
               "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
         root (atom nil)

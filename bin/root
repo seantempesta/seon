@@ -65,17 +65,11 @@ launch() {
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
 }
 # send_unsent PORT: the results root (the one :seon.config.proofs/results-port names) takes the
-# runs' results no root took while it was down (:seon.config.proofs/unsent-dir, one request a
-# file, kept by bin/test): each sent to its server, removed once recorded, kept when not
+# runs' results no root took while it was down (:seon.config.proofs/unsent-dir, kept by bin/test):
+# test-runner's one sender (bin/test --send-unsent), each file removed once recorded
 send_unsent() {
-  [[ ${SEON_RESULTS_PORT:-0} == $1 && -d ${SEON_UNSENT_DIR:-} ]] || return 0
-  local f r n=0 k=0
-  for f in $SEON_UNSENT_DIR/*.edn(N); do
-    r=$("$ROOT/bin/ask" $1 < "$f")
-    if [[ $r == *":error"* || $r == *":seon.error/type"* ]]; then k=$((k+1)); else rm -f "$f"; n=$((n+1)); fi
-  done
-  (( n + k )) && print "results kept while no root ran: $n recorded, $k still unsent in $SEON_UNSENT_DIR"
-  return 0
+  [[ ${SEON_RESULTS_PORT:-0} == $1 && -n $(print -l ${SEON_UNSENT_DIR:-/nonexistent}/*.edn(N)) ]] || return 0
+  "$ROOT/bin/test" --send-unsent || true
 }
 # stop: TERM to the holder (the root's stdin closes, it stops cleanly), answered at the holder's end
 # with the root's exit status. bin/held --end opens the done fifo before it signals and waits on it:

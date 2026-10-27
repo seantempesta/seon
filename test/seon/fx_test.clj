@@ -144,9 +144,9 @@
                (catch Throwable e (ex-data e)))]
     (is (contains? (set (map :coord (:unresolved r))) 'nowhere/nothing))))
 
-(deftest a-merges-deferred-tests-read-from-their-verdicts
+(deftest a-merges-deferred-tests-read-from-their-results
   ;; the merge gate (root's ruling, 2026-10-22) runs them through prove's one entry, and reads
-  ;; each one's result at the digest prove's plan gave it (out/tests.edn) in the results store
+  ;; each one's result at the digest prove's plan gave it (out/tests.edn) on the results root's main
   ;; its shards record into, never its printed output (seon.prove is the one runner,
   ;; 2026-10-27: the regex over RED and SHARD lines went): a green there passed (it ran green, or
   ;; was green at its digest), a red is red, and a test with no result, or no digest (the plan

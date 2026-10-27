@@ -13,7 +13,7 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
@@ -160,9 +160,15 @@
                    :failures {:type "object"} :main? {:type "boolean" :description "a run of main's tree"}}
             :required ["run" "ran"]
             :answer (fn [sys _ req]
-                      (let [r (proofs/record! #(deref (c/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}})) @(:conn sys)
-                                              (select-keys req [:run :ran :failures :main?]))]
-                        (if (contract/error? r) r {:recorded (:datoms r) :t (:t r)})))}
+                      (let [write! #(deref (c/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}}))
+                            r (proofs/record! write! @(:conn sys) (select-keys req [:run :ran :failures :main?]))]
+                        (if (contract/error? r)
+                          ;; refused: an :effect row on main, open until a later record of the run's id writes it
+                          (let [w (write! (err/asked-tx @(:conn sys) (assoc r :seon.fx/at-ms (System/currentTimeMillis)) :seon.proof.run/id
+                                                        [{:seon.proof.run/id (str (get-in req [:run :id]))}]))]
+                            ;; the row refused too: the answer says so, never as if written
+                            (cond-> r (contract/error? w) (assoc :unrecorded-row (:seon.error/message w))))
+                          {:recorded (:datoms r) :t (:t r)})))}
    :results {:doc "The results main holds at digests (seon.proofs/stored-results): {:results {digest {:pass :fail :error :failures :flaky}}}, a digest with none left out: what a run reuses instead of running."
              :args {:digests {:type "array" :items {:type "string"}}} :required ["digests"]
              :answer (fn [sys _ req] {:results (proofs/stored-results @(:conn sys) (vec (:digests req)))})}

@@ -85,3 +85,7 @@
        (let [detail {'a/t1 {'a/f [10 9000 9000 100 100] 'a/g [4 400 400 0 0] 'a/new [1 9 9 0 0]}}]
          (is (= [['a/f :self-ticks 300 900 3.0]] (mapv (juxt :var :by :before :after :ratio) (proofs/slower @conn detail)))
              "f tripled again; g held; a function main never measured is new, not slower"))))))
+
+(deftest a-run-sent-late-says-where-it-waited
+  (let [[run] (proofs/results-tx {:id "r" :tree "t" :kept "/x/unsent/1.edn"} {'a/t {:test 'a/t :digest "d" :pass 1 :fail 0 :error 0}} {})]
+    (is (= "/x/unsent/1.edn" (:seon.proof.run/kept run)) (pr-str run))))

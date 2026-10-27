@@ -534,12 +534,11 @@
              [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)])))
 
 (defn- results-at
-  "The results the standing root's main holds at digests (its server's :results op, through
-  bin/ask, :seon.config.proofs/results-port): {digest result}, or the io-error saying why none came."
-  {:malli/schema [:=> [:cat [:sequential :string]] :map]}
-  [digests]
-  (let [port (cfg/value :seon.config.proofs/results-port)
-        {:keys [out]} (sh/sh (str (cfg/checkout) "/bin/ask") (str port) :in (str (sedn/encode {:op :results :digests (vec digests)}) "\n"))
+  "The results the results root's main holds at digests (its server's :results op on port, through
+  bin/ask): {digest result}, or the io-error saying why none came."
+  {:malli/schema [:=> [:cat :int [:sequential :string]] :map]}
+  [port digests]
+  (let [{:keys [out]} (sh/sh (str (cfg/checkout) "/bin/ask") (str port) :in (str (sedn/encode {:op :results :digests (vec digests)}) "\n"))
         r (when-not (str/blank? out) (edn/read-string {:default tagged-literal} out))]
     (if (map? (:results r))
       (:results r)
@@ -561,7 +560,9 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        results (cfg/value :seon.config.proofs/results-port)
+        ;; the results root, or this root itself when none is named (a test's root): where the run's
+        ;; shards record and where its results are read back
+        results (let [p (cfg/value :seon.config.proofs/results-port)] (if (pos? p) p (cfg/value :seon.config.root/server-port)))
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
@@ -574,8 +575,8 @@
         ;; read below are the ones its run recorded
         (let [r (apply sh/sh (concat clean [(str "SEON_RESULTS_PORT=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
               plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
-              found (results-at (vals (:digests plan)))]
-          (spit log (str (:out r) (:err r)))
+              _ (spit log (str (:out r) (:err r)))
+              found (results-at results (vals (:digests plan)))]
           (if (contract/error? found)
             found
             {:value {:results (test-results plan found tests) :ms (profile/ms-since t0) :log log}}))
