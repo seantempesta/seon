@@ -54,8 +54,12 @@
 (defn- equip-ns!
   "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
   agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
-  each is free and clojure.repl holds it (an agent's process interns source and pst there, seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its own,
-  and left). Answers ns."
+  each is free and clojure.repl holds it (an agent's process interns source and pst there,
+  seon.agent/make-ns!), so an in-ns to another namespace keeps them (a name ns already holds is its
+  own, and left). Done here, at the reader, on purpose (audit cut 8, 2026-10-27): this loop is the one
+  place that carries *ns* from form to form, so it is the owner of what follows the agent into a new
+  one; a producer-side fix would redefine in-ns (a core var, a smell by AGENTS 5) or refer into
+  every program namespace at load, which are not the agent's. Answers ns."
   {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
   [ns]
   (let [held (ns-publics (find-ns 'clojure.repl))
