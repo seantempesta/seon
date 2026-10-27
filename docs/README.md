@@ -65,6 +65,7 @@ The pages on how work is tasks, how it is checked and how it merges.
 - [plan](plan.md) (and [restart](restart.md): picking the work up on a fresh account): what is in flight, what the owner has not yet ruled, and the steps to the goal.
 - [decisions](decisions.md): the owner's standing rulings, each with its words, date and where it is now stated.
 - Who does what, delegation and briefs: [AGENTS.md §2](../AGENTS.md).
+- The repository's front page, for a person arriving: [README.md](../README.md#start-here) (what Seon is, how to build it, where things live).
 
 ## Words and provenance
 

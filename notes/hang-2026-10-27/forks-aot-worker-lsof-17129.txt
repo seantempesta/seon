@@ -1,0 +1,9 @@
+COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF                NODE NAME
+jolt    17129 sean  cwd    DIR   1,13      736          1165005209 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem
+jolt    17129 sean  txt    REG   1,13 30512744          1165016532 /Users/sean/src/seon-next/.worktrees/an-old-word-is-a-problem/target/jolt/jolt
+jolt    17129 sean  txt    REG   1,13  4129840 1152921500312609216 /usr/lib/dyld
+jolt    17129 sean    0r   CHR    3,2      0t0                 336 /dev/null
+jolt    17129 sean    1w   REG   1,13       54          1168821495 /Users/sean/src/seon-next/target/cache/aot/v0.8.23-139-g67e7bf3e-A43E84-C8CC8105-211719.188FF1C1.111D22.C7EC2563-tr/v1/aot-jobs-17027.edn.log
+jolt    17129 sean    2w   REG   1,13       54          1168821495 /Users/sean/src/seon-next/target/cache/aot/v0.8.23-139-g67e7bf3e-A43E84-C8CC8105-211719.188FF1C1.111D22.C7EC2563-tr/v1/aot-jobs-17027.edn.log
+jolt    17129 sean    3w   REG   1,13      734          1168821184 /Users/sean/src/seon-next/target/cache/aot/v0.8.23-139-g67e7bf3e-A43E84-C8CC8105-211719.188FF1C1.111D22.C7EC2563-tr/v1/aot-jobs-17027.edn
+jolt    17129 sean    7r   CHR   17,1  0t61024                 612 /dev/urandom

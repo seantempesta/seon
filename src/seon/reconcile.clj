@@ -278,7 +278,7 @@
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
                            ;; an outside run's model is the outside agent's (attach), whatever the task's
-                           (not= (cond-> (desired-env t) (outside? (:seon.run/env a)) (assoc :model "outside")) (:seon.run/env a)) :env-changed)
+                           (not= (cond-> (desired-env t) (outside? (:seon.run/env a)) (assoc :model "outside")) (dissoc (:seon.run/env a) :holder)) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))
@@ -491,7 +491,8 @@
                                      ;; by nobody: an outside one stays outside
                                      newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
                                      lost? (or (= :lost (:seon.run/status newest)) (contains? (:reap idx) (:seon.run/id newest)))
-                                     env (cond-> (desired-env t) (and lost? (outside? (:seon.run/env newest))) (assoc :model "outside"))]]
+                                     env (cond-> (desired-env t)
+                                           (and lost? (outside? (:seon.run/env newest))) (merge (select-keys (:seon.run/env newest) [:model :holder])))]]
                  ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
                    {:op :wake :task id :env env :run run :agent (:seon.run/agent p)}

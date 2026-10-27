@@ -1,0 +1,548 @@
+[jolt.deps] deps declare :deps/prep-lib steps jolt does not run (their compiled/generated assets will be missing): io.replikativ/datahike
+started seon.record-cost-test/a-protocol-call-costs-what-its-method-reads
+ended seon.record-cost-test/a-protocol-call-costs-what-its-method-reads
+started seon.e2e-test/a-default-plan-cites-the-vars-its-proof-calls
+ended seon.e2e-test/a-default-plan-cites-the-vars-its-proof-calls
+started seon.e2e-test/a-model-run-is-judged-by-what-the-plan-asks
+ended seon.e2e-test/a-model-run-is-judged-by-what-the-plan-asks
+started seon.e2e-test/await-quiet-ends-on-a-recorded-defect
+:defect #:seon.error{:agents 0, :class :platform, :count 1, :first-ms 1793106271833, :last-ms 1793106271833, :message seon.reconcile/reconciler-proc: boom, :signature fedcba9876543210}
+ended seon.e2e-test/await-quiet-ends-on-a-recorded-defect
+started seon.e2e-test/turns-count-the-work-runs
+ended seon.e2e-test/turns-count-the-work-runs
+started seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+ended seon.contract-test/an-arm-that-can-throw-is-still-reported-as-the-schemas
+started seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+ended seon.contract-test/an-armed-call-costs-its-checks-not-a-try
+started seon.contract-test/an-unarmed-proof-runs-the-raw-roots-wherever-it-runs
+ended seon.contract-test/an-unarmed-proof-runs-the-raw-roots-wherever-it-runs
+started seon.task-test/a-design-adds-a-proof-with-update
+ended seon.task-test/a-design-adds-a-proof-with-update
+started seon.task-test/a-new-boot-leaves-the-earlier-boots-agents
+ended seon.task-test/a-new-boot-leaves-the-earlier-boots-agents
+started seon.task-test/a-released-branch-takes-its-task-from-main
+ended seon.task-test/a-released-branch-takes-its-task-from-main
+started seon.task-test/a-resumed-branch-takes-its-needs-from-main
+ended seon.task-test/a-resumed-branch-takes-its-needs-from-main
+started seon.task-test/a-root-before-its-first-boot-is-no-entity-value
+ended seon.task-test/a-root-before-its-first-boot-is-no-entity-value
+started seon.task-test/a-runs-lifecycle-is-read-from-its-schema
+ended seon.task-test/a-runs-lifecycle-is-read-from-its-schema
+started seon.task-test/a-task-is-its-members-not-its-plans-vector
+ended seon.task-test/a-task-is-its-members-not-its-plans-vector
+started seon.task-test/a-templates-instructions-are-cited-as-a-plan-is
+ended seon.task-test/a-templates-instructions-are-cited-as-a-plan-is
+started seon.task-test/an-agents-links-pull-from-its-root
+ended seon.task-test/an-agents-links-pull-from-its-root
+started seon.task-test/an-agents-live-state-is-facts-on-its-entity
+ended seon.task-test/an-agents-live-state-is-facts-on-its-entity
+started seon.task-test/the-reader-answers-every-stored-member
+ended seon.task-test/the-reader-answers-every-stored-member
+started seon.task-test/the-writer-cites-the-programs-names-not-the-reproductions
+ended seon.task-test/the-writer-cites-the-programs-names-not-the-reproductions
+started seon.task-test/the-writer-derives-a-tasks-references
+ended seon.task-test/the-writer-derives-a-tasks-references
+started seon.task-test/the-writer-derives-a-tasks-sections
+ended seon.task-test/the-writer-derives-a-tasks-sections
+started seon.task-test/unresolved-citations-are-answered-not-refused
+ended seon.task-test/unresolved-citations-are-answered-not-refused
+started seon.task-files-test/the-shipped-task-files-load
+ended seon.task-files-test/the-shipped-task-files-load
+started seon.task-files-test/no-shipped-task-is-merged-work
+ended seon.task-files-test/no-shipped-task-is-merged-work
+RED seon.task-files-test/no-shipped-task-is-merged-work {:pass 1, :fail 1, :error 0}
+started seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+ended seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves
+started seon.task-files-test/a-file-task-merges-itself
+ended seon.task-files-test/a-file-task-merges-itself
+started seon.task-files-test/a-removed-entry-is-cancelled-not-deleted
+ended seon.task-files-test/a-removed-entry-is-cancelled-not-deleted
+started seon.task-files-test/a-changed-entry-updates-what-it-states-and-retracts-what-it-dropped
+ended seon.task-files-test/a-changed-entry-updates-what-it-states-and-retracts-what-it-dropped
+started seon.task-files-test/needs-that-form-a-cycle-or-name-nothing-are-refused
+ended seon.task-files-test/needs-that-form-a-cycle-or-name-nothing-are-refused
+started seon.task-files-test/an-unchanged-file-costs-nothing-and-keeps-what-main-learned
+ended seon.task-files-test/an-unchanged-file-costs-nothing-and-keeps-what-main-learned
+started seon.task-files-test/new-entries-are-created-held-and-remember-their-declaration
+ended seon.task-files-test/new-entries-are-created-held-and-remember-their-declaration
+started seon.task-files-test/a-task-file-is-one-vector-of-declarations-named-by-its-namespace
+ended seon.task-files-test/a-task-file-is-one-vector-of-declarations-named-by-its-namespace
+
+FAIL in (no-shipped-task-is-merged-work) (task_files_test.clj:121)
+each is merged work: remove its entry from resources/seon/tasks/ (still-worked names the exceptions)
+expected: (= [] (vec left))
+  actual: (not (= [] ["seon.proofs/tests-are-facts" "seon.root/a-behind-merge-is-bounded-and-merges-main-first" "seon.turn/a-failed-outside-run-ends-failed" "seon.db/an-env-holds-no-semaphore-undo-for-its-life"]))
+started seon.render-test/one-printer-and-no-cut-before-it
+ended seon.render-test/one-printer-and-no-cut-before-it
+RED seon.render-test/one-printer-and-no-cut-before-it {:pass 4, :fail 1, :error 0}
+started seon.render-test/a-render-reaches-no-process
+ended seon.render-test/a-render-reaches-no-process
+started seon.render-test/the-debug-page-grows-with-its-rows-not-its-turns
+ended seon.render-test/the-debug-page-grows-with-its-rows-not-its-turns
+started seon.render-test/the-debug-page-shows-what-each-turn-sent
+ended seon.render-test/the-debug-page-shows-what-each-turn-sent
+started seon.render-test/a-new-turn-is-one-new-row
+ended seon.render-test/a-new-turn-is-one-new-row
+started seon.render-test/a-units-change-rerenders-that-unit
+ended seon.render-test/a-units-change-rerenders-that-unit
+started seon.render-test/an-unrelated-change-redraws-none-of-the-merge-views
+ended seon.render-test/an-unrelated-change-redraws-none-of-the-merge-views
+started seon.render-test/a-transaction-touching-no-page-walks-nothing
+ended seon.render-test/a-transaction-touching-no-page-walks-nothing
+started seon.render-test/the-sidebar-is-roots-agents
+ended seon.render-test/the-sidebar-is-roots-agents
+started seon.render-test/the-merge-views-draw-what-the-merge-functions-answer
+ended seon.render-test/the-merge-views-draw-what-the-merge-functions-answer
+started seon.render-test/a-dead-agents-page-renders-and-never-waits
+ended seon.render-test/a-dead-agents-page-renders-and-never-waits
+started seon.render-test/an-unchanged-unit-never-re-renders
+ended seon.render-test/an-unchanged-unit-never-re-renders
+started seon.render-test/a-new-member-is-an-append
+ended seon.render-test/a-new-member-is-an-append
+started seon.render-test/a-new-evaluation-is-one-append
+ended seon.render-test/a-new-evaluation-is-one-append
+started seon.render-test/the-problems-tile-follows-main-without-reading-it-whole
+ended seon.render-test/the-problems-tile-follows-main-without-reading-it-whole
+started seon.render-test/a-branch-commit-touches-its-page-by-its-datoms-diff
+ended seon.render-test/a-branch-commit-touches-its-page-by-its-datoms-diff
+started seon.render-test/a-branch-read-anew-renders-its-components-again
+ended seon.render-test/a-branch-read-anew-renders-its-components-again
+started seon.render-test/a-handle-links-to-its-eval
+ended seon.render-test/a-handle-links-to-its-eval
+started seon.render-test/a-page-is-its-components
+ended seon.render-test/a-page-is-its-components
+RED seon.render-test/a-page-is-its-components {:pass 10, :fail 1, :error 0}
+started seon.render-test/an-agents-page-draws-the-problems-of-its-own-run
+ended seon.render-test/an-agents-page-draws-the-problems-of-its-own-run
+started seon.render-test/a-part-returns-its-data-as-a-call-of-the-printer
+ended seon.render-test/a-part-returns-its-data-as-a-call-of-the-printer
+started seon.render-test/root-and-an-agent-are-one-chrome
+ended seon.render-test/root-and-an-agent-are-one-chrome
+started seon.render-test/a-page-keeps-what-it-read
+ended seon.render-test/a-page-keeps-what-it-read
+started seon.render-test/every-view-of-an-agent-shows-one-read-of-its-branch
+ended seon.render-test/every-view-of-an-agent-shows-one-read-of-its-branch
+started seon.render-test/the-agent-page-is-its-conversation
+ended seon.render-test/the-agent-page-is-its-conversation
+started seon.render-test/a-dead-agents-eval-opens
+ended seon.render-test/a-dead-agents-eval-opens
+started seon.render-test/an-agents-run-tile-is-its-ctxs
+ended seon.render-test/an-agents-run-tile-is-its-ctxs
+started seon.render-test/an-eval-collapses-to-its-reference
+ended seon.render-test/an-eval-collapses-to-its-reference
+started seon.render-test/a-change-below-a-unit-moves-its-revision
+ended seon.render-test/a-change-below-a-unit-moves-its-revision
+started seon.render-test/a-component-re-runs-on-what-it-read
+ended seon.render-test/a-component-re-runs-on-what-it-read
+started seon.render-test/a-task-already-green-on-main-says-so-first
+ended seon.render-test/a-task-already-green-on-main-says-so-first
+started seon.render-test/the-status-shows-what-an-outside-read-observed
+ended seon.render-test/the-status-shows-what-an-outside-read-observed
+started seon.render-test/a-view-that-throws-answers-its-page-with-the-error
+ended seon.render-test/a-view-that-throws-answers-its-page-with-the-error
+started seon.render-test/root-context-is-its-page-printed-at-the-budget
+ended seon.render-test/root-context-is-its-page-printed-at-the-budget
+started seon.render-test/the-models-page-holds-the-plan-whole
+ended seon.render-test/the-models-page-holds-the-plan-whole
+started seon.render-test/a-collection-keyed-by-id-prints
+ended seon.render-test/a-collection-keyed-by-id-prints
+started seon.render-test/a-debug-page-of-an-agent-with-no-branch-answers
+ended seon.render-test/a-debug-page-of-an-agent-with-no-branch-answers
+started seon.render-test/a-cut-opens-its-path-in-the-row
+ended seon.render-test/a-cut-opens-its-path-in-the-row
+started seon.render-test/a-render-over-a-diff-runs-again-when-the-diff-moves
+ended seon.render-test/a-render-over-a-diff-runs-again-when-the-diff-moves
+started seon.render-test/a-task-reads-its-state-plan-proofs-and-failure
+ended seon.render-test/a-task-reads-its-state-plan-proofs-and-failure
+started seon.render-test/a-whole-tasks-page-holds-its-instructions
+ended seon.render-test/a-whole-tasks-page-holds-its-instructions
+started seon.render-test/a-render-is-opts-then-children
+ended seon.render-test/a-render-is-opts-then-children
+started seon.render-test/an-error-reads-its-message-fix-and-variant
+ended seon.render-test/an-error-reads-its-message-fix-and-variant
+started seon.render-test/an-eval-row-renders-its-value-as-structure
+ended seon.render-test/an-eval-row-renders-its-value-as-structure
+started seon.render-test/roots-page-reads-in-words
+ended seon.render-test/roots-page-reads-in-words
+started seon.render-test/the-printer-renders-each-nested-value-by-its-own-render
+ended seon.render-test/the-printer-renders-each-nested-value-by-its-own-render
+started seon.render-test/a-cut-with-its-whole-form-holds-no-copy
+ended seon.render-test/a-cut-with-its-whole-form-holds-no-copy
+started seon.render-test/a-key-is-its-id-one-to-one
+ended seon.render-test/a-key-is-its-id-one-to-one
+started seon.render-test/a-location-names-root-an-agent-or-an-entity
+ended seon.render-test/a-location-names-root-an-agent-or-an-entity
+started seon.render-test/a-page-an-agent-built-renders-nested
+ended seon.render-test/a-page-an-agent-built-renders-nested
+started seon.render-test/a-part-that-sorts-into-the-middle-goes-there
+ended seon.render-test/a-part-that-sorts-into-the-middle-goes-there
+started seon.render-test/an-eval-and-a-turn-say-what-they-cost
+ended seon.render-test/an-eval-and-a-turn-say-what-they-cost
+started seon.render-test/an-outside-read-is-no-model-call
+ended seon.render-test/an-outside-read-is-no-model-call
+started seon.render-test/compose-fills-slots-recursively
+ended seon.render-test/compose-fills-slots-recursively
+started seon.render-test/every-sent-part-names-its-record
+ended seon.render-test/every-sent-part-names-its-record
+started seon.render-test/render-proc-has-no-beat
+ended seon.render-test/render-proc-has-no-beat
+started seon.render-test/root-process-is-root-own-data
+ended seon.render-test/root-process-is-root-own-data
+started seon.render-test/roots-context-is-its-debug-page
+ended seon.render-test/roots-context-is-its-debug-page
+started seon.render-test/selection
+ended seon.render-test/selection
+started seon.render-test/the-html-fallback-folds-only-what-nests
+ended seon.render-test/the-html-fallback-folds-only-what-nests
+started seon.render-test/the-problem-report-reads-by-class
+ended seon.render-test/the-problem-report-reads-by-class
+
+FAIL in (one-printer-and-no-cut-before-it) (render_test.clj:229)
+every var printing beside the one printer is named with its reason
+expected: (= [] (remove named (sites forms printer-vars printer?)))
+  actual: (not (= [] (seon.fx/results-at)))
+
+FAIL in (a-page-is-its-components) (render_test.clj:946)
+the task, what is related, what its newest turn observed, the run (and the keys the agent added, when it added one): each keyed by what it shows
+expected: (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
+  actual: (not (= ["task-data-710248968897789413" "related-710248968897789413" "status-710248968897789413" "run-head-710248968897789413"] ["task-data-710248968897789413" "related-710248968897789413" "status-710248968897789413" "run-head-710248968897789413" "own-problems-710248968897789413"]))
+started seon.test-store-test/a-kept-store-is-keyed-by-its-schema
+ended seon.test-store-test/a-kept-store-is-keyed-by-its-schema
+started seon.test-store-test/a-test-root-is-its-own
+ended seon.test-store-test/a-test-root-is-its-own
+started seon.test-store-test/agent-tests-in-one-process-share-its-root
+ended seon.test-store-test/agent-tests-in-one-process-share-its-root
+started seon.test-store-test/n-roots-open-the-process-store-at-once
+ended seon.test-store-test/n-roots-open-the-process-store-at-once
+started seon.test-store-test/the-process-store-is-made-before-any-shard
+ended seon.test-store-test/the-process-store-is-made-before-any-shard
+started seon.test-store-test/the-program-store-is-named-by-the-programs-own-schema
+ended seon.test-store-test/the-program-store-is-named-by-the-programs-own-schema
+started seon.results-test/a-digest-judged-green-and-red-is-flaky-whichever-came-last
+ended seon.results-test/a-digest-judged-green-and-red-is-flaky-whichever-came-last
+started seon.results-test/a-functions-cost-per-call-is-written-only-when-it-moves
+ended seon.results-test/a-functions-cost-per-call-is-written-only-when-it-moves
+started seon.results-test/a-red-is-reused-with-its-failures
+ended seon.results-test/a-red-is-reused-with-its-failures
+started seon.results-test/a-refused-write-is-unrecorded
+ended seon.results-test/a-refused-write-is-unrecorded
+started seon.results-test/a-run-sent-late-says-where-it-waited
+ended seon.results-test/a-run-sent-late-says-where-it-waited
+started seon.results-test/a-run-writes-what-ran-and-one-value-of-its-function-costs
+ended seon.results-test/a-run-writes-what-ran-and-one-value-of-its-function-costs
+started seon.results-test/a-tests-last-ms-is-its-newest-result-whatever-its-digest
+ended seon.results-test/a-tests-last-ms-is-its-newest-result-whatever-its-digest
+started seon.results-test/flaky-and-unreported-results-record-nothing
+ended seon.results-test/flaky-and-unreported-results-record-nothing
+started seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
+ended seon.ref-test/a-bare-word-is-a-reference-only-when-it-names-something
+started seon.ref-test/a-citation-ending-in-a-wildcard-is-prose
+ended seon.ref-test/a-citation-ending-in-a-wildcard-is-prose
+started seon.ref-test/a-citation-naming-no-page-names-nothing
+ended seon.ref-test/a-citation-naming-no-page-names-nothing
+started seon.ref-test/a-line-citation-is-its-file-marked-line-reference
+ended seon.ref-test/a-line-citation-is-its-file-marked-line-reference
+started seon.ref-test/a-literal-and-fenced-code-are-not-references
+ended seon.ref-test/a-literal-and-fenced-code-are-not-references
+started seon.ref-test/a-name-is-shown-once-at-its-strongest-depth
+ended seon.ref-test/a-name-is-shown-once-at-its-strongest-depth
+started seon.ref-test/a-namespace-is-read-as-a-namespace
+ended seon.ref-test/a-namespace-is-read-as-a-namespace
+started seon.ref-test/a-section-doc-is-its-lead-and-headings-below
+ended seon.ref-test/a-section-doc-is-its-lead-and-headings-below
+started seon.ref-test/a-section-opening-with-a-list-has-no-lead
+ended seon.ref-test/a-section-opening-with-a-list-has-no-lead
+started seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+ended seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
+started seon.ref-test/a-span-is-read-by-one-rule
+ended seon.ref-test/a-span-is-read-by-one-rule
+started seon.ref-test/a-span-of-a-name-and-more-words-is-prose
+ended seon.ref-test/a-span-of-a-name-and-more-words-is-prose
+started seon.ref-test/a-string-literal-in-prose-cites-nothing
+ended seon.ref-test/a-string-literal-in-prose-cites-nothing
+started seon.ref-test/a-summary-names-the-citation-that-reads-the-rest
+ended seon.ref-test/a-summary-names-the-citation-that-reads-the-rest
+started seon.ref-test/a-task-name-is-a-reference-to-the-task
+ended seon.ref-test/a-task-name-is-a-reference-to-the-task
+started seon.ref-test/a-var-quoted-name-is-cited
+ended seon.ref-test/a-var-quoted-name-is-cited
+started seon.ref-test/an-alias-form-in-a-code-span-is-code-not-a-reference
+ended seon.ref-test/an-alias-form-in-a-code-span-is-code-not-a-reference
+started seon.ref-test/commonmark-examples-for-the-subset
+ended seon.ref-test/commonmark-examples-for-the-subset
+started seon.ref-test/one-parse-costs-one-pass
+ended seon.ref-test/one-parse-costs-one-pass
+started seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
+ended seon.ref-test/one-text-gives-names-paths-and-line-citations-by-one-rule
+started seon.ref-test/the-delimiter-picks-the-depth
+ended seon.ref-test/the-delimiter-picks-the-depth
+started seon.source-test/a-batch-of-edits-reads-the-changed-files-not-the-tree
+ended seon.source-test/a-batch-of-edits-reads-the-changed-files-not-the-tree
+started seon.source-test/a-body-edit-writes-only-its-form
+ended seon.source-test/a-body-edit-writes-only-its-form
+started seon.source-test/a-change-to-a-namespace-with-no-file-is-named-never-dropped
+ended seon.source-test/a-change-to-a-namespace-with-no-file-is-named-never-dropped
+started seon.source-test/a-changed-macro-reloads-the-forms-it-expanded-in
+ended seon.source-test/a-changed-macro-reloads-the-forms-it-expanded-in
+started seon.source-test/a-changed-ns-form-applies-its-requires-before-its-forms
+ended seon.source-test/a-changed-ns-form-applies-its-requires-before-its-forms
+started seon.source-test/a-changed-schema-entry-rewrites-only-itself
+ended seon.source-test/a-changed-schema-entry-rewrites-only-itself
+started seon.source-test/a-checkout-whose-submodule-moved-is-synced-to-its-pin
+ended seon.source-test/a-checkout-whose-submodule-moved-is-synced-to-its-pin
+started seon.source-test/a-file-whose-namespace-is-not-loaded-imports
+ended seon.source-test/a-file-whose-namespace-is-not-loaded-imports
+started seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+ended seon.source-test/a-fixed-change-costs-the-same-at-any-program-size
+started seon.source-test/a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+ended seon.source-test/a-form-imported-into-a-loaded-namespace-is-loaded-not-unmapped
+started seon.source-test/a-helper-recorded-after-its-user-is-written-before-it
+ended seon.source-test/a-helper-recorded-after-its-user-is-written-before-it
+started seon.source-test/a-merge-is-committed-on-the-merges-branch
+ended seon.source-test/a-merge-is-committed-on-the-merges-branch
+started seon.source-test/a-merge-to-imported-source-loads-in-place
+ended seon.source-test/a-merge-to-imported-source-loads-in-place
+started seon.source-test/a-merged-change-rewrites-only-its-form
+ended seon.source-test/a-merged-change-rewrites-only-its-form
+started seon.source-test/a-merged-protocol-keeps-its-records
+ended seon.source-test/a-merged-protocol-keeps-its-records
+started seon.source-test/a-merged-record-is-the-one-its-callers-see
+ended seon.source-test/a-merged-record-is-the-one-its-callers-see
+started seon.source-test/a-moved-tree-replaces-mains-program
+ended seon.source-test/a-moved-tree-replaces-mains-program
+started seon.source-test/a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+ended seon.source-test/a-refresh-is-the-whole-trees-replace-at-the-cost-of-what-changed
+started seon.source-test/a-restart-catches-up-and-a-new-generation-resumes
+the restart test's boot logs kept in /Users/sean/src/seon-next/target/restart-test-fe23c370-e459-47c3-b752-43b53c3e33fb
+ended seon.source-test/a-restart-catches-up-and-a-new-generation-resumes
+RED seon.source-test/a-restart-catches-up-and-a-new-generation-resumes {:pass 6, :fail 4, :error 0}
+started seon.source-test/a-schema-file-round-trips-through-the-program
+ended seon.source-test/a-schema-file-round-trips-through-the-program
+started seon.source-test/a-source-the-image-cannot-analyze-is-an-error-not-a-throw
+ended seon.source-test/a-source-the-image-cannot-analyze-is-an-error-not-a-throw
+started seon.source-test/a-test-that-reaches-a-process-is-found-by-the-reach-walk
+ended seon.source-test/a-test-that-reaches-a-process-is-found-by-the-reach-walk
+started seon.source-test/an-agent-runs-its-branchs-change-to-imported-source
+ended seon.source-test/an-agent-runs-its-branchs-change-to-imported-source
+started seon.source-test/an-imported-namespace-the-process-does-not-hold-is-loaded
+ended seon.source-test/an-imported-namespace-the-process-does-not-hold-is-loaded
+started seon.source-test/import-then-write-back-is-a-zero-diff
+ended seon.source-test/import-then-write-back-is-a-zero-diff
+started seon.source-test/importing-src-records-every-form-exactly
+ended seon.source-test/importing-src-records-every-form-exactly
+started seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
+ended seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
+started seon.source-test/the-source-read-carries-each-reference-code-pin
+ended seon.source-test/the-source-read-carries-each-reference-code-pin
+started seon.source-test/the-source-tree-follows-main
+ended seon.source-test/the-source-tree-follows-main
+started seon.source-test/the-write-back-of-a-file-is-one-pass-over-its-forms
+ended seon.source-test/the-write-back-of-a-file-is-one-pass-over-its-forms
+
+FAIL in (a-restart-catches-up-and-a-new-generation-resumes) (source_test.clj:294)
+each merge live in place: [{:commit nil, :commits [], :commit-errors [], :turn-ms 138088, :root 1, :agent "1", :spans [["loop/gen#1" 135133 137082] ["loop/gen-merge#1" 137290 137945]], :quiescent {:t 536870984, :root-causes [{:task "loop/gen-merge", :blocks [], :run "loop/gen-merge#1", :cause "run loop/gen-merge#1's deferred tests, run on a checkout at its merge, are not green: seon.agent-test/a-blocked-agent-ends-on-its-socket-eof error, seon.agent-test/a-blocked-agent-ends-with-its-root error, seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged error, seon.agent-test/a-death-costs-the-test-it-interrupted-and-no-other error, seon.agent-test/a-failed-call-keeps-what-it-sent error, seon.agent-test/a-failure-marked-through-the-server-holds-the-task error, seon.agent-test/a-forked-agent-knows-its-task error, seon.agent-test/a-green-whole-task-merges-itself-with-no-act-beyond-done error, seon.agent-test/a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox error, seon.agent-test/a-model-turn-records-its-prose-and-the-message-it-took error, seon.agent-test/a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once error, seon.agent-test/a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals error, seon.agent-test/a-proof-run-ends-with-its-agent error, seon.agent-test/a-red-at-its-digest-is-reused-with-its-failures error, seon.agent-test/a-red-whole-task-is-not-merged-and-its-next-turn-says-why error, seon.agent-test/a-requests-implement-continues-its-designs-request error, seon.agent-test/a-resumed-branch-holds-what-main-gained error, seon.agent-test/a-resumed-branchs-agent-is-this-boots error, seon.agent-test/a-root-with-no-provider-ends-the-run-on-its-typed-error error, seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting error, seon.agent-test/a-spawn-after-the-fork-server-is-lost-answers error, seon.agent-test/a-spawns-start-costs-the-same-on-a-bigger-program error, seon.agent-test/a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe error, seon.agent-test/a-waiting-run-parks-and-a-message-wakes-the-same-process error, seon.agent-test/a-whole-tasks-work-turns-are-no-merge-turns error, seon.agent-test/a-wide-reach-reuses-unchanged-results error, seon.agent-test/an-agent-commits-after-each-eval error, seon.agent-test/an-agent-ends-when-its-root-is-gone error, seon.agent-test/an-agent-finds-no-repository error, seon.agent-test/an-agent-holds-mains-tests-and-runs-them error, seon.agent-test/an-agent-inherits-a-static-heap error, seon.agent-test/an-agent-that-throws-ends-with-its-cause error, seon.agent-test/an-agent-with-no-task-resumes-a-kept-branch error, seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store error, seon.agent-test/an-agents-test-run-is-its-proofs-and-what-its-change-reaches error, seon.agent-test/an-outside-run-with-a-green-proof-finishes error, seon.agent-test/an-outside-run-writes-its-end error, seon.agent-test/code-sent-again-is-told-on-its-answer error, seon.agent-test/each-eval-call-is-answered-before-the-next error, seon.agent-test/one-bound-one-verdict-and-the-judge-reruns-no-green error, seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text error, seon.agent-test/root-interrupts-a-blocked-take error, seon.agent-test/the-judge-is-a-run-of-the-test-service error, seon.check-test/a-check-leaves-its-store-as-it-found-it error, seon.check-test/a-failed-seed-says-failed error, seon.check-test/a-stale-binary-is-refused error, seon.check-test/a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter error, seon.check-test/every-test-root-starts-through-start-root! error, seon.config-test/bin-ports-writes-its-keys-under-their-current-names error, seon.context-test/an-unknown-proof-says-what-to-write error, seon.context-test/each-thing-is-said-once error, seon.context-test/the-task-data-is-plan-write-set-and-proofs error, seon.db-test/a-create-that-fails-leaves-no-store error, seon.judge-test/a-pass-scores-each-request-once error, seon.judge-test/a-pass-stops-at-its-bound error, seon.lib-test/a-fork-beside-a-running-thread-is-refused-and-says-how-many-run error, seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store error, seon.lib-test/a-forked-child-runs-none-of-its-parents-shutdown-hooks error, seon.lib-test/a-forked-child-that-throws-exits-and-never-returns-into-its-parent error, seon.lib-test/a-wait-for-a-line-parks-the-fiber error, seon.lib-test/the-memory-gauge-reads-what-macos-charges-across-a-fork error, seon.procs-test/every-step-fn-carries-the-contract error, seon.procs-test/the-fork-server-step error, seon.procs-test/the-fork-servers-replica-is-main-at-each-commit error, seon.procs-test/the-fork-servers-stop-ends-every-child-before-it-answers error, seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs error, seon.prove-test/a-session-and-an-agents-turn-for-one-digest-end-in-one-run error, seon.prove-test/main-is-proved-at-boot-with-the-config-on-nobody-asking error, seon.reconcile-test/a-death-names-its-cause error, seon.repl-test/a-missing-name-says-the-nearest error, seon.repl-test/a-name-that-is-no-var-says-so error, seon.repl-test/a-redefinition-that-changes-a-docstring-says-so error, seon.repl-test/a-value-that-is-no-data-among-the-values-reaches-root-printed error, seon.repl-test/an-agent-repl-answers-what-a-clojure-repl-answers error, seon.repl-test/an-interrupt-stops-only-the-request-it-arrives-in error, seon.repl-test/help-reads-any-address-and-lists-on-a-miss error, seon.repl-test/the-help-page-runs error, seon.repl-test/the-template-instructions-run error, seon.root-test/a-built-root-reads-a-line-citation error, seon.root-test/a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on error, seon.root-test/a-root-binary-requires-a-library-it-did-not-compile error, seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote error, seon.root-test/a-second-boot-in-one-process-is-refused error, seon.root-test/a-second-boot-resumes-the-same-main error, seon.root-test/a-test-roots-task-files-are-its-own error, seon.root-test/an-agent-resumes-a-branch-cut-before-an-attribute error, seon.root-test/every-end-of-a-root-is-a-fact error, seon.root-test/main-follows-its-source-tree-across-restarts error, seon.root-test/root-threads-are-what-root-declares error, seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects error, seon.server-test/a-fork-goes-on-from-an-agents-head error, seon.server-test/a-later-read-draws-one-page-and-costs-what-the-one-before-did error, seon.server-test/a-message-reaches-the-agent error, seon.server-test/a-prove-never-ends-the-agent-it-proves error, seon.server-test/a-refused-attach-writes-nothing error, seon.server-test/a-reset-starts-the-task-again-from-main error, seon.server-test/a-root-eval-replies-like-an-agent-eval error, seon.server-test/a-server-defect-answers-that-request-alone error, seon.server-test/a-server-refused-answer-is-the-one-error-map error, seon.server-test/an-agent-reads-its-task-running error, seon.server-test/an-attach-gives-the-caller-the-branch-or-names-who-holds-it error, seon.server-test/an-attached-agent-holds-its-run error, seon.server-test/an-outside-agent-changes-its-task-by-swap error, seon.server-test/an-outside-agent-reads-its-context-after-it-defines error, seon.server-test/an-outside-agents-repl-answers-plainly error, seon.server-test/done-answers-the-judges-reasons error, seon.server-test/the-context-op-answers-what-a-model-is-sent error, seon.source-test/a-restart-catches-up-and-a-new-generation-resumes error, seon.source-test/importing-src-records-every-form-exactly error, seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart error, seon.test-store-test/a-test-root-is-its-own error, seon.test-store-test/agent-tests-in-one-process-share-its-root error, seon.test-store-test/n-roots-open-the-process-store-at-once error, seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there error, seon.vector-test/a-turn-with-nothing-due-asks-nothing error, seon.vector-test/more-due-than-one-request-takes-waits-for-the-next error"}]}} {:commit-errors [], :turn-ms 2955, :root 1, :agent "1", :commit "53cb0837c723cac7dffef03c6040472ac8520389", :commits [["loop-2/gens-merge#1" "53cb0837c723cac7dffef03c6040472ac8520389"]], :spans [["loop-2/gens#1" 175 2085] ["loop-2/gens-merge#1" 2210 2654] ["loop/gen#1" -3179 -1230] ["loop/gen-merge#1" -1022 -367]], :quiescent {:t 536871057, :root-causes [{:task "loop/gen-merge", :blocks [], :run "loop/gen-merge#1", :cause "run loop/gen-merge#1's deferred tests, run on a checkout at its merge, are not green: seon.agent-test/a-blocked-agent-ends-on-its-socket-eof error, seon.agent-test/a-blocked-agent-ends-with-its-root error, seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged error, seon.agent-test/a-death-costs-the-test-it-interrupted-and-no-other error, seon.agent-test/a-failed-call-keeps-what-it-sent error, seon.agent-test/a-failure-marked-through-the-server-holds-the-task error, seon.agent-test/a-forked-agent-knows-its-task error, seon.agent-test/a-green-whole-task-merges-itself-with-no-act-beyond-done error, seon.agent-test/a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox error, seon.agent-test/a-model-turn-records-its-prose-and-the-message-it-took error, seon.agent-test/a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once error, seon.agent-test/a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals error, seon.agent-test/a-proof-run-ends-with-its-agent error, seon.agent-test/a-red-at-its-digest-is-reused-with-its-failures error, seon.agent-test/a-red-whole-task-is-not-merged-and-its-next-turn-says-why error, seon.agent-test/a-requests-implement-continues-its-designs-request error, seon.agent-test/a-resumed-branch-holds-what-main-gained error, seon.agent-test/a-resumed-branchs-agent-is-this-boots error, seon.agent-test/a-root-with-no-provider-ends-the-run-on-its-typed-error error, seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting error, seon.agent-test/a-spawn-after-the-fork-server-is-lost-answers error, seon.agent-test/a-spawns-start-costs-the-same-on-a-bigger-program error, seon.agent-test/a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe error, seon.agent-test/a-waiting-run-parks-and-a-message-wakes-the-same-process error, seon.agent-test/a-whole-tasks-work-turns-are-no-merge-turns error, seon.agent-test/a-wide-reach-reuses-unchanged-results error, seon.agent-test/an-agent-commits-after-each-eval error, seon.agent-test/an-agent-ends-when-its-root-is-gone error, seon.agent-test/an-agent-finds-no-repository error, seon.agent-test/an-agent-holds-mains-tests-and-runs-them error, seon.agent-test/an-agent-inherits-a-static-heap error, seon.agent-test/an-agent-that-throws-ends-with-its-cause error, seon.agent-test/an-agent-with-no-task-resumes-a-kept-branch error, seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store error, seon.agent-test/an-agents-test-run-is-its-proofs-and-what-its-change-reaches error, seon.agent-test/an-outside-run-with-a-green-proof-finishes error, seon.agent-test/an-outside-run-writes-its-end error, seon.agent-test/code-sent-again-is-told-on-its-answer error, seon.agent-test/each-eval-call-is-answered-before-the-next error, seon.agent-test/one-bound-one-verdict-and-the-judge-reruns-no-green error, seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text error, seon.agent-test/root-interrupts-a-blocked-take error, seon.agent-test/the-judge-is-a-run-of-the-test-service error, seon.check-test/a-check-leaves-its-store-as-it-found-it error, seon.check-test/a-failed-seed-says-failed error, seon.check-test/a-stale-binary-is-refused error, seon.check-test/a-starter-that-is-gone-leaves-no-fifo-after-the-next-starter error, seon.check-test/every-test-root-starts-through-start-root! error, seon.config-test/bin-ports-writes-its-keys-under-their-current-names error, seon.context-test/an-unknown-proof-says-what-to-write error, seon.context-test/each-thing-is-said-once error, seon.context-test/the-task-data-is-plan-write-set-and-proofs error, seon.db-test/a-create-that-fails-leaves-no-store error, seon.judge-test/a-pass-scores-each-request-once error, seon.judge-test/a-pass-stops-at-its-bound error, seon.lib-test/a-fork-beside-a-running-thread-is-refused-and-says-how-many-run error, seon.lib-test/a-forked-child-runs-go-blocks-and-makes-a-store error, seon.lib-test/a-forked-child-runs-none-of-its-parents-shutdown-hooks error, seon.lib-test/a-forked-child-that-throws-exits-and-never-returns-into-its-parent error, seon.lib-test/a-wait-for-a-line-parks-the-fiber error, seon.lib-test/the-memory-gauge-reads-what-macos-charges-across-a-fork error, seon.procs-test/every-step-fn-carries-the-contract error, seon.procs-test/the-fork-server-step error, seon.procs-test/the-fork-servers-replica-is-main-at-each-commit error, seon.procs-test/the-fork-servers-stop-ends-every-child-before-it-answers error, seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs error, seon.prove-test/a-session-and-an-agents-turn-for-one-digest-end-in-one-run error, seon.prove-test/main-is-proved-at-boot-with-the-config-on-nobody-asking error, seon.reconcile-test/a-death-names-its-cause error, seon.repl-test/a-missing-name-says-the-nearest error, seon.repl-test/a-name-that-is-no-var-says-so error, seon.repl-test/a-redefinition-that-changes-a-docstring-says-so error, seon.repl-test/a-value-that-is-no-data-among-the-values-reaches-root-printed error, seon.repl-test/an-agent-repl-answers-what-a-clojure-repl-answers error, seon.repl-test/an-interrupt-stops-only-the-request-it-arrives-in error, seon.repl-test/help-reads-any-address-and-lists-on-a-miss error, seon.repl-test/the-help-page-runs error, seon.repl-test/the-template-instructions-run error, seon.root-test/a-built-root-reads-a-line-citation error, seon.root-test/a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on error, seon.root-test/a-root-binary-requires-a-library-it-did-not-compile error, seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote error, seon.root-test/a-second-boot-in-one-process-is-refused error, seon.root-test/a-second-boot-resumes-the-same-main error, seon.root-test/a-test-roots-task-files-are-its-own error, seon.root-test/an-agent-resumes-a-branch-cut-before-an-attribute error, seon.root-test/every-end-of-a-root-is-a-fact error, seon.root-test/main-follows-its-source-tree-across-restarts error, seon.root-test/root-threads-are-what-root-declares error, seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects error, seon.server-test/a-fork-goes-on-from-an-agents-head error, seon.server-test/a-later-read-draws-one-page-and-costs-what-the-one-before-did error, seon.server-test/a-message-reaches-the-agent error, seon.server-test/a-prove-never-ends-the-agent-it-proves error, seon.server-test/a-refused-attach-writes-nothing error, seon.server-test/a-reset-starts-the-task-again-from-main error, seon.server-test/a-root-eval-replies-like-an-agent-eval error, seon.server-test/a-server-defect-answers-that-request-alone error, seon.server-test/a-server-refused-answer-is-the-one-error-map error, seon.server-test/an-agent-reads-its-task-running error, seon.server-test/an-attach-gives-the-caller-the-branch-or-names-who-holds-it error, seon.server-test/an-attached-agent-holds-its-run error, seon.server-test/an-outside-agent-changes-its-task-by-swap error, seon.server-test/an-outside-agent-reads-its-context-after-it-defines error, seon.server-test/an-outside-agents-repl-answers-plainly error, seon.server-test/done-answers-the-judges-reasons error, seon.server-test/the-context-op-answers-what-a-model-is-sent error, seon.source-test/a-restart-catches-up-and-a-new-generation-resumes error, seon.source-test/importing-src-records-every-form-exactly error, seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart error, seon.test-store-test/a-test-root-is-its-own error, seon.test-store-test/agent-tests-in-one-process-share-its-root error, seon.test-store-test/n-roots-open-the-process-store-at-once error, seon.vector-test/a-plan-rewritten-on-a-branch-gets-its-vector-there error, seon.vector-test/a-turn-with-nothing-due-asks-nothing error, seon.vector-test/more-due-than-one-request-takes-waits-for-the-next error"}]}}]
+expected: (= [2 2] [(:root t1) (:root t2)])
+  actual: (not (= [2 2] [1 1]))
+
+FAIL in (a-restart-catches-up-and-a-new-generation-resumes) (source_test.clj:295)
+two merges committed: {:commits [], :commit-errors []} then {:commits [["loop-2/gens-merge#1" "53cb0837c723cac7dffef03c6040472ac8520389"]], :commit-errors []}; the runs: [["loop-2/gens#1" :done :green 1] ["loop-2/gens-merge#1" :merged :green 0] ["loop/gen#1" :done :green 1] ["loop/gen-merge#1" :closed :green 0]]
+expected: (= 2 (count (:commits t2)))
+  actual: (not (= 2 1))
+
+FAIL in (a-restart-catches-up-and-a-new-generation-resumes) (source_test.clj:313)
+the binary older than both merges runs both, caught up at boot on the same main
+expected: (= [2 [1 2]] (ask "[(seon.generation/generation) (seon.generation/generations)]"))
+  actual: (not (= [2 [1 2]] [1 [1 2]]))
+
+FAIL in (a-restart-catches-up-and-a-new-generation-resumes) (source_test.clj:320)
+the new generation runs both, resumed on main holding its generation
+expected: (= [2 [1 2] (:commit g)] (ask "[(seon.generation/generation) (seon.generation/generations) (:commit (my.root/generation sys))]"))
+  actual: (not (= [2 [1 2] "53cb0837c723cac7dffef03c6040472ac8520389"] [1 [1 2] "53cb0837c723cac7dffef03c6040472ac8520389"]))
+started seon.patterns-test/a-backlog-is-the-unread-queue
+ended seon.patterns-test/a-backlog-is-the-unread-queue
+started seon.patterns-test/workers-compete-for-one-shared-in-port
+ended seon.patterns-test/workers-compete-for-one-shared-in-port
+started seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+ended seon.agent-test/a-blocked-agent-ends-on-its-socket-eof
+started seon.agent-test/a-blocked-agent-ends-with-its-root
+ended seon.agent-test/a-blocked-agent-ends-with-its-root
+started seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged
+ended seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged
+started seon.agent-test/a-compile-errors-line-and-suggestions-arrive-as-data
+ended seon.agent-test/a-compile-errors-line-and-suggestions-arrive-as-data
+started seon.agent-test/a-death-costs-the-test-it-interrupted-and-no-other
+ended seon.agent-test/a-death-costs-the-test-it-interrupted-and-no-other
+started seon.agent-test/a-failed-call-keeps-what-it-sent
+ended seon.agent-test/a-failed-call-keeps-what-it-sent
+RED seon.agent-test/a-failed-call-keeps-what-it-sent {:pass 4, :fail 1, :error 0}
+started seon.agent-test/a-failure-marked-through-the-server-holds-the-task
+ended seon.agent-test/a-failure-marked-through-the-server-holds-the-task
+started seon.agent-test/a-forked-agent-knows-its-task
+ended seon.agent-test/a-forked-agent-knows-its-task
+started seon.agent-test/a-green-whole-task-merges-itself-with-no-act-beyond-done
+ended seon.agent-test/a-green-whole-task-merges-itself-with-no-act-beyond-done
+started seon.agent-test/a-killed-test-run-names-the-test-that-was-running
+ended seon.agent-test/a-killed-test-run-names-the-test-that-was-running
+RED seon.agent-test/a-killed-test-run-names-the-test-that-was-running {:pass 5, :fail 1, :error 0}
+started seon.agent-test/a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
+ended seon.agent-test/a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
+started seon.agent-test/a-model-turn-records-its-prose-and-the-message-it-took
+ended seon.agent-test/a-model-turn-records-its-prose-and-the-message-it-took
+started seon.agent-test/a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
+ended seon.agent-test/a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
+started seon.agent-test/a-previous-roots-inputs-are-not-shared
+ended seon.agent-test/a-previous-roots-inputs-are-not-shared
+started seon.agent-test/a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
+ended seon.agent-test/a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
+started seon.agent-test/a-proof-run-ends-with-its-agent
+ended seon.agent-test/a-proof-run-ends-with-its-agent
+started seon.agent-test/a-red-at-its-digest-is-reused-with-its-failures
+ended seon.agent-test/a-red-at-its-digest-is-reused-with-its-failures
+started seon.agent-test/a-red-whole-task-is-not-merged-and-its-next-turn-says-why
+ended seon.agent-test/a-red-whole-task-is-not-merged-and-its-next-turn-says-why
+started seon.agent-test/a-requests-implement-continues-its-designs-request
+ended seon.agent-test/a-requests-implement-continues-its-designs-request
+started seon.agent-test/a-resumed-branch-holds-what-main-gained
+ended seon.agent-test/a-resumed-branch-holds-what-main-gained
+started seon.agent-test/a-resumed-branchs-agent-is-this-boots
+ended seon.agent-test/a-resumed-branchs-agent-is-this-boots
+started seon.agent-test/a-root-with-no-provider-ends-the-run-on-its-typed-error
+ended seon.agent-test/a-root-with-no-provider-ends-the-run-on-its-typed-error
+started seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting
+ended seon.agent-test/a-run-at-its-cap-is-recorded-cap-never-waiting
+started seon.agent-test/a-run-takes-its-sessions-entries-from-main
+ended seon.agent-test/a-run-takes-its-sessions-entries-from-main
+started seon.agent-test/a-runs-outcome-on-main-reaches-the-agents-ctx-at-its-next-take
+ended seon.agent-test/a-runs-outcome-on-main-reaches-the-agents-ctx-at-its-next-take
+started seon.agent-test/a-spawn-after-the-fork-server-is-lost-answers
+ended seon.agent-test/a-spawn-after-the-fork-server-is-lost-answers
+started seon.agent-test/a-spawns-start-costs-the-same-on-a-bigger-program
+ended seon.agent-test/a-spawns-start-costs-the-same-on-a-bigger-program
+RED seon.agent-test/a-spawns-start-costs-the-same-on-a-bigger-program {:pass 11, :fail 1, :error 0}
+started seon.agent-test/a-stall-task-closes-when-its-conditions-hold
+ended seon.agent-test/a-stall-task-closes-when-its-conditions-hold
+started seon.agent-test/a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
+ended seon.agent-test/a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
+started seon.agent-test/a-waiting-run-parks-and-a-message-wakes-the-same-process
+ended seon.agent-test/a-waiting-run-parks-and-a-message-wakes-the-same-process
+started seon.agent-test/a-whole-tasks-work-turns-are-no-merge-turns
+ended seon.agent-test/a-whole-tasks-work-turns-are-no-merge-turns
+started seon.agent-test/a-wide-reach-reuses-unchanged-results
+ended seon.agent-test/a-wide-reach-reuses-unchanged-results
+RED seon.agent-test/a-wide-reach-reuses-unchanged-results {:pass 2, :fail 3, :error 0}
+started seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base
+ended seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base
+started seon.agent-test/an-agent-commits-after-each-eval
+ended seon.agent-test/an-agent-commits-after-each-eval
+started seon.agent-test/an-agent-ends-when-its-root-is-gone
+ended seon.agent-test/an-agent-ends-when-its-root-is-gone
+started seon.agent-test/an-agent-finds-no-repository
+ended seon.agent-test/an-agent-finds-no-repository
+started seon.agent-test/an-agent-holds-mains-tests-and-runs-them
+ended seon.agent-test/an-agent-holds-mains-tests-and-runs-them
+started seon.agent-test/an-agent-inherits-a-static-heap
+ended seon.agent-test/an-agent-inherits-a-static-heap
+started seon.agent-test/an-agent-that-throws-ends-with-its-cause
+ended seon.agent-test/an-agent-that-throws-ends-with-its-cause
+started seon.agent-test/an-agent-with-no-task-resumes-a-kept-branch
+ended seon.agent-test/an-agent-with-no-task-resumes-a-kept-branch
+started seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+ended seon.agent-test/an-agents-greens-and-a-checkouts-are-one-store
+started seon.agent-test/an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+ended seon.agent-test/an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+started seon.agent-test/an-agents-transactions-name-their-runtime
+ended seon.agent-test/an-agents-transactions-name-their-runtime
+started seon.agent-test/an-outside-run-with-a-green-proof-finishes
+ended seon.agent-test/an-outside-run-with-a-green-proof-finishes
+started seon.agent-test/an-outside-run-writes-its-end
+ended seon.agent-test/an-outside-run-writes-its-end
+started seon.agent-test/code-sent-again-is-told-on-its-answer
+ended seon.agent-test/code-sent-again-is-told-on-its-answer
+started seon.agent-test/each-eval-call-is-answered-before-the-next
+ended seon.agent-test/each-eval-call-is-answered-before-the-next
+started seon.agent-test/memory-is-read-when-asked
+ended seon.agent-test/memory-is-read-when-asked
+started seon.agent-test/merge-main-brings-the-task-content-main-carried
+ended seon.agent-test/merge-main-brings-the-task-content-main-carried
+started seon.agent-test/one-bound-one-verdict-and-the-judge-reruns-no-green
+ended seon.agent-test/one-bound-one-verdict-and-the-judge-reruns-no-green
+started seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text
+ended seon.agent-test/related-is-an-eval-of-the-plan-and-of-any-text
+started seon.agent-test/root-interrupts-a-blocked-take
+ended seon.agent-test/root-interrupts-a-blocked-take
+started seon.agent-test/the-judge-is-a-run-of-the-test-service
+ended seon.agent-test/the-judge-is-a-run-of-the-test-service
+
+FAIL in (a-failed-call-keeps-what-it-sent) (agent_test.clj:1080)
+the page's status: the turn of how many: {:page
+   {"task-data-474214426199802354"
+      [:section
+       {:class "task-data", :id "task-data-474214426199802354"}
+       [:h2 "task"]
+       [:p "taf64fcf1/t · whole · running"]
+       ([:p
+         {:class "seon-prose"}
+         "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's work merged in. First reproduce what the plan says is wrong in one eval and read its output: if the output is already right, the premise is false: fail the task with that output at once (``(my.task/fail! \"why\" evidence)``). Once the output is wrong, stop reading: write it as a deftest beside the function's existing tests, in their namespace (``(my.agent/tests-reaching 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, then the deftest: no file), its input built as theirs (their helpers and fixtures, never the live db, vector literals where order matters), register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red (``(my.agent/prove)``). Then make it pass by redefining the functions it needs, in their own namespaces, keeping their contracts, with a cost proof (``seon.cost/proof``) for a function whose input grows. Never loosen a contract or proof to pass. Your status's :merge says what main changed under you and what merging would conflict on: redefine each such var for both sides. Once :merge says :ready, your run ends and root merges your branch."]
+        [:p {:class "seon-prose"} "Work."]
+        [#'seon.render/html {:budget 600, :handle (dissoc (my.task/data) :task :write-set :sections)} {:to-prove {demo-test/t "not written yet"}}])],
+    "related-474214426199802354"
+      [:section
+       {:class "related", :id "related-474214426199802354"}
+       [:h2 "related"]
+       [:p {:class "muted"} "nothing related yet"]],
+    "own-problems-474214426199802354"
+      [:div
+       {:class "own-problems", :id "own-problems-474214426199802354"}
+       nil]}}
+expected: (str/includes? (str (peek (:read (:value turn)))) "1 of 1")
+  actual: false
+
+FAIL in (a-killed-test-run-names-the-test-that-was-running) (agent_test.clj:701)
+a child killed while running app-test/slow: that test is red, with how the child ended
+expected: (= {(quote app-test/slow) :error} (proofs/results run))
+  actual: (not (= #:app-test{slow :error} {}))
+
+FAIL in (a-spawns-start-costs-the-same-on-a-bigger-program) (agent_test.clj:940)
+:state: 471280 bytes before, 611872 after 200 more forms
+expected: (<= (get after k) (+ (* 1.1 v) 65536))
+  actual: (not (<= 611872 583944.0))
+
+FAIL in (a-wide-reach-reuses-unchanged-results) (agent_test.clj:383)
+and both are facts on root's main
+expected: (= 2 (:value files))
+  actual: (not (= 2 0))
+
+FAIL in (a-wide-reach-reuses-unchanged-results) (agent_test.clj:384)
+root's :tests (the judge's) runs nothing: both reused from it, the same results
+expected: (= [{proof :pass, reached :pass} 0 2] (:value judged))
+  actual: (not (= [{seon.reader-test/prose-without-a-fence-is-a-comment :pass, seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args :pass} 0 2] [{seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args :pass, seon.reader-test/prose-without-a-fence-is-a-comment :pass} 2 0]))
+
+FAIL in (a-wide-reach-reuses-unchanged-results) (agent_test.clj:385)
+and so does the agent's next run
+expected: (= {:results {proof :pass, reached :pass}, :ran 0, :reused 2} (:value second-run))
+  actual: (not (= {:results {seon.reader-test/prose-without-a-fence-is-a-comment :pass, seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args :pass}, :ran 0, :reused 2} {:results {seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args :pass, seon.reader-test/prose-without-a-fence-is-a-comment :pass}, :ran 2, :reused 0}))
+started seon.root-test/a-build-without-whole-program-inference-reads-with-tools-reader
+ended seon.root-test/a-build-without-whole-program-inference-reads-with-tools-reader
+started seon.root-test/a-built-root-reads-a-line-citation
+ended seon.root-test/a-built-root-reads-a-line-citation
+started seon.root-test/a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
+ended seon.root-test/a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
+started seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
+ended seon.root-test/a-root-binary-requires-a-library-it-did-not-compile
+started seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote
+ended seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote
+started seon.root-test/a-second-boot-in-one-process-is-refused
+ended seon.root-test/a-second-boot-in-one-process-is-refused
+started seon.root-test/a-second-boot-resumes-the-same-main
+ended seon.root-test/a-second-boot-resumes-the-same-main
+started seon.root-test/a-test-roots-task-files-are-its-own
+ended seon.root-test/a-test-roots-task-files-are-its-own
+started seon.root-test/an-agent-resumes-a-branch-cut-before-an-attribute
+ended seon.root-test/an-agent-resumes-a-branch-cut-before-an-attribute
+started seon.root-test/every-end-of-a-root-is-a-fact
+ended seon.root-test/every-end-of-a-root-is-a-fact
+started seon.root-test/main-follows-its-source-tree-across-restarts
+ended seon.root-test/main-follows-its-source-tree-across-restarts
+started seon.root-test/root-threads-are-what-root-declares
+jolt fiber dump: 0 live fibers of 196 held, on thread 0
+rs/sean/src/seon-next/target/prove/20261027T200348-14937/shard-0.log)
