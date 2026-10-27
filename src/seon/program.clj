@@ -1014,22 +1014,32 @@
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
   (reach-digests), unless the form referencing it defines one of env-readers. The host's file
-  readers, and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
+  readers (io/resource reads the resources/ classes), and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
   bin/check: what such a test proves is the whole program the binary is built from."
-  '#{clojure.core/slurp clojure.core/file-seq seon.test-store/binary-sh})
+  '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
+
+(def env-class-readers
+  "The vars that read one class of the checkout's files that have no program facts
+  (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
+  that class's digest. The bin/ scripts, web/ and resources/public, system.edn, deps.edn and the
+  schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
+  (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
+  takes every class, which graph-index adds from its flags, not this map."
+  '{seon.fx/declared-refs :seon.env/system
+    seon.system/read-decl :seon.env/system
+    seon.web/handler :seon.env/web
+    seon.fork-server/dev-classpath! :seon.env/deps
+    clojure.java.shell/sh :seon.env/bin})
 
 (def env-readers
-  "The platform vars whose file reads are of inputs every digest already holds (:env:
-  resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
-  test read the tree. A reader not named here counts as reading the tree (conservative: a
-  missed name reruns more, never reuses a stale green). Measured: with
+  "The platform vars whose file reads are of a class of inputs a digest holds apart from the
+  tree (env-class-readers: the schema resources, system.edn, deps.edn, web/public) or of no
+  checkout file at all (seon.proofs/verdicts: the results directory, by digest), so reaching them
+  does not make a test read the tree. A reader not named here counts as reading the tree
+  (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
-  '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
-     seon.fork-server/dev-classpath! ;; deps.edn, in :env
-     seon.fx/declared-refs ;; resources/seon/system.edn, in :env
-     seon.web/handler ;; web/public, in :env
-     seon.proofs/verdicts}) ;; the results directory, outside the tree, by digest
+  (conj (set (keys env-class-readers)) 'seon.proofs/verdicts 'seon.config/baked-schema-forms))
 
 (def config-key-readers
   "The vars that read a config key named in data rather than in their own code: a form defining
@@ -1071,6 +1081,27 @@
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
 
+(def input-class-namespaces
+  "The namespaces of the :config entries that are a class of files rather than a config key
+  (seon.fx/inputs): :seon.env/* (env-class-readers) and :seon.pin/* (pin-reads). A test that
+  reads files or runs a process takes every one (graph-index)."
+  #{"seon.env" "seon.pin"})
+
+(defn- pin-rules
+  "pins (:seon.config.source/pin-namespaces: prefix -> submodules) as [prefix prefix. [:seon.pin/NAME ...]]
+  rows, matched against a namespace by = and starts-with?."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [pins]
+  (vec (for [[p ms] pins :let [s (str p)]] [s (str s ".") (mapv #(keyword "seon.pin" (last (str/split % #"/"))) ms)])))
+
+(defn- pin-reads
+  "The :seon.pin/NAME classes of the submodules the namespaces of refs run on, by rules
+  (pin-rules): a namespace is a prefix or under it. A library used through interop or a :require
+  with no var reference is not seen: the daily full run is the net."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol] [:vector :any]] [:set :qualified-keyword]]}
+  [refs rules]
+  (into #{} (for [r refs :let [n (namespace r)] [p p. ks] rules :when (or (= n p) (str/starts-with? n p.)) k ks] k)))
+
 (defn config-reads
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
   of a seon.config.* namespace, the config's keys), or :all when it takes a whole config map
@@ -1079,13 +1110,15 @@
   own readers (value, resolve) name no key of their own; every one of their callers names its
   key, but for config-key-readers'. A form baking the schemas (referencing seon.config/baked-schema-forms:
   seon.config/schema-forms, its one form, which holds nothing else) names every key as its
-  declaration, data :env holds, and reads none. A test's digest takes the values of the keys its reach reads (graph-index), so a key
-  no test reads moves no digest."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol]] [:or [:= :all] [:set :qualified-keyword]]]}
-  [keywords refs nsym]
-  (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
-        (refs 'seon.config/baked-schema-forms) #{}
-        :else (into #{} (filter #(str/starts-with? (namespace %) "seon.config.")) keywords)))
+  declaration, data its class holds, and reads none. Beside the keys, the file classes it reads
+  (env-class-readers): the :seon.env/* entries of :config. A test's digest takes the values of
+  the keys and classes its reach reads (graph-index), so a key no test reads moves no digest."
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:set :qualified-symbol] [:maybe :symbol] [:vector :any]] [:or [:= :all] [:set :qualified-keyword]]]}
+  [keywords refs nsym pins]
+  (let [classes (into (pin-reads refs pins) (keep env-class-readers) refs)]
+    (cond (and (or (refs 'seon.config/config) (refs 'seon.config/from-db)) (not= 'seon.config nsym)) :all
+          (refs 'seon.config/baked-schema-forms) classes
+          :else (into classes (filter #(str/starts-with? (namespace %) "seon.config.")) keywords))))
 
 (defn- reach-rows
   "Form entities es as the reach walk reads them (reach-step): each one's :id, :own (its
@@ -1096,7 +1129,8 @@
   (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
-  (let [at (fn [a es] (if scan?
+  (let [pins (pin-rules (cfg/value :seon.config.source/pin-namespaces))
+        at (fn [a es] (if scan?
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
                         (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
@@ -1111,7 +1145,8 @@
     (vec (for [e es :let [[i] (id e) nsym (first (nn (first (nsv e)))) refs (set (rv e))]]
            {:id i :own (str/replace i #"#\d+$" "") :ns nsym :refs refs :quoted (set (qv e))
             :defines (into #{} (keep key-of) (dv e))
-            :config (config-reads (set (kv e)) refs nsym)}))))
+            :keywords (set (kv e))
+            :config (config-reads (set (kv e)) refs nsym pins)}))))
 
 (defn reached-by
   "The forms that reach forms ids through a reach graph's reverse edges rev ({form [form ...]}),
@@ -1153,6 +1188,13 @@
         ;; a config-key-reader reads the config keys schema entries name (config-key-readers)
         added (for [f added] (cond-> f (and (set? (:config f)) (some (fn [[k s]] (and (= :var k) (config-key-readers s))) (:defines f)))
                                    (update :config into (:schema-config g))))
+        ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
+        ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.
+        ;; The form that bakes the registry (seon.config/schema-forms) holds every key as data, not as lookups
+        added (vec (for [f added] (-> f (assoc :sedges (if ((:refs f) 'seon.config/baked-schema-forms)
+                                                         []
+                                                         (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
+                                      (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
         defs (by (:defs g) :var) methods (by (:methods g) :method) impls (by (:impls g) :impl)
         var-form #(peek (get defs %))
@@ -1170,27 +1212,36 @@
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
+        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
+        pvars (cfg/value :seon.config.source/process-vars)
+        bvars (cfg/value :seon.config.source/binary-vars)
+        reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
+        ;; a form that starts a process (a process var, the binary) reaches the program that process
+        ;; runs: the entry vars' forms. The process's code is reached over a socket, by keyword ops
+        ;; and as a quoted form it is sent, edges no reference shows
+        entry (cfg/value :seon.config.source/process-entry)
+        entry-ids (vec (keep var-form entry))
         edges (fn [f] (if (schema-row? f)
                         (vec (:schema f))
                         (vec (concat (remove test-ids (keep var-form (named f)))
+                                     (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
+                                     (filter rows (:sedges f))
                                      (for [s (defined f :var)
                                            id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
                                        id)))))
         holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
+        starters (when (some V entry) (concat proc bin))
         dirty (-> (set (map :id added))
                   (into (mapcat #(get refd %)) V)
                   (into (keep var-form) (concat V M P))
                   (into holders)
+                  (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (as-> (:rev g) r
               (reduce (fn [r id] (reduce #(update %1 %2 disj id) r (get-in g [:adj id]))) r (concat dirty gone-ids))
               (reduce (fn [r id] (reduce #(update %1 %2 (fnil conj #{}) id) r (adj id))) r dirty)
               (apply dissoc r gone-ids))
-        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
-        pvars (cfg/value :seon.config.source/process-vars)
-        bvars (cfg/value :seon.config.source/binary-vars)
-        reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
         plain? (fn [f] (and (not (schema-row? f)) (not-any? (fn [[k]] (= :var k)) (:defines f))))
         plain (as-> (:plain g) pl
                 (reduce (fn [pl f] (update pl (:ns f) disj (:id f))) pl (filter plain? gone))
@@ -1280,7 +1331,11 @@
                  (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
                        ks (map #(:config (flags %)) cs)
                        ;; the values of the config keys its reach reads (config-reads), every key's for one reading the map
-                       kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))]
+                       kvs (if (some #{:all} ks) config (select-keys config (into #{} cat ks)))
+                       ;; a reader of files or a process (the tree, a root, the binary) can read any class
+                       kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
+                             (into kvs (filter (fn [[ck]] (input-class-namespaces (namespace ck)))) config)
+                             kvs)]
                    {:digest (error/digest (apply str k "\n" env "\n" (when (and roots (some #(:reads (flags %)) cs)) tree)
                                                  (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
                     :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]

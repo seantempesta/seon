@@ -3,7 +3,7 @@
 ;; shape differs from the stored one (needs as ids, results as a map, conflicts as a vector) the
 ;; map entry carries its schema inline.
 {;; what happened to a task (seon.reconcile/task-state), in the tasks tile's order; each title
- ;; is its pill's (seon.render.ui/state-title): a new state is one entry here
+ ;; is its meaning (read with seon.contract/properties): a new state is one entry here
  :seon.task/state [:enum {:seon.status/title
                           {:running "running: a run works it now"
                            :blocked "blocked: a task it needs is not done (its blocked-by)"

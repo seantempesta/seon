@@ -184,11 +184,23 @@
                             r
                             (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
 
+(defn- state-view
+  "What the service holds, as data: the running run's key, stage and runner, how many wait on it,
+  how many runs wait to start, and the api's asks it has open ([step key]: a :spawn, :tests, :write
+  or :kill answer owed to it). A hang in the chain is read from it: a run whose ask is open and
+  whose target is idle (seon.root's stall task records it)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [run (:running st)]
+    {:running (:key run) :stage (:stage run) :runner (:runner run) :waiting (count (:waiters run)) :next (count (:next st))
+     :open (vec (sort-by str (vals (:pending st))))}))
+
 (defn prove-proc
   "The test service's admission (see the namespace doc). In :req (requests the api forwards,
   {:rid :branch :t :digest :agent :names}), :answers (the api's answers to this proc's requests) and
   :main (the writer's commit notice); out :to-api (its requests; {:op :prove-answer :rid :r} for
-  each waiter, one message each; {:op :problem} for a failed run). Buffers (system.edn): :req and
+  each waiter, one message each; {:op :problem} for a failed run; {:op :prove-state :r view} when
+  what it holds changed (`state-view`), which root keeps for a stall's evidence). Buffers (system.edn): :req and
   :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding
   buffer of one, a notice replaced by the next."
   {:malli/schema :seon.step/step-fn}
@@ -199,12 +211,14 @@
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
   ([_args] {:rid 0 :pending {} :next {} :done {}})
   ([st _tr] st)
-  ([st in m]
-   (let [[st outs] (case in
+  ([st0 in m]
+   (let [st st0
+         [st outs] (case in
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
                      :main (let [st (assoc st :main-t (:t m))]
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
                                (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
                                [st []])))]
-     [st (if (seq outs) {:to-api (vec outs)} {})])))
+     (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))]
+       [st (if (seq outs) {:to-api outs} {})]))))

@@ -59,9 +59,9 @@ A component's root element carries one class, its render's name, and its render'
 
 Each fact the page and root's context both show has one producer they share:
 - **A lifecycle is declared once, on its enum's schema,** and read through one reader, `seon.contract/properties` (an enum's members, in order: `seon.contract/enum-values`):
-  - `:seon.agent/status` carries its live, stopped and gone sets (`seon.root/gone-statuses`, read by root, the web, the server and the check harness; `seon.render.ui/live`; `seon.render.ui/status-order`);
+  - `:seon.agent/status` carries its live, stopped and gone sets (`seon.root/gone-statuses`, read by root, the web, the server and the check harness; `seon.render.ui/live`);
   - `:seon.run/status` its finished, judged and failed sets, read once, by `seon.task` (`seon.task/finished`, `judged`, `failed`; with `seon.task/done?`, a task's done on a db, and `seon.task/running`, the running runs by one index seek), which the reconciler, problems, the render UI and the server require (`seon.main-test/a-runs-lifecycle-is-read-once`);
-  - `:seon.task/state` a task's observed states with each pill's title (`seon.render.ui/state-title`). A task's state is derived once, from the reconciler's index (`seon.reconcile/task-state`), which every reader of a task's state calls.
+  - `:seon.task/state` a task's observed states with each state's meaning (its `:seon.status/title`, read with `seon.contract/properties`). A task's state is derived once, from the reconciler's index (`seon.reconcile/task-state`), which every reader of a task's state calls.
 
   A new status is one enum entry. Not this: a status set typed out at each site that asks.
 - **How an agent is:** `seon.render.ui/shown-status` and `seon.render.ui/ended-as`; its newest events are the stream's own words (`seon.render.ui/event-detail`); a cost verdict's lines are `seon.cost/verdict-lines`. The writer, the fork server and main are root's process (```seon.render.proc/process-value```), drawn by ```seon.render.ui/process-tile```.
@@ -141,6 +141,8 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `seon.context/related`: what a search ranked (`seon.context/relevance`), cut by its chance (`:seon.config.render/relevance-summary`) and counted (`take` the config's `:seon.config.render/related`), the cited ones left out; what the cut left out is counted with the form that lists it: a search's answer, not a cut of output.
+- `seon.context/search`, `my.agent/related`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
+- `seon.context/names-in`: a keyword's name out of the query's text (`subs` off its colon), to seed a search's references.
 - `seon.context/item-text`, `seon.context/tokens`: a text's identifier tokens for relevance's lexical feature (a schema's form printed to find its words, a token's characters `subs` out of its text): an input to a score, never shown.
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.

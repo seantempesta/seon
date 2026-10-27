@@ -1,0 +1,28 @@
+COMMAND  PID USER   FD     TYPE             DEVICE   SIZE/OFF                NODE NAME
+seon    7323 sean  cwd      DIR               1,13       2624          1130911991 /Users/sean/src/seon-next/target
+seon    7323 sean  txt      REG               1,13  242080317          1165632129 /Users/sean/src/seon-next/target/seon
+seon    7323 sean  txt      REG               1,13    4129840 1152921500312609216 /usr/lib/dyld
+seon    7323 sean  txt      REG               1,13       8192          1166444060 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/lock.mdb
+seon    7323 sean  txt      REG               1,13       4096          1166444097 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/ids
+seon    7323 sean  txt      REG               1,13     177504          1130920919 /Users/sean/src/seon-next/target/lib/liblz4.dylib
+seon    7323 sean  txt      REG               1,13      34656          1148292216 /Users/sean/src/seon-next/target/lib/libprobe.dylib
+seon    7323 sean  txt      REG               1,13     130880          1140801700 /Users/sean/src/seon-next/target/lib/liblmdb.dylib
+seon    7323 sean  txt      REG               1,13     633920          1130921102 /Users/sean/src/seon-next/target/lib/libzstd.dylib
+seon    7323 sean  txt      REG               1,13     884992             6948540 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libssl.3.dylib
+seon    7323 sean  txt      REG               1,13    4846032             6948539 /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.3.dylib
+seon    7323 sean  txt      REG               1,13 2135310336          1166444052 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/data.mdb
+seon    7323 sean    0r     CHR                3,2        0t0                 336 /dev/null
+seon    7323 sean    1w     REG               1,13      19753          1166444055 /Users/sean/src/seon-next/target/check/20261027T172542/problems.log
+seon    7323 sean    2w     REG               1,13      19753          1166444055 /Users/sean/src/seon-next/target/check/20261027T172542/problems.log
+seon    7323 sean    3r     CHR               17,1    0t41328                 612 /dev/urandom
+seon    7323 sean    4u     REG               1,13       8192          1166444060 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/lock.mdb
+seon    7323 sean    5u     REG               1,13 2135310336          1166444052 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/data.mdb
+seon    7323 sean    6w     REG               1,13 2135310336          1166444052 /Users/sean/src/seon-next/target/check/20261027T172542/stores/problems/data.mdb
+seon    7323 sean    7u    unix  0x6f5750c4ed5d7ee        0t0                     ->0xdab170304decbf27
+seon    7323 sean    8u    unix  0xd3532a20a0e60b2        0t0                     ->0x20bce24969c8fd7
+seon    7323 sean    9u    unix 0xb4047ca5351350a8        0t0                     ->0x8637569b180d9cc2
+seon    7323 sean   10u    unix 0x144dcc843f774acc        0t0                     ->0x3d2c60982044b25a
+seon    7323 sean   11     PIPE 0xc4a1148ae6659ea3      16384                     ->0xd416841369d11b09
+seon    7323 sean   12     PIPE 0xd416841369d11b09      16384                     ->0xc4a1148ae6659ea3
+seon    7323 sean   13u  KQUEUE                                                   count=0, state=0xa
+seon    7323 sean   15u    unix 0x443b210b2c635b9b        0t0                     ->0xb6c3f15340c39be2
