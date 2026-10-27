@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.root :as root] [seon.repl :as repl] [seon.render.proc] [seon.web]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.root :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -178,30 +178,40 @@
   ;; seon.root/import-source! wrote its :seon.root/source fact and ignored the answer: a fact
   ;; the store refused (inputs holding a sorted map, which konserve.jolt.fasl cannot encode)
   ;; left the previous boot's fact in force, agents shared no inputs, and nothing said why.
-  ;; Root's api is stood in for by a loop that answers the source read with such inputs and
-  ;; steps the real writer proc on its own store for each write.
+  ;; Root's api is stood in for by a loop that answers the source read with the inputs given
+  ;; and steps the real writer proc on a store of its own (the in-memory test store has no
+  ;; codec) for each write; the same inputs as a plain map are the control, and close the cause.
   (let [path (str (System/getProperty "user.dir") "/target/procs-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try (let [st (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)}))
-               ext (a/chan 16)
-               inputs {:tree "t" :env (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))]))}
-               loop (future (loop [] (when-let [{:keys [op req p]} (a/<!! ext)]
-                                       (deliver p (if (= op :fx)
-                                                    {:inputs inputs :binary "t"}
-                                                    (let [[st' outs] (step #'writer/writer-proc @st :in (assoc req :dest {:rid 1}))]
-                                                      (vreset! st st')
-                                                      (some :r (:to-api outs)))))
-                                       (recur))))
-               fact (root/import-source! {:graph nil :ext ext :conn conn :boot 7} {:root "tree" :dirs []})
-               held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
-               cause (d/q '[:find (pull ?e [:seon.error/message :seon.error/subject]) . :where [?e :seon.error/class :platform]] @conn)]
-           (a/close! ext) @loop
-           (is (= fact held) "the fact answered is the one in force")
-           (is (= 7 (:boot held)) "this boot's")
-           (is (nil? (:inputs held)) "no inputs shared that were never stored")
-           (is (some-> (:error held) (clojure.string/includes? "refused")) (pr-str held))
-           (is (some? (:seon.error/message cause)) "the refusal is a :platform cause on root, with the writer's reason")
-           (is (= :seon.root/source (:seon.error/subject cause)) "closed by the next import that writes the fact"))
+               env (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])
+               import! (fn [inputs boot]
+                         (let [ext (a/chan 16)
+                               api (future (loop [] (when-let [{:keys [op req p]} (a/<!! ext)]
+                                                      (deliver p (if (= op :fx)
+                                                                   {:inputs inputs :binary "t"}
+                                                                   (let [[st' outs] (step #'writer/writer-proc @st :in (assoc req :dest {:rid 1}))]
+                                                                     (vreset! st st')
+                                                                     (some :r (:to-api outs)))))
+                                                      (recur))))
+                               fact (root/import-source! {:graph nil :ext ext :conn conn :boot boot} {:root "tree" :dirs []})]
+                           (a/close! ext) @api
+                           fact))
+               held #(:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+               cause #(some (fn [r] (when (= :seon.root/source (get-in r [:example :seon.error/subject])) r))
+                            (get-in (problems/report @conn) [:classes :platform :rows]))
+               fact (import! {:tree "t" :env (into (sorted-map) env)} "b1")]
+           (is (= fact (held)) "the fact answered is the one in force")
+           (is (= "b1" (:boot (held))) "this boot's")
+           (is (nil? (:inputs (held))) "no inputs shared that were never stored")
+           (is (some-> (:error (held)) (clojure.string/includes? "refused")) (pr-str (held)))
+           (is (some? (:message (cause))) "the refusal is a :platform cause on root, with the writer's reason")
+           (is (not= false (:open? (cause))) "open while no import has written the fact")
+           (testing "the same inputs as a plain map store, and close the cause"
+             (let [fact (import! {:tree "t" :env (into {} env)} "b2")]
+               (is (= {:tree "t" :env (into {} env)} (:inputs (held))) (pr-str fact))
+               (is (nil? (:error (held))))
+               (is (false? (:open? (cause))) (pr-str (cause))))))
          (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
