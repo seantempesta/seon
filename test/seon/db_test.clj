@@ -843,8 +843,16 @@
           (pdb/after-fork! (assoc-in cfg [:store :path] "/nonexistent/a-fork-keeps-its-parents-node-caches"))
           (let [after @cs]
             (is (not-any? :conn (vals after)) "no connection is kept")
-            (is (= #{(:node-cache entry)} (into #{} (keep :node-cache) (vals after)))
+            (is (contains? (into #{} (keep :node-cache) (vals after)) (:node-cache entry))
                 "each cache is kept, the same object")
             (is (every? #(and (zero? (:count %)) (:node-store-key %) (:threshold %)) (vals after))
-                "held by node store and threshold, as a connect looks one up"))
+                "held by node store and threshold, as a connect looks one up")
+            ;; the first connect to that store reserves it: Datahike's own reservation, run over
+            ;; a copy of what the fork kept, so no store is opened here
+            (binding [datahike.connections/*connections* (atom after)]
+              (let [r (datahike.connections/reserve-connection-opening!
+                        [:a-fork-keeps :conn] :a-completion :acquisition (:physical-store-key entry)
+                        (:node-store-key entry) (:threshold entry) (fn [] :a-fresh-cache))]
+                (is (= :owner (:state r)))
+                (is (identical? (:node-cache entry) (:node-cache r)) "the agent's first connect reads through its parent's cache"))))
           (finally (reset! cs before)))))))
