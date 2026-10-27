@@ -366,8 +366,7 @@
   ([root cfg checkout] (inputs root cfg checkout (tree-id root)))
   ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
   ([root cfg checkout tree]
-   (let []
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+   (let [entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
