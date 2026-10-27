@@ -57,6 +57,9 @@ main_first() {
 # is_main_tree: this checkout (ROOT) is the main tree. Only main's merge verification goes first:
 # bin/prove --merge holds the lock there, and a worktree's --merge holds nothing, waiting like any run
 is_main_tree() { [ "$(cd "$ROOT" && pwd -P)" = "$(cd "$MAIN_TREE" && pwd -P)" ]; }
+# worktrees share refs: what runs here commits its merges on a branch of this worktree's own
+# (:seon.config.source/branch), never the main tree's jolt/seon-merges
+is_main_tree || export SEON_SOURCE_BRANCH=${SEON_SOURCE_BRANCH:-jolt/seon-merges-$(basename "$ROOT")}
 # main_hold NAME CMD ARGS: CMD run under the lock (waiting for another holder first), NAME in the lock file
 main_hold() {
   mkdir -p "$(dirname "$MAIN_LOCK")"

@@ -4,7 +4,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.docs :as docs] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
-            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err]))
+            [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source]))
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
@@ -63,6 +63,38 @@
   "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
+
+(defn write-back!
+  "Write the source files of the merged runs ids (run ids) onto the merges branch again: those a
+  failed write-back left :seon.run/unwritten (a reconciler :committed that the git effect
+  refused), read from main as it is now and committed in one :git effect like the reconciler's.
+  The answer is recorded by seon.reconcile/commit-tx: the sha on each run, which clears its
+  unwritten files and the error, or the error and the files again. A run with none unwritten is
+  answered :seon.root/nothing-lost under :not-lost and left out. Answers {:written ids :sha} or the
+  git effect's error, with :not-lost when any."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.run/id]] :map]}
+  [sys ids]
+  (let [db @(:conn sys)
+        runs (into {} (for [id ids] [id (task/run db id)]))
+        lost (filterv #(seq (:seon.run/unwritten (runs %))) ids)
+        not-lost (vec (for [id ids :when (not-any? #{id} lost)]
+                        (contract/error :seon.root/nothing-lost #'my.root/write-back!
+                                        (str "run " id (if (runs id) " has no write-back to repeat" " does not exist")) {:run id})))
+        paths (vec (sort (distinct (mapcat #(:seon.run/unwritten (runs %)) lost))))
+        root (config/value :seon.config.source/root)
+        files (source/files db paths)
+        members (vec (for [id lost] {:task (:seon.run/task (runs id)) :run id}))
+        r (cond (empty? lost) {:written []}
+                (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!
+                                            "no source root declared (:seon.config.source/root): nothing is written back here" {:runs lost})
+                (empty? files) (contract/error :seon.root/no-source-text #'my.root/write-back!
+                                               (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
+                :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files
+                                               :message (source/commit-message members)}))
+        tx (when (seq lost) (reconcile/commit-tx db r members paths))]
+    (when (seq tx) @(root/transact-main! sys tx))
+    (cond-> (if (contract/error? r) r {:written lost :sha (get-in r [:value :sha])})
+      (seq not-lost) (assoc :not-lost not-lost))))
 
 (defn gate!
   "Root's go for tasks ids: the process tests each one's change reaches (a shell, a fork, a

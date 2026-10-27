@@ -501,11 +501,12 @@
   each task whose latest run root refused to spawn (its reason: the branch is held, or
   too many live agents), each task whose latest run parked its session (its outcome: it waits
   for a message, which wakes it), and each other task not released (cancelled, held) that released
-  work needs, with the released tasks it blocks. Read once at quiescence: one pass over the
-  tasks."
+  work needs, with the released tasks it blocks, and each merged run whose write-back failed (its
+  :seon.run/unwritten files: no commit holds them). Read once at quiescence: one pass over the
+  tasks and runs."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
   [idx]
-  (vec (for [[id t] (sort-by key (:tasks idx))
+  (vec (concat (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
              :let [ex (:seon.task/execution t)
                    f (when (= :held ex) (:seon.task/failure t))
@@ -521,7 +522,33 @@
                                         :else (name ex))
                   :blocks bs}
            (:run f) (assoc :run (:run f))
-           stopped (assoc :run (:seon.run/id stopped))))))
+           stopped (assoc :run (:seon.run/id stopped))))
+               ;; a merged run whose source files no commit holds: its write-back failed (my.root/write-back!)
+               (for [[aid a] (sort-by key (:runs idx)) :when (and (= :merged (:seon.run/status a)) (seq (:seon.run/unwritten a)))]
+                 {:task (:seon.run/task a) :run aid :blocks []
+                  :cause (str "write-back lost: " (:seon.run/commit-error a) " [" (str/join ", " (sort (:seon.run/unwritten a))) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
+
+(defn commit-tx
+  "Main's write of the :git effect's answer r for the runs of members, which wrote paths: a sha is
+  :seon.run/commit on each (and clears what an earlier failure left: its :seon.run/unwritten and
+  the error that named it); a failure is :seon.run/commit-error with the paths still
+  :seon.run/unwritten, which root-causes names until a commit holds them, and its :effect row
+  (seon.error/asked-tx), closed by the next commit's sha. Nil when r is neither. The reconciler's
+  write-back and my.root/write-back! write it alike."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :map] [:sequential :string]] [:maybe [:vector :any]]]}
+  [db r members paths]
+  (let [sha (get-in r [:value :sha])
+        m (cond sha {:seon.run/commit sha}
+                (contract/error? r) {:seon.run/commit-error (:seon.error/message r) :seon.run/unwritten (set paths)})]
+    (when m
+      (err/asked-tx db r :seon.run/commit
+                    (vec (mapcat (fn [{:keys [run]}]
+                                   (let [a (task/run db run) lost (:seon.run/unwritten a)]
+                                     (cond-> [(assoc m :seon.run/id run)]
+                                       (and sha (seq lost))
+                                       (into (cons [:db/retract [:seon.run/id run] :seon.run/commit-error (:seon.run/commit-error a)]
+                                                   (for [p lost] [:db/retract [:seon.run/id run] :seon.run/unwritten p]))))))
+                                 members))))))
 
 (defn- unfiled-error
   "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
@@ -991,14 +1018,9 @@
                                                              :message (source/commit-message members)}}))))
       ;; the sha on each merged run; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
-      :committed (let [sha (get-in r [:value :sha])
-                       m (cond sha {:seon.run/commit sha}
-                               (contract/error? r) {:seon.run/commit-error (:seon.error/message r)})]
-                   ;; a failed commit is recorded here, its row closed by the next commit's sha
-                   (if m
-                     (one (write st aid :done (err/asked-tx (:db st) r :seon.run/commit
-                                                            (vec (for [{:keys [run]} (:members (:writeback f))] (assoc m :seon.run/id run))))))
-                     (done st))))))
+      :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)))]
+                   (one (write st aid :done tx))
+                   (done st)))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

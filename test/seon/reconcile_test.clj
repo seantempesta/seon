@@ -750,6 +750,29 @@
         (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
         (is (= "the write-back read none of src/app/none.clj on main" (:seon.run/commit-error run')))))))
 
+(deftest a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
+  ;; the :git effect refused the write-back of a merged run (a locked ref): its run keeps the files unwritten, quiescence names
+  ;; it, and a later commit of them (my.root/write-back!, or the next merge's) clears the run and the cause
+  (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :merged :outcome :green)))
+        members [{:task "demo/add-merge" :run "demo/add-merge#1"}]
+        refused (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "cannot lock ref refs/heads/jolt/seon-merges" {:path "/x"}) :seon.fx/at-ms 5)
+        lost-tx (r/commit-tx db refused members ["src/app/m.clj"])
+        lost (d/db-with db lost-tx)
+        causes (r/root-causes (r/index lost))
+        fixed (d/db-with lost (r/commit-tx lost {:value {:sha "abc123" :files 1}} members ["src/app/m.clj"]))
+        run-of #(task/run % "demo/add-merge#1")]
+    (is (= #{"src/app/m.clj"} (:seon.run/unwritten (run-of lost))) "the files are still unwritten")
+    (is (= "cannot lock ref refs/heads/jolt/seon-merges" (:seon.run/commit-error (run-of lost))))
+    (is (= [{:task "demo/add-merge" :run "demo/add-merge#1" :blocks []
+             :cause "write-back lost: cannot lock ref refs/heads/jolt/seon-merges [src/app/m.clj]; (my.root/write-back! sys [\"demo/add-merge#1\"]) writes it again"}]
+           causes)
+        "a merged run with unwritten files is a root cause, naming the function that writes them")
+    (is (= [] (r/root-causes (r/index db))) "a merged run that lost nothing is none")
+    (is (= "abc123" (:seon.run/commit (run-of fixed))))
+    (is (nil? (:seon.run/unwritten (run-of fixed))) "a commit holds them: nothing unwritten")
+    (is (nil? (:seon.run/commit-error (run-of fixed))) "and the error that named them is gone")
+    (is (= [] (r/root-causes (r/index fixed))))))
+
 (deftest a-held-task-shows-its-reason-among-the-problems
   (let [[db' act] (held (mdb [(decl "add")] :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail})))
         [row & more] (get-in (problems/report db') [:classes :failed :rows])]
