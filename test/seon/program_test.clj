@@ -546,8 +546,16 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's are not: they are in :env")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto]]
+    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
+    ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
+    ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
+    ;; runs on (and by every test that reads files or runs a process)
+    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
+        "the runtime's pins are classes too")
+    (let [e0 (:env in)]
+      (is (= e0 (:env (fx/inputs here (assoc cfg/config :seon.config.source/pin-namespaces (cfg/value :seon.config.source/pin-namespaces)) (cfg/checkout))))
+          "the same inputs give the same :env"))
+    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/jolt]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
@@ -706,13 +714,12 @@
         ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
         ;; without it all 69 tests reaching pattern kept their digest when the window moved
         window (moved :seon.config.ctx/window "7")
-        readers (program/tests-reaching g 'seon.render/pattern)
-        ;; the tests that take a whole config map (root's boot, from-db): every key is theirs
-        whole (set (for [t (keys a) :when (= :all (get-in g [:flags (get-in g [:comp-of (peek (get (:defs g) t))]) :config]))] t))]
+        readers (program/tests-reaching g 'seon.render/pattern)]
     (is (< 0 (count window) (quot (count a) 2)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, fewer than half"))
     (is (not (window 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
-    (is (seq whole) "a test booting a root reads every key")
-    (is (= whole (moved :seon.config.no/such-key "1")) "a key no form names moves only the tests reading every key")
+    ;; root, 2026-10-27: a form taking the whole config map (root's boot, from-db) took every key,
+    ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
+    (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
     (is (seq readers) "tests reach the reader of a computed key")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
     ;; the reader list is complete: a form outside seon.config that calls the config's one reader

@@ -348,14 +348,31 @@
  :seon.config.source/process-entry #{seon.main/-main seon.turn/work!}
  ;; Unit: namespace prefix -> submodules. The pins a test takes by what its reach references (the
  ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
- ;; reach datahike.*, not every test. The runtime and the binary (jolt, chez, lmdb, zstd, llama.cpp,
- ;; awesome-jolt) are in no set: every test takes them. Provenance: root's task (2026-10-27): pins moved
- ;; every digest in 3 of the last 12 --merge batches (datahike 3, konserve 2, jolt 2); the libraries'
- ;; own suites run on a bump (bin/check forks, 4cdd5625f5).
+ ;; reach datahike.*, not every test. Every submodule is in a set: Jolt and Chez (the runtime and its
+ ;; compiler) are taken by a test reaching one of Jolt's library namespaces (its analyzer, IR, deps,
+ ;; nREPL, HTTP client, async remote), not its host layer (jolt.host, jolt.scheme, jolt.ffi,
+ ;; jolt.io-poller), which every form runs on as it runs on clojure.core (924 of 977 tests reach
+ ;; jolt.host, measured 2026-10-27), lmdb and zstd by one reaching the
+ ;; store (konserve, datahike), llama.cpp by one reaching seon.vector, awesome-jolt (prose and
+ ;; examples) by none but a test reading files or running a process. What a test runs on without
+ ;; naming it (every test runs clojure.core on Jolt) is the forks' own suites' and the daily full
+ ;; run's to catch (owner, 2026-10-27: "no test digests the whole tree"). Provenance: root's task
+ ;; (2026-10-27): pins moved every digest in 3 of the last 12 --merge batches (datahike 3, konserve
+ ;; 2, jolt 2), and the Jolt pin, in every test's :env, moved 15 times in 3 days: worktrees on one
+ ;; Jolt pin shared 84% of digests, on two pins 0%; the libraries' own suites run on a bump
+ ;; (bin/check forks, 4cdd5625f5).
  :seon.config.source/pin-namespaces
- {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
-             "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
-  konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
+ {jolt.analyzer #{"reference-code/jolt" "reference-code/chez"}
+  jolt.ir #{"reference-code/jolt" "reference-code/chez"}
+  jolt.deps #{"reference-code/jolt" "reference-code/chez"}
+  jolt.nrepl #{"reference-code/jolt" "reference-code/chez"}
+  jolt.http #{"reference-code/jolt" "reference-code/chez"}
+  jolt.async #{"reference-code/jolt" "reference-code/chez"}
+  datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
+             "reference-code/jolt-fressian" "reference-code/jolt-overlay" "reference-code/lmdb" "reference-code/zstd"}
+  konserve #{"reference-code/konserve" "reference-code/jolt-fressian" "reference-code/lmdb" "reference-code/zstd"}
+  seon.vector #{"reference-code/llama.cpp"}
+  awesome-jolt #{"reference-code/awesome-jolt"}
   malli #{"reference-code/malli"}
   jolt.crypto #{"reference-code/crypto"}
   org.replikativ.persistent-sorted-set #{"reference-code/persistent-sorted-set"}
