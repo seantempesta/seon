@@ -29,8 +29,4 @@
  {:seon.task/name "a-cancelled-tasks-run-problems-close"
   :seon.task/plan "A run's problem rows (`seon.problems/run-rows`) were `:open? (not (task/done? db te))`, and a task root cancelled (`:seon.task/execution :cancelled`) is never done, so its rows stayed open forever (notes/root-repair-findings-2026-10-27.md G8). Corrected at the row's producer: a run's problem is open while its task is still to be worked, not done and not cancelled (the task's execution rides the run's one pull). The :unrun row stays open until its tests pass. src +1 line. Wiki: docs/health.md says a cancelled task's run problems close."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.problems-test/a-cancelled-tasks-run-problems-close}}
- {:seon.task/name "health-reads-each-part-once"
-  :seon.task/plan "`seon.problems/health` computed `answers` and `report` computed it again, and called `problem-unlinked` twice and then `distinct`ed the second pass's repeats of the first: a dedupe of its own double work. Corrected: `report` and `health` share `report-with`, which takes the answers read once; `problem-unlinked` judges its own class's page in its one pass, so the second call and the `distinct` go. Contracted calls of one `health` read on the proof's db: 59 before, 51 after (report-with's own contract is one of them); the rows are unchanged (seon.problems-test/an-issue-with-no-page-is-a-problem and problem-unlinked-follows-the-classes-not-their-rows stay green)."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.problems-test/health-reads-each-part-once}}]
+  :seon.task/proofs #{seon.problems-test/a-cancelled-tasks-run-problems-close}}]
