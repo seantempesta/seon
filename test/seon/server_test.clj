@@ -339,9 +339,12 @@
                              "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
                              "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
-                             "  (vec (repeatedly 5 m)))")]))
-        later (rest (:value reads))]
-    (is (= 5 (count (:value reads))))
+                             "  {:reads (vec (repeatedly 5 m))"
+                             "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))]"
+                             "                (= page (seon.context/page db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))))})")]))
+        later (rest (:reads (:value reads)))]
+    (is (= 5 (count (:reads (:value reads)))))
+    (is (true? (:live=cold (:value reads))) "the live walk's page is the cold draw's at the commit it framed at")
     (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))

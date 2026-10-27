@@ -1076,9 +1076,10 @@
                               :else %)
                   ;; the own task re-homed under a new run (a restart's: ctx holds it whole under the
                   ;; newest) is the same task, which the page's task data and cited vars draw: its move
-                  ;; is not told as data (it was 190 KB of :ctx in one read); its own changes are
+                  ;; between two runs is not told as data (it was 190 KB of :ctx in one read): the page's task data
+                  ;; tells what changed of it; any other change of the task is told
                   [o0 o1] [(own-task (:tree r0)) (own-task (:tree r1))]
-                  drawn? (fn [p] (and (not= o0 o1) (some #(and % (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) [o0 o1])))
+                  drawn? (fn [p] (and o0 o1 (not= o0 o1) (some #(and (<= (count %) (count p)) (= % (subvec (vec p) 0 (count %)))) [o0 o1])))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
                            (for [[p ov] (ctx/diff r0 r1) :when (not (drawn? p))] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
