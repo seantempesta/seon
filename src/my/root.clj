@@ -134,10 +134,9 @@
 
 (defn task-files
   "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or error}. A file's name is its owning namespace. Each work
-  task is followed by its merge task (seon.template/with-merge, over all files, so a need
-  on another file's work task is a need on its merge), derived here and never written in
-  a file."
+  {owning-ns declarations or error}. A file's name is its owning namespace. Each
+  declaration is one :whole task (seon.template/request) that merges itself, so a need on
+  another file's task is a need on it; the kind is derived here and never written in a file."
   {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
   ([] (task-files (config/value :seon.config.root/tasks-dir)))
   ([dir]
@@ -149,7 +148,7 @@
      (if (seq refused)
        read
        (merge (zipmap (keys read) (repeat []))
-              (group-by :seon.task/ns (tpl/with-merge (into [] cat (vals read)))))))))
+              (group-by :seon.task/ns (into [] (mapcat tpl/request) (apply concat (vals read)))))))))
 
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
