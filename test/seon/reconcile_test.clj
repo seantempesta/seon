@@ -469,6 +469,50 @@
         (d/release (d/connect (pdb/store-cfg :lmdb path)) true)
         (sh/sh "rm" "-rf" path)))))
 
+(def ^:private listed-sizes [10 300 600])
+
+(defn listed-input
+  "The listing proof's input at n: main on a store on disk of its own (as observed-input's,
+  at listed-path) holding n tasks shaped as a root's main holds them: a plan of about 1.4 KB
+  (out of line, as a task file's is), three proofs, and chains of five along :needs, released."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
+  [n]
+  (let [path (str (observed-path n) "-listed")
+        _ (sh/sh "rm" "-rf" path)
+        {:keys [conn]} (pdb/open! :lmdb path 2000 :db)
+        plan (apply str (repeat 40 "Make the reconciler's index cost its tasks. "))
+        decls (mapv (fn [i] (cond-> (assoc (decl (str "u" i)) :seon.task/plan (str plan i)
+                                           :seon.task/proofs (set (map #(symbol "demo-test" (str "u" i "-" %)) (range 3))))
+                              (pos? (mod i 5)) (assoc :seon.task/needs #{(str "demo/u" (dec i))})))
+                    (range n))]
+    (d/transact conn (task/create-tx @conn decls))
+    (d/transact conn (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) decls) :running))
+    (d/transact conn (task/boot-tx "boot-1" 4))
+    [@conn]))
+
+(deftest an-index-is-listed-at-the-cost-of-its-tasks
+  ;; an agent's first request build lists the index (seon.turn/index!); every reconciler helper
+  ;; takes the index, so its contract checks it shallowly (each entry is checked where it enters)
+  (try
+    (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/listed-input
+                 :n "tasks on main, in chains of five along :needs"
+                 :work (str "one pull of each task, run and root entity, then each task derived once in "
+                            "the order of its needs (depth, accumulated proofs, claims, ready); the index's "
+                            "contract is checked on every helper call at the cost of its keys, never of its "
+                            "entries. Checked deeply on every call, a listing cost tasks x tasks: 156M ticks "
+                            "and 636 MB on a root's main of 903 tasks, 26.8M and 149 MB with the contracts off")
+                 :growth :linear
+                 ;; measured on LMDB: 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
+                 ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task.
+                 ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
+                 :fixed {:ticks 100000.0 :bytes 300000.0}
+                 :per-n {:ticks 36000.0 :bytes 180000.0 :calls 11.0}
+                 :sizes listed-sizes})
+    (finally
+      (doseq [n listed-sizes :let [path (str (observed-path n) "-listed")] :when (pdb/store? path)]
+        (d/release (d/connect (pdb/store-cfg :lmdb path)) true)
+        (sh/sh "rm" "-rf" path)))))
+
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
     (is (= {:seon.task/kind :merge :seon.task/needs #{"demo/a"} :seon.task/branch :task-demo-a}
