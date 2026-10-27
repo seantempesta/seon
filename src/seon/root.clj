@@ -646,7 +646,9 @@
   ([] {:params {:graph "a promise of this graph" :system "a promise of the built system (seon.system/build)"}
        :ins {:from-writer "writer answers and stats" :from-fs "fork-server events"} :outs {:to-fs "fork-server requests"}
        :workload :io
-       :ping-map-fn (fn [st] {:agents (count (:agents st)) :pending (count (:pending st)) :closing (boolean (:closing st))})})
+       :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
+                              ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
+                              :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))})})
   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
   ;; seon.root/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0 :next-id 0
@@ -1071,7 +1073,9 @@
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
       submit! (cond-> {:op :eval :id id :forms (:forms args)} (:ticks args) (assoc :ticks (:ticks args)) (:origin args) (assoc :origin (:origin args)))
-      run-tests! (cond-> {:op :tests :id id} (:ticks args) (assoc :ticks (:ticks args)))
+      ;; the agent proves its branch through the test service as root's judge does (seon.agent/prove!
+      ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
+      run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
       message! {:op :message :id id :from :owner :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
