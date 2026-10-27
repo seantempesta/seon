@@ -63,7 +63,9 @@
   ;; fork copied it; root's hook (its whole stop: seon.main/root-serve) ran in an agent or a test
   ;; child that left by System/exit, an uncaught throw or a signal, on root's copied state
   ;; against the shared store (seon.check/fork-cases "child-hooks")
-  (is (= {:status {:exit 3} :parents-hook-ran-in nil} (fork-case "child-hooks"))))
+  (is (= {:status {:exit 3} :parents-hook-ran-in nil} (fork-case "child-hooks")))
+  (testing "nor any of its parent's fibers: a parent fiber reading a socket reads it in the parent alone (seon.check/fork-cases \"child-fibers\")"
+    (is (= {:status {:exit 0} :read-by :parent} (fork-case "child-fibers")))))
 
 (deftest a-wait-for-a-line-parks-the-fiber
   ;; an agent waits for its test child's lines for the whole test run (seon.agent/run-tests-forked):
