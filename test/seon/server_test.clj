@@ -196,3 +196,22 @@
     (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
+
+(deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
+  ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
+  ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
+  ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
+  ;; process's exact counts (seon.profile/measure!), the page draws the contracted calls of seon.context/page
+  (let [[reads]
+        (at/in-agent (fn [{:keys []}]
+                       [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
+                             " m (fn [] (let [v (volatile! nil)]"
+                             "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
+                             "           {:ticks (:ticks @v) :bytes (:bytes @v)"
+                             "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
+                             "  (vec (repeatedly 5 m)))")]))
+        later (rest (:value reads))]
+    (is (= 5 (count (:value reads))))
+    (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
+    (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
+    (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
