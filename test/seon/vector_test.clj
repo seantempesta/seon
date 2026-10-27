@@ -121,6 +121,18 @@
           (is (empty? (:to-api o5)) "nothing due: nothing asked, the proc idles")
           (is (= 1 (:embedded st))))))))
 
+(deftest a-caught-up-proc-looks-only-at-a-commits-texts
+  ;; task one-index step 2: with everything due asked for, the next notice reads the texts that commit
+  ;; changed (seon.vector/written), not every text of the store
+  (let [db (db-due-only)
+        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
+        _ (is (seq (:to-api o)) "the first round reads the store: x/1 is due")
+        [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+        [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api (second (vector/vectors-proc st :main {:t 10 :db db}))))) :r {:ok true :t 11}})
+        db2 (d/db-with db [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+        [_ o2] (vector/vectors-proc (assoc st :running false :written-t 10) :main {:t 12 :db db2})]
+    (is (= ["title: none | text: (defn h [])"] (get-in (first (:to-api o2)) [:req :req :texts])) "the commit's new text alone is asked")))
+
 (deftest a-failed-embedding-waits-for-the-next-notice
   (let [db (db-due-only)
         [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
