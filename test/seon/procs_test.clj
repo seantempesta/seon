@@ -205,7 +205,7 @@
            (is (= "b1" (:boot (held))) "this boot's")
            (is (nil? (:inputs (held))) "no inputs shared that were never stored")
            (is (some-> (:error (held)) (clojure.string/includes? "refused")) (pr-str (held)))
-           (is (some? (:message (cause))) "the refusal is a :platform cause on root, with the writer's reason")
+           (is (some? (:message (cause))) "the refused write is a :platform cause on root, with the writer's reason")
            (is (not= false (:open? (cause))) "open while no import has written the fact")
            (testing "the same inputs as a plain map store, and close the cause"
              (let [fact (import! {:tree "t" :env (into {} env)} "b2")]
