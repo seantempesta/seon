@@ -589,8 +589,8 @@
 (defn world
   "What changed for agent entity a between two commits of its branch on db (the ones a turn's
   request and the one before it were made on), as data: {:page {key hiccup}, each part of its page whose hiccup changed (nil for one
-  that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path
-  (the owner, 2026-10-26: every change is told, as a data diff in ctx's shape)}, the empty ones left out; with no c0, the page whole, {:page page}.
+  that went), :ctx {path [old new]}, seon.ctx/diff of its record advanced across them, every path that
+  changed}, the empty ones left out; with no c0, the page whole, {:page page}.
   Printed whole as one user message: the page and each change told once."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? [:maybe :any] :any] [:vector :seon.model/message]]}
   [db a c0 c1]

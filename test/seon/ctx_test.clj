@@ -739,7 +739,11 @@
         (is (= :seon.ctx/invalid (:seon.error/type r)))
         (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
         (is same)
-        (is (= (:max-tx db) (:max-tx db')))))
+        (is (= (:max-tx db) (:max-tx db'))))
+      (let [r1 (id db [:seon.run/id "lab/ctx#1"]) f0 (id db [:var/name 'app.x/f0])
+            [[r] _] (step db #(swap! ctx/ctx update-in [:runs r1 :task :cited] dissoc f0))]
+        (is (= "a lookup's members follow :seon.task/references: change it" (:why (first (:invalid r))))
+            "no var changed in it (one gone): what the members follow, no definition named")))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
       (let [[[r same] db'] (step db #(swap! ctx/ctx update :runs dissoc "nope"))]
         (is (map? r))
@@ -780,13 +784,15 @@
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [st {:db (seeded n) :key k :branch :b :mode :test}]
+    ;; the state's watch builds the record the swap! starts from (seon.ctx/on-state)
     (reset! seon.agent/state st)
     [st (ctx/record) (key (first (:runs (:tree (ctx/record)))))]))
 
 (defn one-swap
   "One swap! of the task's plan through @ctx, from the session's state and record (set again
-  each call, the state's watch off while it is: constant work): write!'s edits, its d/with, the
-  transaction applied in test mode and its patch, and the record installed."
+  each call, the state's watch, seon.ctx's, off while it is: constant work, a share of what is
+  measured): write!'s edits, its d/with, the transaction applied in test mode and its patch, and
+  the record installed."
   {:malli/schema [:=> [:cat :map :map :int] :nil]}
   [st record rid]
   (remove-watch seon.agent/state :seon.ctx/ctx)
@@ -809,6 +815,7 @@
      :growth :constant
      :fixed {:calls 39}
      :sizes [100 300 1000 3000]})
+  ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))
 
 (defn one-attribute

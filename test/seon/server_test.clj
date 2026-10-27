@@ -153,5 +153,5 @@
     (is (= plan (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (clojure.string/includes? (:context next-turn) plan) "the next turn shows it")
-    (is (re-find #":seon\.task/plan\] \["Work\." (:context next-turn))
+    (is (clojure.string/includes? (:context next-turn) (pr-str ["Work." plan]))
         "and tells it as a diff in ctx's shape, {path [old new]}")))
