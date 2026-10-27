@@ -469,9 +469,183 @@
         all-tests (set (keys a))
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)]
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
+      ;; and a test that reads files or runs a process takes every class
+      (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
+    (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps] [:schemas (moved :seon.env/schemas)]]]
       (is (< 0 (count m) (count all-tests)) (str (count m) " of " (count all-tests) " tests take the " c " class: some, not every test"))
       (is (not (m 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c " class")))
     (is (< (count web) (count bin)) "fewer tests read the web handler than may run a script")))
+
+(deftest an-uncommitted-edit-in-a-submodule-is-an-input
+  ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
+  ;; the test runtime loads its files as they are: a dependency edit not yet committed left
+  ;; every digest as it was, so a green proven on the old files was reused on the new
+  (let [p (checkout! "with-sub" {"deps.edn" "{}"})
+        s (str p "/reference-code/lib")
+        core (str s "/core.clj")]
+    (.mkdirs (java.io.File. s))
+    (spit core "(ns lib.core)")
+    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
+      (apply sh/sh "git" "-C" s args))
+    (sh/sh "git" "-C" p "add" "reference-code/lib")
+    (let [before (:env (fx/inputs p))]
+      (spit core "(ns lib.core) (def edited 1)")
+      (is (not= before (:env (fx/inputs p))) "an edit in the submodule's files moves every test's :env")
+      (spit core "(ns lib.core)")
+      (is (= before (:env (fx/inputs p))) "its files back as committed: the same input as before"))))
+
+;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
+
+(defn- refs-of [db sym]
+  (set (d/q '[:find [?r ...] :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f] [?f :form/refs ?r]] db sym)))
+
+(deftest a-quoted-name-is-no-reference-but-in-a-macros-template
+  ;; root's ruling, 2026-10-25: the reach follows calls; a quoted name is data, but what a
+  ;; macro's template quotes is its expansion's code
+  (let [db (record (empty-db) 'user "(ns app.pt-q)" 'app.pt-q "(defn g [] 1)"
+                   'app.pt-q "(defn f [] [`g 'app.pt-q/g {:render 'app.pt-q/g}])"
+                   'app.pt-q "(defn c [] (g))"
+                   'app.pt-q "(defmacro t [] `(g))")]
+    (is (not (contains? (refs-of db 'app.pt-q/f) 'app.pt-q/g)) "a syntax-quoted and a quoted name, in a map too: data, no reference")
+    (is (contains? (refs-of db 'app.pt-q/c) 'app.pt-q/g) "a call is")
+    (is (contains? (refs-of db 'app.pt-q/t) 'app.pt-q/g) "and a name a macro's template quotes, which its expansion calls")
+    (is (= '[app.pt-q/c app.pt-q/f app.pt-q/t] (seon.docs/callers db 'app.pt-q/g)) "who calls or names g: f names it as data")))
+
+(deftest a-macro-use-is-a-ref
+  (let [db (record (empty-db) 'user "(ns app.pt-qm)" 'app.pt-qm "(defmacro m [x] x)"
+                   'app.pt-qm "(defn u [] (m 1))"
+                   'app.pt-qm "(defmacro mdo [] `(do (defn ~'w [] 1) (defn ~'w2 [] 2)))"
+                   'app.pt-qm "(mdo)"
+                   'app.pt-qm "(defmacro m2 [x] `(m ~x))")]
+    (is (contains? (refs-of db 'app.pt-qm/u) 'app.pt-qm/m) "the macro a form expanded")
+    (is (contains? (refs-of db 'app.pt-qm/w) 'app.pt-qm/mdo) "a top-level macro call that expands to a do: each unit's form names it")
+    (is (contains? (refs-of db 'app.pt-qm/m2) 'app.pt-qm/m) "a macro whose template names another: the expansion chain is closed")))
+
+(deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
+  (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
+                   'user "(ns app.pt-mac-test (:require [clojure.test :refer [deftest is]] [app.pt-mac :as a]))"
+                   'app.pt-mac-test "(deftest m-test (is (= 2 (a/m 1))))"
+                   'app.pt-mac-test "(deftest plain-test (is (= 1 1)))")
+        ts '#{app.pt-mac-test/m-test app.pt-mac-test/plain-test}
+        before (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts)
+        db' (record db 'app.pt-mac "(defmacro m [x] `(+ 2 ~x))")
+        after (select-keys (program/reach-digests db' {:env "e" :tree "t" :config {}}) ts)]
+    (is (not= (before 'app.pt-mac-test/m-test) (after 'app.pt-mac-test/m-test)) "the macro's body changed: the test expanding it moved (no stale green)")
+    (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
+    (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
+
+(deftest a-var-a-test-resolves-at-run-time-moves-its-digest
+  ;; a constant symbol passed to resolve, ns-resolve or requiring-resolve is a reference (the
+  ;; compiler's facts): a green at a digest that left the var out was reused after it changed,
+  ;; and a task whose proof resolves a var it defines closed with no turn (app.proofs/gens-test)
+  (let [db (record (empty-db) 'user "(ns app.pt-res)" 'app.pt-res "(defn f [] 1)"
+                   'user "(ns app.pt-res-test (:require [clojure.test :refer [deftest is]]))"
+                   'app.pt-res-test "(deftest r-test (is (= 1 ((resolve 'app.pt-res/f)))))"
+                   'app.pt-res-test "(deftest ns-test (is (= 1 ((ns-resolve 'app.pt-res 'f)))))"
+                   'app.pt-res-test "(deftest req-test (is (= 1 ((requiring-resolve 'app.pt-res/f)))))"
+                   'app.pt-res-test "(deftest later-test (is (= 2 ((resolve 'app.pt-res/g)))))"
+                   'app.pt-res-test "(deftest plain-test (is (= 1 1)))"
+                   'app.pt-res-test "(deftest data-test (is (= 'app.pt-res/f (first (list 'app.pt-res/f)))))")
+        ts '#{app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test app.pt-res-test/later-test app.pt-res-test/plain-test app.pt-res-test/data-test}
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts))
+        before (dg db)
+        changed (dg (record db 'app.pt-res "(defn f [] 3)"))
+        defined (dg (record db 'app.pt-res "(defn g [] 2)"))]
+    (doseq [t '[app.pt-res-test/r-test app.pt-res-test/ns-test app.pt-res-test/req-test]]
+      (is (not= (before t) (changed t)) (str t ": the var it resolves changed, so its digest moved")))
+    (is (not= (before 'app.pt-res-test/later-test) (defined 'app.pt-res-test/later-test))
+        "the var it resolves came to exist: its digest moved")
+    (is (= (before 'app.pt-res-test/plain-test) (changed 'app.pt-res-test/plain-test) (defined 'app.pt-res-test/plain-test))
+        "a test resolving nothing kept its digest")
+    (is (= (before 'app.pt-res-test/later-test) (changed 'app.pt-res-test/later-test)) "f is no var later-test resolves")
+    ;; root, 2026-10-27: a name quoted in a test's namespace is one the test hands over by name
+    ;; (seon.program-test/a-name-a-test-hands-over-quoted-is-what-it-reaches): a rerun, never a stale green
+    (is (not= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name a test's namespace quotes is what it reaches")))
+
+(deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        db (-> (record (empty-db) 'user "(ns app.pt-sc)"
+                       'app.pt-sc "(defn h {:malli/schema [:=> [:cat :app.pt-sc/n] :app.pt-sc/n]} [x] x)"
+                       'user "(ns app.pt-sc-test (:require [clojure.test :refer [deftest is]] [app.pt-sc :as a]))"
+                       'app.pt-sc-test "(deftest h-test (is (= 1 (a/h 1))))"
+                       'app.pt-sc-test "(deftest plain-test (is (= 1 1)))")
+               (schema :app.pt-sc/n "[:and :int :app.pt-sc/base]")
+               (schema :app.pt-sc/base "int?"))
+        ts '#{app.pt-sc-test/h-test app.pt-sc-test/plain-test}
+        dg (fn [db] (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) ts))
+        before (dg db)
+        after (dg (schema db :app.pt-sc/n "[:and :string :app.pt-sc/base]"))
+        after-base (dg (schema db :app.pt-sc/base "pos-int?"))]
+    (is (not= (before 'app.pt-sc-test/h-test) (after 'app.pt-sc-test/h-test)) "the schema h's contract names changed: the test calling h moved")
+    (is (not= (before 'app.pt-sc-test/h-test) (after-base 'app.pt-sc-test/h-test)) "and a schema that schema names, on")
+    (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
+        "a test not reaching h kept its digest")))
+
+(deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+  ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
+  ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
+  ;; import of the same tree. The same commit, imported twice and from a copy at another path,
+  ;; gives the same digest for every test: a second run reruns nothing, two worktrees share.
+  ;; And root's import of it (seon.source/import-tx of :seon.config.source/dirs, as
+  ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
+  ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
+  ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
+  (let [here (System/getProperty "user.dir")
+        copy (scratch-dir "copy")
+        ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
+        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
+        ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
+        ;; (a tracked file deleted on disk is no file of the tree: left out)
+        dirs (cfg/value :seon.config.source/dirs)
+        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard " (str/join " " dirs) ")\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
+        in (fx/inputs here)
+        a (program/reach-digests (runner/program-db here (ts/program-store)) in)
+        b (program/reach-digests (runner/program-db here (ts/program-store)) in)
+        c (program/reach-digests (runner/program-db copy (ts/program-store)) in)
+        ;; root imports into its own store, which holds no example program (the test store's seed
+        ;; does: names a test quotes would reach it)
+        {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
+        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
+               (program/reach-digests @conn in)
+               (finally (d/release conn true)))
+        dir (scratch-dir "same-tree")]
+    (is (< 300 (count a)) "the whole suite")
+    (is (= a b) "the same tree imported twice in one process: every digest equal")
+    (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
+    (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
+    (proofs/store-verdicts! #(fx/write-file {:req %}) dir (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
+    (is (= [] (:run (run-plan a dir))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))
+
+(deftest a-test-digest-takes-only-the-config-keys-it-reads
+  ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
+  ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
+  ;; digest takes the values of the keys its reach names (seon.program/config-reads)
+  (let [here (System/getProperty "user.dir")
+        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        in (fx/inputs here)
+        digests #(update-vals (program/graph-index g % nil) :digest)
+        a (digests in)
+        moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
+        ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
+        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
+        ;; without it all 69 tests reaching pattern kept their digest when the window moved
+        window (moved :seon.config.ctx/window "7")
+        readers (program/tests-reaching g 'seon.render/pattern)
+        ;; the tests that take a whole config map (root's boot, from-db): every key is theirs
+        whole (set (for [t (keys a) :when (= :all (get-in g [:flags (get-in g [:comp-of (peek (get (:defs g) t))]) :config]))] t))]
+    (is (< 0 (count window) (quot (count a) 2)) (str (count window) " of " (count a) " tests read :seon.config.ctx/window: some, fewer than half"))
+    (is (not (window 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a test that reaches no reader of the key keeps its digest")
+    (is (seq whole) "a test booting a root reads every key")
+    (is (= whole (moved :seon.config.no/such-key "1")) "a key no form names moves only the tests reading every key")
+    (is (seq readers) "tests reach the reader of a computed key")
+    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
+    ;; the reader list is complete: a form outside seon.config that calls the config's one reader
+    ;; (value, resolve) naming no config key of its own reads a computed one, and is named
+    (is (= [] (sort-by str (for [[_ r] (:rows g)
+                          :when (and (not= 'seon.config (:ns r)) (set? (:config r)) (empty? (:config r))
+                                     (some (:refs r) '[seon.config/value seon.config/resolve]))]
+                      (:defines r))))
+        "every form reading a computed config key is a config-key-reader")))
 
 (deftest no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the

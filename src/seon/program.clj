@@ -1014,22 +1014,33 @@
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
   (reach-digests), unless the form referencing it defines one of env-readers. The host's file
-  readers, and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
+  readers (io/resource reads the resources/ classes), and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
   bin/check: what such a test proves is the whole program the binary is built from."
-  '#{clojure.core/slurp clojure.core/file-seq seon.test-store/binary-sh})
+  '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
+
+(def env-class-readers
+  "The vars that read one class of the checkout's files that have no program facts
+  (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
+  that class's digest. The bin/ scripts, web/ and resources/public, system.edn, deps.edn and the
+  schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
+  (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
+  takes every class, which graph-index adds from its flags, not this map."
+  '{seon.config/baked-schema-forms :seon.env/schemas
+    seon.fx/declared-refs :seon.env/system
+    seon.system/read-decl :seon.env/system
+    seon.web/handler :seon.env/web
+    seon.fork-server/dev-classpath! :seon.env/deps
+    clojure.java.shell/sh :seon.env/bin})
 
 (def env-readers
-  "The platform vars whose file reads are of inputs every digest already holds (:env:
-  resources/, deps.edn, web/) or of no checkout file at all, so reaching them does not make a
-  test read the tree. A reader not named here counts as reading the tree (conservative: a
-  missed name reruns more, never reuses a stale green). Measured: with
+  "The platform vars whose file reads are of a class of inputs a digest holds apart from the
+  tree (env-class-readers: the schema resources, system.edn, deps.edn, web/public) or of no
+  checkout file at all (seon.proofs/verdicts: the results directory, by digest), so reaching them
+  does not make a test read the tree. A reader not named here counts as reading the tree
+  (conservative: a missed name reruns more, never reuses a stale green). Measured: with
   seon.config/baked-schema-forms (a macro every contracted form expands) counted, 327 of 368
   tests took the tree, so any edit anywhere reran them."
-  '#{seon.config/baked-schema-forms ;; resources/seon/schemas, in :env
-     seon.fork-server/dev-classpath! ;; deps.edn, in :env
-     seon.fx/declared-refs ;; resources/seon/system.edn, in :env
-     seon.web/handler ;; web/public, in :env
-     seon.proofs/verdicts}) ;; the results directory, outside the tree, by digest
+  (conj (set (keys env-class-readers)) 'seon.proofs/verdicts))
 
 (def config-key-readers
   "The vars that read a config key named in data rather than in their own code: a form defining
@@ -1070,20 +1081,6 @@
     (into {} (for [dt (d/datoms db :aevt :schema/key)] [(:v dt) (text (:e dt))]))))
 
 (defn- schema-row? {:malli/schema [:=> [:cat :map] :boolean]} [f] (contains? f :schema))
-
-(def env-class-readers
-  "The vars that read one class of the checkout's files that have no program facts
-  (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
-  that class's digest. The bin/ scripts, web/ and resources/public, system.edn, deps.edn and the
-  schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
-  (:env). A reader of any file or a process (tree-readers, process-vars, binary-vars) takes every
-  class (graph-index)."
-  '{seon.config/baked-schema-forms :seon.env/schemas
-    seon.fx/declared-refs :seon.env/system
-    seon.system/read-decl :seon.env/system
-    seon.web/handler :seon.env/web
-    seon.fork-server/dev-classpath! :seon.env/deps
-    clojure.java.shell/sh :seon.env/bin})
 
 (defn config-reads
   "The config keys form f reads, from its facts: the keys its constants name (:form/keywords
