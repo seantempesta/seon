@@ -930,7 +930,7 @@
    about n datoms of an example program on :db; a root holds no program it was not given)
    :main branch (root's main; an existing branch is resumed; :db is the seed itself)
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
-   runs' model) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
+   runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.root/started-by) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
    move it) :source s}. s: Seon's own source
    is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
    root's dirs at boot (import-source!: replaced when they read otherwise than main's last
@@ -940,7 +940,7 @@
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
   {:malli/schema [:=> [:cat :map] :seon.root/sys]}
-  [{:keys [datoms log? path main backend max-running provider stall-ms source] :or {datoms 0}}]
+  [{:keys [datoms log? path main backend max-running provider stall-ms source started-by] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
   (let [t0 (profile/now-ns)
@@ -1022,7 +1022,9 @@
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
                                                                                   (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
-                                                                         prev (conj {:seon.root/id :root :seon.root/previous-end prev}))}})]
+                                                                         prev (conj {:seon.root/id :root :seon.root/previous-end prev})
+                                                                         ;; the test that started this boot (a test's main is its own: no other boot resumes it)
+                                                                         started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     (when source (import-source! sys source))
     sys))

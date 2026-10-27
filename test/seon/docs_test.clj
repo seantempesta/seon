@@ -351,7 +351,7 @@
     (is (= [[:var 'app/g]] (map hit (seon.docs/tokens db "fusing" #{:var} 2.0))) "the kinds asked only")
     (is (= [] (seon.docs/tokens db "nowhere" all 2.0)) "no word of it in any text")
     (is (= [] (seon.docs/tokens db "" all 2.0)))
-    (is (= ["datoms" "diff" "seon" "run" "outcome" "a" "b"] (seon.docs/words "datoms-diff seon.run/outcome aB")) "an identifier is its parts, camelCase too")
+    (is (= ["datoms" "diff" "seon" "run" "outcome" "near" "of"] (seon.docs/words "datoms-diff seon.run/outcome nearOf aB x")) "an identifier is its parts, camelCase too; a one-letter part is no word")
     (testing "the first line holding a word, and its number"
       (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
 

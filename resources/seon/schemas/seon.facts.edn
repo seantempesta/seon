@@ -339,6 +339,7 @@
  ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
+ :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/root-causes)
@@ -393,6 +394,7 @@
  :seon.root/previous-end :seon.root/end
  :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] :seon.db/agent-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
+                          [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]

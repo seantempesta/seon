@@ -201,25 +201,6 @@
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
-(defn tokens
-  "Text s's identifier tokens, lower case: s split at every character that is no letter or digit
-  and between a lower and an upper case letter, those of two characters or more. What relevance's
-  lexical feature matches, so `seon.vector/near` and `near-of` match the words near and of. One
-  pass over the characters: on 150 of the program's forms a third of the time of a regex split
-  and a sixteenth of its bytes, the same tokens."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:vector :string]]}
-  [s]
-  (let [s (or s "") n (count s)
-        word (fn [out start end] (if (and (>= start 0) (> (- end start) 1)) (conj! out (str/lower-case (subs s start end))) out))]
-    (loop [i 0 start -1 lower? false out (transient [])]
-      (if (< i n)
-        (let [c (.charAt s i)]
-          (cond (not (Character/isLetterOrDigit c)) (recur (inc i) -1 false (word out start i))
-                ;; a word starts here: after a separator, or at an upper case letter after a lower
-                (or (neg? start) (and lower? (Character/isUpperCase c))) (recur (inc i) i (Character/isLowerCase c) (word out start i))
-                :else (recur (inc i) start (Character/isLowerCase c) out)))
-        (persistent! (word out start n))))))
-
 (defn- item-text
   "Entity e's text as relevance's lexical feature reads it: its name twice (a var's, a section's
   address and heading, a schema key) and its text (a form's source, a section's, a schema's form)."
@@ -231,20 +212,6 @@
                     (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
                     :else ["" ""])]
     (str n " " n " " t)))
-
-(defn- bm25
-  "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
-  :bm25-k1 and :bm25-b) for the query's distinct tokens qs, fs each text's token frequencies; its idf
-  counted over fs, so the texts scored are their own corpus and no index of the store is read. In
-  fs's order."
-  {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]]] [:vector number?]]}
-  [qs fs]
-  (let [{k1 :bm25-k1 b :bm25-b} (cfg/value :seon.config.render/relevance-features)
-        n (count fs) lens (mapv #(reduce + 0 (vals %)) fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
-        idf (into {} (for [w qs :let [df (count (filter #(contains? % w) fs))]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
-    (mapv (fn [f len] (reduce + 0.0 (for [w qs :let [c (get f w)] :when c]
-                                      (* (idf w) (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg))))))))))
-          fs lens)))
 
 (defn- section-names
   "Each var name the wiki's sections name, to those sections: {name #{e}}, one read of
@@ -364,7 +331,7 @@
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
-  cosine with qv, zb its BM25 for the text's tokens, zt its cosine with the touched items' mean
+  cosine with qv, zb its BM25 (seon.docs/bm25) for the text's terms (seon.docs/terms), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
   :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). Measured on 57 merged
@@ -387,7 +354,7 @@
         rare (fn [e] (/ (inc rarity-cap) (inc (min rarity-cap (or (counted e) (degree db names e rarity-cap))))))
         weights (cfg/value :seon.config.render/relevance-weights)
         knots (cfg/value :seon.config.render/relevance-calibration)
-        qs (set (tokens text))
+        qs (set (docs/terms text))
         centroid (when (seq touched)
                    (let [vs (keep #(vector/vector-of db %) touched)]
                      (when (seq vs)
@@ -403,7 +370,7 @@
                        []
                        (let [w (weights kind)
                              zc (z (if qv (vector/scores db qv pool) (repeat (count pool) nil)))
-                             zb (z (bm25 qs (mapv #(frequencies (tokens (item-text db %))) pool)))
+                             zb (z (let [fs (mapv #(frequencies (docs/terms (item-text db %))) pool)] (docs/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
                              zt (z (if centroid (vector/scores db centroid pool) (repeat (count pool) nil)))]
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)

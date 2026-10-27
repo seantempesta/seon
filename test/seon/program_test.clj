@@ -153,6 +153,25 @@
       (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
       (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
 
+(deftest a-base-cut-before-an-attribute-has-a-reach-graph
+  ;; test-audit, 2026-10-27, on a store kept from before 7177cc5899: a resumed agent's base (its
+  ;; merge base with main) was cut before :form/ops, and its :context died reading the base's reach
+  ;; graph (Bad entity attribute :form/ops, not defined in current schema). A db that does not
+  ;; declare an attribute holds none of its datoms: its forms' rows read it as absent
+  ;; (docs/source.md#tests-run-by-reach)
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        _ (d/transact conn (vec (remove #(= :form/ops (:db/ident %)) pdb/schema)))
+        _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] m)" :form/ns "n" :form/order 0 :form/defines #{"v"}}
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn}])
+        g (program/reach-graph @conn nil)]
+    (is (= #{"app.old/f"} (set (map :id (vals (:rows g))))) "the base's graph holds its form")
+    (is (= #{"app.old/f" "app.old/g"}
+           (set (keys (:rows (program/reach-update g (d/db-with @conn [{:db/id "f" :form/id "app.old/g" :form/src "(defn g [m] m)" :form/ns [:ns/name 'app.old]
+                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/kind :fn}]))))))
+        "and a form added on it is read too, entity by entity")))
+
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; time deciding is a sleep, a deref with a timeout, or core.async's timeout

@@ -705,11 +705,11 @@
   [v] (pr-str {:seon.test/started v}))
 
 (deftest a-killed-test-run-names-the-test-that-was-running
-  (testing "a child killed while running app-test/slow: that test is red, with how the child ended"
+  (testing "a child killed while running app-test/slow: that test has no verdict (proofs/results), and its death is named with how the child ended"
     (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9} false)]
-      (is (= {'app-test/slow :error} (proofs/results run)))
+      (is (= {} (proofs/results run)) "a death is no verdict")
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
-      (is (= {:signal 9} (:exit (first (:reports run)))))))
+      (is (= ["#'app-test/slow" {:signal 9}] ((juxt :var :exit) (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
       (is (= res (agent/test-run-answer (pr-str res) {:exit 0} false)))))
