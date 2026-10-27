@@ -245,22 +245,23 @@
   bytes 1,536 to 3,776 B over and runs of 8 equal calls on the way down, so a bound near the
   estimate went red or green by the draw (task seon.cost/a-call-allocates-the-same-bytes-each-time).
   A count of calls, never a time. A call that has not settled after
-  `:seon.config.proofs/cost-max-samples` calls is a :seon.cost/unsettled error, thrown: its bytes
-  are not a number to judge."
+  `:seon.config.proofs/cost-max-samples` calls answers the least of them, marked in the answer's
+  meta (`:unsettled {:calls n :lowered-at k}`): noise on a large allocation lowers the least now and
+  then without end (a 32 MB call: the last new low at call 53 of 60), so \"no new low in a run of
+  calls\" is a test that fails by chance, not a defect of the call; a call that never reaches a floor
+  shows in that mark and in the spread of its bytes."
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [need (config/value :seon.config.proofs/cost-settled)
         cap (config/value :seon.config.proofs/cost-max-samples)
         b @baseline
-        best (loop [n 1 best (once f args) low-at 1]
-               (cond (>= (- n low-at) need) best
-                     (>= n cap) (throw (ex-info (str "a call allocated fewer bytes than its least for " (- n low-at) " calls only in " n " calls (cost-settled " need ")")
-                                                (contract/error :seon.cost/unsettled #'seon.cost/measure
-                                                                (str "the call's bytes did not settle in " n " calls: its least so far " (long (:bytes best)) " B was last lowered at call " low-at)
-                                                                {:calls n :least (long (:bytes best))})))
-                     :else (let [m (once f args) n (inc n)]
-                             (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))]
-    (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))))
+        [best n low-at] (loop [n 1 best (once f args) low-at 1]
+                          (if (or (>= (- n low-at) need) (>= n cap))
+                            [best n low-at]
+                            (let [m (once f args) n (inc n)]
+                              (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
+        dims (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))]
+    (cond-> dims (< (- n low-at) need) (vary-meta assoc :unsettled {:calls n :lowered-at low-at}))))
 
 (declare units)
 
