@@ -347,21 +347,22 @@
 (defn problem-unlinked
   "Each class of classes ({class {:rows ...}}) with an open row whose wiki section (:seon.problems/docs)
   is no stored section, or that declares none, as a :problem-unlinked row: an issue that points
-  nowhere is itself a problem. None while the db holds no wiki (unknown). Cost: one lookup per
-  class with rows."
+  nowhere is itself a problem, and so is the class of those rows when its own section is missing.
+  None while the db holds no wiki (unknown). Cost: one lookup per class with rows."
   {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]}
   [db ans classes]
   (if (empty? (d/datoms db :aevt :seon.section/address))
     []
-    (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))]
-      (vec (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (some #(not (false? (:open? %))) rows)
-                 :let [page (docs c)] :when (or (nil? page) (nil? (pdb/eid db :seon.section/address page)))
-                 :let [s (str "problem-unlinked " (name c))]]
-             (derived-row ans s 'seon.problems
-                          (if page
-                            (str (name c) " has open problems, and its section " page " is no section of the wiki")
-                            (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
-                          {:kind :problem-unlinked :class c :page page} {:class c :page page}))))))
+    (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
+          unlinked? (fn [c] (let [page (docs c)] (or (nil? page) (nil? (pdb/eid db :seon.section/address page)))))
+          row (fn [c] (let [page (docs c) s (str "problem-unlinked " (name c))]
+                        (derived-row ans s 'seon.problems
+                                     (if page
+                                       (str (name c) " has open problems, and its section " page " is no section of the wiki")
+                                       (str (name c) " has open problems and no section of the wiki declared for it (:seon.problems/docs)"))
+                                     {:kind :problem-unlinked :class c :page page} {:class c :page page})))
+          rows (mapv row (for [[c {:keys [rows]}] (sort-by (comp str key) classes) :when (not= :problem-unlinked c) :when (some #(not (false? (:open? %))) rows) :when (unlinked? c)] c))]
+      (cond-> rows (and (seq rows) (unlinked? :problem-unlinked)) (conj (row :problem-unlinked))))))
 
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
@@ -389,6 +390,10 @@
         attr (fn [a] (into {} (comp (filter #(contains? carrying (:e %))) (map (juxt :e :v))) (d/datoms db :aevt a)))
         ids (attr :form/id) srcs (attr :form/src)]
     (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
+
+(def caused-classes
+  "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
+  #{:dead-citation :unnamed-site :stale-section})
 
 (defn caused-split
   "{:caused :attention :rows}: the derived problems the branch at head has that base (its merge base) had not, by
@@ -450,7 +455,7 @@
   [:seon.run/id :seon.run/status :seon.run/outcome :seon.run/reason :seon.run/end-ms {:seon.run/agent [:seon.agent/id]}
    :seon.run/unmerged :seon.run/failures :seon.run/costs :seon.run/error :seon.run/waste :seon.run/task-conflicts
    :seon.run/deferred :seon.run/gate-unread {:seon.run/deferred-results [:seon.proof/test :seon.proof/status]}
-   {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs]}
+   {:seon.run/task [:db/id :seon.task/id :seon.task/ns :seon.task/proofs :seon.task/execution]}
    {:seon.run/conflicts [:seon.merge/key :seon.merge/kind :seon.merge/base :seon.merge/ours :seon.merge/theirs]}])
 
 (defn- task-ready?
@@ -526,7 +531,7 @@
         unmerged (vec (sort (:seon.run/unmerged p)))
         base {:run aid :task (get-in p [:seon.run/task :seon.task/id]) :agent (get-in p [:seon.run/agent :seon.agent/id]) :status status
               :outcome (:seon.run/outcome p) :reason (:seon.run/reason p) :end-ms (:seon.run/end-ms p)
-              :open? (not (task/done? db te)) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
+              :open? (and (not= :cancelled (get-in p [:seon.run/task :seon.task/execution])) (not (task/done? db te))) :owner-ns (get-in p [:seon.run/task :seon.task/ns]) :producer nil :proofs []
               :answered-by (get-in ans [:from aid] []) :at-ms (:seon.run/end-ms p)}
         ;; a red proof is this run's problem when the task itself states it: an inherited
         ;; proof was green on main when the task started (its needs were done), so red now it
@@ -597,18 +602,10 @@
           :evidence (cond-> {:kind :test-red :test t :run (:seon.proof/run r) :failures (:seon.proof/failures r)} flaky? (assoc :flaky true))
           :answered-by (get-in ans [:signature s] []) :at-ms nil})))
 
-(defn report
-  "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
-  classes' :n is their occurrences and their rows run by count; run classes' :n is
-  their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
-  count is the true one: a repeat of a written signature is counted in the fold and not
-  yet on main."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
-                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
-  ([db] (report db {}))
-  ([db fold]
-  (let [ans (answers db)
-        live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
+(defn- report-with
+  "`report` over the answers its caller read."
+  [db ans fold]
+  (let [live (into {} (map (fn [{:keys [signature base] n :count}] [signature (+ (or base 0) n)])) (vals fold))
         errors (group-by :class (map #(let [r (error-row db ans %)] (update r :count max (get live (:signature r) 0)))
                                      (es db :seon.error/signature)))
         runs (into (sorted-set)
@@ -626,7 +623,18 @@
                                 [c {:n (count rows) :rows rows}]))
                      {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}
                       :test-red {:n (count reds) :rows (vec reds)}
-                      :flaky {:n (count flaky) :rows (vec flaky)}})})))
+                      :flaky {:n (count flaky) :rows (vec flaky)}})}))
+
+(defn report
+  "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted
+  classes' :n is their occurrences and their rows run by count; run classes' :n is
+  their rows, newest first. With an observer's fold (seon.error/fold), a recorded error's
+  count is the true one: a repeat of a written signature is counted in the fold and not
+  yet on main."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
+                  [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}
+  ([db] (report db {}))
+  ([db fold] (report-with db (answers db) fold)))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
@@ -642,10 +650,7 @@
                   :stale-section (stale-sections db ans) :orphan-page (orphan-pages db ans)
                   :leadless-section (leadless-sections db ans)
                   :uncited-task (uncited-tasks db ans)}
-         classes (merge (:classes (report db fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
-         ;; its own class last: a missing section of the unlinked class is one more row
-         unlinked (problem-unlinked db ans classes)
-         unlinked (into unlinked (problem-unlinked db ans (assoc classes :problem-unlinked {:rows unlinked})))
-         unlinked (vec (distinct unlinked))]
+         classes (merge (:classes (report-with db ans fold)) (update-vals derived (fn [rows] {:n (count rows) :rows rows})))
+         unlinked (problem-unlinked db ans classes)]
      (vary-meta (assoc {:t (:max-tx db)} :classes (assoc classes :problem-unlinked {:n (count unlinked) :rows unlinked}))
                 assoc :seon.render/schema :seon.problems/report))))
