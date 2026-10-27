@@ -96,8 +96,8 @@
               ;; nothing renders an eval's value), its producer's schema or not
               ;; a namespaced map as Clojure's REPL prints one (*print-namespace-maps*)
               ["(my.task/current)" :text "#:seon.task{"]
-              ["(my.task/current)" :text ":id \"demo/t\""]
-              ["(:seon.task/id (with-meta (my.task/current) nil))" :text "\"demo/t\""]
+              ["(my.task/current)" :text "/t\""]
+              ["(:seon.task/id (with-meta (my.task/current) nil))" :text "/t\""]
               ["(pr-str (keys (with-meta (my.task/current) nil)))" :text ":seon.task/plan"]
               ;; update! answers the member it changed, as swap! answers the new value, never the
               ;; whole task (live agents, 2026-10-25: its instructions and task data were most of each answer)
@@ -142,7 +142,7 @@
                       (filter #(str/starts-with? % "(my.task/fail!") forms)
                       (filter ends forms))
         cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
-        [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
+        [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
     (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
     (is (some #{"(my.branch/unmerged)"} forms) "merge's own: the entries it resolves")
     (doseq [[form item] (map vector forms items)]
@@ -158,7 +158,7 @@
         end? #(or (= "(my.turn/wait)" %) (str/starts-with? % "(my.task/fail!"))
         forms (concat (remove end? forms) (sort-by #(= "(my.turn/wait)" %) (filter end? forms)))
         cited (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.context/help-text (my.db/db))}])")
-        [problems & items] (rest (at/in-agent (into [{:op :context :agent "a1"} cited] forms)))]
+        [problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited] forms))))]
     (is (= [] (:value problems)) (str "every name the help page cites resolves in the program: " (pr-str problems)))
     (is (< 20 (count forms)) "the page shows the agent how to work")
     (doseq [[form item] (map vector forms items)]
@@ -179,7 +179,7 @@
   ;; the live rounds (notes/live-2026-10-25.md): (my.agent/callers 'seon.proof/status) answered [],
   ;; read as "no callers", and the run asked again until it ended :no-progress. A symbol that names
   ;; no var says so, with the form for the registry key of that name when there is one
-  (let [[_ nothing key-name real callees library _ fresh aliased] (at/in-agent [{:op :context :agent "a1"}
+  (let [[_ nothing key-name real callees library _ fresh aliased] (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                          "(my.agent/callers 'seon.task/no-such-thing)"
                                                          "(my.agent/callers 'seon.task/plan)"
                                                          "(my.agent/callers 'seon.task/accumulate)"
@@ -187,7 +187,7 @@
                                                          "(my.agent/callers 'clojure.core/map)"
                                                          "(defn zz-fresh [] 1)"
                                                          "(my.agent/callers (symbol (str *ns*) \"zz-fresh\"))"
-                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"])]
+                                                         "(do (require '[clojure.string :as s-alias]) (my.agent/callers 's-alias/join))"))]
     (is (= :my.agent/no-var (:seon.error/type (:value nothing))) (pr-str nothing))
     (is (= 'seon.task/no-such-thing (:name (:value nothing))) "it names what was asked")
     (is (nil? (:ask (:value nothing))) "and no key of that name: nothing to ask instead")
@@ -241,9 +241,9 @@
   ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Help is the
   ;; wiki's one view: the help page at :summary, any section at :code, and on a miss the page's
   ;; sections and the form that lists every page's, never nil
-  (let [[toc anchor other miss] (rest (at/in-agent [{:op :context :agent "a1"}
+  (let [[toc anchor other miss] (rest (at/in-agent #(vector {:op :context :agent (:agent %)}
                                                        "(my.agent/help)" "(my.agent/help \"done\")" "(my.agent/help \"docs/vector.md#the-model\")"
-                                                       "(my.agent/help \"references\")"]))
+                                                       "(my.agent/help \"references\")")))
         printed #(str (:text %))]
     (is (str/includes? (printed toc) "docs/agent.md#done") "no argument: the help page's sections at summary")
     (is (str/includes? (printed anchor) "The judge counts exactly") "an anchor of the help page")
@@ -273,10 +273,10 @@
   ;; interrupt; root's SIGUSR1 stops the request running, and one that merges while the agent
   ;; is idle stops nothing that comes after it
   (let [[_ after-idle stopped after-stop]
-        (at/in-agent [{:op :eval :agent "root" :code "(seon.root/interrupt! sys :a1)"}
-                      "(+ 1 2)"
-                      "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
-                      "(+ 2 2)"])]
+        (at/in-agent #(vector {:op :eval :agent "root" :code (str "(seon.root/interrupt! sys :" (:agent %) ")")}
+                             "(+ 1 2)"
+                             "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
+                             "(+ 2 2)"))]
     (is (= 3 (:value after-idle)) (str "the request after an idle interrupt runs: " (pr-str after-idle)))
     (is (str/starts-with? (str (:seon.error/message (:ex stopped))) "interrupted by root") (pr-str stopped))
     (is (= 4 (:value after-stop)) (pr-str after-stop))))
