@@ -1,6 +1,6 @@
 # The wiki: a map
 
-Seon on Jolt's docs, one concept per page, addressed `topic#section`; find the page where your problem lives, read its leading sentences, and follow its links.
+Seon on Jolt's docs, one concept per page, addressed `topic#section`; find the page where your problem lives, read its leading sentences, and follow its links. The wiki is the one home for how the system works ([AGENTS](../AGENTS.md)); a Claude session's working papers are not it, and live in `claude_scratch/`.
 
 ## How the wiki is kept
 

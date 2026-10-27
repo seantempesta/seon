@@ -22,15 +22,15 @@
 # runs every test and step with no green at its digest, the ones that
 # reach a process too (nothing left out, none named by hand: bin/check contracts and bin/check smoke
 # are steps of that same run, keyed by digest, never run again beside it); ends on MERGE OK / MERGE
-# FAILED from its exit status alone, naming each red and anything that did not run; and appends its line to notes/merge-log.md: the sha, the
+# FAILED from its exit status alone, naming each red and anything that did not run; and appends its line to claude_scratch/merge-log.md: the sha, the
 # plan's counts, the verdicts, the reds, the src delta of HEAD against its first parent and the
 # keys left out against main's last merge line.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # merge_verdict OUT ST: the merge's one verdict from prove's exit status alone (its steps include
 # contracts and smoke), with the reds named from its log in OUT; its line appended to MERGE_LOG
-# (notes/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
+# (claude_scratch/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
 merge_verdict() {
-  local out=$1 st=$2 log=${MERGE_LOG:-$ROOT/notes/merge-log.md}
+  local out=$1 st=$2 log=${MERGE_LOG:-$ROOT/claude_scratch/merge-log.md}
   v() { (( $1 == 0 )) && echo OK || echo "FAILED (exit $1)"; }
   local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
   local counts=$(grep -E "^prove: [0-9]+ keys" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: //; s/; selected in.*//')
