@@ -161,4 +161,4 @@
         "green at its digest passed; a red is red; a digest with no verdict, or a test the plan never named, is no pass")
     (is (= {'seon.root-test/boots :error} (fx/test-results nil dir ['seon.root-test/boots]))
         "a run whose plan never ran says nothing of any test")
-    (is (= ["nice" "-n" "15" "bin/prove" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test])))))
+    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o")))))
