@@ -201,18 +201,10 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(defn- content-attr?
-  "Whether attribute a is one a program key's content reads: the program's (program/attr-namespaces)
-  or a data attribute (das, data-attr?'s predicate or a set)."
-  {:malli/schema [:=> [:cat ifn? :keyword] :boolean]}
-  [das a] (boolean (or (program/attr-namespaces (namespace a)) (das a))))
-
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs: the keys borne,
   on base or on that db, by each entity a datom of which one holds and the other does not
-  (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
-  attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
-  data (data-attr?), never a platform record such as an embedding. Cost: the datoms that
+  (datahike.api/datoms-diff, which skips the subtrees they share). Cost: the datoms that
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
@@ -220,9 +212,8 @@
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
-                          d (read db)
-                          content? (fn [{:keys [a]}] (or (content-attr? (nth b 2) a) (content-attr? (nth d 2) a)))]
-                    e (into #{} (comp (filter content?) (map :e)) (concat gone added))
+                          d (read db)]
+                    e (into #{} (map :e) (concat gone added))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))
@@ -267,7 +258,7 @@
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
         das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (content-attr? das (:a d))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)
