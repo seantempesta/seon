@@ -109,9 +109,9 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
-        db0 (d/db-with db0 [{:db/id "a" :seon.agent/id :a1 :seon.agent/status :idle}])
+        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx "b1" :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
-        db1 (d/db-with db0 [[:db/add (:db/id (d/entity db0 [:seon.agent/id :a1])) :seon.agent/status :busy]])]
+        db1 (d/db-with db0 (seon.task/agent-tx "b1" :a1 {:status :busy}))]
     [st db1]))
 
 (deftest a-move-of-main-costs-what-moved
