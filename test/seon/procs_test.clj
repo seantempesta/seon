@@ -215,7 +215,7 @@
          (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest the-flush-is-continuous-group-commit
-  ;; owner 2026-10-21 (notes/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
+  ;; owner 2026-10-21 (claude_scratch/archive/DECISIONS-superseded.md, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
   ;; covered; commits during a sync share the next one; an idle system never syncs.

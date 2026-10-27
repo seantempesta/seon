@@ -301,7 +301,7 @@
     (try
       (.mkdirs (java.io.File. dir))
       (git "init" "-q" "-b" "main")
-      (write! ".gitignore" "ignored/\n") (write! "src/a.clj" "(ns a)") (write! "src/b.clj" "(ns b)") (write! "notes/n.md" "n")
+      (write! ".gitignore" "ignored/\n") (write! "src/a.clj" "(ns a)") (write! "src/b.clj" "(ns b)") (write! "claude_scratch/n.md" "n")
       (git "add" "-A") (git "commit" "-qm" "first")
       (let [idx0 (index-bytes)]
         (is (= (fresh) (seon.fx/tree-id dir)) "clean")
@@ -311,7 +311,7 @@
         (is (= (fresh) (seon.fx/tree-id dir)) "a new file")
         (.delete (java.io.File. (str dir "/src/b.clj")))
         (is (= (fresh) (seon.fx/tree-id dir)) "a deleted file")
-        (write! "ignored/x" "x") (write! "notes/m.md" "m")
+        (write! "ignored/x" "x") (write! "claude_scratch/m.md" "m")
         (is (= (fresh) (seon.fx/tree-id dir)) "an ignored file and a note move nothing")
         (git "add" "src/c.clj") (write! "src/c.clj" "(ns c) ;; staged, then changed again")
         (is (= (fresh) (seon.fx/tree-id dir)) "a staged file changed again: the file on disk")
@@ -331,7 +331,7 @@
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
-  ;; task seon.fx/the-tree-id-is-what-is-read: notes/ is no input (every merge appends its log line
+  ;; task seon.fx/the-tree-id-is-what-is-read: claude_scratch/ is no input (every merge appends its log line
   ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
   (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-tree-" (random-uuid))
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
@@ -342,9 +342,9 @@
       (git "init" "-q" "-b" "main")
       (commit! "src/a.clj")
       (let [t0 (seon.fx/tree-id dir)]
-        (write! "notes/merge-log.md")
+        (write! "claude_scratch/merge-log.md")
         (is (= t0 (seon.fx/tree-id dir)) "an untracked note")
-        (commit! "notes/merge-log.md")
+        (commit! "claude_scratch/merge-log.md")
         (is (= t0 (seon.fx/tree-id dir)) "a committed note")
         (commit! "docs/x.md")
         (is (not= t0 (seon.fx/tree-id dir)) "a doc is in the tree")
@@ -359,7 +359,7 @@
             (git "add" "-A") (git "commit" "-qm" "bin and config")
             (let [same (fn [] (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))]
               (is (same) "agree")
-              (write! "notes/more.md")
+              (write! "claude_scratch/more.md")
               (is (same) "and agree with a note written")))))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 

@@ -1,5 +1,5 @@
 (ns seon.root
-  "Root: the control process (session F2, notes/archive/option3-F1-flow.md; proto/flow f2-final
+  "Root: the control process (session F2, claude_scratch/archive/option3-F1-flow.md; proto/flow f2-final
   proto.control's api, reader, boot and API). Boots the database
   (Datahike, E4a index), forks the single-threaded fork server before any thread exists,
   then runs ONE root graph of four procs:

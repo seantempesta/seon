@@ -951,7 +951,7 @@
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
             [(when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
-             ;; the mockup's collapsed line (notes/archive/design-agent-view-2026-10-24.md §5): its code's first
+             ;; the mockup's collapsed line (claude_scratch/archive/design-agent-view-2026-10-24.md §5): its code's first
              ;; line, its time, its handle; the value only when opened
              ;; the one printer's one-line cut, which names what it left
              [:code {:class "seon-form"} (prose (or (:code rec) "") (cell) {:one-line? true})]

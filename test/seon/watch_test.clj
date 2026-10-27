@@ -34,7 +34,7 @@
     (is (= #{:docs} (k [[:path (str co "/docs/health.md")]])))
     (is (= #{:source} (k [[:path (str co "/src/seon/watch.clj")]])))
     (is (= #{:tasks} (k [[:path (str co "/resources/seon/tasks/seon.watch.edn")]])))
-    (is (= #{} (k [[:path (str co "/notes/x.md")] [:path (str co "/target/seon")] [:path "/elsewhere/docs/x.md"]])) "no loader reads them: nothing loads")
+    (is (= #{} (k [[:path (str co "/claude_scratch/x.md")] [:path (str co "/target/seon")] [:path "/elsewhere/docs/x.md"]])) "no loader reads them: nothing loads")
     (is (= #{:source} (k [[:path "/g/refs/heads/jolt/health"]])) "this checkout's branch moved: a commit or a merge on it")
     (is (= #{:source} (k [[:path "/g/refs/heads/jolt/merges"]])) "the write-back branch moved")
     (testing "the repository is every worktree's: another branch's commit is not this root's (root-test's 806 tasks, 2026-10-25)"

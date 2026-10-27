@@ -137,7 +137,7 @@
  ;; first; Jolt's cache counts every node as 4,096 bytes (datahike.index.node-cache), so this
  ;; is 32,768 nodes. At the bound a node is evicted and its next read goes to the store again
  ;; (65-75 us cold against 8.6 us warm per seek). Provenance, measured 2026-10-23
- ;; (notes/global-ids/MEASURED.md §2-3): Datahike's default of 1,000 nodes thrashed on a scan
+ ;; (claude_scratch/global-ids/MEASURED.md §2-3): Datahike's default of 1,000 nodes thrashed on a scan
  ;; of one 115k-datom index (3,704 nodes: a second scan read all again, 270 ms, as cold), and a
  ;; cache holding them scanned in 26 ms and opened a sibling branch reading 8 nodes. 128 MB holds
  ;; about nine such indexes: a thirty-second of :seon.config.machine/memory-mb per process.
@@ -259,7 +259,7 @@
  ;; own :seon.config.merge/max-merge-turns wins.
  :seon.config.merge/max-merge-turns 2
 ;; Unit: behind runs. A merge run the writer refuses as behind main (main moved under it) is green, so
-;; max-merge-turns never counts it and its task ran again without end (notes/archive/root-repair-findings-2026-10-27.md
+;; max-merge-turns never counts it and its task ran again without end (claude_scratch/archive/root-repair-findings-2026-10-27.md
 ;; gap 4: a namespace main gained made every merge behind). Past this many behind runs of one merge task the next
 ;; behind answer holds the task for root with the writer's evidence. Provenance: worktree session
 ;; a-behind-merge-is-bounded-and-merges-main-first; three reruns are three chances for main to hold still.
@@ -320,12 +320,12 @@
  :seon.config.source/program-dirs ["src"]
  ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
  ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a
- ;; commit to them moves no digest and rebuilds nothing. notes/ is working papers (AGENTS.md
+ ;; commit to them moves no digest and rebuilds nothing. claude_scratch/ is working papers (AGENTS.md
  ;; section 7), and every merge appends its merge-log line there. A path not named is in the
  ;; tree: a new directory reruns what reads the tree, never reuses a stale green. Provenance:
  ;; root, 2026-10-27 (286 of 919 tests rerun after one merge-log line). At the bound: an empty
  ;; vector puts every file in the tree id.
- :seon.config.source/tree-excludes ["notes"]
+ :seon.config.source/tree-excludes ["claude_scratch"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of Seon's own: an agent (in-agent), a fork
  ;; (lib/fork!), the binary or a root booted for it (binary-sh, through which ts/start-root!
@@ -467,7 +467,7 @@
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
- ;; Provenance: owner via root, 2026-10-23 (option B of notes/archive/test-fork-main-2026-10-23.md).
+ ;; Provenance: owner via root, 2026-10-23 (option B of claude_scratch/archive/test-fork-main-2026-10-23.md).
  ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
  ;; (two runs never share a checkout, AGENTS section 3). Derived data: deleting it costs one
  ;; import. At the bound: see program-store-max-bytes.
@@ -549,7 +549,7 @@
  ;; the reasoning ate the reply (:seon.model/reasoning-ate-reply). v1 ships 65,536 for Flash
  ;; with thinking on (its 4,096 and 8,192 starved reasoning). Ported 2026-10-21 after the first
  ;; DeepSeek agent on Seon's own code: two refinement runs answered empty, reasoning took all
- ;; 2,048. 2026-10-22, step E (root's research, notes/archive/agent-context-research-2026-10-22.md §3.3):
+ ;; 2,048. 2026-10-22, step E (root's research, claude_scratch/archive/agent-context-research-2026-10-22.md §3.3):
  ;; 8,192 while thinking is off (the default below). The largest ordinary reply measured ~5k;
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
  ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
@@ -566,7 +566,7 @@
  ;; reply's reasoning goes back exactly as it was returned (seon.model/request-body); false: it
  ;; is left out of the request, and still stored on the turn and shown. With thinking :enabled
  ;; and tools (every request) false is refused at load (:seon.config.ai/reasoning-pair):
- ;; DeepSeek answers 400 when it is left out (measured 2026-10-24, notes/step0/no-replay.edn).
+ ;; DeepSeek answers 400 when it is left out (measured 2026-10-24, claude_scratch/step0/no-replay.edn).
  ;; With thinking off there is no reasoning to send.
  :seon.config.ai/replay-reasoning true
  ;; Unit: USD. One first-move pass's spend (my.root/first-moves!: one call per task, ~6k
@@ -650,7 +650,7 @@
  ;; tool message, the agent's page). Provenance: v1's 6144 (owner 2026-10-12: print more, so
  ;; help and the current-state block show whole), raised to 16000 (owner 2026-10-25: "a
  ;; generous context budget"; main's problems through their render measured 14,218 tokens
- ;; whole, cut at 6144; notes/archive/printer-audit-2026-10-25.md). Past it the value is cut, every
+ ;; whole, cut at 6144; claude_scratch/archive/printer-audit-2026-10-25.md). Past it the value is cut, every
  ;; cut carrying the form that reads its rest.
  :seon.config.render.agent/token-budget 16000
  ;; Unit: nested levels shown (v1's :seon.config.render.agent/max-depth).
@@ -707,7 +707,7 @@
  ;; 0 shows none. Provenance: the owner's ruling (2026-10-24, DECISIONS "Embeddings join the
  ;; context"): a small measured list; embeddings alone recalled 0.495 at 10 on 283 pairs
  ;; (docs/vector.md#fused-with-the-call-graph). Off (0) by the owner's ruling ("if it's not working
- ;; well leave them out"), on step 6's measurement (2026-10-25, notes/measure/step6: the 5 fit tasks,
+ ;; well leave them out"), on step 6's measurement (2026-10-25, claude_scratch/measure/step6: the 5 fit tasks,
  ;; 3 runs each, deepseek-flash, thinking off): green 8/15 with 5 listed, 7/15 with none; the runs
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.

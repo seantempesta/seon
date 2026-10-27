@@ -1,6 +1,6 @@
 # ctx: the agent's record as one map
 
-An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `notes/archive/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
+An agent reads its own record with `@ctx`: one map of its agent entity pulled by a pattern (its runs with their task, the vars the task cites, turns and messages, and its evals), with `:t`, `:branch` and `:commit` beside them (``seon.ctx/ctx``). It is a plain Clojure atom, kept current as the agent works, so a read is a deref and nothing is built for it. The design, the measurements and the owner's rulings behind it are in `claude_scratch/archive/design-ctx-atom-2026-10-25.md`; the task is `seon.ctx/the-record-is-an-atom`.
 
 ## The pattern
 
