@@ -96,7 +96,7 @@
           (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "laws")) "laws reads the tree alone")
           (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1" :config {}})))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
-      (is (= #{"laws" "lmdb-kill" "lmdb-sem"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own")
+      (is (= #{"laws" "lmdb-kill" "lmdb-sem" "forks"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own, forks runs Jolt")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (program/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
