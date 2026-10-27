@@ -882,11 +882,11 @@
 
 (defn divergence-view
   "What the branch's merge carries to main (a component over the db; the base's commit its child):
-  seon.program/divergence, the vars it added, redefined and removed and the schema keys it changed."
+  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
   [:section [:h2 "its merge carries"]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (program/divergence (commit-db db base) db)]])
+   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]])
 
 (defn related
   "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
