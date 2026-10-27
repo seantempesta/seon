@@ -129,6 +129,22 @@
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:value sent)) "and the read records what it sent, as a model turn does (the debug page shows it)")))
 
+(deftest an-outside-agent-reads-its-context-after-it-defines
+  ;; THE PLAN 0.7: the first real work through the server is an outside agent that attaches,
+  ;; defines something at its branch's REPL and reads its context again. Once its branch holds a
+  ;; change, the read's observe selects tests by what the branch changed (seon.merge/changed-vars):
+  ;; it answered "nth not supported on this type: Keyword" for every agent past its first define
+  (let [[before defined after status] (at/in-agent (fn [{:keys [agent ns]}]
+                                                     [{:op :context :agent agent}
+                                                      (str "(ns " ns ") (defn answer [] 42)")
+                                                      {:op :context :agent agent}
+                                                      "(my.task/status)"]))]
+    (is (clojure.string/starts-with? (:context before) "# You are a Seon agent") (str "the read before any change: " (pr-str before)))
+    (is (not (:ex defined)) (pr-str (:ex defined)))
+    (is (clojure.string/starts-with? (str (:context after)) "# You are a Seon agent") (pr-str after))
+    (is (clojure.string/includes? (str (:context after)) "answer") "the read after it defined tells the change")
+    (is (not (contract/error? (:value status))) (pr-str (:value status)))))
+
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
