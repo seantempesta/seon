@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.docs :as docs] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.docs :as docs] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -436,3 +436,18 @@
     (is (= ["datoms" "diff" "seon" "run" "outcome" "a" "b"] (seon.docs/words "datoms-diff seon.run/outcome aB")) "an identifier is its parts, camelCase too")
     (testing "the first line holding a word, and its number"
       (is (= {:line "(fusing 1))" :at 2} (select-keys (first (filter #(= 'app/g (:name %)) (seon.docs/tokens db "fusing" all 2.0))) [:line :at]))))))
+
+(deftest the-wiki-holds-the-top-level-pages-beside-docs
+  ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and
+  ;; one view reach them (:seon.config.root/wiki-dirs)
+  (let [co (seon.config/checkout)
+        db0 (ts/test-db)
+        tx (seon.root/wiki-tx db0 co)
+        db (d/db-with db0 tx)
+        paths (set (seon.docs/page-paths db))]
+    (is (every? paths ["AGENTS.md" "BAGGAGE.md" "docs/agent.md"]) "the top-level pages and docs/'s")
+    (is (seq (seon.docs/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
+    (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
+    (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
+    (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
+    (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))

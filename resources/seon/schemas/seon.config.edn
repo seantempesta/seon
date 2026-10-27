@@ -26,6 +26,7 @@
   [:seon.config.root/main :seon.config.root/main]
   [:seon.config.root/system-path :seon.config.root/system-path]
   [:seon.config.root/tasks-dir :seon.config.root/tasks-dir]
+  [:seon.config.root/wiki-dirs :seon.config.root/wiki-dirs]
   ;; the store
   [:seon.config.store/backend :seon.config.store/backend]
   [:seon.config.store/lmdb-map-bytes :seon.config.store/lmdb-map-bytes]
