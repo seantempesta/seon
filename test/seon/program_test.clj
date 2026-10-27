@@ -862,14 +862,20 @@
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
-  ;; the tree when what it reaches reads it.
+  ;; the tree when what it reaches reads it, and a test scanning the checkout (file-seq) does.
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (program/reach-digests db (in "t1"))
         b (program/reach-digests db (in "t2"))
         step #(program/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
     (is (< 300 (count a)) "the whole suite")
-    (is (= a b) "a new tree moves no test's digest, one running the binary (seon.root-test's) included")
+    ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
+    ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
+    ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
+    (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
+      (is (contains? moved 'seon.docs-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
+      (is (< (count moved) 30) (str (count moved) " tests scan the checkout: a few, not the 286 that read a file"))
+      (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
 
 (deftest a-test-naming-another-test-does-not-reach-it
