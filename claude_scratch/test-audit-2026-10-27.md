@@ -89,3 +89,95 @@ The same method as §4, in this worktree after merging main, with `stages.clj` (
 | Date | Main at | Merged fix | Warm plan | One-file refresh | Schema-change / empty store | reach-graph | Reuse | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-27 19:15 | 971aef7397 | baseline | 2.5 s, 184 M ticks, 1.1 GB | 1.0–1.5 s, 30–68 M ticks | 17.7–27.7 s, 2.6–3.9 G ticks, 8–24 GB | 1.65 s, 254 M ticks, 1.31 GB | 884 of 977 on main's own tree; 0 of 990 on main's merges (merge-log) | load 38–55 |
+| 2026-10-27 19:56 | 9dbb90f8bf | kept-store-by-program-schema, inputs-hash-only-what-changed, test-plan-is-the-services, one-run-one-directory, jolt-pin-is-a-class, reach-graph-is-stored, tests-are-facts, contracts-on-main | 0.98–1.57 s plan-of, 67 M ticks, 420 MB (program-db 14 ms, inputs 0.33–0.38 s, reach-graph-of 0.27–0.35 s, graph-index 0.1 s, tree-id 0.3–0.5 s) | 0.74 s, 84 M ticks, 671 MB (after a main merge: lmdb pin and 1 commit) | **24.1 s, 3.3 G ticks, 15.8 GB**: a new program-schema digest (249fecc5) still imports the whole program | 0.27 s from reach-graph.fasl (was 1.65 s); 1.97 s when built | **0 of 885 candidates**: root's main holds 462 results from 54 runs and none at this tree's digests; the 359k test-results/ files are no longer read | one-function change (seon.profile/ms-since): 161 of 997 digests move. Jolt bump: `:seon.pin/jolt` alone moves 451 of 997, and `jolt-compiler-options` 197. Load 23–39. |
+
+**Reading the row.**
+- **Warm selection fell from 2.5 s to about 1 s, cold selection did not.** `kept-store-by-program-schema` narrowed the key, but the program schema itself changed today, and the full import that follows still costs 24 s once per checkout. Fix 1 (root's program, with no second program db) is still what removes it.
+- **Reuse is 0 after `tests-are-facts`.** The results' home moved to root's main, and nothing carried the old greens over. Until main runs this tree, every checkout runs about 880 tests. Neither main's verification nor a migration-free reseed has run yet. A results gap like this should be expected at every switch of the results home, and stated in the merge.
+- **A Jolt bump still moves 45% of digests** (451 of 997). That is all tests whose reach touches a Jolt-pinned namespace. Whether 451 is honest (they do reach Jolt code) is reuse's call.
+- `ask-root` answered `:refused` once in four tries while root was up, and then said "nothing is reused". A refused connection reads as "no results", with no retry or error fact.
+
+### Per-merge watch (owner: "stay on top of the perf and the lines of code")
+
+| Merge (main) | src delta | Names what it replaced | Perf change |
+|---|---|---|---|
+| 04359bea96 agent-repl (tip) | +13 −5 | n/a (small) | none measured |
+| 964414bb18, c6b36bac67 one-ms-record | +18 −3 | yes: ms recorded once (cut D) | warm selection 0.98 s, same |
+| e0b2437872 wiki-reads-agents-and-readme | +10 −6, 1 key | n/a | none measured |
+| 558224bbf9 an-outside-agent-lives-until-done | +20 −10 | n/a | none measured |
+| 49f8c4e2de a-daily-full-run-is-the-net | **+192 −18, new ns seon.cron, 1 key** | nothing (fills audit gap F; seon.cron is AGENTS §4's one cron proc) | no common op touched |
+| **c10b0c19e1 relevance-lab** | **+526 −146 (net +380), 9 keys added, 3 removed** | nothing in the merge subject. It replaces search-relevance, search-min and related-rarity, but adds a second BM25 (seon.context/bm25) beside seon.docs/tokens | turn's request build 0.60 s, 53.5 M ticks, 250 MB (no earlier baseline) |
+| 85dbf9a6ce agent-repl | +139 −70 | not named | none measured apart |
+| 7177cc5899 process-tests-reach-their-ops | +143 −97, 1 key changed | yes (the seon.main/-main edge) | — |
+| 9079c82fd2 an-old-word-is-a-problem | +137 −17 | yes (docs-test's whole-tree scan) | — |
+| 7274786a42 an-outside-agent-proves-its-process-tests-at-the-judge | +77 −8 | not named | — |
+| 3dd370f760 gate-skips-the-test-that-started-its-root | +36 −9, 1 key (`#env SEON_GATE_SELF`) | not named | — |
+| 88130af42e refresh-reads-only-what-it-must; 3366b9a66e reach-step-builds-in-bulk | +32 −15; +39 −13 | yes; not named | **full program import 24.1 s / 3.3 G ticks → 10.0 s / 2.89 G**; reach-graph-of 0.21 → 0.19 s warm |
+| 2f254a45c9 unarmed-needs-no-rebinding; 86cc4c9e36 search-has-no-sibling…; 078a9caee9 one-path-or-fail-loudly | +2 −39; +24 −57; +4 −7 | yes (cut: contract alter-var-root; seon.docs/exact and grep; the unsent queue) | — |
+| 7eade14a94 jolt-keyed-by-source-group | +50 −26 | not named | Jolt digests are now keyed per source group. My bump simulation moves every group, so it no longer shows a real bump (769 of 1033) |
+| 33 other merges, c6b36bac67..ddcfa0be02 | each ≤ +43, most ±15 | mostly named | — |
+| **range total c6b36bac67..ddcfa0be02 (46 merges)** | **+1548 −678 = +870 src, 32 files; context.clj +578/−?, server.clj ±260, program.clj ±230** | relevance-lab is 44% of the growth | see the baseline below |
+
+### Common ops, re-measured at main ddcfa0be02 (2026-10-27 22:50, load 4–14, the worktree's own root on a fresh store)
+
+| Op | At c6b36bac67 | At ddcfa0be02 |
+|---|---|---|
+| Selection, warm (plan-of) | 0.98 s, 69 M ticks | 0.66 s, 73 M ticks, 459 MB; reach-graph-of 0.19 s, graph-index 84 ms |
+| Selection, cold (new program-schema digest 012c10f7) | 24.1 s, 3.3 G ticks | **10.0 s, 2.89 G ticks, 9.3 GB, 1.10 M calls** (a full import; −59% wall, −12% ticks) |
+| Reuse at main's tree | 833 of 893 | **228 of 910**: root's main holds 300 results at these digests, because no `--merge` has run since the Jolt bump 7627453d (the 21:25 full run was on an older tree) |
+| A turn's request build (seon.turn/context-block, in the agent, unchanged tree) | not measured | **0.60 s, 53.5 M ticks, 250 MB** for a 3.1 KB page |
+| The agent's ctx pull (`:context`) | 7.1 s first; 0.37–0.39 s after | 18.9 s first (a fresh store: attach, fork, first page); then 0.81 s and 0.54 s, 6.3 and 3.7 KB |
+| `(my.agent/prove)`, no change | 144 ms, then 11 ms | 128 ms, 42 M ticks; then 8.8 ms |
+| `(my.agent/prove)` after a one-function change (ms-since) | 8.7 s; 48 ran, 14 reused, green | **30.6 s, red: ran 51, deferred 125, reused 14; 44 errors, each OutOfMemoryError** (the heap ceiling of 2 044 014 496 bytes, live just above it: the agent's own heap plus `:seon.config.agent/heap-extra-bytes` 1 GiB, seon.agent at line 1154) |
+| `bin/build seon`, catch-up after the Jolt bump | 32.2 s (back to a built tree) | 50.0 s (a new Jolt) |
+| `bin/build seon`, no-op | 1.0 s | 0.99 s |
+
+The store from 20:52, made at c6b36bac67, broke `:context`: the agent answered `:transact/schema` "Bad entity attribute :form/ops", an attribute that 7177cc5899 added. On a fresh store it works. The old store is kept at runs/kept-2052 in this worktree.
+
+### Common ops, baseline at main c6b36bac67 (2026-10-27 20:50, load 9–17, the worktree's own root)
+
+| Op | Measured |
+|---|---|
+| Selection, warm | 0.98 s plan-of (69 M ticks, 426 MB); reach-graph-of 0.21 s; **reuse 833 of 893** (main ran this tree) |
+| Selection after 6 merges (22 program files changed) | **program-db refresh 10.5 s, 2.19 G ticks, 11.7 GB, 1.49 M calls**: two thirds of a full import (3.3 G) for 22 files, against 84 M for one commit's change |
+| Selection, cold (new program-schema digest) | 24.1 s, 3.3 G ticks (19:56) |
+| An eval, `(+ 1 2)` at root | 8.8 k ticks, 56 KB |
+| The agent's ctx pull (`:context`, task seon.proofs/prove-runs-what-a-change-reaches) | first, with attach and fork: 7.1 s, 46.6 KB; then 0.37–0.39 s, 3.1–5.7 KB (ticks not read: the op returns none) |
+| `(my.agent/prove)`, no change | 144 ms, 40 M ticks first; then 11 ms, 1.8 M ticks; 15 reused |
+| `(my.agent/prove)` after a one-function change (seon.profile/ms-since) | 8.7 s, 62 M ticks in the agent; 48 ran, 14 reused, 62 process tests to the judge |
+| `bin/build seon`, no-op | 1.0 s |
+| `bin/build seon`, one file (a comment in src/seon/profile.clj) | **37.7 s** (user 33.7) |
+| `bin/build seon` back to a tree built a minute before | **32.2 s**: no binary is kept by tree, so every return rebuilds |
+
+## 7. Independent audit of today's merges (AGENTS §2: every 10 merges or daily)
+
+**What was read.** Main took 190 first-parent commits today. src, test and bin went +9,495 / −4,320 lines, net +5,175. Two Sonnet auditors that had not seen the work read 36 merges against §1, §3 (earns its place, value review) and §9:
+- the 18 test-pipeline merges;
+- the 18 merges that grew src most outside the pipeline.
+
+I checked the cuts marked ✓ against the code myself. A claim I could not confirm is marked "unverified". There are no clocks and no old §7a words.
+
+**Ratings.**
+- **Overbuilt:** reach-graph-is-stored and cost-bytes-are-the-calls-own.
+- **Questionable:** tests-are-facts, jolt-pin-is-a-class, inputs-hash-only-what-changed, tests-stream-and-continue, a-process-tests-digest-moves…, a-test-result-is-reused…, a-write-back-is-never-lost, one-search, health-in-context, agent-repl, outside-repl-surface and an-outside-agent-is-a-first-class-worker.
+- **Worth it:** the rest, including render-walk (+679 lines: it deletes the parts layer, 9.5–21.8 M → 0.76 M ticks a new eval), test-plan-is-the-services (it deletes the selector twin), prove-is-the-one-runner (net 0 over 14 files) and observe-reads-are-renders (it deletes merge-readiness).
+
+**What to cut, ranked by value against risk:**
+
+| # | Cut | From | ≈ lines | Replaced by |
+|---|---|---|---|---|
+| 1 | test_runner's own `program-db` (test_runner.clj:83-125). Its stored graph file `builder-id`/`reach-graph-of` (126-156, keyed by a hand-rolled digest of seon.program's forms) is a stored copy beside a value, which exists only because the runner keeps a second program. ✓ | tests-are-facts, reach-graph-is-stored | −75 | root's program and fork-server graph, through the service (fix 1). This removes the 24 s cold import too. |
+| 2 | The **unsent queue**: `ask-root`/`no-root`/`unrecorded?`/`keep-unsent!`/`send-unsent!` (197-260), plus `unsent-dir`. When no root took the results the run stays green ("kept, not lost, so the run is not red", :254). That is a fallback instead of an error fact (§9), and a hand-built retry queue. A refused `:results` ask likewise answers "nothing is reused" with no fact, as measured in §6. ✓ | tests-are-facts | −60, 1 key | one request to the service; no root is a red run that names it |
+| 3 | `contract/disarm!` and `unarmed` (contract.clj:285-301): `alter-var-root` over every armed var, process-wide, to measure a cost proof's bytes. That is a §5 code smell, with a residual error the docstring admits. ✓ | cost-bytes-are-the-calls-own | −35 | the cost-proof harness measures under one declared arming state |
+| 4 | `problems/health-moved` (problems.clj:712) with `split-rows`, `touched-runs`, `health!`: a second, incremental health path beside `health`, with no number in its merge. ✓ (the code exists; "no number" is from the commit) | health-in-context | −150 | `health`, unless the branch's report shows the saving |
+| 5 | one-search's unmeasured keys: `search-weights` (all 1.0), `search-relevance`, `search-min`, `context/relevance` and the `:min` filter. `docs/exact` and `my.agent/grep` still sit beside `search`. ✓ (weights all 1.0) | one-search | −45 to −75, 3 keys | add them back with embed-lab's measured selector, and fold exact and grep into search |
+| 6 | `config-key-readers` (program.clj:1044), a hand-kept list of one reader. A reader that is not on it moves no digest, which is a silent hole. ✓ | a-process-tests-digest…, a-test-result-is-reused… | −25 | the key declared at the reader's definition (reuse's area) |
+| 7 | `server/fork!` and the `:from`/`:fresh` MCP arguments repeat `attach!`'s run start (unverified) | agent-repl | −35 | `attach!` on a new task |
+| 8 | `:seon.render/summary`, `summarized`, `state-summary` for one value, and `repl/equip-ns!`, which fixes at the reader what `make-ns!` should produce (unverified) | outside-repl-surface | −55 | `agent/state` printing small at its producer; `make-ns!` |
+| 9 | `prune-runs!` (test_runner.clj:369) and `runs-kept`: a second disk-pruning beside docs/machine.md's | one-run-one-directory | −12, 1 key | machine.md's pruning |
+| 10 | The env expression repeated at reconcile.clj:281 and :494, fixed at the reader (unverified) | an-outside-agent-is-a-first-class-worker | −5 | `attach!` records the env |
+| 11 | `SEON_SOURCE_BRANCH` as `#env` in config (§9: an env var instead of config) | a-write-back-is-never-lost | −5 | a config key set per checkout by bin/worktree |
+| 12 | The twin prewalks `placed-units`/`placed-hiccup` (unverified) | render-walk | −15 | one walk |
+
+Not a cut: `my.root/hold!`/`take-back-tx` has no caller in src, but my.root is root's REPL surface, so its callers are root's evals. Process notes: watcher-source-reload was merged, reverted (5731149001) and merged again with the same diff, and the revert states no cause. Several merges from the 48d650df60 → 13605b6341 → f6ea4caf85 chain undid each other's config-read code within hours, which is the "half-baked plan that got built" of §9. **Total: about −540 lines and −5 config keys**, cuts 1 and 2 being most of the test pipeline's.
+

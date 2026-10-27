@@ -1,0 +1,819 @@
+[ {
+  "task" : "merge: import-source!: self-review fixes (7 findings) import-source!: a source fact the store refuses is a :platform cause on root, never ignored",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/errors.md#errors",
+    "pct" : 58,
+    "label" : "useful",
+    "why" : "recorded platform error entity"
+  }, {
+    "kind" : "section",
+    "name" : "docs/decisions.md#root-merges-verified-fixes-as-they-come-in",
+    "pct" : 42,
+    "label" : "noise",
+    "why" : "merge policy, unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 56,
+    "label" : "useful",
+    "why" : "function changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/platform-tx",
+    "pct" : 47,
+    "label" : "useful",
+    "why" : "records the refused fact"
+  } ],
+  "missing" : [ "docs/clocks.md#time-measured-recorded-never-compared-to-decide" ]
+}, {
+  "task" : "merge: Self-review: :ended beside its own comment, the test's ended-ms against id order, system-value's :now-ms named as a measure The grid keeps every live agent and the newest ended ones (config render.list/ended): an agent's end is the event that retires one, no RETIRE-MS, no second-keyed order cache (seon.render-test/an-ended-agent-leaves-the-grid-by-an-event)",
+  "items" : [ {
+    "kind" : "function",
+    "name" : "seon.render.ui/render-ctx",
+    "pct" : 49,
+    "label" : "noise",
+    "why" : "ctx layout, not agent grid"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/stall-ms",
+    "pct" : 60,
+    "label" : "noise",
+    "why" : "stall bound, unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/stall-factor",
+    "pct" : 41,
+    "label" : "noise",
+    "why" : "stall bound, unrelated"
+  } ],
+  "missing" : [ "seon.render.proc/ended-cap", "seon.render.proc/order", ":seon.config.render.list/ended", "seon.render.ui/tile-agents", "seon.render.proc/system-value" ]
+}, {
+  "task" : "merge: docs/render.md: the Prose link follows its renamed heading (the one string cutter); the wiki loads again test-namespaces resolves test/ against the tree the config names, never the working directory Task text: declared-refs cited at its var; names that no longer exist are literals Wiki: result handles are literals, not citations printer-eval, review: laws that fail on a lost form, line breaks found once, one escape per cut The wiki says what is true now; AGENTS states where information lives; notes archived Task plans trimmed to current truth; 50 tasks filed; 3 refinement tasks deleted seon.ref: an anchor-only link names nothing; task names resolve; a cited task shows its plan",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#prose-and-the-one-string-cutter",
+    "pct" : 44,
+    "label" : "useful",
+    "why" : "the link being fixed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 68,
+    "label" : "useful",
+    "why" : "in changed; omnibus"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.render/related",
+    "pct" : 65,
+    "label" : "noise",
+    "why" : "related panel config, not changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/task-fact",
+    "pct" : 56,
+    "label" : "useful",
+    "why" : "task entries edited"
+  } ],
+  "missing" : [ "seon.ref/references", "seon.ref/loaded-var?", "seon.ref/kept", "docs/references.md#files-and-namespaces-on-demand", "seon.print.select/limits" ]
+}, {
+  "task" : "merge: problems-test: a new boot closes an earlier boot's stall Self-review: a new boot retracts every stall an earlier boot showed (task/earlier-agents-tx), so no :stalled problem outlives its process; the runner prints each test's end (ended) and bin/stalls names only a test still running after its started line, never one that finished; the stall bound's unused #env dropped; docs/config.md says what the stall keys are bin/test names a test stalled past its own bound: :seon.config.proofs/stall-factor (3) times its last recorded run, floored at :seon.config.agent/stall-ms (root's ruling (a): at a flat 30 s, 21 healthy process tests were named STALLED in one run); the plan writes each measured test's bound (out/stall-bounds) and bin/stalls reads it. Proof: of two quiet shards, the test past its 200 ms bound is named once, the one within its 600 s bound is not, and the watcher ends with them docs: the stall fact's name, :seon.agent/stall Fix the reds: the stall fact is :seon.agent/stall (its first name was the stall error's schema key); a refused diff's expected end has :outcome :error; the stalled-agents class is one more constant call in two cost proofs; the problems check awaits the stall unnamed (another proc's fact); no citation of the deleted stall-ms var A stall becomes a task for root, never a push (owner): its first write in a live run writes root/stall-<agent>-<run> from seon.template/stall, held with model outside (the reconciler forks nothing; a Claude session works it through seon_attach), its :seon.task/cause pre-filled with the stall, its proofs the boundary conditions (seon.stall-proofs: the stall ended, the cause recorded with its evidence, a bug's defect filed); my.task/update! writes the cause, carried to main. Proofs: one task per agent and run, none spawned, red until its conditions hold The stall bound is a config key, :seon.config.agent/stall-ms (the agent proc's var deleted); bin/test's watcher is bin/stalls, reading it from the plan (out/stall-ms), proved by seon.check-test/a-stalled-test-is-named-and-the-run-goes-on: a shard waiting on a FIFO is named STALLED once and the watcher ends with it, at a 200 ms bound bin/test names a stalled test: a running shard quiet past the stall bound since its last started line prints and records STALLED <test> <ms>, once per test, never ending it (an observation, named in docs/clocks.md)",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/processes.md#a-stalled-agent",
+    "pct" : 89,
+    "label" : "useful",
+    "why" : "stall mechanism doc"
+  }, {
+    "kind" : "section",
+    "name" : "docs/clocks.md#time-decides-owed-its-owners-fix",
+    "pct" : 40,
+    "label" : "useful",
+    "why" : "stall bound listed; changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.template/stall",
+    "pct" : 73,
+    "label" : "useful",
+    "why" : "stall task"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/back-op",
+    "pct" : 49,
+    "label" : "useful",
+    "why" : "in changed; stall message path"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/stall-task",
+    "pct" : 48,
+    "label" : "useful",
+    "why" : "stall task, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.template/stall-proofs",
+    "pct" : 48,
+    "label" : "useful",
+    "why" : "stall proofs, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/start!",
+    "pct" : 47,
+    "label" : "useful",
+    "why" : "boot closes earlier stalls"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/stall-factor",
+    "pct" : 92,
+    "label" : "useful",
+    "why" : "stall bound key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/stall-ms",
+    "pct" : 92,
+    "label" : "useful",
+    "why" : "stall floor key"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/cause",
+    "pct" : 88,
+    "label" : "useful",
+    "why" : "stall cause attribute"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/jobs",
+    "pct" : 47,
+    "label" : "noise",
+    "why" : "shard count, not stall"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.agent/stall",
+    "pct" : 46,
+    "label" : "useful",
+    "why" : "stall fact renamed"
+  } ],
+  "missing" : [ "seon.task/earlier-agents-tx", "seon.problems/stalled-agents", "docs/config.md#constants", "seon.task/this-boots", ":seon.config.agent/test-ticks" ]
+}, {
+  "task" : "merge: Self-review: the turn's one diff read in prove! after its commit (the child forks on that db), citations to seon.merge/divergence and changed-vars, divergence says what changed means, the cost proof drops the pair it held One branch diff per turn: seon.merge/divergence and changed-vars project delta-changes, read once per (base, db) by seon.agent/branch-changes; the writer's caused takes the three-way's :ours",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/storage.md#compiled-code",
+    "pct" : 87,
+    "label" : "useful",
+    "why" : "in changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/observe",
+    "pct" : 62,
+    "label" : "useful",
+    "why" : "reads the diff per turn"
+  }, {
+    "kind" : "function",
+    "name" : "my.branch/changes",
+    "pct" : 59,
+    "label" : "useful",
+    "why" : "branch changes, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/branch-changes",
+    "pct" : 53,
+    "label" : "useful",
+    "why" : "read-once diff"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 49,
+    "label" : "useful",
+    "why" : "consumer of the diff, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/prove!",
+    "pct" : 48,
+    "label" : "useful",
+    "why" : "reads diff after commit"
+  } ],
+  "missing" : [ "seon.merge/divergence", "seon.merge/changed-vars", "seon.merge/delta-changes", "seon.problems/caused", "docs/health.md#cost" ]
+}, {
+  "task" : "merge: test-inputs reads the tests, not the check driver beside them in test/ (its waits are a check's measurement, named in docs/clocks.md) drivers-out, review fixes: the binary's -main is seon.main's; check modes load the driver from the checkout at run time; the clocks law reads src and test drivers-leave-src, slice 1: seon.check leaves src for test/; its production code, root-serve and ports, is seon.main",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/machine.md#builds-and-checks",
+    "pct" : 81,
+    "label" : "useful",
+    "why" : "in changed"
+  }, {
+    "kind" : "section",
+    "name" : "docs/checks.md#modes",
+    "pct" : 67,
+    "label" : "useful",
+    "why" : "check modes driver"
+  }, {
+    "kind" : "function",
+    "name" : "seon.main/-main",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "changed, driver loading"
+  }, {
+    "kind" : "function",
+    "name" : "seon.main/driver!",
+    "pct" : 46,
+    "label" : "useful",
+    "why" : "check driver loader"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.agent/test-ticks",
+    "pct" : 57,
+    "label" : "noise",
+    "why" : "agent test bound, unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/gate-checkout",
+    "pct" : 42,
+    "label" : "noise",
+    "why" : "gate checkout, not changed"
+  } ],
+  "missing" : [ "docs/clocks.md#time-decides-a-checks-measurement-and-a-checks-ping", "seon.main/root-serve", "docs/server.md#the-server", "docs/resolution.md#sanctioned", "seon.main/out!" ]
+}, {
+  "task" : "merge: proofs: seon.fences/budgets-are-data-and-spend-is-measured, design step proofs: seon.fences/a-transient-model-failure-parks, design step proofs: seon.writer/durability-is-continuous-group-commit (census #6), design step proofs: seon.root/a-proc-answers-every-request-it-took (census #2), design step proofs: seon.fences/one-test-bound-derived-and-named (census #1), design step",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/flow.md#idioms-for-seon",
+    "pct" : 46,
+    "label" : "useful",
+    "why" : "proc request/answer, retry idioms"
+  }, {
+    "kind" : "function",
+    "name" : "seon.prove/prove-proc",
+    "pct" : 49,
+    "label" : "noise",
+    "why" : "test service admission, unrelated"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.proofs/case-sizes",
+    "pct" : 48,
+    "label" : "noise",
+    "why" : "cost sizes, near-miss"
+  } ],
+  "missing" : [ "seon.agent/run-answer", "seon.root/errors" ]
+}, {
+  "task" : "merge: Bump Chez to d19eb3b (jolt/thread-bytes: a per-thread mutator byte count, (cs)thread_bytes_allocated; the collector's and runtime's conses uncounted) prove, re-review: no stale green from the agents' store, and about -70 lines check-test: a check step's runs are its own directory (SEON_RUNS): bin/test's shards run at once, and other tests make theirs under target/runs while it runs (red under 4 shards, green alone) prove: seon.proofs leaves mg/check's pure namespaces (it runs git and writes results) and names its pure functions; the system check expects the :proof-inputs worker; one encoder (seon.edn/encode) for config-input and a fixture's ex-data, beside the one printer Thread-bytes review: helper threads signal they run; a measure's time is what its thread does; the docs say what time still holds -main names an unknown mode as its text, not through pr-str (seon.render-test/one-printer-and-no-cut-before-it) seon.check.edn reads after the merge: main's older copy of a-test-root-names-its-store-and-main's plan, left by the conflict, removed prove: one results store (root's option (a)). Root reads its source checkout's proof inputs once through the :proof-inputs effect and records them on main; agents key by that fact and share the one results directory",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/merging.md#a-merge-runs-what-the-change-reaches",
+    "pct" : 57,
+    "label" : "useful",
+    "why" : "in changed"
+  }, {
+    "kind" : "section",
+    "name" : "docs/cost.md#what-is-measured",
+    "pct" : 43,
+    "label" : "useful",
+    "why" : "thread-bytes measure doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/run-tests-forked",
+    "pct" : 58,
+    "label" : "useful",
+    "why" : "prove fork, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.root/import-source!",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "in changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.turn/observe",
+    "pct" : 52,
+    "label" : "useful",
+    "why" : "in changed; stale green fix"
+  }, {
+    "kind" : "function",
+    "name" : "seon.fx/config-input",
+    "pct" : 52,
+    "label" : "useful",
+    "why" : "one encoder, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.proofs/run-tests!",
+    "pct" : 50,
+    "label" : "useful",
+    "why" : "prove runner, changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/test-results-dir",
+    "pct" : 57,
+    "label" : "useful",
+    "why" : "results store, changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/gate-checkout",
+    "pct" : 41,
+    "label" : "noise",
+    "why" : "not changed"
+  } ],
+  "missing" : [ "seon.proofs/greens", "seon.proofs/store-greens!", "seon.agent/test-plan", "seon.check/pure-nss", "docs/cost.md#where-it-is-used" ]
+}, {
+  "task" : "merge: Reach's docs say a literal name passed to a resolver is a reference (docs/source.md, unit-account's :refs, resolvers' and resolved's docstrings: an unqualified or aliased name reaches nothing); a quoted name passed to no resolver stays data (data-test keeps its digest) (self-review) Reach follows a var looked up by name: a literal symbol passed to resolve, ns-resolve or requiring-resolve is one of the form's :refs (seon.program/unit-account, from the IR's :invoke and its args' datum; seon.program/resolved)",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 91,
+    "label" : "useful",
+    "why" : "reach docs edited"
+  }, {
+    "kind" : "section",
+    "name" : "docs/resolution.md#sanctioned",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : "name-to-var resolution sites"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/resolvers",
+    "pct" : 91,
+    "label" : "useful",
+    "why" : "docstring edited"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/resolved",
+    "pct" : 89,
+    "label" : "useful",
+    "why" : "docstring edited"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/unit-account",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : ":refs doc edited"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/quoted-names",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "quoted name stays data"
+  }, {
+    "kind" : "function",
+    "name" : "seon.source/analyze-form",
+    "pct" : 45,
+    "label" : "noise",
+    "why" : "analysis upstream, unchanged"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/process-vars",
+    "pct" : 48,
+    "label" : "noise",
+    "why" : "near-miss"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "merge: The reconciler's entity-value reads a run only where its start recorded it, as runs and run do: a branch's run stub is none A run on db is the entity its start recorded (:seon.run/status), so a branch's stub (the id a turn's or message's ref resolves by) is no run record there (seon.task/run-value refused it: three agent tests); page's tests start a run with its agent's id bin/build: the css step's closing brace, lost where its function and the embed step's met in the merge rename pass over jolt/page run-start-tx takes the agent's id and root's boot and writes the agent's entity with both (its key and its id), so a run read before root records its agent still names it (seon.task/run-value refused an agent with no id: four agent tests); its callers pass the id again Root's relevant keys leave :seon.root/stopped out: on a running root it is the previous boot's stop, which read as root stopped (page's report) An agent's key is root's boot as main holds it (the image it forked from, or main's head for a clone), never its branch's root fact: a resumed branch's agent recorded under an earlier boot's agent (page's browser round); proof seon.agent-test/a-resumed-branchs-agent-is-this-boots docs/render.md: a page is answered once whole; a location naming nothing says so; an unwatched view keeps nothing",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 47,
+    "label" : "noise",
+    "why" : "generic doc, incidental edit"
+  }, {
+    "kind" : "function",
+    "name" : "seon.task/entity-value",
+    "pct" : 58,
+    "label" : "useful",
+    "why" : "the named fix"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/advance",
+    "pct" : 56,
+    "label" : "useful",
+    "why" : "in changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.task/runs",
+    "pct" : 55,
+    "label" : "useful",
+    "why" : "run reads, mirrored"
+  }, {
+    "kind" : "function",
+    "name" : "seon.server/ops",
+    "pct" : 52,
+    "label" : "useful",
+    "why" : "in changed; weak"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/start",
+    "pct" : 49,
+    "label" : "noise",
+    "why" : "flight start, unchanged"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.root/stopped",
+    "pct" : 41,
+    "label" : "useful",
+    "why" : "relevant keys leave it out"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 41,
+    "label" : "noise",
+    "why" : "generic task state"
+  } ],
+  "missing" : [ "seon.task/agent-tx", "seon.task/agent-key", "seon.task/run-pull", "seon.problems/run-rows", "seon.task/agent-attrs" ]
+}, {
+  "task" : "merge: self-review: the cost proof's :work states the measured rows, not their history the reach walk reads what it needs: seon.program/reach-row (a form's id, ns, src, definitions and references) replaces form-row in reach-graph and reach-update, which read all eight fact sets (:form/quoted and :form/keywords among them) that no edge, digest or flag reads. the-reach-walk-is-one-pass-whatever-the-keys, red on main at 1.26x its bytes at 10,000: bytes 111 MB -> 79 MB at 100, 336 MB -> 242 MB at 1,000, 982 MB at 5,000 (185 KB a form against 254 KB); ticks 24.9M -> 15.6M, 75.2M -> 47.2M; the estimate set to the measured rows",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 85,
+    "label" : "useful",
+    "why" : "reach walk doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/reach-rows",
+    "pct" : 64,
+    "label" : "useful",
+    "why" : "sibling row reader"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/form-sets",
+    "pct" : 45,
+    "label" : "useful",
+    "why" : "form-row facts being replaced"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/units",
+    "pct" : 43,
+    "label" : "noise",
+    "why" : "unit cost table"
+  }, {
+    "kind" : "schema",
+    "name" : ":form/quoted",
+    "pct" : 51,
+    "label" : "noise",
+    "why" : "not in reach-row"
+  }, {
+    "kind" : "schema",
+    "name" : ":form/keywords",
+    "pct" : 50,
+    "label" : "noise",
+    "why" : "not in reach-row"
+  } ],
+  "missing" : [ "seon.program/reach-step" ]
+}, {
+  "task" : "merge: self-review fixes: resolve-ref decodes a var's contract as the import encoded it (seon.edn/decode: a bad one throws), and reads arglists only where they are shown; seon.reader/arglists for defn, defn- and defmacro, tested by arity; the depth test's vars are the db's alone, and a var only the db holds shows from its facts; a redefined var's record holds its new form (the var's form a unit); the wiki cites render-task; render's locals and printed cache say task no 'story' (owner, 2026-10-26: \"a render is just a function and the data being rendered\"): seon.context/run-state is render-task, its memo key render-task-key, the request's printed one printed-task; the story wrapper deleted; view's renders key :task; tests, docstrings and the wiki renamed; render-task-key's docstring names the known gap (the plan's citations parsed from its text and read from the db, until the task's references are refs in ctx) the story reads the db, not the process: seon.docs/resolve-ref reads a var the db holds from its facts (:var/doc, :var/contract, its recorded source, and the arglists it declares, seon.reader/arglists), a library var the db does not hold from the process's meta, which its build fixes; :var/form a unit of the var (:seon.db/var-fact), so a redefinition joins its new form; context-test's program facts carry each var's doc and contract, as the import records them ctx diff, self-review fixes: a patch applies every entity's retractions before any assertion, so a member retracted and made again under its key (a new entity) within one patch of net datoms comes out as the end's; tested; diff's precondition (c1 one advance's from c0) and its unit shapes stated; the cost claim narrowed to diff, advance's being the patch's the turn's ctx diff (revision 4.2, root's ruling): seon.ctx/advance patches the start's record by the net datoms to the end t, read from the db alone; seon.ctx/diff, pure in the two records, {path [old new]} over the changed paths, equal ones and ones under another dropped; an emptied unit's path is changed too. The start's record with the diff applied is the end's over twelve random turns; an eval added diffs in one contracted call at 100/1,000/3,000 evals",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/ctx.md#kept-by-the-change-never-rebuilt",
+    "pct" : 88,
+    "label" : "useful",
+    "why" : "render memo/cache doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.docs/resolve-ref",
+    "pct" : 93,
+    "label" : "useful",
+    "why" : "the fixed function"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/world",
+    "pct" : 73,
+    "label" : "noise",
+    "why" : "branch change, unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/meaning",
+    "pct" : 68,
+    "label" : "noise",
+    "why" : "wiki staleness, near-miss"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/reach-step",
+    "pct" : 59,
+    "label" : "noise",
+    "why" : "reach walk, unrelated"
+  }, {
+    "kind" : "function",
+    "name" : "seon.problems/stale-sections",
+    "pct" : 57,
+    "label" : "noise",
+    "why" : "near-miss by wording"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/var-fact",
+    "pct" : 61,
+    "label" : "useful",
+    "why" : "var facts read by resolve-ref"
+  } ],
+  "missing" : [ "seon.reader/arglists", "seon.context/render-task", "seon.context/render-task-key", "seon.reader/definition-head", "seon.context/printed-story" ]
+}, {
+  "task" : "merge: cost proofs for the shared bar: seon.render.ui/page's fixed calls 6 -> 7 (top-bar), and a debug page pass 429 -> 458 calls (the bar and header's elements and attributes, serialized once a pass; measured: 434 with a bare nav, 455 without the off-screen mark); top-bar takes one link or nil the agents' safelist covers what an agent's render reaches for (ctx-atom found list-decimal unstyled): layout, spacing, type, lists, borders and the theme's colors, responsive where layout is; measured app.css 38 KB -> 117 KB (7 -> 16 KB gzipped), Tailwind 63 -> 90 ms; chosen over rebuilding the stylesheet when an agent's render names a class (a build effect from the agent's REPL, a new mechanism) self-review (worth it; 8 findings): a screen eval opened under its turn keeps its eval-eN anchor; emit's handle comment names chat-part's row; why a cut code block is not highlighted; the observer's cost stated; a test for the highlighted line. Not changed: no hljs guard (a missing asset is a deploy defect, loud); the whole-page scan (simple, its cost stated); the first-line tokenising (cosmetic). Checked in the browser: a row re-rendered on open keeps its summary highlighted. the page looks finished, from the r3 layout and the static mockup (owner, 2026-10-25): each eval a block whose first line is its code highlighted and its value's line, opening to its code (the printer's code block, seon.render.ui/code) and its value; prose (replies, messages) in the system's text face; a sticky top bar shared by root's, an agent's and the debug page (seon.render.ui/top-bar, three copies of the nav gone); the agents a strip of chips on a phone (they were hidden below lg); root's input row no longer overflows its column; the eval-eN anchor on the row, so a handle links whether or not its row is open",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#tailwind",
+    "pct" : 70,
+    "label" : "useful",
+    "why" : "changed doc"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#a-value-on-the-page-is-its-structure",
+    "pct" : 66,
+    "label" : "useful",
+    "why" : "changed doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/evaluation",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "debug page unit, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/page-chrome",
+    "pct" : 52,
+    "label" : "useful",
+    "why" : "top bar placement"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/debug",
+    "pct" : 50,
+    "label" : "useful",
+    "why" : "debug page, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/eval-item",
+    "pct" : 46,
+    "label" : "noise",
+    "why" : "conversation component"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/prose",
+    "pct" : 43,
+    "label" : "noise",
+    "why" : "not in change"
+  } ],
+  "missing" : [ "seon.render.ui/shell", "seon.render.ui/component", "seon.render.ui/root-input", "seon.render.ui/chat", "seon.render.ui/turn" ]
+}, {
+  "task" : "merge: agent-test: the fork server a test kills is the one root names ([:fork-server :pid]), never the first child pgrep lists: pid order wraps, and the lost-fork-server test killed root's file watcher in its place and waited for a loss that never came (root-ended picked it the same way) Jolt 10cd561f: every host winder that closes or frees what its body uses runs at the real exit; a forked child's throw names its frames Self-review of the newest commits (questionable, 6 findings): in-agent throws when the attach made no agent, after stopping its root, so no caller reads a refused attach as an agent's answer (line 411's sum over nil passed); Jolt's park test asserts the descriptors the parked reads and copies opened are closed at their end (cb542649, a test-only commit; the pinned code is the same); the task text says a task file refused, not the old word. Kept: the archive citations other docs hold (not this branch's) From jolt/fork-guard before its deletion (the old-branch audit): the blocking-calls note; the deadlock design, archived, its task's citation moved; stability rows 1b, 1c and 7-10; the tasks jolt.async/the-main-carrier-is-stuck-only-when-no-thread-runs and seon.root/a-running-roots-os-thread-count-is-what-it-declares (green under the boot order, to check on main); a task file's refusal added to seon.problems/a-platform-error-closes-when-its-cause-is-gone Jolt 98abdd82: a read scope's jar readers stay open across a park; in-agent answers a refused attach instead of waiting for a hello Self-review of the merged branch (worth it, 7 findings): a failed boot is not booted again, said where a second start! is; a date out of a rewritten test comment; boot!'s map indented. Kept: the clock sites (bin/laws clocks and measures OK, named by their functions), the seon.db task (filed, not done here), the check modes (one process, one boot each) seon.db task: the measurement's source named in plain words clocks: the fork cases' timeout and boot!'s durations named",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data",
+    "pct" : 65,
+    "label" : "noise",
+    "why" : "generic"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#jolt",
+    "pct" : 51,
+    "label" : "useful",
+    "why" : "Jolt pin text, changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/state",
+    "pct" : 69,
+    "label" : "noise",
+    "why" : "unrelated schema"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.problems/class",
+    "pct" : 49,
+    "label" : "noise",
+    "why" : "unrelated schema"
+  } ],
+  "missing" : [ "seon.root/boot!", "seon.root/start!", "seon.lib/fork!", "seon.lib/gc-sweepers!", "docs/failure-points.md#physics-who-may-run-threads" ]
+}, {
+  "task" : "merge: seon.main/-main fixes the GC sweeper pool at 0 first: Chez never stops a sweeper it started, so a collection beside a waiting thread before root's fix left the count to timing ([0 1], [0 2] in root-threads-are-what-root-declares); ./seon sweepers-held proves it (6 unfixed, 0 fixed)",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/failure-points.md#physics-who-may-run-threads",
+    "pct" : 91,
+    "label" : "useful",
+    "why" : "thread/sweeper rules"
+  }, {
+    "kind" : "section",
+    "name" : "docs/forks.md#chez",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : "Chez pin and sweepers"
+  }, {
+    "kind" : "section",
+    "name" : "docs/machine.md#builds-and-checks",
+    "pct" : 44,
+    "label" : "noise",
+    "why" : "build prerequisites"
+  }, {
+    "kind" : "function",
+    "name" : "seon.lib/gc-sweepers!",
+    "pct" : 78,
+    "label" : "useful",
+    "why" : "function -main calls"
+  }, {
+    "kind" : "function",
+    "name" : "seon.main/-main",
+    "pct" : 76,
+    "label" : "useful",
+    "why" : "changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.main/root-serve",
+    "pct" : 48,
+    "label" : "noise",
+    "why" : "unchanged server mode"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.root/gc-sweepers",
+    "pct" : 92,
+    "label" : "useful",
+    "why" : "sweeper count key"
+  } ],
+  "missing" : [ ]
+}, {
+  "task" : "merge: test-namespaces resolves test/ against the tree the config names, never the working directory Review: a deftest for the plan's refusals, --all first in the usage, one namespace check, docs/cost.md states the rule docs/cost.md: rename's record-tx time was 1.84x of the old record, not 1.37x The AVET-seek overruns are recorded on the proof's own thread's measure: record-tx was red against a record the old measure took bin/test refuses a selection that cannot select: an unknown flag, a name that is no test namespace, named namespaces that match no test",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 47,
+    "label" : "noise",
+    "why" : "reach, not test selection"
+  } ],
+  "missing" : [ "docs/cost.md#an-accepted-overrun-and-its-ratchet" ]
+}, {
+  "task" : "merge: reach-rows: definition-key's precedence, a test that the walk's rows are form-row's facts in both read modes and that a form's own digest is its id, the wiki's section and stale names (self-review fixes). Every stored test result misses once: a form's own digest is its :form/id, no longer a SHA-256 of its text reach-index reads each attribute once (reach-rows: one pass over the attribute's index, a seek per entity for an update) and takes a form's own digest from its :form/id, not a re-hash of :form/src; the cost proof tightened: 33k ticks / 153 KB a form -> 15.8k / 97 KB (task seon.program/reach-index-reads-each-attribute-once)",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/source.md#tests-run-by-reach",
+    "pct" : 86,
+    "label" : "useful",
+    "why" : "reach walk doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/reach-rows",
+    "pct" : 72,
+    "label" : "useful",
+    "why" : "changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/program-digest",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "digest of a form"
+  }, {
+    "kind" : "function",
+    "name" : "seon.agent/test-plan",
+    "pct" : 53,
+    "label" : "noise",
+    "why" : "consumer, unchanged"
+  }, {
+    "kind" : "function",
+    "name" : "seon.cost/units",
+    "pct" : 51,
+    "label" : "noise",
+    "why" : "unit cost table"
+  }, {
+    "kind" : "function",
+    "name" : "seon.program/account-diff-tx",
+    "pct" : 51,
+    "label" : "noise",
+    "why" : "unchanged writer"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.config.source/test-results-dir",
+    "pct" : 41,
+    "label" : "noise",
+    "why" : "results path"
+  } ],
+  "missing" : [ "seon.program/reach-graph", "seon.program/reach-step", "seon.program/reach-update" ]
+}, {
+  "task" : "merge: seon.reconcile/a-design-step-designs: a :design attempt is done only when it improved the plan seon.reconcile/a-design-step-designs, design: proofs red; the attempt records the plan it began with",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/tasks.md#the-done-rule",
+    "pct" : 61,
+    "label" : "useful",
+    "why" : "done rule doc"
+  }, {
+    "kind" : "section",
+    "name" : "docs/agent.md#what-you-read",
+    "pct" : 49,
+    "label" : "noise",
+    "why" : "generic context doc"
+  }, {
+    "kind" : "section",
+    "name" : "docs/vocabulary.md#tasks-task-chains-words",
+    "pct" : 41,
+    "label" : "noise",
+    "why" : "vocabulary"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/done-explain",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "the done rule"
+  }, {
+    "kind" : "function",
+    "name" : "seon.reconcile/done-input",
+    "pct" : 43,
+    "label" : "useful",
+    "why" : "changed"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.run/plan",
+    "pct" : 65,
+    "label" : "useful",
+    "why" : "done-input reads run plan"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/actions",
+    "pct" : 58,
+    "label" : "noise",
+    "why" : "actions schema"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.reconcile/done-input",
+    "pct" : 42,
+    "label" : "useful",
+    "why" : "changed schema"
+  } ],
+  "missing" : [ "seon.reconcile/done-refusals", ":seon.attempt/plan", "seon.task/attempt-start-tx", "seon.turn/work!", "seon.reconcile/advance" ]
+}, {
+  "task" : "merge: agent-test: the parts proof swaps into seon.ctx/ctx by its full name (the eval before it is in lab.ui); a failed call sends the screen's three evals, the page's print gone an agent's page names only the tiles whose render does not name itself the line saying whose drawing an agent's page is is a unit (p-caption), so it goes when the agent's own parts arrive (the skeleton is never patched); proof: the open tab is sent it the review's fixes: the memo keys on the ctx members a part was made from (:from), so a view made again draws from it, pruned to the page's parts; no page waits on a process (drawn from its branch until its parts arrive, saying so); a gone agent's parts dropped; the folded line drawn only for evals; the walk's callers named until slice 5 (its task, every-page-is-its-parts) the cost proof of seon.render/view: linear in the evals, 4 contracted calls an eval folded to one line reads its code's first line ⇒ its value's recorded line (seon.render.ui/evaluation :inline), as the conversation's block did docs: an agent's page is its parts (docs/render.md#the-page); the screen's page print gone from the help page and ctx.md; the draw-part failure point slice 2b of the one derivation: an agent's page is its parts, drawn by the agent (seon.repl/parts, the :parts op root routes) and laid out by root (seon.render.ui/parts-page, the sidebar as root's chrome); root draws an agent with no process from its branch, the page saying so; the draw-asking machinery (ask-draws, *drawn*, *wanted*, branch-render, drawer, seon.repl/draw) and the screen's page print and round trip (seon.screen/show, seon.agent/screen, the proc's screen views) deleted; view adds the agent's own keys and its turns",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/agent.md#ctx",
+    "pct" : 77,
+    "label" : "useful",
+    "why" : "naming ctx by full name"
+  }, {
+    "kind" : "section",
+    "name" : "docs/render.md#the-page",
+    "pct" : 61,
+    "label" : "useful",
+    "why" : "page is parts, changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/asked-by",
+    "pct" : 65,
+    "label" : "noise",
+    "why" : "eval attribution"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.proc/agent-view",
+    "pct" : 45,
+    "label" : "useful",
+    "why" : "page from parts"
+  }, {
+    "kind" : "function",
+    "name" : "seon.repl/render-ctx",
+    "pct" : 42,
+    "label" : "useful",
+    "why" : "agent's parts render"
+  }, {
+    "kind" : "function",
+    "name" : "seon.print.emit/highlight",
+    "pct" : 40,
+    "label" : "noise",
+    "why" : "code highlight"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.db/agent-fact",
+    "pct" : 48,
+    "label" : "noise",
+    "why" : "generic fact"
+  } ],
+  "missing" : [ "seon.render/view", "seon.render.proc/agent-page", "seon.render.proc/ask-parts", "seon.repl/parts", "docs/render.md#the-screen-is-sent-as-diffs" ]
+}, {
+  "task" : "merge: Self-review fixes: the judge's first-move request is a fresh agent's (written on a speculative db, d/with; world draws the request's own commit from db itself); the turn's block is its current state again (waste's shown proofs); render-ctx's prev by butlast; a plain vector headed by a var prints as data; the status asserted on the page; one path's proof parity: the context row cites seon.context/request and world (messages is deleted) context-test requires seon.render.ui (its long-source proof draws the cited part) each-section-is-told-once: its proof written (an unwritten one repeats the plan in what to assert), the status as the printer prints it The printer prints a call's value at the call's own budget and handle (root and the owner: no thousands of items anywhere; the same cut as the page, naming the form that reads the rest); related's call carries its budget; the 8,000-form source is the proof The two gaps of revision 4.2: [:status] from the newest turn of either origin (an outside read's observations shown, without a turn count); the request has one path (messages, its agent-less branch, task-message, state-message, task-keys, reader-text, model-turns and turn-record deleted; the tests that read them read the page, the turn's state or the task's data)",
+  "items" : [ {
+    "kind" : "section",
+    "name" : "docs/render.md#the-models-context-a-cached-prefix-then-the-turn",
+    "pct" : 54,
+    "label" : "useful",
+    "why" : "changed doc"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/world",
+    "pct" : 49,
+    "label" : "useful",
+    "why" : "named in plan"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/printed-run",
+    "pct" : 42,
+    "label" : "useful",
+    "why" : "changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.context/render",
+    "pct" : 40,
+    "label" : "useful",
+    "why" : "changed"
+  }, {
+    "kind" : "function",
+    "name" : "seon.render.ui/task-data",
+    "pct" : 40,
+    "label" : "noise",
+    "why" : "not in change"
+  }, {
+    "kind" : "schema",
+    "name" : ":seon.task/task-fact",
+    "pct" : 68,
+    "label" : "noise",
+    "why" : "not in change"
+  } ],
+  "missing" : [ "seon.context/request", "seon.context/current-state", "seon.render/render-ctx", "seon.turn/context-block", "seon.context/related" ]
+} ]

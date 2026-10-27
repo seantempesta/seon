@@ -826,8 +826,9 @@
         lst (some #(when (= :model (:seon.turn/origin %)) %) older)
         task (:seon.task/id (held-task c rid))]
     (when turn
-      (let [b (:seon.turn/basis (d/pull db [:seon.turn/basis] (:db/id turn)))
-            l (when lst (d/pull db [:seon.turn/truncated :seon.turn/calls] (:db/id lst)))]
+      ;; the turns as ctx's pull holds them ([*]): their basis, and the last model turn's calls
+      (let [b (ratom/realize (:seon.turn/basis turn))
+            l (some-> lst ratom/realize (select-keys [:seon.turn/truncated :seon.turn/calls]))]
         [:section [:h2 "status"]
          [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
           (context/turn-state db (task/task db task) (context/turn-input db b l))]]))))
@@ -854,42 +855,51 @@
 (defn caused-view
   "What the branch's own work made wrong since its merge base (a component over the db; the base's
   commit its child): seon.problems/caused-split's open problems it caused, which the done rule
-  refuses, and what it changed under the wiki (:attention)."
+  refuses, and what it changed under the wiki (:attention); nothing when it caused none."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
   (let [{:keys [caused attention]} (problems/caused-split (commit-db db base) db)]
-    [:section [:h2 "caused"]
-     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
-      {:caused caused :attention attention}]]))
+    (when (or (seq caused) (seq attention))
+      [:section [:h2 "caused"]
+       [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
+        {:caused caused :attention attention}]])))
 
 (defn gaps-view
   "The functions the branch defines without a contract since its merge base (a component over the
   db; the base's commit its child): seon.merge/uncontracted over the branch's own changes, what
-  root's judge and the merge gate ask."
+  root's judge and the merge gate ask; nothing when it defines none."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
-  [:section [:h2 "without a contract"]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget)}
-    (vec (sort-by str (pm/uncontracted (pm/delta-changes (commit-db db base) db #{}))))]])
+  (let [gaps (vec (sort-by str (pm/uncontracted (pm/delta-changes (commit-db db base) db #{}))))]
+    (when (seq gaps)
+      [:section [:h2 "without a contract"]
+       [#'render/html {:budget (config/value :seon.config.render/value-budget)} gaps]])))
 
 (defn divergence-view
   "What the branch's merge carries to main (a component over the db; the base's commit its child):
-  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed."
+  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed;
+  nothing when it carries none."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} base]
-  [:section [:h2 "its merge carries"]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]])
+  (let [carried (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]
+    (when (seq carried)
+      [:section [:h2 "its merge carries"]
+       [#'render/html {:budget (config/value :seon.config.render/value-budget)} carried]])))
 
 (defn related
-  "What the task's plan is likely to need beyond what it cites (a component over ctx and the db):
-  seon.context/related over the db as seon.context/related-view lines it (each section its first
-  sentence, each function its doc's, with the forms that read more), what (my.task/related)
-  answers, as a call of the one printer; a line saying so when there is nothing yet."
+  "What the agent's work on its task is likely to need beyond what the plan cites (a component over
+  ctx and the db): the units its last turn included (:seon.agent/included, seon.context/selected:
+  what its plan and recent evals point to, each whole with its chance, in the order they entered), as
+  seon.context/related-view lines them (with the forms that read more), as a call of the one printer;
+  a line saying so when there is nothing yet. No relevance call here: the turn decides, the page draws."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} rid]
-  (let [r (some->> (context/related db (get-in c [:runs rid :task :db/id])) (context/related-view db))]
+  (let [r (some->> (not-empty (:seon.agent/included c)) context/shown (context/related-view db))]
     [:section [:h2 "related"]
-     (if r [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/related)} r] [:p {:class "muted"} "nothing related yet"])]))
+     ;; its budget the selection's (seon.context/selected fills relevance-budget) and a value's for the
+     ;; forms beside it, so the printer never cuts a unit the selection chose
+     (if r [#'render/html {:budget (+ (config/value :seon.config.render/relevance-budget) (config/value :seon.config.render/value-budget)) :handle '(my.task/related)} r]
+         [:p {:class "muted"} "nothing related yet"])]))
 
 (defn run-head
   "The run (a component over ctx): its relevant attributes and the turns it took, by its schema's
@@ -954,7 +964,7 @@
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
             [(when-not (str/blank? (:prose rec)) [:span {:class "seon-prose"} (:prose rec)])
-             ;; the mockup's collapsed line (notes/archive/design-agent-view-2026-10-24.md §5): its code's first
+             ;; the mockup's collapsed line (claude_scratch/archive/design-agent-view-2026-10-24.md §5): its code's first
              ;; line, its time, its handle; the value only when opened
              ;; the one printer's one-line cut, which names what it left
              [:code {:class "seon-form"} (prose (or (:code rec) "") (cell) {:one-line? true})]
@@ -1016,12 +1026,12 @@
                        [#'related {} rid]
                        (when (seq (:turns run)) [#'status {} rid])
                        ;; what the turn no longer computes, drawn when what it reads moves: the merge
-                       ;; base's and main's commits (ctx's :base-commit :main-commit) are their children. A
+                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
                        ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
-                       (when-let [b (:base-commit c)]
+                       (when-let [b (:seon.agent/base-commit c)]
                          (list [#'caused-view {} b] [#'gaps-view {} b] [#'divergence-view {} b]
                                ;; a task that merges itself: whether it can merge now
-                               (when (and (:main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:main-commit c) b])))))
+                               (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:seon.agent/main-commit c) b])))))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when rid [#'own-problems {} rid])

@@ -2,7 +2,7 @@
 // entity id and the last transaction id issued, mapped MAP_SHARED from the file `ids` beside
 // the store (or anonymously for a store in memory, shared with forked children), so every
 // process writing the store issues each id once. Taking one is a single atomic fetch-add:
-// 28-34 ns alone, 200-240 ns with 10 processes contending (notes/global-ids/MEASURED.md §6).
+// 28-34 ns alone, 200-240 ns with 10 processes contending (claude_scratch/global-ids/MEASURED.md §6).
 #include <stdint.h>
 #include <sys/mman.h>
 #include <fcntl.h>

@@ -21,12 +21,22 @@
 
 ;; ---- the view: one read of main ---------------------------------------------------
 
+(defn- outside?
+  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
+  drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [env] (= "outside" (:model env)))
+
 (defn desired-env
-  "The environment task t's runs must run in."
-  {:malli/schema [:=> [:cat :seon.task/own] :seon.task/env]}
-  [t]
-  {:branch (:seon.task/branch t) :model (:seon.task/model t)
-   :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})})
+  "The environment task t's runs must run in; with prior, a run's environment it goes on from,
+  an outside agent's stays outside (seon.server's attach: the model and its :holder are the
+  outside agent's, whatever the task's)."
+  {:malli/schema [:function [:=> [:cat :seon.task/own] :seon.task/env] [:=> [:cat :seon.task/own [:maybe :map]] :seon.task/env]]}
+  ([t] (desired-env t nil))
+  ([t prior]
+   (cond-> {:branch (:seon.task/branch t) :model (:seon.task/model t)
+            :max-turns (cfg/value :seon.config.agent/max-turns {:task t :model (:seon.task/model t)})}
+     (outside? prior) (merge (select-keys prior [:model :holder])))))
 
 ;; ---- the done rule -----------------------------------------------------------------
 
@@ -154,12 +164,6 @@
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
 
-(defn- outside?
-  "Whether env, a run's environment, is an outside agent's (seon.server's attach): no turn loop
-  drives it, so it is handed back at :started and its refused end holds rather than taking a verdict."
-  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
-  [env] (= "outside" (:model env)))
-
 (defn- idle
   "Task id's parked run whose process is idle now: parked in this boot, by an agent. A wake
   reuses it; a cancel, a hold or a new branch for its task stops it (classify: its process
@@ -277,8 +281,7 @@
         kill (cond
                live? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                            (= :held (:seon.task/execution t)) :held
-                           ;; an outside run's model is the outside agent's (attach), whatever the task's
-                           (not= (cond-> (desired-env t) (outside? (:seon.run/env a)) (assoc :model "outside")) (:seon.run/env a)) :env-changed)
+                           (not= (desired-env t (:seon.run/env a)) (:seon.run/env a)) :env-changed)
                parked? (cond (= :cancelled (:seon.task/execution t)) :cancelled
                              (= :held (:seon.task/execution t)) :held
                              (not= (:seon.task/branch t) (get-in a [:seon.run/env :branch])) :env-changed))
@@ -428,7 +431,9 @@
                        ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
                        ;; 2026-10-27: process tests the change reaches run automatically at the judge)
                        (and (empty? rs) merge?)
-                       (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
+                       (let [self (get-in idx [:root :started-by])
+                             ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
+                             deferred (sort-by str (remove #(= self (str %)) (:seon.run/deferred a #{}))) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
                          ;; with no checkout to run them on (a root with no source), the merge is
                          ;; held with that reason, never merged with them unrun
@@ -439,7 +444,12 @@
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}
                                :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
-                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))))))
+                                                           (str/join ", " (for [[t s] red] (str t " " (name s))))
+                                                           ;; why they could not run, when the gate itself failed: the effect's error, or a changed
+                                                           ;; namespace with no file on the branch (each test then reads :error)
+                                                           (let [why (concat (some-> (:seon.run/error a) :seon.error/message vector)
+                                                                             (for [u (:seon.run/gate-unread a)] (str (:ns u) ": " (:reason u))))]
+                                                             (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))))))
                        (empty? rs) {:op :accept :run aid :task id}
                        ;; it parked (waiting, out of turns, no progress, a provider's error): never a
                        ;; hold, the session waits for its next message (design agent-loop section 1)
@@ -491,7 +501,7 @@
                                      ;; by nobody: an outside one stays outside
                                      newest (last (sort-by :seon.run/start-ms (map (:runs idx) (get-in idx [:by-task id]))))
                                      lost? (or (= :lost (:seon.run/status newest)) (contains? (:reap idx) (:seon.run/id newest)))
-                                     env (cond-> (desired-env t) (and lost? (outside? (:seon.run/env newest))) (assoc :model "outside"))]]
+                                     env (desired-env t (when lost? (:seon.run/env newest)))]]
                  ;; its process is idle (parked in this boot, on its branch): its next run is a wake on it, no fork
                  (if (and p (not (get-in idx [:kill (:seon.run/id p)])))
                    {:op :wake :task id :env env :run run :agent (:seon.run/agent p)}

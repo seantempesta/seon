@@ -11,7 +11,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.program :as program] [seon.docs]
+            [seon.program :as program] [seon.docs] [seon.server]
             [seon.proofs :as proofs]
             [seon.fx :as fx]
             [seon.merge :as pm]
@@ -152,6 +152,25 @@
           "so a change to that key re-arms the form, as it did before :form/keywords")
       (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
       (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
+
+(deftest a-base-cut-before-an-attribute-has-a-reach-graph
+  ;; test-audit, 2026-10-27, on a store kept from before 7177cc5899: a resumed agent's base (its
+  ;; merge base with main) was cut before :form/ops, and its :context died reading the base's reach
+  ;; graph (Bad entity attribute :form/ops, not defined in current schema). A db that does not
+  ;; declare an attribute holds none of its datoms: its forms' rows read it as absent
+  ;; (docs/source.md#tests-run-by-reach)
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        _ (d/transact conn (vec (remove #(= :form/ops (:db/ident %)) pdb/schema)))
+        _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] m)" :form/ns "n" :form/order 0 :form/defines #{"v"}}
+                            {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn}])
+        g (program/reach-graph @conn nil)]
+    (is (= #{"app.old/f"} (set (map :id (vals (:rows g))))) "the base's graph holds its form")
+    (is (= #{"app.old/f" "app.old/g"}
+           (set (keys (:rows (program/reach-update g (d/db-with @conn [{:db/id "f" :form/id "app.old/g" :form/src "(defn g [m] m)" :form/ns [:ns/name 'app.old]
+                                                                       :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/kind :fn}]))))))
+        "and a form added on it is read too, entity by entity")))
 
 (deftest catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
@@ -489,7 +508,7 @@
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
-  ;; every class when it reads files or runs a process
+  ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (System/getProperty "user.dir")
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
@@ -523,6 +542,19 @@
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
+(defn- path
+  "The shortest chain of forms (as the vars each defines, or its id) from var a's form (or the
+  form of id a) to var b's in reach graph g, or nil."
+  [{:keys [adj defs rows]} a b]
+  (let [to (peek (get defs b)) start (if (string? a) a (peek (get defs a)))
+        show (fn [id] (or (first (keep (fn [[k s]] (when (= :var k) s)) (:defines (rows id)))) id))]
+    (loop [fr [start] from {start nil}]
+      (when (seq fr)
+        (if (contains? from to)
+          (mapv show (reverse (take-while some? (iterate from to))))
+          (let [st (for [id fr w (adj id) :when (not (contains? from w))] [w id])]
+            (recur (vec (distinct (map first st))) (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from st))))))))
+
 (deftest a-test-that-starts-a-process-reaches-the-program-it-runs
   ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
   ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
@@ -539,34 +571,81 @@
     (is (every? reaching process) "every test that starts a process reaches the code the agent it starts runs")
     (is (every? #(get (:defs g) %) (cfg/value :seon.config.source/process-entry)) "and every configured entry var is in the program: a renamed one drops its edge in silence")
     (is (every? reaching '[seon.server-test/the-context-op-answers-what-a-model-is-sent seon.server-test/done-answers-the-judges-reasons]))
-    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")))
+    (is (not (reaching 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test does not")
+    ;; owner, 2026-10-27 ("no tests should include all of src"): the entry was seon.main/-main, a
+    ;; root's whole boot (1,512 vars), so a change anywhere in it deferred every process test to the
+    ;; merge. The entry is what the process runs for the test: the agent's turn, and of the server's
+    ;; answers (seon.server/op-answer) only the methods of the ops the test sends
+    (let [method (fn [op] (first (for [id (get (:methods g) 'seon.server/op-answer)
+                                       :when (contains? (:defines ((:rows g) id)) [:method 'seon.server/op-answer (pr-str op)])]
+                                   id)))
+          tests-of (fn [ids] (set (for [id ids [k s] (:defines ((:rows g) id)) :when (and (= :var k) ((:tests g) s))] s)))
+          driving (fn [op] (tests-of (program/reached-by (:rev g) [(method op)])))
+          done (driving :done) evals (driving :eval)]
+      (is (get (:defs g) 'seon.generation/generation) "the boot's var is in the program")
+      ;; a test reaching it by its own code (seon.source-test's restart calls seon.e2e/loop-turn!) still does
+      (is (empty? (keep #(path g % 'seon.generation/generation) (cons 'seon.turn/work! (get (:methods g) 'seon.server/op-answer))))
+          "what a process runs for a test (the turn, each op's answer) does not reach a root's boot")
+      (is (and (method :done) (method :eval)) "each op is a method of its own")
+      (is (done 'seon.server-test/done-answers-the-judges-reasons) "a test that sends :done reaches the :done method")
+      (is (and (process 'seon.server-test/an-agent-reads-its-task-running) (not (done 'seon.server-test/an-agent-reads-its-task-running)))
+          "a process test that sends no :done does not")
+      (is (< 0 (count done) (count process)) (str (count done) " of " (count process) " process tests send :done"))
+      (is (evals 'seon.server-test/an-agent-reads-its-task-running) "every in-agent test sends :eval (in-agent does) and reaches its method"))))
 
-(deftest an-entry-var-redefined-moves-what-starts-a-process-by-an-update-too
-  ;; the edge from a form using a process var to the entry vars (:seon.config.source/process-entry):
-  ;; an update after the entry var is redefined, added or removed agrees with a rebuild
+(deftest a-var-an-eval-string-names-moves-the-test-that-sends-it
+  ;; root, 2026-10-27: code a test sends a process as a string (in-agent's evals) is read by the one
+  ;; reader at analysis (seon.program/unit-account), its names an edge in a test's namespace as a
+  ;; quoted form's are; a string of fragments (str "(f " x ")") reads once its delimiters are
+  ;; repaired. An update after the named var is redefined, added or removed agrees with a rebuild
   (let [in {:env "e" :tree "t" :config {}}
-        with-main (fn [body] (-> (record (empty-db) 'user "(ns seon.main)" 'seon.main (str "(defn -main [] " body ")"))
-                                 (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
-                                         'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
-                                         'app.pt-pe-test "(deftest pure-test (is (= 1 1)))")))
-        db0 (-> (empty-db) (record 'user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
-                                   'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! 1))))"
-                                   'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"))
-        db1 (with-main "1") db2 (with-main "2")
+        tests ['user "(ns app.pt-pe-test (:require [clojure.test :refer [deftest is]]))"
+               'app.pt-pe-test "(deftest starts-test (is (= 1 (seon.lib/fork! \"(app.pt-pe/f 1)\"))))"
+               'app.pt-pe-test "(deftest built-test (is (= 1 (seon.lib/fork! (str \"(app.pt-pe/g \" 1 \")\")))))"
+               'app.pt-pe-test "(deftest pure-test (is (= 1 1)))"]
+        with-f (fn [body] (apply record (record (empty-db) 'user "(ns app.pt-pe)" 'app.pt-pe (str "(defn f [x] " body ")") 'app.pt-pe (str "(defn g [x] " body ")")) tests))
+        db0 (apply record (empty-db) tests)
+        db1 (with-f "1") db2 (with-f "2")
         dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
         rebuilt (fn [db] (dg (program/reach-graph db nil)))
         g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]
-    (is (= (rebuilt db1) (dg g1)) "an entry var added: the update agrees with a rebuild")
+    (is (= (rebuilt db1) (dg g1)) "the named var added: the update agrees with a rebuild")
     (is (= (rebuilt db2) (dg g2)) "redefined: the same")
     (is (= (rebuilt db0) (dg (program/reach-update g2 db0))) "removed: the same")
-    (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test that starts a process moves with the entry var")
+    (is (not= ((dg g1) 'app.pt-pe-test/starts-test) ((dg g2) 'app.pt-pe-test/starts-test)) "the test whose eval string names the var moves with it")
+    (is (not= ((dg g1) 'app.pt-pe-test/built-test) ((dg g2) 'app.pt-pe-test/built-test)) "and so does one whose string is built from fragments")
     (is (= ((dg g1) 'app.pt-pe-test/pure-test) ((dg g2) 'app.pt-pe-test/pure-test)) "a pure test does not")))
+
+(deftest an-op-answer-redefined-moves-the-tests-that-send-it-by-an-update-too
+  ;; a form that starts a process, or sends an op from a test's namespace, has an edge to
+  ;; seon.server/op-answer's method of each op it sends (its :form/ops): an update after a method
+  ;; is added, redefined or removed agrees with a rebuild, and moves only the tests sending its op
+  ;; (two methods of ops nobody sends, :pt-a and :pt-b, added to the live multimethod and removed after)
+  (let [in {:env "e" :tree "t" :config {}}
+        tests ['user "(ns app.pt-op-test (:require [clojure.test :refer [deftest is]]))"
+               'app.pt-op-test "(deftest a-test (is (= 1 (seon.lib/fork! {:op :pt-a}))))"
+               'app.pt-op-test "(deftest b-test (is (= 1 (seon.lib/fork! {:op :pt-b}))))"
+               'app.pt-op-test "(defn ask [x] {:op :pt-b :x x})"]
+        server (fn [a] ['seon.server "(defmethod op-answer :pt-a [_ _ _] {:a 1})" 'seon.server (str "(defmethod op-answer :pt-b [_ _ _] {:b " a "})")])
+        db0 (apply record (empty-db) tests)
+        db1 (apply record (apply record (empty-db) (server 1)) tests)
+        db2 (apply record db1 (server 2))
+        dg (fn [g] (update-vals (program/graph-index g in nil) :digest))
+        rebuilt (fn [db] (dg (program/reach-graph db nil)))
+        g0 (program/reach-graph db0 nil) g1 (program/reach-update g0 db1) g2 (program/reach-update g1 db2)]
+    (try
+      (is (= (rebuilt db1) (dg g1)) "the methods added: the update agrees with a rebuild")
+      (is (= (rebuilt db2) (dg g2)) "one redefined: the same")
+      (is (= (rebuilt db0) (dg (program/reach-update g2 db0))) "removed: the same")
+      (is (not= ((dg g1) 'app.pt-op-test/b-test) ((dg g2) 'app.pt-op-test/b-test)) "the test sending :pt-b moves with its answer")
+      (is (= ((dg g1) 'app.pt-op-test/a-test) ((dg g2) 'app.pt-op-test/a-test)) "the one sending only :pt-a does not")
+      (finally (remove-method seon.server/op-answer :pt-a) (remove-method seon.server/op-answer :pt-b)))))
 
 (deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
-  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on)
-  ;; and by every test that reads files or runs a process; the runtime's pins stay every test's
+  ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
+  ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
@@ -576,22 +655,30 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; worktrees
-    ;; on two Jolt pins shared no digest. Every submodule is a class now: Jolt's is taken by a test
-    ;; reaching Jolt's library namespaces (analyzer, IR, deps, nREPL...), not its host layer every form
-    ;; runs on, which 937 of 977 tests reach (and by every test that reads files or runs a process)
-    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt])
-        "the runtime's pins are classes too")
-    (doseq [c [:seon.pin/datahike :seon.pin/crypto :seon.pin/lmdb :seon.pin/zstd :seon.pin/jolt]]
+    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
+    ;; class it moved 451 tests on every bump. Jolt is keyed by source group (its analyzer and IR,
+    ;; deps, nREPL, core.async), each taken by the tests reaching it; its runtime core and Chez, which
+    ;; every form runs on, by none: the forks' suites and the full run after a pin bump catch a change there
+    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt
+                                             :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async])
+        "every submodule and every source group is a class")
+    (is (= #{} (moved :seon.pin/jolt) (moved :seon.pin/chez)) "the runtime core takes no pin, a process test's digest included")
+    (is (not= (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj) (moved :seon.pin/jolt.stdlib.clojure.core.async))
+        "each group moves the tests that reach it")
+    (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
+    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd
+               :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
+    (is (< (count (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj)) (* 0.5 (count all-tests))) "a change to Jolt's analyzer moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
   ;; the test runtime loads its files as they are: a dependency edit not yet committed left
-  ;; every digest as it was, so a green proven on the old files was reused on the new
+  ;; every digest as it was, so a green proven on the old files was reused on the new. A submodule
+  ;; is a class (seon.config/pin-class), taken by the tests whose reach runs on it
   (let [p (checkout! "with-sub" {"deps.edn" "{}"})
         s (str p "/reference-code/lib")
         core (str s "/core.clj")]
@@ -600,11 +687,43 @@
     (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
       (apply sh/sh "git" "-C" s args))
     (sh/sh "git" "-C" p "add" "reference-code/lib")
-    (let [before (:env (fx/inputs p))]
+    (let [lib #(get-in (fx/inputs p) [:config :seon.pin/lib])
+          before (lib)]
+      (is (string? before) "the submodule is a class of the inputs")
       (spit core "(ns lib.core) (def edited 1)")
-      (is (not= before (:env (fx/inputs p))) "an edit in the submodule's files moves every test's :env")
+      (is (not= before (lib)) "an edit in the submodule's files moves its class")
       (spit core "(ns lib.core)")
-      (is (= before (:env (fx/inputs p))) "its files back as committed: the same input as before"))))
+      (is (= before (lib)) "its files back as committed: the same input as before"))))
+
+(deftest a-source-group-moves-with-its-own-files-only
+  ;; root's ruling D (2026-10-27): Jolt is keyed by source group. A group is the git entry of its path
+  ;; in the tree of the submodule's files as they are: an edit, or an untracked file, in it moves its
+  ;; class and no other group's; a group path the tree does not hold refuses the inputs
+  (let [p (checkout! "with-groups" {"deps.edn" "{}"})
+        s (str p "/reference-code/lib")
+        core (str s "/core.clj")]
+    (.mkdirs (java.io.File. (str s "/x")))
+    (spit core "(ns lib.core)")
+    (spit (str s "/x/a.clj") "(ns lib.x.a)")
+    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
+      (apply sh/sh "git" "-C" s args))
+    (sh/sh "git" "-C" p "add" "reference-code/lib")
+    (let [c (assoc cfg/config :seon.config.source/pin-namespaces '{lib.core #{"reference-code/lib/core.clj"} lib.x #{"reference-code/lib/x"}})
+          classes #(select-keys (:config (fx/inputs p c (cfg/checkout))) [:seon.pin/lib.core.clj :seon.pin/lib.x])
+          before (classes)]
+      (is (= 2 (count (filter string? (vals before)))) "each group is a class of the inputs")
+      (spit core "(ns lib.core) (def edited 1)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "an edit moves its group's class")
+        (is (= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "and no other group's"))
+      (spit core "(ns lib.core)")
+      (spit (str s "/x/b.clj") "(ns lib.x.b)")
+      (let [after (classes)]
+        (is (not= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "an untracked file in a group moves its class")
+        (is (= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "its files back as committed: the same as before"))
+      (is (thrown-with-msg? Exception #"reference-code/lib/nope.clj"
+                            (fx/inputs p (assoc c :seon.config.source/pin-namespaces '{lib.nope #{"reference-code/lib/nope.clj"}}) (cfg/checkout)))
+          "a group path the tree does not hold refuses the inputs, naming it"))))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 
@@ -740,7 +859,7 @@
         a (digests in)
         moved (fn [k v] (let [b (digests (assoc-in in [:config k] v))] (set (for [[t d] a :when (not= d (b t))] t))))
         ;; a key read by a computed keyword: seon.render/pattern's (config/value lim), lim a join's
-        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/config-key-readers);
+        ;; :limit that a schema entry's :seon.ctx/pattern names (seon.program/computed-config-reader?, by its facts);
         ;; without it all 69 tests reaching pattern kept their digest when the window moved
         window (moved :seon.config.ctx/window "7")
         readers (program/tests-reaching g 'seon.render/pattern)]
@@ -750,28 +869,32 @@
     ;; so each new key moved the 57 tests that boot a root; it reads the keys it names
     (is (= #{} (moved (keyword "seon.config.no" "such-key") "1")) "a key no form names moves no test, a root-booting one included")
     (is (seq readers) "tests reach the reader of a computed key")
-    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader")
-    ;; the reader list is complete: a form outside seon.config that calls the config's one reader
-    ;; (value, resolve) naming no config key of its own reads a computed one, and is named
-    (is (= [] (sort-by str (for [[_ r] (:rows g)
-                          :when (and (not= 'seon.config (:ns r)) (set? (:config r)) (empty? (:config r))
-                                     (some (:refs r) '[seon.config/value seon.config/resolve]))]
-                      (:defines r))))
-        "every form reading a computed config key is a config-key-reader")))
+    (is (true? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:limit}}))
+        "a resolver call naming no key of its own reads a computed one")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.render :refs #{seon.config/value} :keywords #{:seon.config.ctx/window}}))
+        "one naming its key reads that key")
+    (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
+    (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
 (deftest no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
-  ;; the tree when what it reaches reads it.
+  ;; the tree when what it reaches reads it, and a test scanning the checkout (file-seq) does.
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (program/reach-digests db (in "t1"))
         b (program/reach-digests db (in "t2"))
         step #(program/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
     (is (< 300 (count a)) "the whole suite")
-    (is (= a b) "a new tree moves no test's digest, one running the binary (seon.root-test's) included")
+    ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
+    ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
+    ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
+    (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
+      (is (contains? moved 'seon.docs-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
+      (is (< (count moved) 30) (str (count moved) " tests scan the checkout: a few, not the 286 that read a file"))
+      (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
 
 (deftest a-test-naming-another-test-does-not-reach-it
@@ -873,3 +996,13 @@
       (is (= (moved i) (set (program/tests-reaching g (symbol "app.pc" (str "f" i))))) (str "f" i ": the tests its change selects")))
     (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
     (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))
+
+(deftest a-program-with-no-schema-change-declares-nothing-new
+  ;; THE PLAN 0.7's first merge through Seon (2026-10-27): (my.branch/merge-main!) on a branch whose
+  ;; merge carried no schema change failed with seon.schema.datahike/declarations invalid-input {}:
+  ;; schema-registry answered {} for "nothing changed", and seon.merge handed that to
+  ;; schema-declarations. Nothing changed is the built registry itself
+  (let [db (ts/test-db)]
+    (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
+    (is (identical? seon.contract/registry (program/schema-registry {})))))
+

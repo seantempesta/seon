@@ -134,10 +134,11 @@
                                          :error (contract/error :seon.agent/interrupt-unreachable #'seon.agent-proc/agent-frame
                                                                 "root's interrupt (SIGUSR1) does not reach this agent: its handler did not run at boot, so a runaway eval can only be killed" {})}))
                  ;; its branch's program did not load where it resumed: each failure a recorded problem
-                 (doseq [{:keys [ns message]} (:load-errors m)]
+                 (doseq [{:keys [ns message form lead]} (:load-errors m)]
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/load-failed #'seon.agent-proc/agent-frame
-                                                                (str "its branch's program did not load in " ns ": " message) {:ns ns})}))
+                                                                (str "its branch's program did not load in " ns (when lead (str ", at the form " lead)) ": " message)
+                                                                (cond-> {:ns ns} form (assoc :form form)))}))
                  ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
                  (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))
                  (when-let [x (:misaligned m)]
@@ -190,7 +191,7 @@
                (step/out! o :to-api (status st {:mem-mb (:mem-mb (:result m)) :status (busy st)}))
                st)
       ;; what a test run of the agent's ran (seon.agent/run-tests-forked: seon.proofs/results-tx),
-      ;; recorded on main by root's writer: a refusal is this agent's problem, as its other facts' are
+      ;; recorded on main by root's writer: a refused request is this agent's problem, as its other facts' are
       :record (do (step/out! o :to-writer {:op :tx :branch :db :tx-data (:tx-data m) :dest {:agent-facts [id]}}) st)
       ;; the agent committed its branch (it owns the branch's writes): the writer's next flush
       ;; covers it

@@ -55,20 +55,6 @@
      :fixed {:calls 33 :bytes 1050000}
      :sizes [10 100 1000]}))
 
-(defn grep-input
-  "The cost proof's input at n: n forms, every tenth holding the word."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string]]}
-  [n] [(seon.docs-test/grep-db (for [i (range n)] [(str "f" i) nil (str "(defn f" i " []\n  " (if (zero? (mod i 10)) "(accumulate 1)" "(inc 1)") ")")])) "accumulate"])
-
-(deftest grep-costs-its-forms
-  (cost/proof {:of 'seon.docs/grep :input 'seon.docs-cost-test/grep-input
-                    :n "forms the branch holds, a tenth of them matching"
-                    :work "one scan of :form/src, then per match its definitions and a split of its source"
-                    :growth :linear
-                    :per-n {:bytes 20000 :calls 0.3}
-                    :fixed {:bytes 400000 :calls 6}
-                    :sizes [10 100 1000]}))
-
 (defn search-input
   "The cost proof's input at n texts: n forms, n/2 wiki sections, n/4 task plans and n/8 schema entries
   (the mix of the store's own), a tenth of each holding the word; the search asks for exact text and
@@ -86,8 +72,33 @@
 (deftest search-costs-its-texts
   (cost/proof {:of 'seon.context/search :input 'seon.docs-cost-test/search-input
                :n "texts the branch holds (forms, sections, task plans and schema entries), a tenth of each holding the word"
-               :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query"
+               :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query; relevance over the first k x related-near hits (a bounded pool)"
                :growth :linear
-               :per-n {:bytes 24000 :calls 6.5}
-               :fixed {:bytes 100000 :calls 20}
+               ;; measured 2026-10-27 with relevance on its first k x related-near hits (seon.context/relevance):
+               ;; 3.38 MB / 621 calls at 100, 8.12 MB / 1,088 at 300, 17.75 MB / 2,312 at 1,000
+               :per-n {:bytes 14000 :calls 1.8}
+               :fixed {:bytes 4000000 :calls 600}
                :sizes [100 300 1000 4000]}))
+
+(defn citing-input
+  "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n]
+  (let [db (ts/test-db)
+        pages (into {} (for [p (range (max 1 (quot n 10)))]
+                         [(str "demo/p" p ".md")
+                          (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
+                                 (for [s (range 1 11)] (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f1` does.\n")))]))]
+    [(d/db-with db (docs/load-tx db "demo" pages)) 'app.m0/f1]))
+
+;; See docs/references.md#the-wiki-in-the-store
+(deftest a-cited-var-finds-its-sections-by-the-names-sections-hold
+  (cost/proof
+    {:of 'seon.docs/citing-sections :input 'seon.docs-cost-test/citing-input
+     :n "wiki sections citing the var (all of them)"
+     :work "one pass over the sections' cited names (:seon.section/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
+     :growth :linear
+     ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
+     :per-n {:ticks 4000 :bytes 19000 :calls 0}
+     :fixed {:ticks 20000 :bytes 300000 :calls 1}
+     :sizes [100 300 1000]}))

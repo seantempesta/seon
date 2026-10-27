@@ -34,7 +34,7 @@
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
 (deftest a-render-is-opts-then-children
-  ;; Reagent's form (notes/archive/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
+  ;; Reagent's form (claude_scratch/archive/render-design-2026-10-26.md, piece 6): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
   (testing "every render a schema declares takes [opts v]: its contract's first argument is :seon.render/opts"
     (let [declared (distinct (keep #(r/declared %) (keys seon.contract/forms)))
@@ -943,8 +943,8 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid)] (mapv :id task))
-        "the task, what is related, what its newest turn observed, the run (and the keys the agent added, when it added one): each keyed by what it shows")
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, what is related, what its newest turn observed, the run, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
       (is (str/includes? h ":fail"))
@@ -1200,8 +1200,8 @@
 
 (deftest the-merge-views-draw-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
-  ;; moves; a view of main and the merge base takes their commits as children (ctx's :main-commit
-  ;; :base-commit) and reads them from the branch's own store, so it is a function of its args
+  ;; moves; a view of main and the merge base takes their commits as children (the agent's :seon.agent/main-commit
+  ;; and :seon.agent/base-commit, facts its turn writes) and reads them from the branch's own store, so it is a function of its args
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
@@ -1217,7 +1217,11 @@
         (is (str/includes? carries "demo/h") "what the branch's merge carries")
         (is (not (str/includes? carries "demo/k")) "never main's change")
         (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
-        (is (not (str/includes? gaps "demo/f")) "never one it did not change")))))
+        (is (not (str/includes? gaps "demo/f")) "never one it did not change")
+        ;; a branch that changed nothing: its views draw nothing, not a header over an empty answer
+        (let [same (d/commit-as-db conn base)]
+          (is (every? nil? [(ui/divergence-view {:seon.db/db same} base) (ui/gaps-view {:seon.db/db same} base) (ui/caused-view {:seon.db/db same} base)])
+              "a view with no rows is nil"))))))
 
 (deftest an-unrelated-change-redraws-none-of-the-merge-views
   ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; each is a component
@@ -1233,7 +1237,7 @@
         (d/transact conn tx))
       (let [c0 (d/commit-id @conn)
             k (seon.task/agent-key "b1" :a3)
-            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :main-commit c0 :base-commit c0)
+            tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
             views '#{seon.render.ui/merge-view seon.render.ui/caused-view seon.render.ui/gaps-view seon.render.ui/divergence-view}
@@ -1246,7 +1250,7 @@
             (r/frame! w nil)
             (is (= r0 (ran)) "an unrelated change redraws none of them")
             (d/transact conn [{:seon.task/id "demo/g" :seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make demo/g." :seon.task/kind :work :seon.task/proofs #{}}])
-            (swap! a assoc :main-commit (d/commit-id @conn))
+            (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/frame! w nil)
             (let [r1 (ran)]
               (is (= #{'seon.render.ui/merge-view}

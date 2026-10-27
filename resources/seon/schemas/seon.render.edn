@@ -1,4 +1,4 @@
-;; Renders (seon.render, session W2; W1's render contract, notes/option3-W1-render.md §1): a
+;; Renders (seon.render, session W2; W1's render contract, claude_scratch/option3-W1-render.md §1): a
 ;; render is a function of a value and its opts (props) answering its hiccup. A schema declares its
 ;; render in its own properties ({:seon.render/html sym}); selection is
 ;; the value's own override key, else the declared render (the schema, then its parents),
@@ -8,6 +8,9 @@
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
  :seon.agent/state [:map {:seon.render/summary seon.agent/state-summary}]
+ ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
+ ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
+ :seon.test/proved [:map {:seon.render/summary my.agent/prove-summary}]
  ;; how a value is shown: in one line, as a full panel, a tile, a row of a list
  :seon.render/as [:enum :inline :block :tile :row]
  ;; a render's props (its second argument), every one optional: like React's, a render that

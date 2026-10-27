@@ -31,7 +31,7 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 # and draws every randomized property test's seeds (:seon.config.proofs/seeds)
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 case ${1:-} in
-  --plan|--shard|--store-steps|--send-unsent) runner "$@"; exit $? ;;
+  --plan|--shard|--store-steps) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
   *) WHAT=tests OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac

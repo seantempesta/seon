@@ -529,12 +529,16 @@
 (defn test-report
   "One clojure.test report as the run keeps it: its type, test var and message; a failing
   assertion's expected and actual printed by the one printer under :part; a cost proof's
-  rows and verdict (seon.cost/proof's :actual) kept as data under :cost (session W2's agent
+  rows and verdict (seon.cost/proof's :actual, a generated case's arguments left to the message
+  that prints them) kept as data under :cost (session W2's agent
   page renders them; the judge persists them on the run); a typed error's :seon.error/type,
   :ticks and :budget (a test past its tick budget)."
   {:malli/schema [:=> [:cat :map [:maybe :string]] :map]}
   [m var]
-  (let [cost (when (map? (:actual m)) (select-keys (:actual m) [:rows :verdict]))]
+  ;; a generated case's arguments (a row's :args) stay out: they may be any value, which prints
+  ;; as no EDN (#error {\n, #'v) and splits the line the test child streams (run-tests-forked);
+  ;; the proof's message names each case over its bound by its arguments, printed
+  (let [cost (when (map? (:actual m)) (update (select-keys (:actual m) [:rows :verdict]) :rows #(some->> % (mapv (fn [r] (dissoc r :args))))))]
     ;; clojure.test's is takes any message and prints it; the run keeps it as that text
     (cond-> {:type (:type m) :var var :message (let [msg (:message m)] (cond-> msg (not (or (nil? msg) (string? msg))) (print/text (:part print/budgets))))}
       (not= :pass (:type m)) (assoc :expected (print/text (:expected m) (:part print/budgets))
@@ -738,8 +742,10 @@
                 (cond (:seon.test/started x) (do (reset! started (str "#'" (:seon.test/started x)))
                                                  (sock/write-line! w (sedn/encode {:seon.test/started @started})))
                       (:seon.test/report x) (swap! current conj (test-report (:seon.test/report x) (str "#'" (:test x))))
-                      ;; a test's end: its result, after its reports
-                      (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)}))
+                      ;; a test's end: its result, after its reports, and the live heap it left (a
+                      ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
+                      (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)
+                                                                      :heap (do (System/gc) (lib/bytes-in-heap))}))
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
@@ -750,6 +756,39 @@
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
      :reports reports}))
 
+(defn child-line
+  "One line a test child streamed (run-tests-forked), decoded, or :seon.test/unreadable-line
+  naming the line's head (the printer's cut) when it does not read: a value that prints as no
+  EDN (#error {\\n splits the line, #'v is no EDN) in what the child sent. The failure point's
+  edge (docs/failure-points.md): the test it was about ends :error and the agent goes on."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [line]
+  (try (sedn/decode line)
+       (catch Throwable e
+         {:seon.error/type :seon.test/unreadable-line
+          :seon.error/message (str "a line the test process sent does not read (" (ex-message e) "): " (print/text line (:part print/budgets)))})))
+
+(defn take-line
+  "acc ({:streamed :ended :fns :heap}, what a test child's lines said so far) after one more line:
+  a test started is the one running (:start, for its caller to tell root); one ended adds its
+  reports, its var, its functions' costs and the live heap it left; a line that does not read (child-line) ends the
+  test running :error with the line's head, once, and the reading goes on."
+  {:malli/schema [:=> [:cat :map :string] :map]}
+  [acc line]
+  (let [x (child-line line) running (:running acc) acc (dissoc acc :start)]
+    (cond (contract/error? x)
+          (if (contains? (:told acc #{}) running)
+            acc
+            (-> acc (update :told (fnil conj #{}) running)
+                (update :streamed conj (cond-> {:type :error :seon.error/type (:seon.error/type x) :message (:seon.error/message x)}
+                                         running (assoc :var running)))))
+          (:seon.test/started x) (assoc acc :running (:seon.test/started x) :start (:seon.test/started x))
+          (:seon.test/ended x) (let [t (:seon.test/ended x)]
+                                 (cond-> (-> acc (update :streamed into (:reports x)) (update :ended conj t))
+                                   (seq (:fns x)) (assoc-in [:fns (proofs/test-symbol t)] (:fns x))
+                                   (:heap x) (assoc-in [:heap (proofs/test-symbol t)] (:heap x))))
+          :else acc)))
+
 (defn test-run-answer
   "The run, from the last line the test child wrote on its pipe before EOF or its exit (nil:
   none), its exit status, and held? (the child exited and its pipe was still open: a process it
@@ -759,13 +798,13 @@
   pipe adds an :error report of its own (:seon.test/pipe-held)."
   {:malli/schema [:=> [:cat [:maybe :string] :seon.lib/exit-status :boolean] :seon.test/result]}
   [line status held?]
-  (let [v (some-> line read-string) var (:seon.test/started v)
-        res (if (contains? v :pass)
-              v
-              {:pass 0 :fail 0 :error 1
-               :reports [(cond-> {:type :error :exit status
-                                  :message (str "test process died: " status (when var (str " while " var " ran")))}
-                           var (assoc :var var))]})]
+  (let [v (some-> line child-line) var (:seon.test/started v)
+        res (cond (contains? v :pass) v
+                  (contract/error? v) {:pass 0 :fail 0 :error 1 :reports [(assoc v :type :error :message (:seon.error/message v) :exit status)]}
+                  :else {:pass 0 :fail 0 :error 1
+                         :reports [(cond-> {:type :error :exit status
+                                            :message (str "test process died: " status (when var (str " while " var " ran")))}
+                                     var (assoc :var var))]})]
     (cond-> res
       held? (-> (update :error inc)
                 (update :reports conj {:type :error :seon.error/type :seon.test/pipe-held
@@ -809,13 +848,17 @@
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
   p with :selected and :run restricted to them. A test that reaches a process of its own (p's
-  :process) runs only when asked for: its namespace is named, or it is one of the proofs;
-  otherwise it is left out and listed under :skipped (DECISIONS, Process tests are not automatic)."
+  :process: a root, an agent, a fork, the binary) never runs here, named or a proof: a child forked
+  from an agent has no process store to start one in (bin/test makes it), so it errored. It is left
+  out and listed under :skipped, and runs at the judge's merge gate on a checkout (seon.reconcile's
+  :gate; a deferred proof is no reason of the done rule's). proofs is kept for the contract's
+  callers: bin/test's own plan, on a checkout, still runs a named or proof process test
+  (seon.proofs/left-out)."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]] [:set :qualified-symbol]] :map]}
   [p names proofs]
   (let [in? #(contains? names (symbol (namespace %)))
         p (if (seq names) (-> p (update :selected #(filterv in? %)) (update :run #(filterv in? %))) p)
-        skip? (proofs/left-out (:selected p) (:process p) (boolean (seq names)) proofs)]
+        skip? (proofs/left-out (:selected p) (:process p) false #{})]
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
@@ -829,7 +872,7 @@
   {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
   [plan ticks tests forked say]
   (let [[r w] (sock/socketpair)
-        streamed (atom []) ended (atom #{}) fns (atom {})]
+        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})]
     (lib/fork!
      {:refused (fn [n] (lib/c-close r) (lib/c-close w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
@@ -856,17 +899,12 @@
       :parent (fn [pid]
                 (lib/c-close w)
                 (forked pid)
-                (let [read (read-to-exit r pid #(let [x (sedn/decode %)]
-                                                  (when-let [t (:seon.test/started x)] (say {:op :testing :test t}))
-                                                  (when-let [t (:seon.test/ended x)]
-                                                    (swap! streamed into (:reports x))
-                                                    (when (seq (:fns x)) (swap! fns assoc (proofs/test-symbol t) (:fns x)))
-                                                    (swap! ended conj t))))
+                (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (lib/wait-status pid)]
                   (lib/c-close r)
                   (if (contract/error? read)
                     read
-                    {:answer (test-run-answer (:line read) st (:held? read)) :streamed @streamed :ended @ended :fns @fns :pid pid :exit st})))})))
+                    (-> (select-keys @lines [:streamed :ended :fns :heap]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
 
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
@@ -924,7 +962,9 @@
                                   f (or (seq (:failures r))
                                         [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
                                            (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
-                              (assoc f :var (str "#'" t) :reused true)))
+                              (cond-> (assoc f :var (str "#'" t) :reused true)
+                                ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
+                                (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
@@ -933,7 +973,7 @@
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
               ;; a child that dies loses the test it was running (its :error stays) and the rest
               ;; run in a new child: the death of one test never costs the run its other results
-              (loop [todo run reports [] fns {}]
+              (loop [todo run reports [] fns {} heap {}]
                 (let [c (test-child plan ticks todo forked say)]
                   (if (contract/error? c)
                     c
@@ -945,9 +985,9 @@
                       ;; a death with something to show for it (a test ended, or the one it died in is
                       ;; named) leaves the rest to a new child; none, and the run ends on it
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
-                        (recur rest-todo reports (merge fns (:fns c)))
+                        (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)))
                         {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :fns (merge fns (:fns c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
+                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
     ;; what ran, recorded on main by root's writer (the agent proc's :record), whoever asked for the run

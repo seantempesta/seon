@@ -250,17 +250,25 @@
   ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
   ;; (:seon.root/stopped; here its stdin closes, as bin/root stop closes it), the next boot
   ;; records it as :seon.root/previous-end, and a boot that left no stop fact (SIGKILL, a
-  ;; crash) is found :unclean. A store of this test's own, as a-second-boot-resumes-the-same-main's
-  ;; (root-answers names its fifo and log after the store); removed at the end.
+  ;; crash) is found :unclean. Who started a boot is that boot's (:seon.root/started-by): the
+  ;; test running start-root!, or the last --started-by its arguments name. A store of this test's
+  ;; own, as a-second-boot-resumes-the-same-main's (root-answers names its fifo and log after the
+  ;; store); removed at the end.
   (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid))
         ev (fn [code] {:op :eval :agent "root" :code code})
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
-        [b1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)")]))
-        [prev killed] (str/split-lines
-                       (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
-                                              (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")]))]
+        by (ev "(:started-by (seon.task/root @(:conn sys)))")
+        [b1 by1] (str/split-lines (root-answers path "main" [(ev "(:boot sys)") by]))
+        [prev killed by2 resume] (str/split-lines
+                           (root-answers path "main" [(ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
+                                                  (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
+                                                  by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
+                                         {:args ["--started-by" "seon.root-test/another"]}))]
     (try
       (is (string? (printed b1)))
+      (is (= "seon.root-test/every-end-of-a-root-is-a-fact" (printed by1)) "the test that started the boot is its fact")
+      (is (= "seon.root-test/another" (printed by2)) "and the next boot's is its own")
+      (is (true? (printed resume)) "and the generation after it carries it")
       (is (= {:boot (printed b1) :cause :stdin-eof} (select-keys (printed prev) [:boot :cause]))
           "the second boot found the first's clean end: its stdin closed")
       (is (= {:boot "killed-boot" :cause :unclean} (select-keys (printed killed) [:boot :cause]))

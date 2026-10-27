@@ -243,8 +243,12 @@
                 "the fixed part is the test store's example program")
      :growth :linear
      ;; ticks measured (seon.cost's once): 7.1M at 100, 21.3M at 1,000 (was 14.7M and 44.4M, 33k a form)
-     :per-n {:ticks 16500 :bytes 100000}
-     :fixed {:ticks 5800000 :bytes 33000000}
+     ;; 2026-10-27, reach-step builds from nothing in bulk (transient indexes) and reads a var's contract and
+     ;; kind in one pass (var-facts, not an entity per var): 4.60M ticks / 36.2 MB at 100, 6.79M / 54.3 MB at 300,
+     ;; 14.57M / 118.4 MB at 1,000 (was 7.43M / 42.5 MB, 10.77M / 63.1 MB, 22.63M / 135.9 MB); on Seon's program
+     ;; (3,540 forms) 160M ticks / 969 MB -> 136M / 837 MB
+     :per-n {:ticks 11500 :bytes 93000}
+     :fixed {:ticks 3600000 :bytes 28000000}
      :sizes [100 300 1000 10000]}))
 
 (defn changed-top
@@ -274,8 +278,8 @@
      ;; above it at 100 and the growth fit read n^1.96. calls 16
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
-     ;; per added form), 2026-10-27
-     :fixed {:ticks 350000 :bytes 4000000 :calls 18}
+     ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
+     :fixed {:ticks 350000 :bytes 4000000 :calls 19}
      :sizes [100 300 1000 10000]}))
 
 (defn- calls-form

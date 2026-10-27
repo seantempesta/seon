@@ -39,9 +39,11 @@
   :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
   :dirs and :sets; :decls, more task declarations in the task's file beside t (a function of
   {:ns :task}, or a vector); :own-root?, a root of its own for this test (its main dropped with
-  it): a test whose agent merges into main, which would move the program every later test runs."
+  it): a test whose agent merges into main, which would move the program every later test runs;
+  :client, the client its attach names (seon.server: then only that client's requests, or ones
+  naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets decls own-root?] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
@@ -86,7 +88,7 @@
                          ;; the agent's :ready event, tapped before the attach that spawns it and
                          ;; awaited after: its hello (a ping of :agents until idle was a poll)
                          (eval-root "(def ready-ev (c/events sys))")
-                         (ask {:op :attach :task (:task names)}))
+                         (ask (cond-> {:op :attach :task (:task names)} client (assoc :client client))))
                 agent (some-> (:agent attach) name)
                 names (assoc names :agent agent :run (:run attach))]
             (vreset! made agent)
@@ -403,24 +405,31 @@
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:ran r) (:reused r)])")
+        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:key r)])")
         own "(select-keys (prove) [:results :ran :reused])"
-        digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
-        ;; how many of the two tests' results root's main holds, at the digests bin/test gives them
-        stored (str "(count (seon.proofs/stored-results @(:conn sys) " (pr-str [(digests proof) (digests reached)]) "))")
+        ;; how many of the two tests' results main holds (as the agent hears it), at the digests the agent's plan gives
+        ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
+        stored (str "(count (seon.proofs/stored-results (seon.agent/heard-main) (vec (vals (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
+                    (pr-str [proof reached]) ")))))")
         [_ inputs first-run files judged second-run]
+        ;; a real change that keeps them green (a vector of what the file's answers), so the reached
+        ;; test is selected: the agent's change reaches it
         (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                    {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
                    own
-                   {:op :eval :agent "root" :code stored}
+                   stored
                    {:op :eval :agent "root" :code (run (:agent %))}
                    own)
-                  {:dirs ["src" "test"] :proofs #{proof}})]
+                  ;; root imports the dirs bin/test does (:seon.config.source/dirs, schemas included), so
+                  ;; root's boot shares its source tree's inputs
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof}})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (:value files)) "and both are facts on root's main")
-    (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")
-    (is (= {:results {proof :pass reached :pass} :ran 0 :reused 2} (:value second-run)) "and so does the agent's next run")))
+    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
+    (is (= 2 (:value files)) "and both are facts on main at the agent's digests")
+    ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
+    (is (= {proof :pass reached :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
+    (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
+    (is (= {proof :pass reached :pass} (:results (:value second-run))) "and so is the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
@@ -734,11 +743,11 @@
   [v] (pr-str {:seon.test/started v}))
 
 (deftest a-killed-test-run-names-the-test-that-was-running
-  (testing "a child killed while running app-test/slow: that test is red, with how the child ended"
+  (testing "a child killed while running app-test/slow: that test has no verdict (proofs/results), and its death is named with how the child ended"
     (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9} false)]
-      (is (= {'app-test/slow :error} (proofs/results run)))
+      (is (= {} (proofs/results run)) "a death is no verdict")
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
-      (is (= {:signal 9} (:exit (first (:reports run)))))))
+      (is (= ["#'app-test/slow" {:signal 9}] ((juxt :var :exit) (first (:reports run)))))))
   (testing "a child that wrote its result last: the result"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
       (is (= res (agent/test-run-answer (pr-str res) {:exit 0} false)))))
@@ -1174,7 +1183,7 @@
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
   ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
-  ;; (notes/archive/design-agent-view-2026-10-24.md §7)
+  ;; (claude_scratch/archive/design-agent-view-2026-10-24.md §7)
   (let [names (volatile! nil)
         [_ end turn on-main] (in-agent (fn [{:keys [agent task ns run] :as n}]
                                          (vreset! names n)
@@ -1196,7 +1205,7 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, notes/archive/design-agent-view-2026-10-24.md
+    ;; the prose comes in the eval call (its first argument, claude_scratch/archive/design-agent-view-2026-10-24.md
     ;; section 1), so the reply's own text is empty and the prose is the eval's
     (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
@@ -1234,16 +1243,21 @@
   ;; agent over seon.context-test's five sections; a process test because my.agent reaches a fork
   (let [[db te dir] (#'seon.context-test/sections-near "Make the page say one thing (docs/vector.md#what-is-embedded).")
         ;; the agent working the task, as a session holds it: its entity and its running run
-        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}])
+        db (d/db-with db [{:seon.agent/key "demo/a1"} {:seon.run/id "demo/r#1" :seon.run/task te :seon.run/status :running :seon.run/agent [:seon.agent/key "demo/a1"]}
+                          ;; the toy's chances sit far below the page's entry cut, so every item scored enters
+                          [:db/add te :seon.config.render/relevance-doc 0.0]])
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
-      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
-          "the screen form: the sections nearest the plan, the cited one left out")
+      ;; the sections the plan does not cite, each a line "<address> <chance>%: <lead>", best first by relevance
+      ;; (seon.context/relevance: the toy's chances are all near 0, so its order is relevance's, not the cosine's)
+      (is (= #{"docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" "docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"}
+             (set (map #(first (str/split % #" ")) (:sections (my.task/related)))))
+          "the screen form: the sections nearest the plan, the cited one (what-is-embedded) left out")
       (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
         (let [v (my.agent/related "the last one" 2)]
-          (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing." (first (:sections v)))
-              "the agent's own words refine it: the sections nearest them")
+          (is (every? #(re-find #"^docs/vector\.md#[a-z-]+: Section \d says one thing\." %) (:sections v))
+              "the agent's own words refine it: sections of the toy wiki, a line each, best first by relevance")
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
 
@@ -1269,3 +1283,34 @@
         (str "the swap! answered " (pr-str swapped) "; the units: " (pr-str (map :id (:units (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.root/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
+
+(deftest a-line-that-does-not-read-ends-its-test-and-the-run-goes-on
+  ;; task seon.agent/a-test-childs-line-always-reads (root, 2026-10-27): a report holding a value
+  ;; that prints as no EDN (an exception's #error {\n splits the line, a var's #'v does not read)
+  ;; killed its agent with exit 70. The line is that test's :error, once, and the next test's lines
+  ;; are taken as before
+  (let [enc seon.edn/encode
+        bad (enc {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]})
+        lines (concat [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]})
+                       (enc {:seon.test/started "#'app.t/b"})]
+                      (str/split-lines bad)
+                      [(enc {:seon.test/started "#'app.t/c"}) (enc {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]})])
+        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {}} lines)
+        errors (filter #(= :error (:type %)) (:streamed acc))]
+    (is (< 1 (count (str/split-lines bad))) "the exception's raw newline splits the line")
+    (is (= 1 (count errors)) "the unreadable line is one :error")
+    (is (= "#'app.t/b" (:var (first errors))) "on the test that was running")
+    (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
+    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
+    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0} false) [:reports 0 :type]))
+        "a last line that does not read is the run's :error, not the agent's death")))
+
+(deftest a-tests-ended-line-keeps-the-live-heap-it-left
+  ;; docs/cost.md#what-a-test-run-measures (root, 2026-10-28): 23 of 191 tests of a forked run ran
+  ;; out of memory at the agent's heap ceiling with no stack; the heap each test leaves, after a
+  ;; collection, is on its ended line and kept per test, so the one that holds memory is named
+  (let [enc seon.edn/encode
+        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {} :heap {}}
+                    [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
+                     (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
+    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))

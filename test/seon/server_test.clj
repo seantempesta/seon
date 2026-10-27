@@ -4,6 +4,12 @@
   (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
             [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
 
+(deftest each-op-has-its-answer
+  ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
+  ;; keys: an op with no method would be listed and answer "unknown op", a method with no entry unlisted
+  (is (= (set (keys seon.server/ops)) (disj (set (keys (methods seon.server/op-answer))) :default)))
+  (is (contains? (methods seon.server/op-answer) :default) "an unknown op has its answer: refused"))
+
 (deftest seon-agents-answers-what-is-live
   ;; seon_agents answered every task on main (580 on the standing root, most :held or
   ;; :cancelled with no run), so an outside agent never saw what runs
@@ -151,6 +157,27 @@
     (is (= "Work." (:value plan)) "the sibling task holds the task's plan")
     (is (= [41 true] (:value seen)) "and its agent what the forked one defined, live and on its branch")))
 
+(deftest an-agent-attached-by-one-client-is-refused-to-another
+  ;; root, 2026-10-27: one session's seon_done named another session's agent (a1, not its own a2)
+  ;; and ended that run red. An agent attached by a client (bin/mcp stamps each request with its
+  ;; own) answers done, eval and message to that client, or to a request that names its task; any
+  ;; other is refused, naming who holds it, and the run stays open
+  (let [[other-done other-eval other-message own named open]
+        (at/in-agent (fn [{:keys [agent task]}]
+                       [{:op :done :agent agent :client "c2"}
+                        {:op :eval :agent agent :code "(+ 1 2)" :client "c2"}
+                        {:op :message :agent agent :body "hi" :client "c2"}
+                        {:op :eval :agent agent :code "(+ 1 2)" :client "c1"}
+                        {:op :eval :agent agent :code "(+ 2 2)" :client "c2" :task task}
+                        {:op :eval :agent "root" :code (str "(boolean (some #(= " (pr-str task) " (:seon.run/task %)) (seon.task/running @(:conn sys))))")}])
+                     {:client "c1"})]
+    (doseq [a [other-done other-eval other-message]]
+      (is (= :seon.server/held (:seon.error/type a)) (pr-str a))
+      (is (clojure.string/includes? (str (:seon.error/message a)) "c1") "naming who holds it"))
+    (is (= 3 (:value own)) "its own client's eval answers")
+    (is (= 4 (:value named)) "and so does one that names the agent's task")
+    (is (true? (:value open)) "the refused done left the run open")))
+
 (deftest a-message-reaches-the-agent
   ;; task seon.render/a-debug-view-of-any-agent (parity row 73): the owner's message, sent as
   ;; the page's message bar sends it (seon.root/message!, here through the server's :message
@@ -278,11 +305,34 @@
     (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
 
-(deftest a-later-read-draws-one-page-and-costs-what-the-one-before-did
+(deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
+  ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
+  ;; reached a process var ran in the agent's fork and errored ("no process store"), its proof or not;
+  ;; seon_prove answered only counts and red names. A process test is deferred to the judge (named, with
+  ;; why), (my.agent/process-test?) says so, and each red comes with its first failing assertion
+  (let [[defined deferred why answer status]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [(str "(ns app.ptest (:require [clojure.test :refer [deftest is]]))"
+                             " (deftest p-test (is (fn? seon.lib/fork!)))"
+                             " (deftest r-test (is (= 1 2) \"one is two\"))")
+                        "(select-keys (my.agent/prove #{'app.ptest/p-test}) [:deferred :ran])"
+                        "(my.agent/process-test? 'app.ptest/p-test)"
+                        {:op :prove :agent agent :names ["app.ptest"]}
+                        "(my.agent/process-test? 'app.ptest/r-test)"]))]
+    (is (nil? (:ex defined)) (pr-str defined))
+    (is (some #{'app.ptest/p-test} (:deferred (:value deferred))) (str "the process test is left to the judge: " (pr-str deferred)))
+    (is (some #{'seon.lib/fork!} (:uses (:value why))) (str "and it says why: " (pr-str why)))
+    (let [r (or (:result answer) answer)]
+      (is (= "one is two" (get-in r [:failures 'app.ptest/r-test :message])) (str "a red's first failing assertion: " (pr-str answer)))
+      (is (some #{'app.ptest/p-test} (:deferred r)) "the service's answer names the deferred one too"))
+    (is (nil? (:value status)) "an in-process test is none")))
+
+(deftest a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did
   ;; the owner, 2026-10-27: a later turn's request build measured 94M ticks, 317 MB on Seon's own tasks, 25,000
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
-  ;; process's exact counts (seon.profile/measure!), the page draws the contracted calls of seon.context/page
+  ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-hiccup),
+  ;; so seon.context/page, the cold draw, is never called, and it equals the cold draw at the commit it framed at
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
@@ -290,18 +340,41 @@
                              "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
                              "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
-                             "  (vec (repeatedly 5 m)))")]))
-        later (rest (:value reads))]
-    (is (= 5 (count (:value reads))))
-    (is (every? #(= 1 (:pages %)) later) (str "each later read draws one page: " (pr-str (map :pages later))))
+                             "  {:reads (vec (repeatedly 5 m))"
+                             "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
+                             "                    cold (seon.context/page db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
+                             "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
+        later (rest (:reads (:value reads)))]
+    (is (= 5 (count (:reads (:value reads)))))
+    (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's at the commit it framed at; differing: " (pr-str (:live=cold (:value reads)))))
+    (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
     (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
+
+(deftest a-named-prove-counts-for-status-and-the-judge-and-answers-its-verdict
+  ;; the blind agent (root, 2026-10-27): a prove naming its proofs (171 green) left both proofs
+  ;; :proof-unknown in my.task/status and at the judge, and a bare prove answered 25k chars. A proof's
+  ;; result counts whichever call measured it, and the answer prints its verdict
+  (let [[_ _ _ proved status done]
+        (at/in-agent (fn [{:keys [agent]}]
+                       [{:op :context :agent agent}
+                        "(ns app.okt (:require [clojure.test :refer [deftest is]])) (deftest ok-test (is (= 2 (+ 1 1))))"
+                        "(my.task/update! :seon.task/proofs conj 'app.okt/ok-test)"
+                        "(my.agent/prove #{'app.okt/ok-test})"
+                        "(let [s (my.task/status)] [(some #(when (= 'app.okt/ok-test (:test %)) (:status %)) (:proofs s)) (filterv #(= 'app.okt/ok-test (:symbol %)) (:refused s (:reasons s)))])"
+                        {:op :done :agent agent}]))]
+    (is (clojure.string/includes? (:text proved) ":verdict :green") (:text proved))
+    (is (clojure.string/includes? (:text proved) "app.okt/ok-test :pass") "each proof's status")
+    (is (< (count (:text proved)) 1000) (str "the answer is its verdict, not the run: " (count (:text proved)) " chars"))
+    (is (= [:pass []] (:value status)) (str "my.task/status: the proof's status, and no reason about it: " (pr-str status)))
+    ;; the harness's task also names demo-test/t, which no test defines: that one is the judge's unknown
+    (is (not (clojure.string/includes? (pr-str done) "proof-unknown app.okt/ok-test")) (str "and the judge counts it: " (pr-str done)))))
 
 (deftest an-attach-gives-the-caller-the-branch-or-names-who-holds-it
   ;; THE PLAN 0.7 (root, 2026-10-27): the first seon_attach to a task was refused "held by live
   ;; agent :a7", an agent the caller never attached. A context read of a task no agent works attaches
   ;; one (the :context op); the caller's attach after it is the same outside run: it answers that
-  ;; agent, never a refusal. A task another task's agent holds the branch of is refused, naming the
+  ;; agent, never a refused request. A task another task's agent holds the branch of is refused, naming the
   ;; agent and the task it works
   (let [[ctx attached again other]
         (at/in-agent (fn [{:keys [ns]}]

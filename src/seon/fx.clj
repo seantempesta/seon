@@ -1,5 +1,5 @@
 (ns seon.fx
-  "Effects (session FX1, notes/archive/option3-FX1-effects.md). Every outside effect kind has ONE
+  "Effects (session FX1, claude_scratch/archive/option3-FX1-effects.md). Every outside effect kind has ONE
   owner proc in root behind a bounded channel, and `workers` performer procs:
 
     agent --socket--> agent proc --:fx/<kind>--> owner --:work--> worker (performs)
@@ -211,7 +211,7 @@
   root loads, no test's code), prose (.md), the shipped config (resources/seon/config/: its
   values are :config's, which a test's digest takes by the keys it reads) and the schema
   resources (their entries are program facts: a test's digest takes the entries its reach names)?
-  (notes/ is already out of the tree, tree-id's excludes.)"
+  (claude_scratch/ is already out of the tree, tree-id's excludes.)"
   {:malli/schema [:=> [:cat :string] :boolean]}
   [p]
   (not (or (str/ends-with? p ".md")
@@ -230,14 +230,26 @@
         (= p "deps.edn") :seon.env/deps
         (str/starts-with? p "bin/") :seon.env/bin))
 
-(defn- pin-class
-  "The class of the submodule at relative path p: :seon.pin/NAME when cfg's
-  :seon.config.source/pin-namespaces names it (a test takes it by the namespaces its reach
-  references), else nil (llama.cpp and awesome-jolt: every test's)."
-  {:malli/schema [:=> [:cat :map :string] [:maybe :keyword]]}
-  [cfg p]
-  (when (some #(contains? % p) (vals (get cfg :seon.config.source/pin-namespaces)))
-    (keyword "seon.pin" (last (str/split p #"/")))))
+(defn- group-entries
+  "The :seon.pin class of each source group cfg's :seon.config.source/pin-namespaces names
+  inside the submodule at sub (relative to root), with its git entry in the tree of the
+  submodule's files as they are (pin: HEAD's, or HEAD+ the tree-id of its files, an uncommitted
+  or untracked file included), one ls-tree for all of them: [class text] pairs. A group path the
+  tree does not hold is refused, naming it (a typo or an upstream rename would key nothing)."
+  {:malli/schema [:=> [:cat :string :map :string [:maybe :string]] [:sequential [:tuple :qualified-keyword :string]]]}
+  [root cfg sub pn]
+  (let [ps (sort (into #{} (comp (mapcat val) (filter #(str/starts-with? % (str sub "/")))) (get cfg :seon.config.source/pin-namespaces)))
+        rel #(subs % (inc (count sub)))]
+    (if-not (and (seq ps) pn)
+      []
+      (let [tree (or (second (str/split pn #"\+" 2)) "HEAD")
+            ls (into {} (for [l (str/split-lines (git! {} (str root "/" sub) (into ["ls-tree" tree "--"] (map rel ps)) nil)) :when (seq l)]
+                          [(second (str/split l #"\t" 2)) l]))]
+        (for [p ps]
+          (if-let [l (get ls (rel p))]
+            [(cfg/pin-class p) l]
+            (throw (ex-info (str "inputs: " p ", a source group of :seon.config.source/pin-namespaces, is not in " sub "'s tree")
+                            {:path p}))))))))
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
@@ -271,7 +283,7 @@
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
   the top-level paths excludes names (default
-  :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
+  :seon.config.source/tree-excludes: claude_scratch/, which no read and no build reads, so a commit to
   it moves nothing). bin/tree computes the same, which bin/build records for the tree it
   builds (target/seon.tree), so a root can tell whether its binary is built from its source."
   {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string [:vector :string]] :string]]}
@@ -355,10 +367,13 @@
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries of no env-class, every submodule's pin (its files
-  as they are) that is not a test's by the namespaces it references, Jolt's included, and the per-test tick bound every verdict is a function of,
-  :seon.config.agent/test-ticks) :config (the config in force, config-input, and a digest of each
-  env-class of files and of each pin the config names (pin-class): each test's digest takes the keys and classes it reads) :data-refs (declared-refs of its system.edn)}, by
+  (every test's: the tree's env-input? entries of no env-class, and the per-test tick bound every
+  verdict is a function of, :seon.config.agent/test-ticks) :config (the config in force,
+  config-input, and a digest of each env-class of files, of each submodule's pin (its files as
+  they are) and of each source group pin-namespaces names inside one (group-entries), all
+  seon.config/pin-class: each test's digest takes the keys and classes it reads, so a pin no
+  namespace of a test's reach names, the runtime core's, moves only the tests that read files or
+  run a process, and the daily full run) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]
                   [:=> [:cat :string :map :string :string] :seon.program/inputs]]}
@@ -371,15 +386,17 @@
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
-                     [(or (env-class p) (when (str/starts-with? m "160000") (pin-class cfg p)))
-                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
+                     [(or (env-class p) (when (str/starts-with? m "160000") (cfg/pin-class p)))
+                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)
+                      (when (str/starts-with? m "160000") (group-entries root cfg p pn))]))
          by-class (group-by first entries)]
      {:tree tree
       :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
-                    (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))]))
+                    (concat (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))])
+                            (for [[_ _ gs] entries [c t] gs] [c (err/digest t)])))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
@@ -573,7 +590,17 @@
         r (when-not (str/blank? out) (edn/read-string {:default tagged-literal} out))]
     (if (map? (:results r))
       (:results r)
-      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (pr-str r)) {:path (str port)}))))
+      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (or (:seon.error/message r) "its answer holds no :results")) {:path (str port)}))))
+
+(defn branch-head
+  "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
+  there yet: the rule git-commit starts a new branch by (it starts at dir's HEAD), so a merge gated
+  before its first write-back runs on the tree that write-back would branch from. nil when neither
+  names a commit (no commit at all)."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [repo branch]
+  (or (git-try repo ["rev-parse" "--verify" "--quiet" (str "refs/heads/" branch "^{commit}")])
+      (git-try repo ["rev-parse" "--verify" "--quiet" "HEAD^{commit}"])))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -592,7 +619,7 @@
         repo (or repo (when all? (str (cfg/checkout))))
         branch (or branch (when all? (cfg/value :seon.config.source/main)))
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
-        sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
+        sha (try (or (branch-head repo branch)
                      (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
@@ -605,7 +632,7 @@
         ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
         ;; a test of the root's working tree that main does not hold, and its shard died at once)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_SOURCE_BRANCH"]
+               "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
@@ -629,9 +656,18 @@
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
                   tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
-                  found (results-at results (vals (:digests plan)))]
-              (if (contract/error? found)
+                  found (when plan (results-at results (vec (vals (:digests plan)))))]
+              (cond
+                ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
+                ;; answer, with the end of what it said, never a run whose tests all read :error with no reason
+                (nil? plan)
+                (error #'seon.fx/run-tests :seon.fx/io-error
+                       (str "the test runner made no plan in " dir " (exit " (:exit r) "); its log: " log
+                            " ends: " (str/join " | " (take-last 3 (remove str/blank? (str/split-lines (str (:err r) "\n" (:out r)))))))
+                       {:path dir})
+                (contract/error? found)
                 found
+                :else
                 (let [rs (test-results plan found tests)]
                   {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
                             all? (assoc :digests (select-keys (:digests plan) tests)
