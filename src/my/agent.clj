@@ -197,13 +197,13 @@
 (defn related
   "The wiki sections nearest x by meaning, a text or a var's definition, k of them
   (:seon.config.render/related unless given), each a line at summary depth with the forms that read one
-  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning}})
-  shown as the page's related part shows its own. A failed embedding answers its error."
+  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning} :min 0.0})
+  (the nearest k, whatever their relevance: the page's own cut is the page's) shown as the page's related part shows its own. A failed embedding answers its error."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
   ([x] (related x (cfg/value :seon.config.render/related)))
   ([x k]
-   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
+   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k) :min 0.0})]
      (cond (contract/error? r) r
            (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
            :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name)) r)})))))

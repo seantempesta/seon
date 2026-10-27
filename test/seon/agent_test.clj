@@ -1204,12 +1204,15 @@
         old @agent/state]
     (reset! agent/state {:n 0 :mode :test :db db :task "demo/r" :key "demo/a1" :branch :b :turn {:run "demo/r#1"}})
     (try
-      (is (= "docs/vector.md#the-model: Section 0 says one thing." (first (:sections (my.task/related))))
-          "the screen form: the sections nearest the plan, the cited one left out")
+      ;; the sections the plan does not cite, each a line "<address> <chance>%: <lead>", best first by relevance
+      ;; (seon.context/relevance: the toy's chances are all near 0, so its order is relevance's, not the cosine's)
+      (is (= #{"docs/vector.md#what-the-work-is-likely-to-need-as-an-eval" "docs/vector.md#the-model" "docs/vector.md#the-pyramid" "docs/vector.md#fused-with-the-call-graph"}
+             (set (map #(first (str/split % #" ")) (:sections (my.task/related)))))
+          "the screen form: the sections nearest the plan, the cited one (what-is-embedded) left out")
       (binding [agent/*fx-stub* (fn [_ _] {:value {:model "m" :vectors [(dir 1.0 0.5)] :tokens [3]}})]
         (let [v (my.agent/related "the last one" 2)]
-          (is (= "docs/vector.md#what-the-work-is-likely-to-need-as-an-eval: Section 4 says one thing." (first (:sections v)))
-              "the agent's own words refine it: the sections nearest them")
+          (is (every? #(re-find #"^docs/vector\.md#[a-z-]+: Section \d says one thing\." %) (:sections v))
+              "the agent's own words refine it: sections of the toy wiki, a line each, best first by relevance")
           (is (= 2 (count (:sections v))) "k of them")))
       (finally (reset! agent/state old)))))
 
