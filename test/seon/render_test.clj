@@ -1343,3 +1343,28 @@
     (is (vector? (r/print-html {} {:seon.task/id "t/x" :evals evals})) "nested in a value")
     (is (vector? (r/html {} evals)) "as the value itself")
     (is (nil? (r/schema-of evals nil)))))
+
+(defn diff-view
+  "A component whose answer is a diff: the vars its walk's db holds that base does not."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :seon.host/db] :any]}
+  [{db :seon.db/db} base]
+  [:p (str (count (second (d/datoms-diff base db :aevt [:var/name]))) " vars added")])
+
+(deftest a-render-over-a-diff-runs-again-when-the-diff-moves
+  ;; task datahike.db/a-diff-records-its-reads: a component that read a datoms-diff is matched
+  ;; against a transaction by the range the diff read, so a var the branch adds runs it again
+  ;; (it read no range at all before, and was skipped with its old answer)
+  (let [base (ts/test-db)
+        cell (volatile! base)
+        w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} #(deref cell) [#'diff-view {} base])
+        frame! (fn [tx-data] (let [res (d/with @cell tx-data)] (vreset! cell (:db-after res)) (r/frame! w (:tx-data res))))
+        runs #(:miss (get (r/ledger w) `diff-view))
+        html #(pr-str (map :out (vals @(:cache w))))]
+    (r/frame! w nil)
+    (is (str/includes? (html) "0 vars added"))
+    (frame! [{:seon.task/id "unrelated/task"}])
+    (is (= 1 (runs)) "a datom outside the diffed attribute leaves it as it was")
+    (frame! [{:var/name 'app.m0/added-on-the-branch}])
+    (is (str/includes? (html) "1 vars added") "the next frame shows the var the branch added")
+    (is (= 2 (runs)) "the component ran again")
+    (r/dispose-walk! w)))

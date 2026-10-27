@@ -231,6 +231,7 @@
     [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
 
 (deftest a-change-re-folds-only-what-reaches-it
+  ;; task seon.program/reach-index-reads-each-attribute-once: the proof's digest does not reach reach-update (named by a quoted symbol)
   (cost/proof
     {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
      :n "forms the graph already holds"
