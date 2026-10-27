@@ -748,16 +748,18 @@
  ;; At the bound: none; each is required.
  :seon.config.render/relevance-features {:alpha 0.15 :bm25-k1 1.2 :bm25-b 0.75 :rarity-cap 16 :ppr-scale 10000.0 :hub 64}
  ;; Unit: [logit chance] knots a kind, read piecewise linearly. What a relevance logit means: the
- ;; chance an item is worth reading for the work, as an independent judge (Sonnet) labelled 1,185 lines
- ;; useful or noise: the first five of each kind on 59 merged tasks' pages and 20 search queries
- ;; (notes/relevance-lab/judge-*). Fitted per kind as sigmoid(a log c + b), c the item's chance that
- ;; its merge changes it (the logistic's isotonic reading on the same plans), and cross-fitted by
- ;; task halves: predicted 0.72 / 0.80 / 0.78 were useful 0.73 / 0.80 / 0.80 (functions, sections,
- ;; schema keys), 0.26 / 0.16 / 0.20 were 0.24 / 0.16 / 0.19. Below each kind's fifth item it is
- ;; extrapolated: no label is there. At the bound: a logit past either end reads its end's chance.
- :seon.config.render/relevance-calibration {:function [[-6.51 0.055] [-5.17 0.062] [-3.83 0.142] [-3.3 0.247] [-2.78 0.34] [-1.95 0.484] [-1.12 0.586] [-0.6 0.712] [-0.07 0.785] [0.62 0.898] [1.32 0.937] [2.56 0.947] [3.81 0.954]]
-                                            :section [[-6.16 0.001] [-4.98 0.001] [-3.8 0.005] [-3.3 0.01] [-2.81 0.016] [-2.63 0.043] [-2.45 0.078] [-2.19 0.191] [-1.92 0.312] [-1.55 0.454] [-1.19 0.568] [-0.94 0.641] [-0.69 0.699] [-0.54 0.793] [-0.4 0.85] [2.12 0.917] [4.65 0.947]]
-                                            :schema [[-8.67 0.01] [-6.58 0.014] [-4.49 0.042] [-4.14 0.08] [-3.79 0.122] [-3.36 0.25] [-2.93 0.369] [-2.39 0.621] [-1.84 0.752] [-1.68 0.821] [-1.52 0.864] [-0.61 0.908] [0.29 0.934] [0.65 0.934] [1.0 0.934]]}
+ ;; chance an item is worth reading for the work now, as an independent judge (Sonnet) labelled 1,905
+ ;; lines useful or noise: the first five of each kind on 59 merged tasks' pages and 20 search
+ ;; queries (the plan's focus, 1,185 lines), and at 48 moments of 10 recorded runs under the work's
+ ;; focus (the plan decaying into the agent's evals, 720 lines; notes/relevance-lab/). Fitted per kind
+ ;; as sigmoid(a log c + b) over both, c the item's chance that its merge changes it, and cross-fitted
+ ;; by halves of the moments: at 60% or more the plan's pages predicted 0.78 / 0.82 / 0.73 and found
+ ;; 0.76 / 0.86 / 0.70 (functions, sections, schema keys), the work's 0.64 / 0.85 / 0.71 and found
+ ;; 0.76 / 0.81 / 0.67; a term for the state moved nothing at the cut. Below each kind's fifth item it
+ ;; is extrapolated: no label is there. At the bound: a logit past either end reads its end's chance.
+ :seon.config.render/relevance-calibration {:function [[-6.51 0.16] [-5.17 0.169] [-3.83 0.243] [-3.3 0.312] [-2.78 0.362] [-1.95 0.433] [-1.12 0.485] [-0.6 0.554] [-0.07 0.602] [0.62 0.701] [1.32 0.753] [2.56 0.77] [3.81 0.784]]
+                                            :section [[-6.16 0.0] [-4.98 0.0] [-3.8 0.002] [-3.3 0.004] [-2.81 0.007] [-2.63 0.022] [-2.45 0.045] [-2.19 0.127] [-1.92 0.232] [-1.55 0.373] [-1.19 0.497] [-0.94 0.582] [-0.69 0.651] [-0.54 0.765] [-0.4 0.834] [2.12 0.913] [4.65 0.948]]
+                                            :schema [[-8.67 0.014] [-6.58 0.02] [-4.49 0.043] [-4.14 0.07] [-3.79 0.096] [-3.36 0.17] [-2.93 0.237] [-2.39 0.401] [-1.84 0.515] [-1.68 0.591] [-1.52 0.648] [-0.61 0.72] [0.29 0.769] [0.65 0.769] [1.0 0.769]]}
  ;; Unit: chance (0-1). An item related ranks at this relevance or more is shown, a line with its
  ;; chance; below it, counted (:hidden) with the form that lists it. A task may set its own (its
  ;; :seon.task/config). Provenance: the judge's labels, cross-fitted: at 0.4 the lines shown were
