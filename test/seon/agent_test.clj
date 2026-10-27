@@ -245,9 +245,10 @@
         eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
                                (if (:error r) r (value-of (:response r)))))
         _ (eval-root "(c/spawn! sys {})")
-        held (str "(do (ns held-proof (:require [clojure.test :refer [deftest is]]))"
-                  " (deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
-                  " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) "))))) :defined)")
+        ;; two forms, as an agent writes them: each recorded on its branch (a definition inside a do is not)
+        held (str "(deftest h (let [w (java.io.FileOutputStream. " (pr-str began) ")] (.write w 49) (.flush w))"
+                  " (is (= 50 (.read (java.io.FileInputStream. " (pr-str gate) ")))))")
+        _ (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str "(ns held-proof (:require [clojure.test :refer [deftest is]]))") "))"))
         defined (eval-root (str "(:response @(c/submit! sys :a1 " (pr-str held) "))"))
         ;; the test service proves a1's branch as its turn does (mode :turn: the tests the branch changed,
         ;; held-proof/h among them): it asks the idle agent for :tests
