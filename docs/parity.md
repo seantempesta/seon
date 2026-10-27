@@ -66,7 +66,7 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 | tests selected by reach; results reused by reach digest | `seon.proofs/plan` over `seon.program/reach-digests`: `bin/prove`, `bin/test` and `bin/check` reuse greens in the results directory every checkout shares (`:seon.config.source/test-results-dir`; check steps keyed too); agents' runs select and reuse by the same plan against their merge base (`seon.agent/test-plan`), also finding a green by its digest among main's result facts | present; an agent shares the greens when its root's binary is built from its source tree ([merging](merging.md#a-merge-runs-what-the-change-reaches)) |
 | contracts armed at definition; cost proofs; per-function profile | `seon.contract`, `seon.cost`, `seon.profile` | present |
 | turns-to-green report (median, p90) | `seon.learn` charges overrun per run (stored as ``:seon.run/waste``) | partial |
-| scheduled work (``seon.schedule``) | none (AGENTS names a cron proc; `resources/seon/system.edn` has none) | missing |
+| scheduled work (``seon.schedule``) | the cron proc (``seon.cron``): one daily message, the full run of main (`:seon.config.proofs/full-run-at`); no general schedules | partial |
 
 ## Context, printing, the page
 

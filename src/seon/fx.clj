@@ -490,6 +490,12 @@
   {:malli/schema [:=> [:cat [:sequential :symbol]] [:vector :string]]}
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
 
+(def full-run-command
+  "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
+  plan ignores the results already stored, runs the process tests, and measures each cost proof
+  at the sizes it states), its plan written beside prove's (target/prove/tests.edn)."
+  ["nice" "-n" "15" "bin/test" "--prove" "tests" "target/prove" "--all"])
+
 (defn test-results
   "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
   tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), dir the
@@ -509,10 +515,15 @@
   ({relative path text}, the candidate's changed files) written over it, then the runner
   (test-command) over the tests' namespaces there, niced, in that tree's own environment;
   the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
-  :seon.fx/io-error naming the step and its log."
+  :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
+  :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
+  also holds :digests {test digest}; repo defaults to this checkout and branch to git's main
+  (:seon.config.source/main)."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch files tests]} :req}]
+  [{{:keys [repo branch files tests all?]} :req}]
   (let [t0 (profile/now-ns)
+        repo (or repo (when all? (str (cfg/checkout))))
+        branch (or branch (when all? (cfg/value :seon.config.source/main)))
         ;; the branch's commit, or the error the asker gets: no such branch is never a run at an empty sha
         sha (try (or (git-try repo ["rev-parse" "--verify" "--quiet" (str branch "^{commit}")])
                      (error #'seon.fx/run-tests :seon.fx/io-error (str "no commit of branch " branch " in " repo) {:path repo}))
@@ -530,10 +541,14 @@
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
         ;; the tree's shards store into this root's results directory, named to them, so the
         ;; verdicts read below are the ones its run wrote
-        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
-              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
+        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)]
+                                     (if all? full-run-command (test-command (sort (distinct (map (comp symbol namespace) tests)))))
+                                     [:dir dir]))
+              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
+              tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)]
           (spit log (str (:out r) (:err r)))
-          {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
+          {:value (cond-> {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}
+                    all? (assoc :digests (select-keys (:digests plan) tests)))})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))

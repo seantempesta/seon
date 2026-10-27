@@ -34,25 +34,18 @@
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
   digest, the plan taking no base)."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
-  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main :full]] :string]}
+  [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when (= :full mode) "!full")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
 
-(defn result-tx
-  "The facts a finished run leaves on main: one :seon.proof/ result per test that ran or was
-  reused (a green the results directory held becomes a fact too) at its digest, greens and reds, and the run's fact.
-  A test whose child died while it ran (a report with its :exit, seon.agent/test-run-answer) has
-  no verdict at its digest, only main's newest result: a death is unknown, and a result at a
-  digest is reused (seon.proofs/stored-results), so it would never run again.
-  run: the run request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports
-  :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
-  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
-  [run answer]
-  (let [statuses (proofs/results {:reports (:reports answer)})
-        fails (proofs/failures {:reports (:reports answer)})
-        died (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))
-        change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))]
+(defn- proof-facts
+  "The run fact and a :seon.proof/ result per test of statuses ({test status}) that has a digest in
+  answer (:digests), by result-tx and full-run-tx; fails {test failures}, died the tests whose child
+  died (no verdict at a digest). The change names who asked."
+  {:malli/schema [:=> [:cat :map :map :map :map [:set :qualified-symbol]] [:vector :map]]}
+  [run answer statuses fails died]
+  (let [change (cond-> (select-keys run [:branch :t]) (:agent run) (assoc :agent (:agent run)))]
     (into [(cond-> {:seon.proof.run/id (:key run) :seon.proof.run/branch (name (:branch run)) :seon.proof.run/t (:t run)
             :seon.proof.run/pass (:pass answer 0) :seon.proof.run/fail (:fail answer 0) :seon.proof.run/error (:error answer 0)
             :seon.proof.run/ms (long (:ms answer 0))}
@@ -67,6 +60,30 @@
                           (= :main (:branch run)) (conj (assoc fact :seon.proof/latest (str t)))))))
                   statuses))))
 
+(defn result-tx
+  "The facts a finished run leaves on main: one :seon.proof/ result per test that ran or was
+  reused (a green the results directory held becomes a fact too) at its digest, greens and reds, and the run's fact.
+  A test whose child died while it ran (a report with its :exit, seon.agent/test-run-answer) has
+  no verdict at its digest, only main's newest result: a death is unknown, and a result at a
+  digest is reused (seon.proofs/stored-results), so it would never run again.
+  run: the run request {:key :branch :t :agent}; answer: the agent's tests answer ({:reports
+  :digests :pass :fail :error :ms}); ms: the run's wall time. The change names who asked."
+  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  [run answer]
+  (proof-facts run answer (proofs/results {:reports (:reports answer)}) (proofs/failures {:reports (:reports answer)})
+               (set (keep #(when (:exit %) (proofs/test-symbol (:var %))) (:reports answer)))))
+
+(defn full-run-tx
+  "The facts of the daily full run (:full mode) on main: result-tx's, from the effect's answer
+  {:results {test status} :digests {test digest} :ms}. A run records a status for every test the
+  plan named, so a test that was red stays visible as :test-red until a later run is green."
+  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  [run {:keys [results digests ms]}]
+  (let [counts (frequencies (vals results))]
+    (proof-facts (update run :t #(or % 0))
+                 {:pass (:pass counts 0) :fail (:fail counts 0) :error (:error counts 0) :ms (or ms 0) :digests digests}
+                 results {} #{})))
+
 ;; ---- admission ---------------------------------------------------------------------------
 
 (defn- reply
@@ -77,7 +94,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
@@ -91,10 +108,13 @@
   [st req waiters]
   (let [run (assoc req :waiters waiters)
         st (assoc st :running run)
-        [st m] (if (:agent req)
-                 (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
-                 (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
-    [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
+        full? (= :full (:mode req))
+        [st m] (cond
+                 ;; the daily full run: bin/test --all in a worktree of git's main, an OS child (the :tests effect)
+                 full? (step/ask st [:prove :answers] [:full (:key req)] {:op :fx :kind :tests :req {:all? true}})
+                 (:agent req) (step/ask st [:prove :answers] [:tests (:key req)] (cond-> {:op :tests :id (:agent req) :mode (:mode req)} (:names req) (assoc :names (:names req))))
+                 :else (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
+    [(assoc-in st [:running :stage] (cond full? :full (:agent req) :tests :else :spawn)) [m]]))
 
 (defn- take-next
   "After a run of branch b: the pending run whose branch is the next in name order after b (then
@@ -172,6 +192,16 @@
                  (let [st (assoc-in st [:running :runner] (:id r))
                        [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
                    [(assoc-in st [:running :stage] :tests) [m]]))
+        ;; the full run's effect answered: its statuses recorded on main, red tests become :test-red rows
+        :full (if (contract/error? r)
+                (finish st r)
+                (let [v (:value r)
+                      counts (frequencies (vals (:results v)))
+                      st (assoc-in st [:running :answer]
+                                   {:pass (:pass counts 0) :fail (:fail counts 0) :error (:error counts 0) :ms (:ms v) :log (:log v)
+                                    :red (vec (sort-by str (keep (fn [[t s]] (when (not= :pass s) t)) (:results v))))})
+                      [st w] (step/ask st [:prove :answers] [:recorded key] {:op :write :req {:op :tx :branch :db :tx-data (full-run-tx run v)}})]
+                  [(assoc-in st [:running :stage] :recording) [w]]))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]
                  (if (contract/error? r)
@@ -182,7 +212,7 @@
         :recorded (finish st
                           (if (contract/error? r)
                             r
-                            (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
+                            (assoc (:answer run) :key key :red (or (:red (:answer run)) (vec (sort-by str (keys (proofs/failures (:answer run))))))))))))) 
 
 (defn prove-proc
   "The test service's admission (see the namespace doc). In :req (requests the api forwards,

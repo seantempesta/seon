@@ -122,6 +122,50 @@
     (is (= [1 2] (waiters-answered all)))
     (is (every? seon.contract/error? (map :r (filter #(= :prove-answer (:op %)) all))))))
 
+;; ---- the daily full run (the cron proc's request, :full mode) -----------------------------------
+
+(def ^:private full-answer
+  {:value {:results '{a.b-test/t :pass a.c-test/u :fail} :digests '{a.b-test/t "dg-t" a.c-test/u "dg-u"} :ms 9 :log "/x.log"}})
+
+(deftest the-full-run-is-a-run-of-the-tests-effect-recorded-on-main
+  ;; root, 2026-10-27: the narrow digests are safe because a daily full run catches the rest. The
+  ;; cron proc's request (no asker, no tx) is admitted as any run: a key per day, one at a time;
+  ;; its executor is the :tests effect (bin/test --all in a worktree of main, an OS child), its
+  ;; answer recorded as the facts every run leaves, on main, so a red test is a :test-red row
+  (let [request [:req {:branch :main :digest "full-2026-10-28" :mode :full}]
+        [st outs] (feed (prove/prove-proc {}) [request])
+        ask (first (asks outs :tests))
+        fx (first (filter #(= :fx (get-in % [:req :op])) outs))]
+    (is (= "main@full-2026-10-28!full" (prove/run-key :main "full-2026-10-28" nil :full)))
+    (is (nil? ask) "no prove agent is spawned or asked")
+    (is (empty? (asks outs :spawn)))
+    (is (= {:op :fx :kind :tests :req {:all? true}} (:req fx)) "the effect runs every test")
+    (testing "the same day's request while it runs joins it; the effect answered, its statuses are written on main"
+      (let [[st2 o2] (feed st [request])
+            [st3 o3] (feed st2 [(answer-of fx full-answer)])
+            w (first (filter #(= :write (get-in % [:req :op])) o3))
+            facts (get-in w [:req :req :tx-data])]
+        (is (empty? (filter :req o2)) "no second run")
+        (is (= #{"dg-t" "dg-u"} (set (keep :seon.proof/digest facts))) "a fact per test, at its digest")
+        (is (= #{:pass :fail} (set (keep :seon.proof/status (filter :seon.proof/digest facts)))))
+        (is (every? #(= "main" (:seon.proof/branch %)) (filter :seon.proof/status facts)))
+        (is (= #{"a.b-test/t" "a.c-test/u"} (set (keep :seon.proof/latest facts))) "main's newest result of each test: what :test-red reads")
+        (let [[st4 o4] (feed st3 [(answer-of w {:ok true :t 6})])]
+          (is (nil? (:running st4)) "the run ended")
+          (is (empty? (filter :req o4)))
+          (is (empty? (filter #(= :problem (:op %)) o4)) "a red test is not a platform defect: it is a :test-red row")
+          (testing "the day again: answered from its result, nothing runs"
+            (is (empty? (filter :req (second (feed st4 [request]))))))
+          (testing "and the facts make the red test a :test-red row"
+            (let [db (d/db-with (ts/test-db) (get-in w [:req :req :tx-data]))
+                  rows (get-in (problems/report db) [:classes :test-red :rows])]
+              (is (= ['a.c-test/u] (mapv :test rows))))))))
+    (testing "an effect that failed is a platform problem, recorded as any failed run, and retried the next day"
+      (let [err (seon.contract/error :seon.fx/io-error #'seon.prove/full-run-tx "bin/worktree --at exited 1" {})
+            [st5 o5] (feed st [(answer-of fx err)])]
+        (is (nil? (:running st5)))
+        (is (= 1 (count (filter #(= :problem (:op %)) o5))))))))
+
 ;; ---- the facts a run leaves, and the class they make true ------------------------------------
 
 (deftest a-run-leaves-a-fact-per-digest-and-a-red-closes-with-a-later-green
