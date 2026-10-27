@@ -14,7 +14,7 @@
   the base its write-back edits, entry by entry, with rewrite-clj (v1's `schema-file-text`):
   every other byte as it was."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.program :as program] [seon.db :as pdb] [seon.reader :as reader] [seon.config :as config] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set]
             [rewrite-clj.zip :as z] [rewrite-clj.node :as node] [rewrite-clj.parser :as parser] [jolt.analyzer] [jolt.host] [seon.edn :as sedn]))
 
 (defn read-forms
@@ -329,24 +329,24 @@
          (or (:ns/tail (d/entity db ne)) "\n"))))
 
 (defn- interface
-  "What a namespace's dependents read of it, from its forms ({:src :ns-form? :inline?
-  :defs [[var kind]]}): each definition's name and kind, and the text of its ns form and of
-  each form whose expansion or inlining is the dependents' (a macro, protocol, type or
-  inline function). A body edit leaves it as it was."
+  "What a namespace's dependents read of it, from its forms ({:src :inline? :defs [[var kind]]}):
+  each definition's name and kind, and the text of each form whose expansion or inlining is the
+  dependents' (a macro, protocol, type or inline function). A body edit leaves it as it was, and
+  so does the ns form: a dependent resolves the names a namespace defines, never its requires."
   {:malli/schema [:=> [:cat [:sequential :map]] [:set :any]]}
   [forms]
-  (into #{} (mapcat (fn [{:keys [src ns-form? inline? defs]}]
+  (into #{} (mapcat (fn [{:keys [src inline? defs]}]
                       (cond-> (set defs)
-                        (or ns-form? inline? (some (comp #{:macro :protocol :type} second) defs)) (conj src))))
+                        (or inline? (some (comp #{:macro :protocol :type} second) defs)) (conj src))))
         forms))
 
 (defn- db-interface
   "Namespace nsym's interface as db holds it: its live forms'."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] [:set :any]]}
   [db nsym]
-  (let [ne (pdb/eid db :ns/name nsym) nf (some-> ne (->> (d/entity db)) :ns/form :db/id)]
+  (let [ne (pdb/eid db :ns/name nsym)]
     (interface (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [e (:e dt) x (d/entity db e)] :when (program/live? db e)]
-                 {:src (:form/src x) :ns-form? (= e nf) :inline? (seq (:form/inline-defs x))
+                 {:src (:form/src x) :inline? (seq (:form/inline-defs x))
                   :defs (for [d (:form/defines x) :when (and (:var/name d) (= e (:db/id (:var/form d))))] [(:var/name d) (:var/kind d)])}))))
 
 (defn- read-interface
@@ -354,7 +354,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [r]
   (interface (for [a (:accounts r)]
-               {:src (:src a) :ns-form? (:ns-form? a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (:kind d)])})))
+               {:src (:src a) :inline? (seq (:inline-defs a)) :defs (for [d (:defs a)] [(:var d) (:kind d)])})))
 
 (defn- required-by
   "The namespaces whose forms require nsym on db (their :form/requires)."
@@ -362,12 +362,27 @@
   [db nsym]
   (into #{} (keep #(when (= nsym (:v %)) (some-> (d/entity db (:e %)) :form/ns :ns/name))) (d/datoms db :aevt :form/requires)))
 
+(defn- dependents
+  "The namespaces that need reading again because namespace nsym lost lost (interface entries): those
+  requiring it when a macro, protocol, type or inline function's text changed (the text is entry
+  :src, a string: what it expands to is theirs), else those among them with a form that references
+  a name nsym lost (a form's :form/refs)."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol [:set :any]] [:set :symbol]]}
+  [db nsym lost]
+  (let [requirers (required-by db nsym)]
+    (if (some string? lost)
+      requirers
+      (into #{} (comp (mapcat (fn [[v _]] (d/datoms db :avet :form/refs v)))
+                      (keep #(some-> (d/entity db (:e %)) :form/ns :ns/name))
+                      (filter requirers))
+            lost))))
+
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path
   text}, a removed file's text nil), and only those: each changed file's namespace read
-  again, and, when what its dependents read of it changed (its interface: names and kinds,
-  macros, protocols, types, the ns form), every namespace requiring it, read again from the
-  file db holds (file-text), and so on through theirs; each changed schema resource. Each
+  again, and, when what its dependents read of it was lost (its interface: names and kinds, macros,
+  protocols, types), every namespace requiring it that references a name lost (or any, for a macro,
+  protocol, type or inline function's text), read again from the file db holds (file-text), and so on through theirs; each changed schema resource. Each
   form is written only where it differs from db (program-tx). The same program as replace-tx
   of the whole tree, at the cost of what changed: a body edit reads one file and writes its
   changed forms, whatever the program's size or the file's dependents (task
@@ -382,8 +397,10 @@
                  read
                  (let [now (read-nss round)
                        read (into read now)
-                       moved (filter #(not= (db-interface db %) (read-interface (read %))) (concat (keys now) check))]
-                   (recur (into {} (for [n moved d (required-by db n) :when (not= d n)
+                       ;; what the namespace had that it no longer has: a name removed or of another kind, a
+                       ;; macro, protocol, type or inline function changed (what was added breaks no form)
+                       lost (into {} (for [n (concat (keys now) check) :let [l (set/difference (db-interface db n) (read-interface (read n)))] :when (seq l)] [n l]))]
+                   (recur (into {} (for [[n l] lost d (dependents db n l) :when (not= d n)
                                          :let [p (:ns/file (d/entity db [:ns/name d]))] :when p]
                                      [p (or (texts p) (file-text db d))]))
                           [] read))))]
