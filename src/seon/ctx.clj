@@ -269,6 +269,18 @@
 
 (def ^:private environment-keys "The map's environment: the record's basis, never written." [:t :branch :commit])
 
+(def ^:private heard-keys
+  "What the agent last heard of main and of its branch's merge base (seon.agent's state :main and
+  :base): the record's basis like the environment, never written, but diffed as data, so a render
+  reading them follows main."
+  [:main-commit :main-t :base-commit :base-t])
+
+(defn- heard
+  "The heard-keys of agent state st: each db's commit and t (a commit only for a committed db)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] (into {} (for [[k c t] [[:main :main-commit :main-t] [:base :base-commit :base-t]] :let [x (get st k)] :when x]
+                  (cond-> {t (:max-tx x)} (d/commit-id x) (assoc c (d/commit-id x))))))
+
 (defn- environment
   "The map's environment: the db's t, the branch and the commit the db is (none for a value as of
   an earlier t: its basis names it)."
@@ -432,7 +444,7 @@
     acc
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
           js (:joins s)
-          skip (cond-> (into #{:db/id} (map :key) js) (empty? p) (into environment-keys))
+          skip (cond-> (into #{:db/id} (map :key) js) (empty? p) (-> (into environment-keys) (into heard-keys)))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
           refuse (fn [acc path w] (update acc :invalid conj {:path path :why w}))
           acc (reduce
@@ -453,7 +465,13 @@
          (let [om (get old key) nm (get new key) path (conj p key)]
            (cond
              (identical? om nm) acc
-             by (refuse acc path (str "a lookup's members follow " attr ": change it"))
+             ;; a lookup's members follow the attribute it reads; a var's, its definition, evaluated as at any REPL
+             by (let [vs (keep (fn [[k m]] (when-not (or (identical? m (get om k)) (stub? m)) (:var/name m))) nm)]
+                  (refuse acc path (if (seq vs)
+                                     (str "a var changes by its definition, not by swap!: evaluate "
+                                          (str/join ", " (for [v vs] (str "(in-ns '" (namespace v) ") (defn " (name v) " ...)")))
+                                          ", and the next @seon.ctx/ctx holds its new source")
+                                     (str "a lookup's members follow " attr ": change it"))))
              (and rev? (many? db j))
              (as-> acc acc
                  (reduce-kv (fn [acc k m]
@@ -494,18 +512,18 @@
 
 (defn write!
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
-  every value checked by its schema, of the record's basis (nv's :t :branch :commit are the
-  record's), and the db, given it, holding what nv says at every path it writes (one d/with); then
+  every value checked by its schema, of the record's basis (nv's :t :branch :commit and heard-keys
+  are the record's), and the db, given it, holding what nv says at every path it writes (one d/with); then
   applied (seon.agent/transact!), and the record as the db holds it installed when the swap! ends.
   Answers true, or throws the error that refuses it, nothing written: :seon.ctx/basis,
   :seon.ctx/invalid, :seon.ctx/not-held. Work: the change's paths, a d/with and a patch of it."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [nv]
-  (let [c @held cur (:tree c) db (agent/db) branch (:branch cur)]
-    (when-not (and c (map? nv) (= (select-keys nv environment-keys) (select-keys cur environment-keys)))
+  (let [c @held cur (:tree c) db (agent/db) branch (:branch cur) basis (into environment-keys heard-keys)]
+    (when-not (and c (map? nv) (= (select-keys nv basis) (select-keys cur basis)))
       (throw (ex-info "ctx: the map is not of the record's basis"
-                      (contract/error :seon.ctx/basis #'write! "the map is not of the record's basis: the db moved while the swap!'s function ran (write with the swap!, not inside its function), or the function wrote :t, :branch or :commit, which are the environment's; nothing written"
-                                      {:held (select-keys cur environment-keys) :swapped (if (map? nv) (select-keys nv environment-keys) {:value nv})}))))
+                      (contract/error :seon.ctx/basis #'write! "the map is not of the record's basis: the db moved while the swap!'s function ran (write with the swap!, not inside its function), or the function wrote :t, :branch, :commit or what the agent heard of main (:main-commit :main-t :base-commit :base-t), which are the record's basis; nothing written"
+                                      {:held (select-keys cur basis) :swapped (if (map? nv) (select-keys nv basis) {:value nv})}))))
     ;; a pattern the walk cannot read is refused before anything is written (seon.render/pattern throws why)
     (when (and (map? nv) (not= (:seon.ctx/pattern nv) (:seon.ctx/pattern cur)) (some? (:seon.ctx/pattern nv))) (render/pattern (:seon.ctx/pattern nv)))
     (let [{:keys [tx invalid paths named]} (edits db (get-in c [:ix :spec (:db/id cur)] {:joins []}) cur nv (:db/id cur) [] {:tx [] :invalid [] :paths [] :named {}})]
@@ -676,19 +694,21 @@
 (defn- on-state
   "The watch on the agent's state: a new agent, key or branch builds ctx, as does a db moved while
   the record lacks its agent's entity; a db moved patches it;
-  a commit of what was applied (one t, one branch) moves only its :commit."
+  a commit of what was applied (one t, one branch) moves only its :commit; what the agent heard of
+  main (heard) is set in each record installed, and moves alone when only it changed."
   {:malli/schema [:=> [:cat :any :any :any :any] :any]}
   [_ _ o n]
-  (let [a (:db o) b (:db n)]
+  (let [a (:db o) b (:db n)
+        in #(install! (update % :tree merge (heard n)))]
     (cond
       (nil? b) nil
-      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (install! (agent-record b n))
-      (identical? a b) nil
+      (or (nil? @held) (nil? a) (not= (:key o) (:key n)) (not= (:branch o) (:branch n))) (in (agent-record b n))
+      (identical? a b) (when (not= (heard o) (heard n)) (in @held))
       ;; the agent's entity reaches its branch after the process starts (a merge of main): until
       ;; it is there the record is its environment alone, and each move looks it up (one seek)
-      (nil? (get-in @held [:tree :db/id])) (install! (agent-record b n))
-      (= (:max-tx a) (:max-tx b)) (install! (update @held :tree with-environment b (:branch n)))
-      :else (let [c (patch @held b (moved a b (:tx n)) (:branch n))]
+      (nil? (get-in @held [:tree :db/id])) (in (agent-record b n))
+      (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b (:branch n)))
+      :else (let [c (update (patch @held b (moved a b (:tx n)) (:branch n)) :tree merge (heard n))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
               (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
 

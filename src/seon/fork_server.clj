@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r]))
 
 (defn- reaped
   "Child pid, which exited (kqueue's NOTE_EXIT, seon.lib/kq-wait) or was already gone when it was
@@ -47,18 +47,22 @@
     (lib/fork! {:fd fd :refused refused :parent parent
                 :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
 
-(defn moves-program?
-  "Whether a commit's resolved ops change the program (an attribute of seon.program/attr-namespaces):
-  what moves the reach graph a fork hands its agent."
-  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
-  [ops] (boolean (some (fn [[_ _ a]] (and (keyword? a) (program/attr-namespaces (namespace a)))) ops)))
-
 (defn graph-at-fork
   "Server state st with main's reach graph (built when the server starts) brought to :db, only
-  when a commit since moved the program (:graph-moved, moves-program?): a spawn's own commit (its
+  when a commit since moved the program (:graph-moved, seon.program/moves-program?): a spawn's own commit (its
   run) moves none, and reach-update reads every live form (15-21 ms a fork, measured)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved))))
+
+(defn index-at-fork
+  "Server state st with main's reconciler index (:index {:db :index}, listed when the server starts)
+  observed forward to :db (seon.reconcile/index over what differs), when main moved since: a forked
+  agent's first turn observes its branch from it, never lists the index itself (a listing of 903
+  tasks: 33M ticks, 160 MB, in every agent)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [{from :db idx :index} (:index st)]
+    (cond-> st (not (identical? from (:db st))) (assoc :index {:db (:db st) :index (r/index idx from (:db st))}))))
 
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
@@ -69,12 +73,15 @@
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork or a standby after a program commit (graph-at-fork), handed
-  ;; to every agent forked (seon.agent/base-graph); a standby inherits it
+  ;; to every agent forked (seon.agent/base-graph); a standby inherits it. :index, main's reconciler index and the db it is of,
+  ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.turn's index! starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph kq]}]
+  ([{:keys [db cfg store conn graph index kq]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
-    :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))})
+    :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
+    ;; listed here when the server boots; a standby inherits its server's
+    :index (or index {:db db :index (r/index db)})})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -96,7 +103,7 @@
                  db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
-                      (moves-program? (:tx-data m)) (assoc :graph-moved true))
+                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
@@ -104,6 +111,8 @@
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [t0 (profile/now-ns)
                  st (graph-at-fork st)
+                 tg (profile/now-ns)
+                 st (index-at-fork st)
                  ;; the heap made static first, so the agent's collections never trace (and un-share)
                  ;; what it inherits (design agent-loop section 2: 163 MB of this heap sat in
                  ;; generations 3-4 at fork; static, an agent's work left 106 MB where it left 333).
@@ -113,8 +122,8 @@
                  _ (lib/static!)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
-                 marks [[:fork-server-in t0 nil] [:reach-graph t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :marks marks) (:db st) (:ns m))
+                 marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
+             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :index (:index st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
                                          [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
@@ -128,9 +137,9 @@
      ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
      ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
      ;; The previous standby is killed: one standby at a time.
-     ;; its graph brought to :db first, so a standby never holds one a program commit has passed
-     :standby (let [st (graph-at-fork st)]
-               (fork-carrying! st #(main (:db st) (:cfg st) % false (:graph st))
+     ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
+     :standby (let [st (-> st graph-at-fork index-at-fork)]
+               (fork-carrying! st #(main (:db st) (:cfg st) % false (select-keys st [:graph :index]))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
@@ -157,7 +166,7 @@
   returns."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
-  ([db0 cfg fd boot? graph]
+  ([db0 cfg fd boot? {:keys [graph index]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -178,7 +187,7 @@
                                    (pos? r) [:cmd {:op :exit :pid r}]
                                    :else (recur)))
                            (case m :eof nil [:cmd m])))))]
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :kq kq :graph graph}
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :kq kq :graph graph :index index}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/c-kill 0 9)
     (lib/c-exit 0))))

@@ -85,12 +85,14 @@
   REPL surface, root's stop): m with a fresh promise as :p, put on the proc's channel ch, and that
   promise, which the proc delivers its one answer to. A channel already closed answers closed at
   once: every request is answered, none left waiting on a proc that will never take it. The one
-  way an edge asks a proc (seon.main-test/an-edge-asks-one-way)."
-  {:malli/schema [:=> [:cat :seon.host/chan :map :any] :seon.host/promise]}
-  [ch m closed]
-  (let [p (promise)]
-    (when-not (a/>!! ch (assoc m :p p)) (deliver p closed))
-    p))
+  way an edge asks a proc (seon.main-test/an-edge-asks-one-way). Given p, the answer goes to that
+  promise (a caller that is also waiting on something else delivered to it: seon.root/await-db)."
+  {:malli/schema [:function [:=> [:cat :seon.host/chan :map :any] :seon.host/promise]
+                  [:=> [:cat :seon.host/chan :map :any :seon.host/promise] :seon.host/promise]]}
+  ([ch m closed] (ask-edge ch m closed (promise)))
+  ([ch m closed p]
+   (when-not (a/>!! ch (assoc m :p p)) (deliver p closed))
+   p))
 
 (defn event "m stamped with the wall-clock ms, for the events channel." {:malli/schema [:=> [:cat :map] :map]} [m] (assoc m :at-ms (System/currentTimeMillis)))
 

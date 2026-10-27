@@ -67,6 +67,7 @@
   [:seon.config.source/binary-vars :seon.config.source/binary-vars]
   [:seon.config.source/branch :seon.config.source/branch]
   [:seon.config.source/main :seon.config.source/main]
+  [:seon.config.source/tree-excludes :seon.config.source/tree-excludes]
   [:seon.config.source/committer-name :seon.config.source/committer-name]
   [:seon.config.source/committer-email :seon.config.source/committer-email]
   [:seon.config.source/generations-dir :seon.config.source/generations-dir]
@@ -81,6 +82,8 @@
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
   [:seon.config.proofs/case-sizes :seon.config.proofs/case-sizes]
   [:seon.config.proofs/cost-max-n :seon.config.proofs/cost-max-n]
+  [:seon.config.proofs/cost-settled :seon.config.proofs/cost-settled]
+  [:seon.config.proofs/cost-max-samples :seon.config.proofs/cost-max-samples]
   [:seon.config.proofs/tick-quantum :seon.config.proofs/tick-quantum]
   [:seon.config.proofs/seeds :seon.config.proofs/seeds]
   ;; effects and the model

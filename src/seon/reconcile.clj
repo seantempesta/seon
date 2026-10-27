@@ -43,7 +43,7 @@
   the one its run began with (or that one is unknown), and :no-proofs, as every task is, until
   it registers one (a design that only rewrote its plan was green at its first plan edit, its
   proofs named in prose and never written: the live agents' rounds). A deferred proof (a process test, run
-  only when root asks: DECISIONS, Process tests are not automatic) is neither red nor unknown
+  at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
   [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred]}]
@@ -419,16 +419,18 @@
                                                                  (set (:seon.run/deferred a)))
                                                       :caused (:seon.run/caused a #{})))]
                      (cond
-                       ;; the process tests the branch's change reaches run before its merge
-                       ;; only when root asked (:seon.task/gate?, my.root/gate!; DECISIONS,
-                       ;; Process tests are not automatic), on a checkout (:gate, seon.fx/run-tests)
+                       ;; the process tests the branch's change reaches run before its merge, on a
+                       ;; checkout (:gate, seon.fx/run-tests), nobody asking (owner's ruling,
+                       ;; 2026-10-27: process tests the change reaches run automatically at the judge)
                        (and (empty? rs) merge?)
                        (let [deferred (sort-by str (:seon.run/deferred a #{})) dres (:seon.run/deferred-results a)
                              red (for [t deferred :let [s (get dres t)] :when (not= :pass s)] [t (or s :unknown)])]
-                         ;; unasked, or with no checkout declared (root's ruling (a)),
-                         ;; the merge goes on, its deferred tests unrun: an open :unrun problem
-                         (cond (or (empty? deferred) (not (:seon.task/gate? t)) (nil? (get-in idx [:root :gate-checkout])))
-                               {:op :ready-to-merge :run aid :task id}
+                         ;; with no checkout to run them on (a root with no source), the merge is
+                         ;; held with that reason, never merged with them unrun
+                         (cond (empty? deferred) {:op :ready-to-merge :run aid :task id}
+                               (nil? (get-in idx [:root :gate-checkout]))
+                               (failed aid id (str "run " aid "'s change reaches process tests (" (str/join ", " deferred)
+                                                   ") and this root has no checkout to run them on (:seon.config.source/gate-checkout, or a source root)"))
                                (nil? dres) {:op :gate :run aid :task id :tests (vec deferred)}
                                (empty? red) {:op :ready-to-merge :run aid :task id}
                                :else (failed aid id (str "run " aid "'s deferred tests, run on a checkout at its merge, are not green: "
@@ -495,17 +497,26 @@
   (vec (sort (filter #(and (= :running (get-in idx [:tasks % :seon.task/execution])) (not (idx-done? idx %)))
                      (disj (downstream idx #{id}) id)))))
 
+(defn lost-write-back
+  "The :seon.git/commit-failed error a merged run holds (its write-back was refused and no commit
+  has held its files since), or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [a]
+  (let [e (:seon.run/error a)]
+    (when (and (= :merged (:seon.run/status a)) (= :seon.git/commit-failed (:seon.error/type e))) e)))
+
 (defn root-causes
   "Why released work is not done, as root causes: each task held for root with a failure
   (a run refused, its agent dead, its merge refused, or marked failed: its reason),
   each task whose latest run root refused to spawn (its reason: the branch is held, or
   too many live agents), each task whose latest run parked its session (its outcome: it waits
   for a message, which wakes it), and each other task not released (cancelled, held) that released
-  work needs, with the released tasks it blocks. Read once at quiescence: one pass over the
-  tasks."
+  work needs, with the released tasks it blocks, and each merged run whose write-back failed (its
+  :seon.git/commit-failed error: no commit holds its files). Read once at quiescence: one pass over the
+  tasks and runs."
   {:malli/schema [:=> [:cat :seon.reconcile/index] [:vector :seon.reconcile/root-cause]]}
   [idx]
-  (vec (for [[id t] (sort-by key (:tasks idx))
+  (vec (concat (for [[id t] (sort-by key (:tasks idx))
              :when (not (idx-done? idx id))
              :let [ex (:seon.task/execution t)
                    f (when (= :held ex) (:seon.task/failure t))
@@ -521,7 +532,36 @@
                                         :else (name ex))
                   :blocks bs}
            (:run f) (assoc :run (:run f))
-           stopped (assoc :run (:seon.run/id stopped))))))
+           stopped (assoc :run (:seon.run/id stopped))))
+               ;; a merged run whose source files no commit holds: its write-back failed (my.root/write-back!)
+               (for [[aid a] (sort-by key (:runs idx)) :let [e (lost-write-back a)] :when e]
+                 {:task (:seon.run/task a) :run aid :blocks []
+                  :cause (str "write-back lost: " (:seon.error/message e) " [" (str/join ", " (:seon.git/files e)) "]; (my.root/write-back! sys [\"" aid "\"]) writes it again")}))))
+
+(defn commit-tx
+  "Main's write of the :git effect's answer r for the runs of members, which wanted paths written
+  and gave the effect those in written: a sha is :seon.run/commit on each, clears the
+  :seon.git/commit-failed error an earlier failure left (beside any note of forms that name no
+  file, which stays), and holds a new one for the paths main had no text for (wanted, not written);
+  a failure is that error for every wanted path, as the run's :seon.run/error (root-causes names it
+  until a commit holds the paths), and its :effect row (seon.error/asked-tx), closed by the next
+  commit's sha. Nil when r is neither. The reconciler's write-back and my.root/write-back! write it
+  alike."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:sequential :map] [:sequential :string] [:sequential :string]] [:maybe [:vector :any]]]}
+  [db r members paths written]
+  (let [sha (get-in r [:value :sha])
+        failed (fn [msg ps] (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx msg {:seon.git/files (vec (sort ps))}))
+        missing (remove (set written) paths)
+        error (cond (contract/error? r) (failed (:seon.error/message r) paths)
+                    (and sha (seq missing)) (failed (str "main holds no text for " (str/join ", " (sort missing))) missing))]
+    (when (or sha error)
+      (err/asked-tx db r :seon.run/commit
+                    (vec (mapcat (fn [{:keys [run]}]
+                                   (let [old (:seon.run/error (task/run db run))]
+                                     (cond-> (if sha [{:seon.run/id run :seon.run/commit sha}] [])
+                                       (and sha (= :seon.git/commit-failed (:seon.error/type old))) (conj [:db/retract [:seon.run/id run] :seon.run/error old])
+                                       error (conj {:seon.run/id run :seon.run/error error}))))
+                                 members))))))
 
 (defn- unfiled-error
   "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
@@ -623,7 +663,7 @@
 
 (defn task-state
   "What happened to task id (:seon.task/state), from the index; its desired execution stays
-  on the task. The one derivation every task row reads (seon.render.proc/task-rows)."
+  on the task. The one derivation of a task's state."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :seon.task/state]}
   [idx id]
   (let [x (get-in idx [:tasks id :seon.task/execution])]
@@ -738,7 +778,7 @@
       :octopus-merge (let [bs (mapv #(get-in (task/run (:db st) (:run %)) [:seon.run/env :branch]) (:members act))]
                      (one (request (assoc-in st [:flights run :branches] bs) run :octopus-merged
                                    {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
-      ;; the merge gate (root asked: :seon.task/gate?): the candidate's files read from its
+      ;; the merge gate (a change reaching process tests): the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st run :gate-read
                           {:op :write :req {:op :branch-db :branch (get-in (task/run (:db st) run) [:seon.run/env :branch])}})))))
@@ -982,23 +1022,19 @@
       :write-back (one (request st aid :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (source/files (:db r) paths)]
-                   ;; paths main holds no text for: no commit, named on each member's run
+                   ;; paths main holds no text for: no commit, held on each member's run as a lost write-back
                    (if (empty? files)
-                     (one (write st aid :done (vec (for [{:keys [run]} members]
-                                                     {:seon.run/id run :seon.run/commit-error (str "the write-back read none of " (str/join ", " paths) " on main")}))))
-                     (one (request st aid :committed
+                     (one (write st aid :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx
+                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
+                                                         members paths [])))
+                     (one (request (assoc-in st [:flights aid :writeback :written] (vec (keys files))) aid :committed
                                    {:op :fx :kind :git :req {:dir (:root (:source st)) :branch (:branch (:source st)) :files files
                                                              :message (source/commit-message members)}}))))
       ;; the sha on each merged run; the merge already runs where main's program runs
       ;; (seon.program/load-changes!), so nothing is built (BUILD plan P4)
-      :committed (let [sha (get-in r [:value :sha])
-                       m (cond sha {:seon.run/commit sha}
-                               (contract/error? r) {:seon.run/commit-error (:seon.error/message r)})]
-                   ;; a failed commit is recorded here, its row closed by the next commit's sha
-                   (if m
-                     (one (write st aid :done (err/asked-tx (:db st) r :seon.run/commit
-                                                            (vec (for [{:keys [run]} (:members (:writeback f))] (assoc m :seon.run/id run))))))
-                     (done st))))))
+      :committed (if-let [tx (commit-tx (:db st) r (:members (:writeback f)) (:files (:writeback f)) (:written (:writeback f)))]
+                   (one (write st aid :done tx))
+                   (done st)))))
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no

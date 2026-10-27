@@ -286,9 +286,11 @@
  ;; (seon.fx/run-tests: a worktree of it at the merges head, the candidate's files over it,
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
  ;; root importing test/ could not host a checkout, and its gated merges were all refused).
- ;; Absent (as here; the standing root's config/local.edn names its merges tree): a merge that
- ;; reaches process tests merges with them recorded unrun on its run, an open problem
- ;; ("merged with N process tests unrun") until they run; root's git merge runs them (bin/prove).
+ ;; Absent (as here): root's own source root (:seon.config.source/root as it resolves, the
+ ;; standing root's merges tree; seon.root/start! writes it with the config in force), so every
+ ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
+ ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
+ ;; that no checkout runs them: never merged with them silently unrun.
  :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
@@ -309,6 +311,14 @@
  ;; 5's big-map request, whose related functions were test/ helpers). At the bound: an empty
  ;; vector makes nothing the program's (no law site, no related function but the agent's own).
  :seon.config.source/program-dirs ["src"]
+ ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
+ ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a
+ ;; commit to them moves no digest and rebuilds nothing. notes/ is working papers (AGENTS.md
+ ;; section 7), and every merge appends its merge-log line there. A path not named is in the
+ ;; tree: a new directory reruns what reads the tree, never reuses a stale green. Provenance:
+ ;; root, 2026-10-27 (286 of 919 tests rerun after one merge-log line). At the bound: an empty
+ ;; vector puts every file in the tree id.
+ :seon.config.source/tree-excludes ["notes"]
  ;; Unit: qualified var names. A test whose reach (seon.program/reach-index, the compiler's
  ;; facts) references one of these reaches a process of Seon's own: an agent (in-agent), a fork
  ;; (lib/fork!), the binary or a root booted for it (binary-sh, through which ts/start-root!
@@ -328,8 +338,11 @@
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
  ;; test starts the binary: seon.test-store/binary-sh.
  :seon.config.source/binary-vars #{seon.test-store/binary-sh}
- ;; Unit: branch. Merges are committed here, never on main and never pushed (owner).
- :seon.config.source/branch "jolt/seon-merges"
+ ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
+ ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
+ ;; bin/env names a worktree's own, jolt/seon-merges-<worktree>, in SEON_SOURCE_BRANCH (task
+ ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1).
+ :seon.config.source/branch #or [#env SEON_SOURCE_BRANCH "jolt/seon-merges"]
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
  ;; what it caused since its merge base with it (seon.fx/base-commit; root's ruling,
  ;; 2026-10-23). At the bound: n/a.
@@ -401,6 +414,18 @@
  ;; bin/test --all sets SEON_COST_MAX_N=100000, so the full run measures each proof as written.
  ;; At the bound: the proof measures no size past this but its two smallest.
  :seon.config.proofs/cost-max-n #long #or [#env SEON_COST_MAX_N 1000]
+ ;; Unit: calls in a row. A cost proof's measure calls the function until this many in a row allocate
+ ;; no fewer bytes than the least so far (its steady state: the first calls allocate more as Jolt
+ ;; compiles what is hot and caches fill; measured 2026-10-27, seon.merge/delta-three-way at n=300:
+ ;; 3,776 2,752 1,536 3,584, 2,752 x8, 1,536, then 320 B over the base, call after call: a run of 8
+ ;; equal calls is not the end, so the count is twice that). Provenance: worktree session
+ ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
+ :seon.config.proofs/cost-settled 16
+ ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
+ ;; (a function that never settles: another thread's collection landing in most calls). Provenance:
+ ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14, so 30 calls settle it and this is twice that.
+ ;; At the bound: the measure throws :seon.cost/unsettled (a proof on it is red, never judged on bytes that did not settle).
+ :seon.config.proofs/cost-max-samples 60
  ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
  ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
  ;; a-contract-carries-its-cost-bound 2026-10-26 (test.check's sample sizes, 0 to 100). At the bound:
@@ -695,8 +720,8 @@
  ;; an agent's history row). Provenance: the literal 600 render.clj and
  ;; render.ui carried (2026-10-22), kept as it was.
  :seon.config.render/value-budget 600
- ;; Unit: tokens of root's context, the system's value printed (seon.render.system/system-data,
- ;; seon.render.proc); past it the printer names the later sections it left. Provenance: render.ai's
+ ;; Unit: tokens of root's context, its page's hiccup printed (seon.render.proc/pass: the render
+ ;; of root's ctx, /root/debug and /context.txt); past it the printer names what it left. Provenance: render.ai's
  ;; and the render proc's 700.
  :seon.config.render/root-context-budget 700
  ;; Unit: tokens of a message or reason shown in one line (root's context, a page's tile or row,
@@ -712,7 +737,7 @@
  :seon.config.render.list/stream 60
  ;; Unit: rows (an evaluation, or a turn with its evaluations). A page renders this many of its
  ;; list at first, newest first, and this many more each time its last row scrolls into view
- ;; (seon.render.ui/page); the rest are counted, never rendered until looked at. Provenance: the
+ ;; (seon.render.proc/debug-value); the rest are counted, never rendered until looked at. Provenance: the
  ;; render proc's HISTORY-CAP 100, then 20 when only what is on screen is rendered (a screen
  ;; holds about 10 rows).
  :seon.config.render.list/history 20

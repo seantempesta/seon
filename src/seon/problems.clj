@@ -403,8 +403,8 @@
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
   that base had not, and base had that head has not, by signature: the candidates `caused-split`
   explains, read on both."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
-  [base head ans]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
+  [base head ans ch]
   (let [bs (section-state base) hs (section-state head)
         removed (set/difference (existing-names base) (existing-names head))
         changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
@@ -420,7 +420,7 @@
         changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
                                             (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
-        moved (program/changed-vars base head)
+        moved (pm/changed-vars ch)
         rows (fn [db state forms-of]
                (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
@@ -446,21 +446,26 @@
   (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
   880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
   for the two full readings; an unchanged branch 7 ms, the scan's floor."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]]
-                                                             [:rows [:vector [:map [:class :keyword] [:message :string]]]]
-                                                             [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]}
-  [base head]
-  (let [{:keys [made closed]} (split-rows base head {})
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
+                                                                     [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
+                                                                                    [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]]}
+  ([base head] (caused-split base head (pm/delta-changes base head #{})))
+  ([base head ch]
+  (let [{:keys [made closed]} (split-rows base head {} ch)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))
         messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))
         shown (fn [rs] (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) rs))))]
     {:caused (messages (complement (comp attention? :class))) :attention (messages (comp attention? :class))
-     :rows (shown made) :closed (shown closed)}))
+     :rows (shown made) :closed (shown closed)})))
 
 (defn caused
-  "The derived problems the branch at head has that base had not that refuse its done (`caused-split`'s :caused)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]}
-  [base head] (into (sorted-set) (:caused (caused-split base head))))
+  "The derived problems the branch at head has that base had not that refuse its done
+  (`caused-split`'s :caused), with the branch's changes since base ch when its caller holds them."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:set :string]]]}
+  ([base head] (into (sorted-set) (:caused (caused-split base head))))
+  ([base head ch] (into (sorted-set) (:caused (caused-split base head ch)))))
 
 ;; ---- runs ------------------------------------------------------------------------
 
@@ -710,7 +715,7 @@
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
-        {:keys [made closed]} (split-rows base head ans)
+        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{}))
         gone (into #{} (map :signature) closed)
         current (fn [row] (assoc row :answered-by (get-in ans [:signature (:signature row)] [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))

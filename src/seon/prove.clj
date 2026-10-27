@@ -14,32 +14,26 @@
   - A key whose run ended is answered at once from that answer, until its key moves.
   - Every waiter is answered exactly once, with the run's answer.
   A run is a chain of requests to the api (this proc's `:to-api`, answers on `:answers`): the
-  agent that holds the branch runs its tests (`:tests`); a branch no agent holds (main, `tests`)
-  is run by a prove agent spawned for it and killed after. Its results are recorded on main as
-  facts, one per test digest (`result-tx`), before its waiters are answered.
+  agent that holds the branch runs its tests (`:tests`); main, which no agent holds, is run by a
+  prove agent forked from the fork server's main (its program, the tests among them:
+  :seon.config.source/dirs) and killed after. Its results are recorded on main as facts, one
+  per test digest (`result-tx`), before its waiters are answered, so every agent forked after
+  finds main's results at their digests (seon.proofs/stored-results) and runs none of them again.
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
-  a reader catches up from main's head); it keeps the latest main t for a request that names none."
+  a reader catches up from main's head): it keeps the latest main t for a request that names
+  none, and a commit that moves main's program (seon.program/moves-program?) is a request to
+  prove main at it, with no waiter: main is proved at each program commit, whoever asks."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.error :as error]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
-(defn read-digest
-  "The digest of what a run reads, its key's (run-key): the program of the branch it runs (pd,
-  seon.program/program-digest of its head) and, for main, the checkout's inputs (seon.fx/inputs:
-  :tree, every file, and :env; main's prove agent loads its tests from the checkout). An agent's
-  run reads its branch's program, its tests among them, and this root's inputs, fixed for the
-  boot as this proc's state is, so inputs is nil. Not read: an agent's merge base (:turn selects
-  what the branch changed since it), which moves with a merge of main that changes the branch's
-  program, except when the branch already held what main gained; then the answer kept covers
-  more tests than the new selection, not fewer."
-  {:malli/schema [:=> [:cat [:maybe [:map [:tree :string] [:env :string]]] :string] :string]}
-  [inputs pd] (if inputs (error/digest (str (:tree inputs) "\n" (:env inputs) "\n" pd)) pd))
-
 (defn run-key
-  "The key of the run of branch whose reads have digest dg (seon.root/prove!), of the tests of
+  "The key of the run of branch whose program has digest dg (seon.program/program-digest of its
+  head: what a run reads, so a write that changes no form never makes a second run), of the tests of
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
-  what the branch changed, an agent's turn)."
-  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge]] :string]}
+  what the branch changed, an agent's turn; :main: main's run, every test with no result at its
+  digest, the plan taking no base)."
+  {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main]] :string]}
   [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn")))
 
 ;; ---- the facts of a run ------------------------------------------------------------------
@@ -82,7 +76,7 @@
 (defn- slot
   "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
   A newer request of one slot replaces an older pending one; requests of different slots never do."
-  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge]]]}
+  {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
 (defn- same?
@@ -134,10 +128,11 @@
 
 (defn- request
   "Admit request m ({:rid :branch :t :digest :agent :names}) of the api, keyed by its :digest
-  (run-key). Answers [st outputs]."
+  (run-key); one with no :rid (main's commit notice) is a run nobody waits on. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st {:keys [rid branch] :as m}]
-  (let [t (or (:t m) (:main-t st))
+  (let [rids (if rid #{rid} #{})
+        t (or (:t m) (:main-t st))
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
         key (run-key branch (:digest m) names mode)
@@ -145,13 +140,13 @@
         k (slot req)
         done (get-in st [:done k])]
     (cond
-      (same? (:running st) req) [(update-in st [:running :waiters] conj rid) []]
-      (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] conj rid) []]
+      (same? (:running st) req) [(update-in st [:running :waiters] into rids) []]
+      (same? (get-in st [:next k]) req) [(update-in st [:next k :waiters] into rids) []]
       ;; asked again after its run, nothing it reads changed
-      (and done (= key (:key done))) [st (reply [] [rid] (:r done))]
+      (and done (= key (:key done))) [st (reply [] rids (:r done))]
       ;; another tx of the same slot while a run is in flight: the latest wins, the asker it replaces follows it
-      (:running st) [(update-in st [:next k] (fn [old] (assoc req :waiters (conj (:waiters old #{}) rid)))) []]
-      :else (go st req #{rid}))))
+      (:running st) [(update-in st [:next k] (fn [old] (assoc req :waiters (into (:waiters old #{}) rids)))) []]
+      :else (go st req rids))))
 
 (defn- kill-runner
   "The request that ends the run's prove agent (none: the run had none)."
@@ -170,19 +165,12 @@
       (not= key (:key run)) [(update st :stale (fnil inc 0)) []]
       :else
       (case step
-        ;; a prove agent on the `tests` branch: main's program, the checkout's tests loaded and recorded
+        ;; a prove agent on the `tests` branch, forked from the fork server's main: main's program, its tests among it
         :spawn (if (contract/error? r)
                  (finish st r)
-                 (let [[st m] (step/ask (assoc-in st [:running :runner] (:id r)) [:prove :answers] [:prepared key]
-                                        {:op :eval :id (:id r) :forms "(seon.agent/load-tests! [\"test\"])"})]
-                   [(assoc-in st [:running :stage] :prepare) [m]]))
-        :prepared (let [e (cond (contract/error? r) r
-                                (:ex r) (contract/error :seon.test/prepare #'seon.prove/answered
-                                                        (str "the prove agent could not load the tests: " (:text r)) {}))]
-                    (if e
-                      (let [[st fin] (finish st e) [st kill] (kill-runner st run)] [st (conj fin kill)])
-                      (let [[st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:runner run) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
-                        [(assoc-in st [:running :stage] :tests) [m]])))
+                 (let [st (assoc-in st [:running :runner] (:id r))
+                       [st m] (step/ask st [:prove :answers] [:tests key] (cond-> {:op :tests :id (:id r) :mode (:mode run)} (:names run) (assoc :names (:names run))))]
+                   [(assoc-in st [:running :stage] :tests) [m]]))
         :tests (let [st (assoc-in st [:running :answer] r)
                      [st kill] (kill-runner st run)]
                  (if (contract/error? r)
@@ -193,7 +181,7 @@
         :recorded (finish st
                           (if (contract/error? r)
                             r
-                            (assoc (:answer run) :key key :ran true :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
+                            (assoc (:answer run) :key key :red (vec (sort-by str (keys (proofs/failures (:answer run)))))))))))) 
 
 (defn prove-proc
   "The test service's admission (see the namespace doc). In :req (requests the api forwards,
@@ -214,5 +202,8 @@
    (let [[st outs] (case in
                      :req (request st m)
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
-                     :main [(assoc st :main-t (:t m)) []])]
+                     :main (let [st (assoc st :main-t (:t m))]
+                             (if (program/moves-program? (:ops m))
+                               (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
+                               [st []])))]
      [st (if (seq outs) {:to-api (vec outs)} {})])))

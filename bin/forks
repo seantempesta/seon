@@ -1,0 +1,29 @@
+#!/bin/zsh
+# bin/forks — the forks' own suites on Jolt (bin/check's forks step): each unit test/forks/baseline.edn
+# names (a Datahike test namespace, a konserve test file) runs in a process of its own
+# (test/forks/run.jolt), niced, its temp files under a directory of this run's own, and its counts
+# are compared with the ones the baseline records. A unit whose counts differ, or that printed none
+# (it failed to load, or died), is FAILED; the run ends on FORKS OK or FORKS FAILED.
+#
+# Its key is the pins (seon.proofs/check-steps "forks" []: the checkout's :env, which holds every
+# submodule's pin, bin/, test/forks/ and the config files), so a bump of datahike, konserve,
+# persistent-sorted-set or jolt runs it, and a change to Seon's .clj program or its prose does not. A unit's counts moving is a change to the fork's
+# semantics or to its tests: the commit that moves them records the new counts here, with why.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+[[ -x $ROOT/target/jolt/jolt ]] || { echo "FORKS FAILED (no target/jolt/jolt; run bin/build jolt first)"; exit 1 }
+. "$ROOT/bin/env"
+export JOLT_PWD=$ROOT
+mkdir -p "$ROOT/target/tmp"; TMP=$(mktemp -d "$ROOT/target/tmp/forks-XXXXXX")
+trap 'rm -rf "$TMP"' EXIT
+bad=0 n=0
+while read -r unit want; do
+  [[ -z $unit || $unit == \;* ]] && continue
+  n=$((n + 1))
+  mkdir -p "$TMP/$n"
+  got=$(cd "$ROOT" && TMPDIR=$TMP/$n/ nice -n 15 target/jolt/jolt -A:dhtest run test/forks/run.jolt "$unit" < /dev/null 2>&1 | tee "$TMP/$n.log" | sed -n 's/^FORK [^ ]* //p' | tail -1)
+  if [[ $got == "$want" ]]; then echo "FORK $unit $got"
+  else bad=$((bad + 1)); echo "FORK $unit FAILED: ${got:-no counts} (baseline $want)"; tail -20 "$TMP/$n.log"; fi
+done < "$ROOT/test/forks/baseline.edn"
+(( n > 0 )) || { echo "FORKS FAILED (no units in test/forks/baseline.edn)"; exit 1 }
+if (( bad )); then echo "FORKS FAILED ($bad of $n units differ from test/forks/baseline.edn)"; exit 1; fi
+echo "FORKS OK ($n units)"

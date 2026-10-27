@@ -89,6 +89,18 @@
       (is (= "user" (:seon.eval/by e)))
       (is (str/includes? (seon.print/record-text rec) ":killed :a1") "what root answered"))))
 
+(deftest an-eval-opened-on-a-page-is-no-eval-of-roots
+  ;; the browser pass (3b-root): opening an agent's eval on its page called seon.root/opened!, and each
+  ;; open was recorded as an eval in root's conversation. Opening is a reader's view of the eval,
+  ;; written as the fact (:seon.agent/opened), never root's work
+  (let [st (#'w/web-proc {:port 0})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/opened! :agent :a1 :args {:key "b1/a1" :eval "e9"}}})
+        [req] (:to-api out)]
+    (is (= :write (get-in req [:req :op])) (pr-str req))
+    (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
+          [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true}})]
+      (is (not-any? #(some :seon.eval/record (get-in % [:req :req :tx-data])) (:to-api o)) "no eval recorded for root"))))
+
 (deftest a-refused-ui-call-reaches-the-stream-and-main
   ;; root refuses a call of one of its fns that is none of its requests, before any request: the refused
   ;; answer goes to the render proc as the call's answer (shown, and recorded on main as an :err item), not dropped

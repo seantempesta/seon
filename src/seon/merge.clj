@@ -204,16 +204,21 @@
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs: the keys borne,
   on base or on that db, by each entity a datom of which one holds and the other does not
-  (datahike.api/datoms-diff, which skips the subtrees they share). Cost: the datoms that
+  (datahike.api/datoms-diff, which skips the subtrees they share), when that datom's
+  attribute is one a key's content reads: the program's (program/attr-namespaces) or declared
+  data (data-attr?), never a platform record such as an embedding. Cost: the datoms that
   differ, not the program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
   [base dbs data-attrs]
-  (let [read (fn [db] [db (get-in db [:rschema :db.cardinality/many] #{}) (data-attr? db data-attrs)])
+  (let [read (fn [db] (let [das (data-attr? db data-attrs)]
+                        [db (get-in db [:rschema :db.cardinality/many] #{}) das
+                         (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base)]
     (into #{} (for [db dbs
                     :let [[gone added] (d/datoms-diff base db :eavt [])
-                          d (read db)]
-                    e (into #{} (map :e) (concat gone added))
+                          d (read db)
+                          content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
+                    e (into #{} (comp (filter content?) (map :e)) (concat gone added))
                     [side many das] [b d]
                     k (entity-keys side many e das)]
                 k))))
@@ -233,6 +238,24 @@
   [from to data-attrs]
   (let [ks (vec (touched-keys from [to] data-attrs))]
     (changes (program-of from ks data-attrs) (program-of to ks data-attrs))))
+
+(defn divergence
+  "What a branch's changes ch (delta-changes from its merge base, read once a turn:
+  seon.agent/branch-changes) carry to main: the vars it added, redefined and removed, and the
+  schema keys it registered or changed; each sorted, an empty kind left out ({}: nothing). A var
+  is changed when its definition's content is (its form's text, kind, contract or doc: def-content),
+  and removed when no live form defines it. A schema registered with no file (a scratch one, my.schema) is no key of the program and never
+  merges, so it is none of these."
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:map-of [:enum :added :changed :removed :schemas] [:vector [:or :qualified-symbol :qualified-keyword]]]]}
+  [ch]
+  (let [kinds (for [[[kind x] [a b]] ch :when (#{:var :schema} kind)]
+                [(cond (= :schema kind) :schemas (nil? a) :added (nil? b) :removed :else :changed) x])]
+    (into {} (for [[k xs] (group-by first kinds)] [k (vec (sort-by str (map second xs)))]))))
+
+(defn changed-vars
+  "The vars changes ch add, redefine or remove (divergence's vars): what the branch changed."
+  {:malli/schema [:=> [:cat :seon.merge/changes] [:set :qualified-symbol]]}
+  [ch] (into #{} (keep (fn [[[kind x]]] (when (= :var kind) x))) (keys ch)))
 
 ;; ---- verbatim merges: a merged datom is the same datom ------------------------------
 

@@ -687,6 +687,12 @@
   [a n]
   [(ts/test-db) (vec (for [i (range (quot n 2))] {a (str "proof entity " i) :form/src (str "(defn f" i ")")}))])
 
+(defn form-refs
+  "d/db-with's arguments for n datoms of one form's :form/refs (cardinality many, symbols):
+  every index comparison past the entity and attribute reaches the value."
+  [n]
+  [(ts/test-db) (vec (for [i (range n)] [:db/add 100000000 :form/refs (symbol "app.m0" (str "f" i))]))])
+
 (def content-id-datoms (partial identity-datoms :form/id))
 (def unique-datoms (partial identity-datoms :seon.task/id))
 
@@ -703,6 +709,23 @@
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
      :sizes [100 300 1000 10000]}))
+
+(deftest a-value-costs-its-index-inserts
+  ;; task datahike.transaction/an-index-insert-allocates-nothing-extra: a card-many value's
+  ;; comparisons all reach the value, so its floor is a plain datom's (two inserts, no card-one
+  ;; descent). Before Jolt's 2-arity == and Datahike's compare-value without a try, 38 KB a
+  ;; datom at 1,000 and growing with n (46 KB at 10,000), 17 KB after; the overrun below is what
+  ;; stays (a deftype method call's dispatch, task jolt.backend/a-deftype-method-call-takes-a-site-cache)
+  (cost/proof
+    {:of 'datahike.api/db-with :input 'seon.db-test/form-refs
+     :n "values of one form's cardinality-many :form/refs"
+     :work "per value: its insert into :eavt and :aevt, each descent comparing up to the value, the datom, its place in the tx-data"
+     :growth :linear
+     :per-n {:ticks 7000 :bytes 10500}
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :measured {:ticks 12969032.0 :bytes 17008064.0}}
+     ;; the overrun's measure is at 1,000, the largest size in every run (--all too); measured
+     ;; at 10,000 too, 17.7 KB a datom against 17.0 at 1,000: near-flat, the log n of a descent
+     :sizes [100 300 1000]}))
 
 (deftest an-identity-costs-its-seek
   ;; task datahike.transaction/an-identity-costs-its-seek: an identity adds its :avet insert,
@@ -803,3 +826,33 @@
         slice (per #(c d from))]
     (is (<= (- slice base) 8.0) (str "a slice comparison allocates " slice " B, an empty call " base " B"))))
 
+
+(deftest a-fork-keeps-its-parents-node-caches-and-no-connection
+  ;; seon.db/after-fork!: a forked agent forgets its parent's connections and LMDB envs, and keeps
+  ;; each node cache alone, which its own first connect to that store adopts (measured on a root of
+  ;; 908 tasks: a fresh agent's first observe 50M ticks with an empty cache, 21.6M with its parent's;
+  ;; its first render no dearer than a later one). The connections map is this process's, so it is
+  ;; restored; the envs entry forgotten is a path no store is at
+  (ts/test-branch!
+    (fn [cfg conn]
+      (let [cs datahike.connections/*connections*
+            before @cs
+            entry (some (fn [[_ e]] (when (:node-cache e) e)) before)]
+        (is (some? entry) "the test's own connection holds a node cache")
+        (try
+          (pdb/after-fork! (assoc-in cfg [:store :path] "/nonexistent/a-fork-keeps-its-parents-node-caches"))
+          (let [after @cs]
+            (is (not-any? :conn (vals after)) "no connection is kept")
+            (is (contains? (into #{} (keep :node-cache) (vals after)) (:node-cache entry))
+                "each cache is kept, the same object")
+            (is (every? #(and (zero? (:count %)) (:node-store-key %) (:threshold %)) (vals after))
+                "held by node store and threshold, as a connect looks one up")
+            ;; the first connect to that store reserves it: Datahike's own reservation, run over
+            ;; a copy of what the fork kept, so no store is opened here
+            (binding [datahike.connections/*connections* (atom after)]
+              (let [r (datahike.connections/reserve-connection-opening!
+                        [:a-fork-keeps :conn] :a-completion :acquisition (:physical-store-key entry)
+                        (:node-store-key entry) (:threshold entry) (fn [] :a-fresh-cache))]
+                (is (= :owner (:state r)))
+                (is (identical? (:node-cache entry) (:node-cache r)) "the agent's first connect reads through its parent's cache"))))
+          (finally (reset! cs before)))))))

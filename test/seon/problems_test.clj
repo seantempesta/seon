@@ -193,7 +193,7 @@
         (is (= [] (writes o)))))))
 
 (deftest root-records-what-went-wrong-in-an-agent
-  ;; the one producer of what is wrong (seon.render.system/problems reads only what is recorded):
+  ;; the one producer of what is wrong (root's problems tile, seon.render.ui/problems-tile, reads only what is recorded):
   ;; root records a red run of an agent with no task, and a refused spawn
   (let [view {:agents {:a1 {:status :idle} :a2 {:status :idle :task "t/x"}}}
         red {:pass 1 :fail 1 :error 0 :reports [{:type :pass :var "#'app.t/ok"} {:type :fail :var "#'app.t/red"}]}
@@ -937,7 +937,7 @@
   ;; per citation or site. Before: ~150 KB per catch site, both dbs read in full.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
-               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (program/changed-vars) and the sections that differ; candidates only through the rule"
+               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
                :fixed {:ticks 800000 :bytes 3800000 :calls 24}

@@ -3,8 +3,8 @@
   row once and only its shortlist's whole vectors; what is due reads each text's and vector's
   facts once."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
-            [datahike.api :as d] [seon.test-store :as ts] [seon.vector :as vector] [seon.context :as context]))
+  (:require [clojure.test :refer [deftest]] [clojure.java.shell] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
+            [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.vector :as vector] [seon.context :as context]))
 
 (defn- unit-vector
   "A unit vector of 768 dims, seeded, its weight falling off along the dims as a Matryoshka
@@ -87,3 +87,45 @@
      :per-n {:ticks 4000.0 :bytes 20000.0}
      :fixed {:ticks 300000.0 :bytes 1500000.0}
      :sizes [250 500 1000 2000 4000]}))
+
+;; A store on disk of this test's own, the last resort (docs/storage.md): the in-memory test store gives
+;; its index nodes no addresses, so no two db values of it share a stored subtree and a structural diff
+;; of them reads everything (as in seon.merge-cost-test); main's dbs are LMDB's, which share them.
+(def ^:private store
+  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/vector-cost-" (random-uuid)) 0 :db))))
+
+(defn round-of
+  "seon.vector/vectors-proc's arguments for main's notice of a commit that wrote one form, with n
+  forms in the store, every one due (a vector of another text's transaction), and the proc caught up
+  at the db before the commit: the one text is the only one looked at."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :keyword :map]]}
+  [n]
+  (let [conn @store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "r" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (d/connect (assoc cfg :branch b))
+        _ (d/transact bc {:tx-data (vec (for [i (range n)] (assoc (vector/pack (unit-vector i)) :db/id (str "f" i) :form/id (str "vf" i)
+                                                                   :form/src (str "(defn vf" i " [])") :seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 8)))})
+        s (keyword (str (name b) "-next"))
+        _ (d/branch! conn b s)
+        c (d/connect (assoc cfg :branch s))
+        _ (d/transact c {:tx-data [{:form/id "vnew" :form/src "(defn vnew [])"}]})
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64}) :clean (pdb/head conn b)) :main {:t 1 :db (pdb/head conn s)}]]
+    (d/release c) (d/release bc)
+    r))
+
+(deftest a-commit-is-embedded-for-what-it-changed
+  (try
+    (cost/proof
+      {:of 'seon.vector/vectors-proc :input 'seon.vector-cost-test/round-of
+       :n "texts in the store, one written by the commit"
+       :work (str "the commit's text datoms (datoms-diff skips every subtree the two dbs share: log n) and, "
+                  "for each, one seek of its vector's facts: not a scan of every text")
+       :growth :log
+       :per-n {:ticks 5000.0 :bytes 40000.0 :calls 2.0}
+       :fixed {:ticks 1500000.0 :bytes 8000000.0 :calls 20}
+       :sizes [100 300 1000]})
+    (finally (when (realized? store)
+               (let [path (get-in @@store [:config :store :path])]
+                 (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))

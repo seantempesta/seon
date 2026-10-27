@@ -14,7 +14,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
-            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn]))
+            [seon.edn :as sedn] [seon.error :as err] [clojure.edn :as edn] [seon.proofs :as proofs]))
 
 (defn- error
   "An effect's declared failure, as the one error map (its variant registered in
@@ -52,7 +52,7 @@
 ;; main's merged forms committed for the next one (seon.source). Never the working tree:
 ;; reading is read-only, and a commit is git's plumbing on a ref, so no checkout moves.
 
-(declare inputs)
+(declare inputs tree-id)
 
 (defn- git-run
   "git in dir with args, under the environment variables env adds ({name value}), fed in when given:
@@ -115,33 +115,85 @@
     (when-let [ref (git-try co ["symbolic-ref" "-q" "HEAD"])]
       (str refs (subs ref (count "refs"))))))
 
+(defn- follow-main
+  "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
+  branch of the main checkout co: fast-forwarded (git merge --ff-only in base) when its HEAD is an
+  ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
+  either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
+  {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
+  when base holds commits main lacks, or {:main :source :refused git's words} when the fast-forward
+  is refused (a dirty tree): read-source records either and imports the tree as it is."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
+  [base co]
+  (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base))
+                 (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
+        main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
+        source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
+    (when (and branch (not= main source))
+      (if (zero? (:exit (git-run {} base ["merge-base" "--is-ancestor" "HEAD" main] nil)))
+        (let [r (git-run {} base ["merge" "--ff-only" "-q" main] nil)]
+          (when-not (zero? (:exit r)) {:main main :source source :refused (str/trim (str (:err r)))}))
+        {:main main :source source
+         :ahead (parse-long (git! {} base ["rev-list" "--count" (str main "..HEAD")] nil))
+         :behind (parse-long (git! {} base ["rev-list" "--count" (str "HEAD.." main)] nil))}))))
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
   HEAD names and the revision it pins each reference-code submodule at (its gitlink), both
   absent when root is no git repository (git answers none).
+  With :paths (relative paths, the files a watcher saw change) only those files, each nil when
+  it is gone, and none of the others read: the cost of what changed.
   With :binary-tree (the file bin/build wrote beside the running binary), also :inputs (the
   tree's, inputs) and :binary (the tree id that file holds, or none), so root records the
-  inputs only for a binary built from this very tree.
-  Answers {:value {path text} :commit sha :pins {path sha} :inputs :binary} or :seon.fx/io-error."
+  inputs only for a binary built from this very tree. In a git repository also :tree, the id
+  of the whole tree as it is on disk (tree-id: git's own index makes it the cost of what
+  changed), which stands for every file's content.
+  With :follow (the main checkout), root's tree is first brought to that checkout's branch
+  (follow-main): fast-forwarded when it is behind (the files it moved are read whole, :paths
+  set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
+  refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
+  read (:value and the rest), so the import goes on and the gap is a recorded problem.
+  Answers {:value {path text} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha} :inputs :binary} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [root dirs binary-tree]} :req}]
+  [{{:keys [root dirs binary-tree paths follow]} :req}]
   (try
     (let [base (.getCanonicalPath (java.io.File. ^String root))
-          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))]
-      (cond-> {:value (into (sorted-map)
-                        (for [d dirs
-                              f (file-seq (java.io.File. (str base "/" d)))
-                              :let [p (.getCanonicalPath ^java.io.File f)]
-                              :when (and (.isFile ^java.io.File f) (or (.endsWith p ".clj") (.endsWith p ".edn")))]
-                          [(subs p (inc (count base))) (slurp f)]))}
+          head0 (when (and follow (checked-out? base)) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          gap (when follow (follow-main base follow))
+          head (when (checked-out? base) (git-try base ["rev-parse" "--verify" "--quiet" "HEAD"]))
+          paths (when-not (and follow (not= head head0)) paths)
+          source? (fn [^String p] (or (.endsWith p ".clj") (.endsWith p ".edn")))
+          inputs (when (and binary-tree head) (inputs base))]
+      (let [src-read (cond-> {:value (if paths
+                        (into (sorted-map)
+                              (for [p paths :when (source? p) :let [f (java.io.File. (str base "/" p))]]
+                                [p (when (.isFile f) (slurp f))]))
+                        (into (sorted-map)
+                              (for [d dirs
+                                    f (file-seq (java.io.File. (str base "/" d)))
+                                    :let [p (.getCanonicalPath ^java.io.File f)]
+                                    :when (and (.isFile ^java.io.File f) (source? p))]
+                                [(subs p (inc (count base))) (slurp f)])))}
         head (assoc :commit head
-                                    :pins (into {}
-                                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
-                                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
-                                                  [p sha])))
-        (and binary-tree head) (assoc :inputs (inputs base)
-                           :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))))
+                    :tree (or (:tree inputs) (tree-id base))
+                    :pins (into {}
+                                (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
+                                                        (git! {} base ["ls-files" "-s" "--" "reference-code"] nil))]
+                                  [p sha])))
+        inputs (assoc :inputs inputs
+                      :binary (let [f (java.io.File. ^String binary-tree)] (when (.isFile f) (str/trim (slurp f)))))
+                       paths (assoc :paths paths))]
+        (if gap
+          (merge (error #'seon.fx/read-source :seon.fx/io-error
+                        (if (:refused gap)
+                          (str "the source tree " root " (at " (:source gap) ") could not follow main (at " (:main gap) "): "
+                               (:refused gap) ": imported as it is")
+                          (str "the source tree " root " holds " (:ahead gap) " commits main lacks (it is at " (:source gap)
+                               ", main at " (:main gap) ", which holds " (:behind gap) " it lacks): imported as it is"))
+                        (assoc gap :path root))
+                 src-read)
+          src-read)))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
 (defn- env-input?
@@ -156,17 +208,19 @@
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
-  --config layers its command line names, the #env values, the profile), as text: the
-  checkout's own path
-  written as <checkout>, and the keys that say where a process runs left out (their schemas'
-  :seon.config/place: its ports, main, store, runs, source tree and results directory: each
-  checkout's and each root's own by design, while :tree covers the source's content). What a
-  result depends on that git does not see, so an agent's root and a checkout on one tree key
-  their results alike (docs/merging.md)."
-  {:malli/schema [:=> [:cat :map :string] :string]}
+  --config layers its command line names, the #env values, the profile), as {key text}: each
+  value with the checkout's own path written as <checkout>, and the keys that say where a
+  process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
+  source tree and results directory: each checkout's and each root's own by design, while
+  :tree covers the source's content). What a result depends on that git does not see: a
+  test's digest takes the keys its reach reads (seon.program/config-reads), so an agent's
+  root and a checkout on one tree key their results alike, and a key no test reads moves
+  none (docs/merging.md)."
+  {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
-  (str/replace (sedn/encode (into (sorted-map) (remove (fn [[k]] (get-in cfg/schema-forms [k 1 :seon.config/place]))) cfg))
-               checkout "<checkout>"))
+  ;; a plain map: the store encodes no sorted one, and the digest sorts its keys (seon.program/graph-index)
+  (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+                       [k (str/replace (sedn/encode v) checkout "<checkout>")])))
 
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration at p names
@@ -183,17 +237,22 @@
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit)
   with every changed and untracked unignored file added, in an index of its own (the
-  repository's index untouched). bin/tree computes the same, which bin/build records for the tree it builds
-  (target/seon.tree), so a root can tell whether its binary is built from its source."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [root]
-  (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
-        env {"GIT_INDEX_FILE" (.getPath idx)}]
-    (try
-      (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
-      (git! env root ["add" "-A"] nil)
-      (git! env root ["write-tree"] nil)
-      (finally (.delete idx)))))
+  repository's index untouched), less the top-level paths excludes names (default
+  :seon.config.source/tree-excludes: notes/, which no read and no build reads, so a commit to
+  it moves nothing). bin/tree computes the same, which bin/build records for the tree it
+  builds (target/seon.tree), so a root can tell whether its binary is built from its source."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string [:vector :string]] :string]]}
+  ([root] (tree-id root (cfg/value :seon.config.source/tree-excludes)))
+  ([root excludes]
+   (let [idx (doto (java.io.File/createTempFile "seon-tree" ".index") (.delete))
+         env {"GIT_INDEX_FILE" (.getPath idx)}
+         top (map #(str ":(top)" %) excludes)]
+     (try
+       (when (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]) (git! env root ["read-tree" "HEAD"] nil))
+       (git! env root ["add" "-A"] nil)
+       (when (seq excludes) (git! env root (into ["rm" "-r" "--cached" "-q" "--ignore-unmatch" "--"] top) nil))
+       (git! env root ["write-tree"] nil)
+       (finally (.delete idx))))))
 
 (defn base-commit
   "The commit the checkout at root's health is read against (health is what a branch caused,
@@ -245,15 +304,16 @@
   (let [head (git! {} dir ["rev-parse" "HEAD"] nil)]
     (if (str/blank? (git! {} dir ["status" "--porcelain" "-uall" "--ignore-submodules=all"] nil))
       head
-      (str head "+" (tree-id dir)))))
+      (str head "+" (tree-id dir [])))))
 
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
   (every test's: the tree's env-input? entries, every submodule's pin (its files as they are),
-  Jolt's included, and
-  the config in force, config-input) :data-refs (declared-refs of its system.edn)}, by
+  Jolt's included, and the per-test tick bound every verdict is a function of,
+  :seon.config.agent/test-ticks) :config (the config in force, config-input: each test's digest
+  takes the keys it reads) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]]}
   ([root] (inputs root cfg/config (cfg/checkout)))
@@ -266,7 +326,8 @@
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)))]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat entries [(config-input cfg checkout)])))
+      :env (err/digest (str/join "\n" (concat entries [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
+      :config (config-input cfg checkout)
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
@@ -430,18 +491,17 @@
   [nss] (into ["nice" "-n" "15" "bin/prove" "--tests"] (map str nss)))
 
 (defn test-results
-  "Each of tests' status from prove's output out and its exit status: :fail or :error where a
-  RED line names it (its counts say which), :pass only when the run reached its tests, exited
-  0 and named it in no RED line (it ran green, or was green at its digest), and :error for
-  every other one: a run that never reached its tests (its plan or its build failed), or that
-  exited non-zero without naming it (a check step, a crash after the shard), says nothing of it
-  passing."
-  {:malli/schema [:=> [:cat :string :int [:sequential :qualified-symbol]] [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
-  [out exit tests]
-  (let [red (into {} (for [[_ t counts] (re-seq #"(?m)^RED (\S+) (\{[^\n]*\})" out)]
-                       [(symbol t) (if (pos? (or (:error (edn/read-string counts)) 0)) :error :fail)]))
-        reached? (boolean (re-find #"(?m)^(SHARD |PROVE OK|prove: .* 0 to run)" out))]
-    (into {} (for [t tests] [t (or (red t) (if (and reached? (zero? exit)) :pass :error))]))))
+  "Each of tests' status from its verdict at its digest: plan is what prove's plan wrote in the
+  tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), dir the
+  results directory its shards store into (seon.proofs/store-verdicts!). :pass when a green is
+  stored there (it ran green, or was green at its digest), :fail when a red is (flaky, or a red
+  alone), :error with none: a run that never reached it (its plan or its build failed, it died)
+  says nothing of it passing. The record read, never prove's printed output."
+  {:malli/schema [:=> [:cat [:maybe [:map [:digests [:map-of :qualified-symbol :string]]]] :string [:sequential :qualified-symbol]]
+                  [:map-of :qualified-symbol [:enum :pass :fail :error]]]}
+  [plan dir tests]
+  (into {} (for [t tests :let [dg (get-in plan [:digests t])]]
+             [t (or (when dg (proofs/status-at dir dg)) :error)])))
 
 (defn run-tests
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
@@ -459,6 +519,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
+        results (cfg/value :seon.config.source/test-results-dir)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"]
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
@@ -467,10 +528,12 @@
       :else
       (try
         (doseq [[p text] files] (let [f (java.io.File. dir p)] (.mkdirs (.getParentFile f)) (spit f text)))
-        (let [r (apply sh/sh (concat clean (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
-              out (str (:out r) (:err r))]
-          (spit log out)
-          {:value {:results (test-results out (:exit r) tests) :ms (profile/ms-since t0) :log log}})
+        ;; the tree's shards store into this root's results directory, named to them, so the
+        ;; verdicts read below are the ones its run wrote
+        (let [r (apply sh/sh (concat clean [(str "SEON_TEST_RESULTS=" results)] (test-command (sort (distinct (map (comp symbol namespace) tests)))) [:dir dir]))
+              plan (let [f (java.io.File. dir "target/prove/tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))]
+          (spit log (str (:out r) (:err r)))
+          {:value {:results (test-results plan results tests) :ms (profile/ms-since t0) :log log}})
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))

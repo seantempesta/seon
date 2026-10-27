@@ -505,7 +505,8 @@
         r3 [@(c/submit! sys b "(apply str (repeat 100000 \"x\"))") @(c/submit! sys b "(range)")]
         r4 @(c/submit! sys b "(+ 1")
         _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
-        t5 @(c/run-tests! sys x 100000000)
+        ;; the runner's tick bound, given here as root's run-tests! (the test service) does not take one
+        t5 (ts/value-of @(c/submit! sys x "(select-keys (seon.agent/run-tests-forked 100000000 #{} :judge) [:error :reports :ms])"))
         r5 @(c/submit! sys x "(+ 1 1)")
         _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
         t6 @(c/run-tests! sys x)
