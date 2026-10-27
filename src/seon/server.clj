@@ -73,15 +73,28 @@
   reconciler starts no turn loop for it and does not kill it. The agent is spawned first;
   only once it exists are its env, the release and the run written, in one transaction,
   so a refused spawn writes nothing and the reconciler never sees a release with no run
-  (it would spawn a second agent for it). Answers {:agent :task :run}."
+  (it would spawn a second agent for it). Answers {:agent :task :run}. A task an outside run
+  already works (an attach before, or a context read of the task, which attaches) answers that
+  run, :attached its start-ms: the caller has the branch, and shares it with whoever attached it.
+  A branch another live run holds is refused, naming its agent, the task it works and its run.
+  (THE PLAN 0.7, 2026-10-27: a session's first attach was refused \"held by live agent :a7\",
+  an agent another session's context read had attached.)"
   {:malli/schema [:=> [:cat :seon.root/sys :seon.task/id] :map]}
   [sys id]
   (let [db @(:conn sys)
-        t (task/task db id)]
-    (if-not t
-      (refused (str "no task " id))
-      (let [env (assoc (r/desired-env t) :model "outside")
-            aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
+        t (task/task db id)
+        env (when t (assoc (r/desired-env t) :model "outside"))
+        running (when t (task/running db))
+        own (some #(when (and (= id (:seon.run/task %)) (= "outside" (get-in % [:seon.run/env :model]))) %) running)
+        holder (some #(when (= (:branch env) (get-in % [:seon.run/env :branch])) %) running)]
+    (cond
+      (not t) (refused (str "no task " id))
+      own {:agent (:seon.run/agent own) :task id :run (:seon.run/id own) :attached (:seon.run/start-ms own)}
+      holder (refused (str "task " id "'s branch " (:branch env) " is held by live agent " (:seon.run/agent holder)
+                           " working " (:seon.run/task holder) " (run " (:seon.run/id holder) ", model "
+                           (get-in holder [:seon.run/env :model]) "): its seon_done or an end frees it"))
+      :else
+      (let [aid (task/run-id id (inc (count (filter #(= id (:seon.run/task %)) (vals (task/runs db))))))
             ;; the session's agent continues (design agent-loop section 1)
             k (task/session-key db id)
             ag (c/spawn! sys (cond-> {:branch (:branch env) :task id :run aid} k (assoc :key k)))]
