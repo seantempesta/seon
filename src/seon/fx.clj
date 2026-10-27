@@ -166,7 +166,8 @@
   none (docs/merging.md)."
   {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
-  (into (sorted-map) (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+  ;; a plain map: the store encodes no sorted one, and the digest sorts its keys (seon.program/graph-index)
+  (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
                        [k (str/replace (sedn/encode v) checkout "<checkout>")])))
 
 (defn declared-refs

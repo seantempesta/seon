@@ -324,7 +324,7 @@
                    own]
                   {:dirs ["src" "test"] :proofs #{proof} :sets [(str ":seon.config.source/test-results-dir=" (pr-str dir))]})]
     (sh/sh "rm" "-rf" dir)
-    (is (= [#{:env :tree :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
+    (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (:value first-run)) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and stores both through root's :file owner, in the results directory")
     (is (= [{proof :pass reached :pass} 0 2] (:value judged)) "root's :tests (the judge's) runs nothing: both reused from it, the same results")

@@ -26,7 +26,7 @@
 
 (defn- schema [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
 
-(defn- digests [db env] (select-keys (program/reach-digests db {:env env :tree "t"}) ts))
+(defn- digests [db env] (select-keys (program/reach-digests db {:env env :tree "t" :config {}}) ts))
 
 (defn- scratch-dir []
   (let [d (str (System/getProperty "user.dir") "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
@@ -73,7 +73,7 @@
     (is (= '[app.pv-neg-test/half-test] (run-of (schema db :app.pv-calc/n "pos-int?") "e"))
         "a schema entry changed: the test reaching the contract naming it runs")
     (is (= (sort-by str ts) (run-of db "e2"))
-        "config, deps or a pin changed (:env, the inputs with no program facts): every test runs")))
+        "deps or a pin changed (:env, the inputs with no program facts): every test runs")))
 
 (deftest a-check-step-is-keyed-by-what-its-function-reaches
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
