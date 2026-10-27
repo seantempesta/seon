@@ -86,8 +86,8 @@
 (deftest search-costs-its-texts
   (cost/proof {:of 'seon.context/search :input 'seon.docs-cost-test/search-input
                :n "texts the branch holds (forms, sections, task plans and schema entries), a tenth of each holding the word"
-               :work "one scan of each kind's text attribute, then per match its names and a split of its text; the references of the best three vars; a sort of the matches"
+               :work "one scan of each kind's text attribute, lower-cased once, a count of the query's words in each (BM25 and its z-score), then per hit its names and its line; the references of the names in the query"
                :growth :linear
-               :per-n {:bytes 40000 :calls 4}
-               :fixed {:bytes 1500000 :calls 100}
+               :per-n {:bytes 24000 :calls 6.5}
+               :fixed {:bytes 100000 :calls 20}
                :sizes [100 300 1000 4000]}))

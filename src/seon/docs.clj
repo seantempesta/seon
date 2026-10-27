@@ -389,8 +389,8 @@
 (defn- named-hits
   "The hits of text v of entity e under attribute a, naming it as its kind does: [{:kind :name :rank}]
   (rank 0 when the name holds s, 1 when its doc or heading does, 2 else), kinds the ones asked; has? asks whether a text holds s."
-  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword] :string ifn?] [:vector :map]]}
-  [db e a kinds s has?]
+  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword] ifn?] [:vector :map]]}
+  [db e a kinds has?]
   (let [x (d/entity db e)
         in? (fn [t] (and t (has? (str t))))]
     (case a
@@ -417,11 +417,71 @@
         hits (for [a (distinct (keep text-attrs kinds))
                    {:keys [e v]} (d/datoms db :aevt a)
                    :let [low (if ci? (str/lower-case v) v) i (str/index-of low q)] :when i
-                   h (named-hits db e a kinds s has?)]
-               (let [i (if (= (count low) (count v)) i 0)] (assoc h :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))))]
+                   h (named-hits db e a kinds has?)]
+               (if (= (count low) (count v))
+                 (assoc h :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))
+                 h))]
     (->> hits (sort-by (juxt :rank (comp str :name)))
          (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)]))) [#{} []])
          second)))
+
+(defn words
+  "The words of text s, lower case: runs of letters and digits, a run split where a lower case letter or
+  a digit meets an upper case one (datomsDiff -> datoms diff), so an identifier (datoms-diff, seon.docs/grep,
+  :seon.run/outcome) is its parts. Distinct, in order."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [s]
+  (vec (distinct (re-seq #"[a-z0-9]+" (str/lower-case (str/replace s #"([a-z0-9])([A-Z])" "$1 $2"))))))
+
+(defn- occurrences
+  "How many times word w occurs in lower case text low."
+  {:malli/schema [:=> [:cat :string :string] :int]}
+  [low w]
+  (loop [i 0 n 0]
+    (if-let [j (str/index-of low w i)] (recur (+ j (count w)) (inc n)) n)))
+
+(defn tokens
+  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: BM25
+  (k1 1.2, b 0.75) over each text's occurrences of each word of `words`, a hit in its name counting three
+  times, scored against every text of those kinds, z its score in standard deviations above their mean (every
+  text, those holding no word scoring 0). Only the texts with z >= z-min are answered. The line is the
+  first holding a word. Cost: one scan of each kind's text attribute (lower-casing each text once) and, per
+  hit, its names; the one text ranking of my.agent/search."
+  {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
+  [db s kinds z-min]
+  (let [ws (words s)
+        attrs (distinct (keep text-attrs kinds))
+        docs (for [a attrs {:keys [e v]} (d/datoms db :aevt a)
+                   :let [low (str/lower-case v)
+                         tf (mapv #(occurrences low %) ws)]]
+               {:a a :e e :v v :low low :tf tf :len (count v)})
+        n (count docs)]
+    (if (or (empty? ws) (zero? n))
+      []
+      (let [avg (/ (reduce + (map :len docs)) (double n))
+            df (mapv (fn [i] (count (filter #(pos? (nth (:tf %) i)) docs))) (range (count ws)))
+            idf (mapv #(Math/log (+ 1.0 (/ (- n % -0.5) (+ % 0.5)))) df)
+            k1 1.2 b 0.75
+            score (fn [d] (reduce + (map (fn [t f] (if (pos? t) (* f (/ (* t (+ k1 1.0)) (+ t (* k1 (+ (- 1.0 b) (* b (/ (:len d) avg))))))) 0.0))
+                                         (:tf d) idf)))
+            scored (for [d docs :when (some pos? (:tf d))] (assoc d :score (score d)))
+            sum (reduce + (map :score scored))
+            sumsq (reduce + (map #(* (:score %) (:score %)) scored))
+            mean (/ sum n)
+            sd (Math/sqrt (max 0.0 (- (/ sumsq n) (* mean mean))))]
+        (if (zero? sd)
+          []
+          (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
+                           h (named-hits db (:e d) (:a d) kinds (fn [t] (some #(str/includes? (str/lower-case t) %) ws)))
+                           :let [low (:low d) v (:v d)
+                                 i (some->> ws (keep #(str/index-of low %)) seq (apply min))]]
+                       (cond-> (assoc h :z z :bm25 (:score d))
+                         (and i (= (count low) (count v)))
+                         (assoc :line (line-at v i) :at (inc (count (re-seq #"\n" (subs v 0 i)))))))]
+            (->> hits (sort-by (juxt (comp - :z) (comp str :name)))
+                 (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
+                         [#{} []])
+                 second)))))))
 
 (defn grep
   "The program vars whose recorded definition on db (:form/src) holds the string s, best first: a

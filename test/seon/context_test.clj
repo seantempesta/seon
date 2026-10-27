@@ -1116,32 +1116,61 @@
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
 
-(deftest search-fuses-exact-text-and-references-and-filters-by-plain-data
+(deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
-  (let [db (d/db-with (seon.docs-test/kinds-db)
+  (let [db (d/db-with (seon.docs-test/corpus-db)
                       [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
         s (fn ([q] (context/search db q {} nil)) ([q o] (context/search db q o nil)))
+        shown (fn [hits] (remove #(= :more (:kind %)) hits))
         kind (fn [hits k] (filter #(= k (:kind %)) hits))]
-    (is (= #{:var :section :task :schema} (set (map :kind (s "fusing")))) "every kind by default")
-    (is (= 6 (count (s "fusing"))) "the five texts and g's caller, by its reference")
-    (is (every? #(and (number? (:score %)) (set? (:by %)) (string? (:line %))) (s "fusing")) "plain data: kind, name, score, by, line")
-    (is (= [:section :section] (map :kind (s "fusing" {:kinds #{:section}}))) "kinds focus it")
-    (is (= 3 (count (s "fusing" {:k 2}))) "k bounds it, and a last entry counts what it left")
-    (let [more (last (s "fusing" {:k 2}))]
-      (is (= :more (:kind more)))
-      (is (= 4 (:left more)) "six hits, two shown")
-      (is (= 4 (reduce + (vals (:counts more)))) "per kind")
-      (is (str/includes? (:more more) "{:k 6}") "and the call that returns them"))
-    (is (every? :e (remove #(= :more (:kind %)) (s "fusing"))) "each hit is an entity")
+    (is (= #{:var :section} (set (map :kind (shown (s "fusing"))))) "functions and sections by default")
+    (is (= #{:var :section :task :schema} (set (map :kind (shown (s "fusing" {:kinds #{:var :section :task :schema}}))))) "the rest on request")
+    (is (every? #(and (number? (:score %)) (set? (:by %)) (:e %)) (shown (s "fusing"))) "plain data: kind, name, entity, score, by")
+    (is (= [:section :section] (map :kind (s "fusing" {:kinds #{:section} :min 0.0}))) "kinds focus it")
+    (is (every? #(= #{:text} (:by %)) (shown (s "fusing" {:by #{:text}}))))
+    (is (every? #(<= 0.0 (:relevance %) 1.0) (filter :relevance (s "fusing" {:min 0.0}))) "a text hit's relevance")
     (is (= (s "fusing") (s "fusing")) "deterministic")
-    (is (apply >= (map :score (remove #(= :more (:kind %)) (s "fusing")))) "best first")
-    (is (= [] (s "fusing" {:by #{:meaning}})) "no meaning without a vector: nothing")
-    (is (every? #(= #{:text} (:by %)) (s "fusing" {:by #{:text}})))
-    (is (= #{['app/g #{:text}] ['app/caller #{:refs}]} (set (map (juxt :name :by) (kind (s "fusing" {:kinds #{:var}}) :var)))) "the var by its text, its caller by the references")
-    (testing "the references of a var: who calls it"
+    (is (apply >= (map :score (shown (s "fusing")))) "best first")
+    (let [two (s "fusing" {:k 1 :min 0.0})]
+      (is (= 2 (count two)) "k bounds it, and a last entry counts what it left")
+      (is (= :more (:kind (last two))))
+      (is (pos? (:left (last two))))
+      (is (= (:left (last two)) (reduce + (vals (:counts (last two))))) "per kind")
+      (is (str/includes? (:more (last two)) ":k ") "and the call that returns them"))
+    (testing "the references of the names in the query: who calls a var"
       (is (= ['app/caller] (map :name (kind (s 'app/g {:by #{:refs}}) :var))))
-      (is (= #{:refs} (:by (first (s 'app/g {:by #{:refs}}))))))
-    (testing ":ns keeps the vars and tests of a namespace prefix"
-      (is (= #{'app/g 'app/caller} (set (map :name (kind (s "fusing" {:ns "app"}) :var)))))
+      (is (= ['app/caller] (map :name (kind (s "who calls app/g" {:by #{:refs}}) :var))) "a name inside a text seeds them too")
+      (is (= [] (kind (s "fusing" {:by #{:refs}}) :var)) "never the text hits' own"))
+    (testing ":ns keeps the vars of a namespace prefix"
+      (is (= ['app/g] (map :name (kind (s "fusing" {:ns "app"}) :var))))
       (is (= [] (kind (s "fusing" {:ns "other"}) :var)))
-      (is (seq (kind (s "fusing" {:ns "other"}) :section)) "and leaves the other kinds"))))
+      (is (seq (kind (s "fusing" {:ns "other"}) :section)) "and leaves the other kinds"))
+    (testing ":min leaves out a hit whose known relevance is below it"
+      (is (= [] (shown (s "fusing" {:min 1.0}))))
+      (is (= :more (:kind (first (s "fusing" {:min 1.0})))) "and says so"))))
+
+(defn- unit-vec [i]
+  (let [raw (mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))
+        n (Math/sqrt (reduce + (map #(* % %) raw)))]
+    (mapv #(/ % n) raw)))
+
+(deftest search-ranks-meaning-across-kinds-by-score-and-weights-the-rankings
+  (let [with-vec (fn [m i] (merge m (vector/pack (unit-vec i)) {:seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 4}))
+        db (d/db-with (ts/test-db)
+                      [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
+                       (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
+                       {:db/id "v" :var/name 'm/f :var/form "f"}
+                       (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)])
+        hits (context/search db "zzz" {:by #{:meaning} :k 10} (unit-vec 0))]
+    (is (= "m.md#a" (:name (first hits))) "the nearest of all kinds first, whichever kind it is")
+    (is (= #{:section :var} (set (map :kind hits))))
+    (is (every? #(= #{:meaning} (:by %)) hits))
+    (is (apply >= (map :score hits)) "ranked by one list, best first")
+    (is (= [:section] (distinct (map :kind (context/search db "zzz" {:by #{:meaning} :kinds #{:section}} (unit-vec 0))))))))
+
+(deftest rrf-scores-weigh-each-ranking
+  (let [plain (vector/rrf-scores [[:a] [:b]])
+        weighed (vector/rrf-scores [[:a] [:b]] [1.0 3.0])]
+    (is (= (:a plain) (:b plain)) "two firsts weigh alike")
+    (is (< (:a weighed) (:b weighed)) "a ranking's weight scales its share")
+    (is (< (Math/abs (- (:b weighed) (* 3.0 (:a weighed)))) 1e-12))))

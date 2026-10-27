@@ -161,38 +161,28 @@
      (if (contract/error? qv) qv (context/search db q opts qv)))))
 
 (defn similar
-  "What on this branch is nearest x by meaning (seon.vector/near): x a var, by its definition's
-  vector, or text, embedded as a search's query by root's :embed effect. [[name score] ...] best
-  first, k of them (10 unless given), each name a var, a wiki section's address or a task's id;
-  a var with no vector yet answers [], and a failed embedding its error."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] [:or [:vector [:tuple :any number?]] :map]]
-                            [:=> [:cat [:or :qualified-symbol :string] nat-int?] [:or [:vector [:tuple :any number?]] :map]]]}
-  ([x] (similar x 10))
-  ([x k]
-   (let [db (agent/db)
-         q (query-of db x)
-         name-of (fn [e] (let [x (d/entity db e)]
-                           (or (some-> (:var/_form x) first :var/name) (:seon.section/address x) (:seon.task/id x) e)))]
-     (cond (contract/error? q) q
-           (nil? q) []
-           :else (mapv (fn [[e s]] [(name-of e) s]) (vector/near db q k))))))
+  "What on this branch is nearest x by meaning, [[name score] ...] best first, k of them
+  (:seon.config.render/search unless given): (search x {:by #{:meaning} :k k}) without its kinds' extras. x a
+  var, a schema key or text; a failed embedding answers its error."
+  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector [:tuple :any number?]] :map]]
+                            [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] pos-int?] [:or [:vector [:tuple :any number?]] :map]]]}
+  ([x] (similar x (cfg/value :seon.config.render/search)))
+  ([x k] (let [r (search x {:by #{:meaning} :k k})]
+           (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
 
 (defn related
-  "The wiki sections nearest x by meaning, a text (embedded as a search's query by root's :embed
-  effect) or a var's definition, k of them (:seon.config.render/related unless given), each a
-  line at summary depth with the forms that read one whole and search further
-  (seon.context/related-view): how an agent refines, in its own words, what its page's related
-  part showed. A var with no vector yet says so; a failed embedding answers its
-  error."
+  "The wiki sections nearest x by meaning, a text or a var's definition, k of them
+  (:seon.config.render/related unless given), each a line at summary depth with the forms that read one
+  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning}})
+  shown as the page's related part shows its own. A failed embedding answers its error."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
                   [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
   ([x] (related x (cfg/value :seon.config.render/related)))
   ([x k]
-   (let [db (agent/db) q (query-of db x)]
-     (cond (contract/error? q) q
-           (nil? q) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view db {:sections (mapv #(:seon.section/address (d/entity db (first %)))
-                                                           (vector/near db q k {:of :seon.section/address}))})))))
+   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k)})]
+     (cond (contract/error? r) r
+           (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
+           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name) (take k)) r)})))))
 
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
