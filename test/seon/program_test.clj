@@ -451,6 +451,7 @@
     (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in (fx/inputs b) [:config :seon.env/schemas])) "but its digest changed")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
+    (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))
 
