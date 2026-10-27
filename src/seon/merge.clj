@@ -310,10 +310,14 @@
   store's, issued once (docs/storage.md#ids), so on any other branch they name the same
   entities and transactions: a merge adds what the branch wrote, never a copy. Platform
   records ride on no key, so they stay where they were written. Datahike keeps a carried
-  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom)."
+  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom). A carried form's
+  namespace entity is carried with it."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [base src ks data-attrs]
   (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
+        ;; a carried form names its namespace by ref: the namespace entity rides with it (a namespace made
+        ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
+        es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
         carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
@@ -329,13 +333,28 @@
         (into added)
         (into (for [t txs d (d/datoms src :eavt t)] d)))))
 
+(defn- own-namespaces
+  "tx, with a namespace the target already has under its own entity read there: the datoms of the
+  source's entity for it are dropped and the carried forms' :form/ns refs name the target's (two
+  branches that each made a namespace without an (ns) form hold it under two ids, and carrying
+  both would give one :ns/name two entities)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.db/tx-data] :seon.db/tx-data]}
+  [onto src tx]
+  (let [mine (into {} (for [d tx :when (= :ns/name (:a d))
+                            :let [t (pdb/eid onto :ns/name (:v d))] :when (and t (not= t (:e d)))]
+                        [(:e d) t]))]
+    (if (empty? mine)
+      tx
+      (vec (for [d tx :when (not (and (mine (:e d)) (not= :form/ns (:a d))))]
+             (if (and (= :form/ns (:a d)) (:added d) (mine (:v d))) (d/datom (:e d) :form/ns (mine (:v d)) (:tx d)) d))))))
+
 (defn merge-tx
   "The tx-data merging src's changes since base for program keys ks onto db onto: the
   datoms src wrote, as they are (carried-tx), and the Datahike declarations a merged schema
   entry's population needs on onto (as a registration installs them)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
   [onto base src ks data-attrs]
-  (let [tx (carried-tx base src ks data-attrs)]
+  (let [tx (own-namespaces onto src (carried-tx base src ks data-attrs))]
     (if (some #(= :schema (first %)) ks)
       (into tx (program/schema-declarations onto (program/schema-registry (program/schema-changes (d/db-with onto tx)))))
       tx)))
