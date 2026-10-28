@@ -269,7 +269,9 @@
         _ (when sent (agent/transact! [{:seon.turn/id id :seon.turn/sent sent}]))
         _ (agent/commit!)
         t1 (profile/now-ns)
-        r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn}
+        ;; the provider as the config stands at this turn (main's, over the task's own), never one copied at boot
+        r (agent/fx! :model (cond-> {:messages messages :task (:seon.task/id t) :turn turn
+                                     :provider (cfg/provider-at (agent/heard-main) (agent/db) (:seon.task/id t))}
                               model-name (assoc :model model-name))
                      {})
         model-ms (long (profile/ms-since t1))

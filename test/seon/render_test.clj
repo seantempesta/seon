@@ -391,7 +391,7 @@
         in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))))
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's task list: its agents' cards")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 1 (count (in root "#c-rows"))) "root's list: its own evaluation"))
@@ -1004,7 +1004,8 @@
         text (seon.print/text (vary-meta page assoc :seon.print/full true))
         at #(str/index-of text %)]
     (is (some? (at "Already green on main: demo/f-test")) "the page says the proof is green on main")
-    (is (< (at "Already green on main") (at (subs walked-plan 0 30))) "before the task's plan")))
+    ;; the plan's words (its `code` spans are drawn as code, so its backticks are no text of the page)
+    (is (< (at "Already green on main") (at "answer the tree")) "before the task's plan")))
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
@@ -1281,4 +1282,50 @@
     (is (str/includes? html "app.okt/bad-test") "the red test is named")
     (is (str/includes? html "the sum") "with its first failing assertion")
     (is (str/includes? html "died: ") "the dead child is listed")
-    (is (not (str/includes? html "child died")) "and not drawn as a red's failure")))
+    (is (not (str/includes? html "child died")) "and not drawn as a red's failure")
+    ;; an agent's (select-keys (my.agent/prove) [:results ..]) keeps the schema in its metadata and drops
+    ;; :reports: every tile of a1's page threw on proofs/failures' contract (2026-10-28)
+    (let [picked (select-keys (with-meta run {:seon.render/schema :seon.test/proved}) [:pass :fail :proofs])]
+      (is (= :seon.test/proved (r/schema-of picked nil)))
+      (is (str/includes? (h/html (r/html {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
+
+(deftest markdown-draws-each-block
+  ;; docs/render.md#prose-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
+  ;; each block's text as written (its backticks pick what a citation pulls, and the model reads it)
+  (let [h (h/html (ui/markdown "# Title\n\nA `code` and **bold** line\ncontinued.\n\n- one\n  more\n- two\n\n1. first\n2. second\n\n```clojure\n(+ 1 2)\n```\n\n---\n\ntail"))]
+    (is (str/includes? h "<h3") "a heading at its level")
+    (is (str/includes? h "A `code` and **bold** line\ncontinued.") "a paragraph as written")
+    (is (str/includes? h "<ul") "a bulleted list")
+    (is (str/includes? h "<ol") "a numbered list stays numbered")
+    (is (= 4 (count (re-seq #"<li" h))) "two bullets and two numbered items")
+    (is (str/includes? h "one\n  more") "a continuation line stays with its item")
+    (is (str/includes? h "(+ 1 2)") "fenced code kept")
+    (is (not (str/includes? h "```")) "fence marks are not text")
+    (is (str/includes? h "<hr") "a break")
+    (is (str/includes? h "tail") "nothing after the fence is lost")))
+
+(deftest a-task-title-is-its-name-in-words
+  ;; docs/render.md#the-page: a task's or a run's id as its title
+  (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
+  (is (= "A long string" (ui/task-title "seon.print/a-long-string#3")))
+  (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
+
+(deftest an-agents-card-says-what-it-works-on
+  ;; docs/render.md#the-page: root's card of an agent: its task in words, its run's turns of its cap, how
+  ;; it ended, each proof's result; an agent with no run says so
+  (let [c {:agents {1 {:seon.agent/id :a3 :seon.agent/status :running
+                       :runs {7 {:seon.run/id "seon.print/a-long-string#2" :seon.run/start-ms 2 :seon.run/turns 3 :seon.run/max-turns 10
+                                 :seon.run/status :running :seon.run/model "deepseek-flash"
+                                 :seon.run/results #{{:seon.proof/test 'seon.print-test/ok-test :seon.proof/status :pass}
+                                                     {:seon.proof/test 'seon.print-test/bad-test :seon.proof/status :fail}}}
+                              6 {:seon.run/id "seon.print/older#1" :seon.run/start-ms 1}}}
+                    2 {:seon.agent/id :a4 :seon.agent/status :idle}}}
+        card (fn [eid] (h/html (ui/agent-card {:seon.ctx/ctx c} eid)))
+        a3 (card 1)]
+    (is (str/includes? a3 "A long string") "its newest run's task, in words")
+    (is (not (str/includes? a3 "Older")) "not an older run's")
+    (is (str/includes? a3 "turn 3 of 10") "its turns of its cap")
+    (is (str/includes? a3 "✓ ok-test") "a green proof")
+    (is (str/includes? a3 "✗ bad-test") "a red proof")
+    (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
+    (is (str/includes? (card 2) "no task yet"))))
