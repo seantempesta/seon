@@ -123,7 +123,6 @@
   [:seon.config.render/part-budget :seon.config.render/part-budget]
   [:seon.config.render/form-budget :seon.config.render/form-budget]
   [:seon.config.render/context-budget :seon.config.render/context-budget]
-  [:seon.config.render/history-budget :seon.config.render/history-budget]
   [:seon.config.ctx/window :seon.config.ctx/window]
   [:seon.config.ctx/callers :seon.config.ctx/callers]
   [:seon.config.ctx/cited-by :seon.config.ctx/cited-by]

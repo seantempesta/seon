@@ -43,6 +43,26 @@
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
+(deftest a-definition-inside-a-top-level-do-is-program
+  ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
+  ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
+  ;; spent 39 turns finding out why (docs/prompt.md)
+  (let [[r nested stopped after branch]
+        (at/in-agent (fn [{:keys [ns task]}]
+                       [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
+                        (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
+                        (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
+                        (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
+                        {:op :eval :agent "root"
+                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
+    (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
+    (is (= 2 (:value r)) "the do's value is its last form's")
+    (is (= 6 (:value nested)) "a do inside a top-level do is its forms too")
+    (is (str/includes? (str (:text stopped)) "boom") "an error inside the do is the request's")
+    (is (= [true false] (:value after)) "the forms after the error never ran")
+    (is (= [true true] (:value branch)) "the branch's program holds c and d")))
+
 (deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
   ;; agent's reply to root carries the text, never the live values (which no wire encodes)

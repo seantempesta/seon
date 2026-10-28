@@ -50,12 +50,16 @@
     (if-not f
       (contract/error :seon.model/no-script #'seon.model/scripted
                       (str "the scripted provider's " script " is not on this process's source roots") {:script script})
-      ;; a script answers its call's code, or the code and the prose the eval tool takes
+      ;; a script answers its call's code, the code and the prose the eval tool takes, or a
+      ;; reply's several calls (:calls, each code)
       (let [out (f request)
-            {text :code thinking :thinking} (if (string? out) {:code out} out)]
-        {:text "" :tool-calls [(cond-> {:id (str "call-" (:turn request)) :code (:text (reader/forgive text))} thinking (assoc :prose thinking))]
+            {text :code thinking :thinking calls :calls} (if (string? out) {:code out} out)
+            call (fn [id code] {:id id :code (:text (reader/forgive code))})]
+        {:text "" :tool-calls (if calls
+                                (vec (map-indexed #(call (str "call-" (:turn request) "-" %1) %2) calls))
+                                [(cond-> (call (str "call-" (:turn request)) text) thinking (assoc :prose thinking))])
          :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
-         :completion-tokens (select/estimate text) :estimated true :ms (profile/ms-since t0)}))))
+         :completion-tokens (select/estimate (or text (apply str calls))) :estimated true :ms (profile/ms-since t0)}))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -92,11 +96,11 @@
   "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
   {:type "function"
    :function {:name "eval"
-              :description "Evaluate Clojure forms at your REPL, in order. The response is {:handle :value :out :err :ex}: the last form's value, what the forms wrote, and the exception that stopped them; result/e<n>, its handle, holds it."
+              :description "Evaluate one Clojure form at your REPL. A reply may make several calls; they run in order, and a call after one that threw is not run. The response is {:handle :value :out :err :ex}: the form's value, what it wrote, and its error; result/e<n>, its handle, holds it."
               ;; prose first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
                            :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}
-                                                  :code {:type "string" :description "Clojure forms"})
+                                                  :code {:type "string" :description "One Clojure form"})
                            :required ["prose" "code"]}}})
 
 (defn- wire-message

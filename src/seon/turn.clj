@@ -294,17 +294,22 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            calls (vec (map-indexed (fn [i {:keys [id code prose]}]
-                                      (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
-                                            shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))]
-                                        {:id id :code code :prose shown
-                                         :response (evaluated! (:text (reader/forgive code))
-                                                                     (cond-> {:origin :model :call-id id :call i}
-                                                                       shown (assoc :prose shown)
-                                                                       content (assoc :content content)
-                                                                       (not (str/blank? prose)) (assoc :call-prose prose)
-                                                                       (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))}))
-                                    (:tool-calls c)))
+            ;; a call after one that threw is not run: its result says so (seon.repl/not-run, docs/prompt.md)
+            calls (reduce (fn [acc [i {:keys [id code prose]}]]
+                            (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
+                                  shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))
+                                  req (cond-> {:origin :model :call-id id :call i}
+                                        shown (assoc :prose shown)
+                                        content (assoc :content content)
+                                        (not (str/blank? prose)) (assoc :call-prose prose)
+                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c)))
+                                  threw (some #(when (:ex (:response %)) (:id %)) acc)
+                                  src (:text (reader/forgive code))]
+                              (conj acc (if threw
+                                          {:id id :code code :prose shown :not-run true
+                                           :response (let [r (repl/not-run src req threw)] (agent/commit!) r)}
+                                          {:id id :code code :prose shown :response (evaluated! src req)}))))
+                          [] (map-indexed vector (:tool-calls c)))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
@@ -326,7 +331,7 @@
                                                             (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count calls)
-                                   :seon.turn/errors (count (filter :ex rs))
+                                   :seon.turn/errors (count (filter :ex (map :response (remove :not-run calls))))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                                    :seon.turn/ms (+ model-ms eval-ms)})
                             (:truncated? c) (assoc :seon.turn/truncated true)

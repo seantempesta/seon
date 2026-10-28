@@ -5,6 +5,12 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-28 rulings
 The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
 
+### The model is sent the whole conversation; no history budget (owner, 2026-10-28)
+"who made a 32k history budget? Remove it I never approved that". A session chose 32,000 tokens on 2026-10-21; it dropped the agent's own evals while page re-renders filled the request. Every request now sends every record whole. Stated in: `seon.context/request`, docs/render.md.
+
+### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28)
+A reply's text heads its block of evals; each eval is one tool call with `prose` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run"; a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
+
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
 "I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: AGENTS §4.
 

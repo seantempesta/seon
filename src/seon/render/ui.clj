@@ -1437,8 +1437,7 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, the page at a turn
-  (whole, or what changed since the turn before), an eval, an eval sent collapsed to its line, a
-  message, the history the budget left out: every ref kind
+  (whole, or what changed since the turn before), an eval, a message: every ref kind
   seon.context/request names (:seon.turn/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t c]]
@@ -1446,9 +1445,7 @@
     :section (str "the help page (its section, entity " x ") as of t " t)
     :page (if t (str "what changed of the page from commit " t " to " c) (str "the page whole at commit " c))
     :eval (str "eval " x)
-    :line (str "eval " x ", sent as its one line")
-    :message (str "message " x)
-    :history (str x " earlier records the history budget left out")))
+    :message (str "message " x)))
 
 (defn- sent-parts-html
   "Parts [[ref messages]] of a sent request, each beside the record that made it, each message

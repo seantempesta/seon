@@ -814,19 +814,14 @@
   then its tool message, the response printed now (seon.print/record-text, opts :fold: its value or
   output an earlier record showed, as the form that reads it there, `folded`; opts :same-as: the
   handle of an earlier eval of the same code that answered the same, shown beside the answer
-  whole), or with opts
-  :collapsed its handle and its value in one line (:line, which a record with a value or an
-  error holds); anyone else's (the user's) is one user message
+  whole); anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed."
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
   [{:seon.eval/keys [by record]} opts]
   (let [{:keys [code prose content call-prose reasoning call-id call]} record
-        ;; collapsed (opts :collapsed, an older one the history keeps small): its handle and its value in one line
-        text (if (:collapsed opts)
-               (str (get-in record [:response :handle]) " ⇒ " (:line record))
-               (print/record-text (cond-> record
-                                    (seq (:fold opts)) (update :response folded (:fold opts))
-                                    (:same-as opts) (assoc-in [:response :same-as] (:same-as opts)))))]
+        text (print/record-text (cond-> record
+                                  (seq (:fold opts)) (update :response folded (:fold opts))
+                                  (:same-as opts) (assoc-in [:response :same-as] (:same-as opts))))]
     (if call-id
       ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
       ;; (a record with neither, from before the prose argument, replays its prose as the text)
@@ -865,17 +860,11 @@
                  :when form]
              [k (second form)])))
 
-(defn- cost
-  "Tokens a part (its messages) sends, by the printer's sizer: each message's content and its calls' code."
-  {:malli/schema [:=> [:cat [:vector :seon.model/message]] :int]}
-  [ms] (select/estimate (str/join (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m)))) ms))))
-
 (defn printed-run
   "The run's records new since cache (items, [ref v k tx] in tx order, ref [:eval id] or [:message
   id]) printed as the conversation sends them, each once (cache, what the run's earlier requests
   printed: content-keyed reuse by the record's id, AGENTS section 5): an eval whole (its value or
-  output an earlier record showed, as the form that reads it there: its ref [:eval id fold]) and
-  collapsed (its handle and one line), each with its cost; a page item ([:page a c0 c1], its
+  output an earlier record showed, as the form that reads it there: its ref [:eval id fold]); a page item ([:page a c0 c1], its
   messages a delay: `world`) drawn only when not printed before; and an eval of code an earlier
   eval of the run ran, with the same answer, whole beside that one's handle (its ref [:eval id
   {:same-as handle}]: the agent asked again and is told so on the answer it reads, where a fold
@@ -885,22 +874,19 @@
   older message is the same bytes (the provider's cache). An item already printed is skipped.
   Answers the cache: {:ids :parts {id part} :seen :canon :codes :tx :pages} (:pages, {commit page}: the
   page of the newest page item, `world` takes the next read's earlier page from it; :codes, each code's last
-  eval: its handle and its answer's hash), each part {:ref :whole :collapsed
-  :cost [whole collapsed] :call}, a folded one also :fold and :plain (it unfolded), :tx the newest
-  record's."
+  eval: its handle and its answer's hash), each part {:ref :whole}, :tx the newest record's."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
   [items cache]
   (reduce (fn [{:keys [seen canon] :as c} [[kind id] v k tx]]
-            (let [part (fn [ref whole collapsed]
-                         {:ref ref :whole whole :collapsed collapsed :cost [(cost whole) (cost collapsed)] :call (:call (first whole) 0)})
+            (let [part (fn [ref whole] {:ref ref :whole whole})
                   c (cond-> (update c :ids conj id) tx (assoc :tx tx))]
               (cond
                 (get-in c [:parts id]) (update c :ids pop)
-                (= :message kind) (let [ms (message-messages v {})] (assoc-in c [:parts id] (part [:message id] ms ms)))
+                (= :message kind) (assoc-in c [:parts id] (part [:message id] (message-messages v {})))
                 ;; the page at a turn: drawn only now, when no earlier request printed it (v, a delay)
                 ;; and its page kept (:pages, the newest only), so the next read's diff draws no page twice
                 (= :page kind) (let [ms @v m (meta ms)]
-                                 (cond-> (assoc-in c [:parts id] (part (into [:page] id) (with-meta ms nil) (with-meta ms nil)))
+                                 (cond-> (assoc-in c [:parts id] (part (into [:page] id) (with-meta ms nil)))
                                    (:page m) (assoc :pages {(:commit m) (:page m)})))
                 :else
                 (let [rec (:seon.eval/record v) r (:response rec)
@@ -909,61 +895,17 @@
                       same (when-let [[h a] (get-in c [:codes (:code rec)])] (when (= a answer) h))
                       c (cond-> c (not same) (assoc-in [:codes (:code rec)] [(:handle r) answer]))]
                   (if same
-                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (eval-messages v {:same-as same}) (eval-messages v {:collapsed true})))
+                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (eval-messages v {:same-as same})))
                 (let [has? (and (contains? r :value) (coll? (:value r)))
                       ;; an equal earlier value stands for this one (seen is by identity)
                       x (when has? (get canon [(type (:value r)) (:value r)] (:value r)))
                       r (cond-> r has? (assoc :value x))
                       fold (if (:printed rec) {} (fold-of r seen canon))]
                   (-> c
-                      (assoc-in [:parts id] (cond-> (part (cond-> [:eval id] (seq fold) (conj fold))
-                                                          (eval-messages v {:fold fold}) (eval-messages v {:collapsed true}))
-                                              ;; and as it reads unfolded: sent so while what it folds to is not shown whole
-                                              (seq fold) (assoc :fold fold :plain (eval-messages v {}))))
+                      (assoc-in [:parts id] (part (cond-> [:eval id] (seq fold) (conj fold)) (eval-messages v {:fold fold})))
                       (assoc :seen (if (:printed rec) seen (print/seen seen r))
                              :canon (cond-> canon has? (assoc [(type x) x] x))))))))))
           (or cache {:ids [] :parts {} :seen nil :canon {} :codes {}}) items))
-
-(defn- as-sent
-  "Part p (printed-run's) as a request sends it, whole-ids the evals it sends whole: folded (its
-  value or output as the form that reads an earlier record's, :fold) only while each record it
-  folds to is sent whole (folds point back, so those are known), else unfolded (:plain), its ref
-  without the fold. Answers [ref messages]."
-  {:malli/schema [:=> [:cat :map [:set :string]] [:tuple :any [:vector :seon.model/message]]]}
-  [{:keys [ref whole fold plain]} whole-ids]
-  (if (every? #(contains? whole-ids (name %)) (vals fold)) [ref whole] [[:eval (second ref)] plain]))
-
-(defn- kept
-  "Which of the parts (each {:cost [whole collapsed] :call}, oldest first) the history budget sends:
-  the parts walked oldest first, holding two cuts, where the collapsed parts (a result's handle and
-  one line) begin, every part before left out, and where the whole ones begin. When what is sent
-  passes the budget, the oldest whole parts collapse until the whole ones fit in half of it, then,
-  if all is still over half, the oldest collapsed are left out until it fits: the cuts only advance,
-  in jumps that leave room for many turns, so between jumps each request is the one before and
-  what was added (the provider's prefix cache; a cut recomputed each turn moved back and forth, and
-  a resumed run hit 23% of 1.1M tokens). A cut never starts inside a reply (a part continuing
-  the call before it), and the newest part is whole. A function of the parts alone: a cold read
-  sends what a warm one does. Answers [picks dropped]: :whole or :line for each part from the first
-  sent, and how many older ones were left out."
-  {:malli/schema [:=> [:cat [:vector :map] :int] [:tuple [:vector [:enum :whole :line]] nat-int?]]}
-  [parts budget]
-  (let [n (count parts)
-        sums (fn [k] (vec (reductions + 0 (map #(nth (:cost %) k) parts))))
-        whole (sums 0) small (sums 1)
-        span (fn [sv a b] (- (nth sv b) (nth sv a)))
-        ;; a cut moved to i, then on past any part that continues a reply, at most to j
-        start (fn [i j] (or (first (drop-while #(pos? (:call (nth parts %))) (range i (inc j)))) j))
-        half (quot budget 2)
-        [l w] (reduce (fn [[l w] j]
-                        (let [sent #(+ (span small %1 %2) (span whole %2 (inc j)))]
-                          (if (<= (sent l w) budget)
-                            [l w]
-                            (let [w (start (or (first (filter #(<= (span whole % (inc j)) half) (range w (inc j)))) j) j)
-                                  l (if (<= (sent l w) half) l
-                                        (start (or (first (filter #(<= (sent % w) half) (range l (inc w)))) w) w))]
-                              [l w]))))
-                      [0 0] (range n))]
-    [(into (vec (repeat (- w l) :line)) (repeat (- n w) :whole)) l]))
 
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals (not a context read's: that
@@ -1063,20 +1005,18 @@
   "The agent's request, a render of its record: agent a (its entity map, :db/id) for the turn
   basis b on db (opts :db :basis :help, and :help-ref, the record the system prompt renders): the system prompt (system-text), then the session in tx order (`records`, printed
   once by printed-run, opts :printed the run's earlier requests' prints, answered again as
-  :printed; within the history budget, `kept`): each eval (eval-messages) and message
+  :printed; all of it, as a REPL keeps its scrollback): each eval (eval-messages) and message
   (message-messages), and at each model turn of the session, the page: the first turn's whole,
   each later one's what changed since the turn before (`world`: the page's parts by key and ctx's
   diff), each at the commit its turn's request was made on, after the turn's record. So the
   session's first request reads the page whole and each later one what changed, each change told
-  once, and every request is the one before and what was added. How many earlier parts the budget
-  left out goes just after the system prompt. An outside agent's read (origin :outside): the
+  once, and every request is the one before and what was added. An outside agent's read (origin :outside): the
   system prompt and the page, whole at its first read and after it what changed since the read
   before. Answers {:messages
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
   records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
-  as of t; [:eval id] (with its fold); [:line id], an eval sent collapsed; [:message id]; [:page a
-  c0 c1], the page at commit c1 (c0 nil) or what changed since c0; [:history n], the n parts the
-  budget left out. Called by the turn."
+  as of t; [:eval id] (with its fold); [:message id]; [:page a c0 c1], the page at commit c1 (c0
+  nil) or what changed since c0. Called by the turn."
   {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
   [a {:keys [db basis help help-ref printed pages]}]
   (let [e (:db/id a)
@@ -1097,17 +1037,10 @@
         rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e since)) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs pages))
         cache (printed-run items (when model? printed))
-        parts (mapv #(get-in cache [:parts %]) (:ids cache))
-        [picks dropped] (kept parts (cfg/value :seon.config.render/history-budget))
-        whole-ids (into #{} (keep (fn [[{:keys [ref]} pick]] (when (and (= :whole pick) (= :eval (first ref))) (second ref)))) (map vector (drop dropped parts) picks))
-        sent (mapv (fn [{:keys [ref collapsed] :as p} pick] (if (= :line pick) [[:line (second ref)] collapsed] (as-sent p whole-ids)))
-                   (drop dropped parts) picks)
-        note (when (pos? dropped) {:role "user" :content (pr-str {:history {:left-out dropped}})})]
-    ;; how many parts the budget left out, just after the system prompt: it changes only when the
-    ;; cut jumps, so every message after it is the one before and what was added
-    {:messages (-> [{:role "system" :content help}] (cond-> note (conj note)) (into (mapcat second) sent))
+        parts (mapv #(get-in cache [:parts %]) (:ids cache))]
+    {:messages (into [{:role "system" :content help}] (mapcat :whole) parts)
      :printed cache
-     :sent (-> [help-ref] (cond-> note (conj [:history dropped])) (into (map first) sent))}))
+     :sent (into [help-ref] (map :ref) parts)}))
 
 ;; ---- a turn's basis: what its context was built from, and the text made from it again ----
 
@@ -1116,10 +1049,9 @@
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), an eval by eval-messages with the
-  fold its ref names (what it showed of an earlier record, as the form that reads it there) or
-  collapsed ([:line id]), a message by its render, the page at a turn or what changed since the
-  turn before ([:page a c0 c1], `world`, re-derived from the branch at those commits),
-  the history note by its count: what the request sent, the same bytes. No request is built
+  fold its ref names (what it showed of an earlier record, as the form that reads it there), a
+  message by its render, the page at a turn or what changed since the turn before ([:page a c0
+  c1], `world`, re-derived from the branch at those commits): what the request sent, the same bytes. No request is built
   again: the same records, rendered."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
   [db refs]
@@ -1129,9 +1061,7 @@
                    :section [{:role "system" :content (system-text (d/as-of db t))}]
                    :eval (eval-messages (ev x) (cond (:same-as t) t (map? t) {:fold t} :else {}))
                    :page (world db x t (nth ref 3))
-                   :line (eval-messages (ev x) {:collapsed true})
-                   :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {})
-                   :history [{:role "user" :content (pr-str {:history {:left-out x}})}])])
+                   :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))])
           refs)))
 
 (defn messages-tokens
@@ -1146,7 +1076,7 @@
   "Where a turn's request went, in tokens (the printer's sizer over each part's content and its
   calls' code), from its parts as parts-of reads them back from the refs the turn recorded: the
   system prompt (:section), the page (each turn's, whole or what changed: :page) and the
-  conversation (each eval, whole or collapsed, each message, the history note).
+  conversation (each eval and each message).
   {:system :conversation :page}."
   {:malli/schema [:=> [:cat [:vector [:tuple :any [:vector :seon.model/message]]]]
                   [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]}

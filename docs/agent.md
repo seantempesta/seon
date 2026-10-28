@@ -50,7 +50,6 @@ The turn's part, last, made again before each request:
 - `:test-run`: the test run itself failing (a timeout, a dead fork); no test result is real until it runs.
 - `:unmerged`: on a merge task, the entries to resolve.
 - Beside the task, its views, each drawn when what it reads moves (main's commit or your merge base's), never per turn: on a task that merges itself, `merge` (what main changed since your merge base, `:main-moved`, and which of those you changed too, `:conflicts`: what merging main would leave unmerged; once your proofs pass and nothing conflicts, your run ends when merging main brings nothing new, and root merges your branch), `caused` (what your own work made wrong, which refuses done, and `:attention`: the wiki sections your code changes made stale, to read and probably fix, never a reason to refuse), `without a contract` (the functions you defined with no ``:malli/schema``), `its merge carries` (every var you added, changed and removed and every schema you changed: anything the task does not need, put back). Your tests: `(my.agent/prove)` runs them; `(my.agent/deferred)` lists the process tests root runs when it asks.
-- `:history`: how many earlier records the history budget left out of the conversation. Older records come collapsed before that: a result as its handle and its value in one line (`result/e12 ⇒ [0 1 2 …]`); evaluate the handle to read it whole.
 
 ## The REPL
 

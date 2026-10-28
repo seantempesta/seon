@@ -855,12 +855,10 @@
     (is (str/includes? opened "&amp;open=false") "the opened form is the button that closes it")))
 
 (deftest every-sent-part-names-its-record
-  ;; root, 2026-10-26: a [:line id] part (an eval sent collapsed, seon.context/request) had no clause
-  ;; in the debug page's source line, so every pass of the render proc threw and no page answered;
-  ;; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:page 12 nil #uuid "00000000-0000-0000-0000-000000000001"] [:page 12 #uuid "00000000-0000-0000-0000-000000000001" #uuid "00000000-0000-0000-0000-000000000002"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:line "e5"] [:message "m1"] [:history 12]]]
-    (is (string? (#'ui/source ref)) (pr-str ref)))
-  (is (= "eval e5, sent as its one line" (#'ui/source [:line "e5"]))))
+  ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
+  ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
+  (doseq [ref [[:section 397 536870918] [:page 12 nil #uuid "00000000-0000-0000-0000-000000000001"] [:page 12 #uuid "00000000-0000-0000-0000-000000000001" #uuid "00000000-0000-0000-0000-000000000002"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
+    (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-view-that-throws-answers-its-page-with-the-error
   ;; root, 2026-10-26: a render that threw stopped every pass of the render proc, and every page
