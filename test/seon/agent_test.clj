@@ -385,6 +385,12 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(defn- statuses
+  "The code of {test status} over the run that code x answers, every test it ran or reused (its
+  :digests): an answer carries only its proofs' passes and its reds (seon.proofs/answer), so every
+  other test it holds a digest of was green."
+  [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
+
 (deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
   ;; task seon.agent/an-agent-holds-mains-tests: the agent holds main's whole suite, and its
   ;; test run (root's :tests request, the one the judge sends) selects what the done rule
@@ -394,7 +400,7 @@
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
-                           {:op :eval :agent "root" :code (str "(seon.proofs/results @(seon.root/run-tests! sys :" (:agent %) "))")})
+                           {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
                           {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
@@ -442,8 +448,8 @@
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:key r)])")
-        own "(select-keys (prove) [:results :ran :reused])"
+        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [" (statuses "r") " (:key r)])")
+        own (str "(let [p (prove)] {:results " (statuses "p") " :ran (:ran p) :reused (:reused p)})")
         ;; how many of the two tests' verdicts the cache holds at the digests the agent's plan gives
         ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
         stored (str "(count (seon.fx/stored-results (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
@@ -710,11 +716,11 @@
                                       {:op :eval :agent "root"
                                        :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                   " (let [db @(:conn sys)]"
-                                                  "  [(keys (seon.fx/last-ms '[demo-test/t]))"
+                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/demo-test\")) .list vec)"
                                                   "   (:seon.run/outcome (get (seon.task/runs db) " (pr-str run) "))]))")}])
                                    {:own-root? true})
         [cached outcome] (:value seen)]
-    (is (= '[demo-test/t] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
+    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
     (is (= :green outcome))))
 
 (deftest an-agent-finds-no-repository
