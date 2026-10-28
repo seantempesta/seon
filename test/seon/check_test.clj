@@ -403,25 +403,25 @@
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's exit status alone (contracts and smoke are steps of
-  ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and appends
-  ;; its line to the merge log itself (so a line cannot say green over a red exit);
-  ;; bin/prove --merge-verdict runs that part alone
+  ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and prints
+  ;; its line for the merge commit's message (so a line cannot say green over a red exit; git keeps
+  ;; every merge's numbers, docs/merging.md); bin/prove --merge-verdict runs that part alone
   (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
-        log (str dir "/merge-log.md")
-        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
+        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st)))
+        line-of (fn [r] (first (filter #(str/includes? % " bin/prove --merge ") (str/split-lines (:out r)))))]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"
                                       "RED seon.x-test/a-red {:pass 1, :fail 1, :error 0}\nPROVE FAILED\n"))
-    (spit log "x one earlier line, 195 process keys left out\n")
     (try
-      (let [r (run 1) line (last (str/split-lines (slurp log)))]
+      (let [r (run 1) line (line-of r)]
         (is (= 1 (:exit r)) (:out r))
         (is (str/ends-with? (str/trim (:out r)) "MERGE FAILED"))
-        (is (str/includes? line "MERGE FAILED; prove FAILED (exit 1)") line)
-        (is (str/includes? line "reds: RED seon.x-test/a-red") line)
-        (is (str/includes? line "main's last line: 195") line))
-      (let [r (run 0) line (last (str/split-lines (slurp log)))]
+        (is (str/includes? (str line) "MERGE FAILED; prove FAILED (exit 1)") (:out r))
+        (is (str/includes? (str line) "reds: RED seon.x-test/a-red") (:out r))
+        (is (re-find #"main's last line: (\d+|none recorded)\)$" (str line)) "the left-out count of main's last merge message, or none recorded"))
+      (let [r (run 0) line (line-of r)]
         (is (zero? (:exit r)))
-        (is (str/includes? line "MERGE OK") line))
+        (is (str/includes? (str line) "MERGE OK") (:out r)))
+      (is (not (.exists (java.io.File. (str dir "/merge-log.md")))) "nothing is written beside the run")
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
