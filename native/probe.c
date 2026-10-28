@@ -96,42 +96,49 @@ long e13_poll(int kq, int fd) {
 #include <signal.h>
 #include <unistd.h>
 static volatile pid_t e13_watched = 0;
+static int e13_kq = -1;  // the running watch's kqueue; closing it ends that watch
 static void e13_end(void) {
   if (getpgrp() == getpid()) kill(0, SIGKILL);
   kill(getpid(), SIGKILL);
 }
-// arg: the watched pid times 2, plus 1 when it is this process's parent (so a parent already gone is seen)
 static void *e13_watch_main(void *arg) {
-  long a = (long)arg;
-  pid_t pid = (pid_t)(a / 2);
-  int kq = kqueue();
-  if (kq < 0) return NULL;
-  struct kevent ch, ev;
-  EV_SET(&ch, pid, EVFILT_PROC, EV_ADD, NOTE_EXIT, 0, NULL);
-  // ESRCH: gone before it was watched
-  if (kevent(kq, &ch, 1, NULL, 0, NULL) < 0) { if (errno == ESRCH) e13_end(); close(kq); return NULL; }
-  if ((a & 1) && getppid() != pid) e13_end();
+  int kq = (int)(long)arg;
+  struct kevent ev;
   for (;;) {
     int r = kevent(kq, NULL, 0, &ev, 1, NULL);
     if (r > 0) e13_end();
-    if (r < 0 && errno != EINTR) { close(kq); return NULL; }
+    // EBADF: a later e13_end_with closed this kqueue and watches instead
+    if (r < 0 && errno != EINTR) return NULL;
   }
 }
-// The thread is made with every signal blocked: a signal for the process (SIGINFO, SIGIO, SIGALRM) is
-// never handled on a thread Chez did not make.
+// One watch a process: the pid is registered here, at once (a pid already gone ends this process now;
+// one that is this process's parent is checked again after, as reparenting shows its death), and the
+// thread only waits. A new watch replaces the running one: its kqueue is closed, so its wait ends. The
+// thread is made with every signal blocked: a signal for the process (SIGINFO, SIGIO, SIGALRM) is never
+// handled on a thread Chez did not make.
 static long e13_arm(pid_t pid, long parent) {
+  int kq = kqueue();
+  if (kq < 0) return -1;
+  struct kevent ch;
+  EV_SET(&ch, pid, EVFILT_PROC, EV_ADD, NOTE_EXIT, 0, NULL);
+  if (kevent(kq, &ch, 1, NULL, 0, NULL) < 0) { close(kq); if (errno == ESRCH) e13_end(); return -1; }
+  if (parent && getppid() != pid) e13_end();
   pthread_t t; sigset_t all, old;
   sigfillset(&all);
   pthread_sigmask(SIG_BLOCK, &all, &old);
-  int r = pthread_create(&t, NULL, e13_watch_main, (void *)((long)pid * 2 + (parent ? 1 : 0)));
+  int r = pthread_create(&t, NULL, e13_watch_main, (void *)(long)kq);
   pthread_sigmask(SIG_SETMASK, &old, NULL);
-  if (r != 0) return -1;
+  if (r != 0) { close(kq); return -1; }
   pthread_detach(t);
+  int was = e13_kq;
+  e13_kq = kq;
+  if (was >= 0) close(was);
   return 0;
 }
 // Watch pid (parent: 1 when pid is this process's parent, so a parent already gone is seen). 0, or -1.
 long e13_end_with(int pid, int parent) { e13_watched = pid; return e13_arm(pid, parent); }
-// In a forked child: watch again what the parent watched (no thread survives a fork). 0 when nothing is watched.
-long e13_end_with_again(void) { pid_t p = e13_watched; return p ? e13_arm(p, 0) : 0; }
+// In a forked child: watch again what the parent watched (no thread and no kqueue survive a fork, so the
+// parent's kqueue number is not this process's to close). 0 when nothing is watched.
+long e13_end_with_again(void) { e13_kq = -1; pid_t p = e13_watched; return p ? e13_arm(p, 0) : 0; }
 // The pid this process ends with, or 0 (its watch thread runs while it is not 0).
 long e13_end_watched(void) { return e13_watched; }
