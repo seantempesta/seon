@@ -2,6 +2,11 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in claude_scratch/archive/DECISIONS-superseded.md.
 
+## 2026-10-28 rulings
+
+### Derived data may be cached; it is always regenerable from the db at t (owner, 2026-10-28)
+"Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
+
 ## 2026-10-27 day rulings
 The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
 
@@ -109,7 +114,7 @@ Owner, 2026-10-25 night: "the agent will have the value printer print out the at
 ### Two outputs: an eval's data, and the page with its diffs (owner, 2026-10-26)
 "there are only two outputs too: @ctx returns data just like any repl eval and then we need to show the UI and the diffs to the ctx and the html at every turn as formal data" and "don't leave anything out I want the agent to understand problems with the rendering functions … I don't think we need the separate seon.render/ai work". The model reads each render's hiccup exactly as it was returned (nothing projected or stripped), the whole page on the first turn, then ctx's diff and the page's diff each turn; `:seon.render/ai` and every ai face are deleted. Now stated in claude_scratch/archive/one-derivation-design-rev42.md (jolt/design-rev42).
 ### No derived data in the db or in ctx (owner, 2026-10-26)
-"no we don't store derived data in the db or the ctx atom". ctx is the agent's data pulled from the db and patched, nothing else; the story, related sections and order are renders over the db as of t, memoized by value. Supersedes revision 4.1's derived members. Now stated in claude_scratch/archive/one-derivation-design-rev42.md.
+"no we don't store derived data in the db or the ctx atom". ctx is the agent's data pulled from the db and patched, nothing else; the story, related sections and order are renders over the db as of t, memoized by value. Supersedes revision 4.1's derived members. Now stated in claude_scratch/archive/one-derivation-design-rev42.md. Refined 2026-10-28: derived data may be cached, in the db too, when it is always regenerable from the db at t (above).
 ### Stability and correctness first (owner, 2026-10-26)
 "oh no I thought we had fixed all the hacks we put in that was causing stability problems? … Are we removing the hacks in datahike, jolt, etc?" and "Get them to main and prioritize stabilty and correctness". The fork server's boot order and one process mode (stability lead), Jolt's swallowed timer errors and the double-fork failure (agent loop), and the LMDB env_open EINVAL under load (full-run-reds) come before new features, each shipped to main in small verified pieces.
 ### The REPL stays simple; every enrichment is a render (owner, 2026-10-26)
