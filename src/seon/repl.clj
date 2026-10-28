@@ -69,7 +69,8 @@
 
 (defn- do-body
   "The text inside a top-level do form's own text src, after its do: what Clojure's compiler
-  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it)."
+  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it),
+  each with its own budget of ticks, as each top-level form has. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string] :string]}
   [src] (subs src (count (re-find #"^\(\s*do\s" src)) (dec (count src))))
 
@@ -95,7 +96,12 @@
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
                    (loop [ns ns prev 0]
-                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
+                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))
+                           ;; where the reader stopped after the form (an eval never moves it), its text and the comments before it
+                           end (when-not (or (= ::eof form) (instance? Throwable form))
+                                 (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r))))
+                           src (when end (form-src code @starts form end))
+                           lead (when end (reader/lead code prev end))]
                        (cond
                          (= ::eof form) [ns :eof]
 
@@ -105,12 +111,10 @@
                                    :err-text (nrepl/err->msg form {:phase :read-source})})
                            [ns :read])
 
-                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms
-                         (and (seq? form) (= 'do (first form)) (next form)
-                              (some->> (form-src code @starts form (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r))))
-                                       (re-find #"^\(\s*do\s")))
-                         (let [end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
-                               [ns' how] (forms! (do-body (form-src code @starts form end)) ns)]
+                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
+                         ;; the comments before the do leading the first of them
+                         (and (seq? form) (= 'do (first form)) (next form) src (re-find #"^\(\s*do\s" src))
+                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns)]
                            (if (= :eof how) (recur ns' end) [ns' how]))
 
                          :else
@@ -123,9 +127,6 @@
                                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
                                                         (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                                       (catch Throwable e [:err e ns (outer-frames)]))
-                               end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
-                               lead (reader/lead code prev end)
-                               src (form-src code @starts form end)
                                ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
                                                :repl/src src}
@@ -366,9 +367,9 @@
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
-  "A request's answers (in order) as its one response (:seon.eval/response): its handle, each
-  form's value in order (:values, as nREPL answers a value per form, when more than one form
-  answered: the values before an error stay), the last form's value (:value, as *1 holds it),
+  "A request's answers (in order) as its one response (:seon.eval/response): its handle, the
+  last form's value (:value, as load-string answers and *1 holds it, so (do (+ 1 1) (+ 2 2))
+  answers 4; docs/prompt.md),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
   seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
@@ -382,7 +383,6 @@
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
-        vs (into [] (comp (filter #(contains? % :repl/value)) (map :repl/value)) fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
         sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
         is (into [] (mapcat :instrumented) fs)
@@ -400,7 +400,8 @@
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)}))]
     (cond-> {:handle handle}
       (contains? lst :repl/value) (assoc :value (:repl/value lst))
-      (and (> (count fs) 1) (seq vs)) (assoc :values vs)
+      ;; what it made program on the branch: each var it defined, an ns form's namespace
+      (some :recorded fs) (assoc :recorded (into [] (mapcat :recorded) fs))
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
       (seq warnings) (assoc :warnings warnings)
       (joined :out) (assoc :out (joined :out))
@@ -409,6 +410,12 @@
       (sum :ms) (assoc :ms (/ (Math/round (* 1000.0 (sum :ms))) 1000.0))
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
+
+(defn- repaired
+  "Response r with what the forgiving reader changed of its code before it ran (req's :repaired,
+  seon.context/repaired), so every call's own result tells it, a call not run included."
+  {:malli/schema [:=> [:cat :seon.eval/response :map] :seon.eval/response]}
+  [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
@@ -436,7 +443,7 @@
   references on db, parsed here once by the one reference parser, seon.ref/references, so no
   render parses it again; read on db, the branch as the eval began, so a name the eval itself
   defines is not yet one; none without a db: root's page before main is read), its value in one line, or its error's message (:line, the one printer
-  under the line budget: what a collapsed eval shows), the provider's call id, its reasoning, its run, its costliest
+  under the line budget: an eval's row on the page), the provider's call id, its reasoning, its run, its costliest
   functions and what it recorded."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]
@@ -445,22 +452,21 @@
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
         ;; copy of the session's record is never stored at each @ctx
-        basis (when (and (contains? resp :value) (not (contains? resp :values))) (:seon.render/basis (meta (:value resp))))
-        data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))) (every? pdb/plain? (:values resp)))]
+        basis (when (contains? resp :value) (:seon.render/basis (meta (:value resp))))
+        data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))))]
     (cond-> (if data?
               {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value :values) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
+              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
                 basis (assoc :basis basis)))
       ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
       (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
       (or (contains? r :value) (:ex r))
-      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (contains? r :values) (:values r) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
+      (assoc :line (print/line (cond (:ex r) (or (get-in r [:ex :seon.error/message]) (:ex r)) (nil? (:value r)) "nil" :else (:value r)) (cfg/value :seon.config.render/line-budget) nil))
       (:prose req) (assoc :prose (:prose req))
       (seq cites) (assoc :cites cites)
       (:call-id req) (assoc :call-id (:call-id req) :call (:call req 0))
       (:reasoning req) (assoc :reasoning (:reasoning req))
       (:content req) (assoc :content (:content req))
-      (:call-prose req) (assoc :call-prose (:call-prose req))
       run (assoc :run run)
       (seq (:fns r)) (assoc :fns (:fns r))
       (seq (:recorded r)) (assoc :recorded (:recorded r)))))
@@ -499,32 +505,30 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (response @answers handle)] [r (print/response-text r (:seen @agent/state) render/summarized)]))
+     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r (:seen @agent/state) render/summarized)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
-                                  (answered))))
-                recorded (into [] (mapcat :recorded) @answers)]
+                                  (answered))))]
             (swap! agent/state assoc-in [:results (keyword (name handle))] r)
             (swap! agent/state update :seen print/seen r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
-            (record! (cond-> (assoc r :text text) (seq recorded) (assoc :recorded recorded) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
+            (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                      code req))
           (finally (swap! agent/state assoc :eval outer))))))
 
-(defn not-run
-  "A model's eval call left unrun because call `after` of its reply threw, recorded as an eval
-  whose response is that error (:seon.turn/not-run), so every call of the reply has its result.
-  See docs/prompt.md."
-  {:malli/schema [:=> [:cat :string :map :string] :seon.eval/response]}
-  [code req after]
+(defn unrun
+  "A model's eval call that never ran, recorded as an eval whose response is error e, why
+  (seon.turn's: a call before it in its reply threw, or the call is not prose and one form), so
+  every call of a reply has its one result. See docs/prompt.md."
+  {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.eval/response]}
+  [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
-        e (contract/error :seon.turn/not-run #'not-run (str "not run: call " after " of this reply threw before it") {:after after})
-        r (response [{:tag :err :err e}] handle)]
+        r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
     (record! (assoc r :text (print/response-text r (:seen @agent/state) render/summarized)) code req)))
 
@@ -610,7 +614,7 @@
        ;; waits on, never a sleep: one arriving from here on stops it
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
-       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value :values)
+       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value)
                     :t (:max-tx (agent/db))}]}])
      :else [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 

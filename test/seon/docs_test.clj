@@ -140,8 +140,7 @@
    'seon.fx-test/owner-admits-by-workers-and-priority "the same admission"
    'seon.reader-test/prose-without-a-fence-is-a-comment "a Markdown code fence"
    "test/seon/fx_admit_test.clj" "the same admission"
-   'seon.reader/fence "a Markdown code fence, CommonMark's word"
-   'seon.fixtures/fenced "a reply in a Markdown code fence"})
+   'seon.reader/fence "a Markdown code fence, CommonMark's word"})
 
 (def ^:private old-words seon.problems/old-words)
 

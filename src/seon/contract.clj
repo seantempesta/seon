@@ -122,7 +122,10 @@
 
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
-(clojure.core/defn- problems {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
+(clojure.core/defn problems
+  "Why v does not satisfy schema s, as an error's problems (:seon.error/problems): each refused
+  part's path and its value as it prints."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
   (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
          {:path path :in in :expected (m/form schema)
           ;; the value as it prints, marked code (print/code): it reads as written, a symbol or

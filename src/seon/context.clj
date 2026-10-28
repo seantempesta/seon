@@ -117,19 +117,17 @@
     {:line (inc (count (filter #(= \newline %) (subs text 0 start)))) :column (inc (- at start))
      :text (subs text start end)}))
 
-(defn last-reply
-  "What happened to the agent's last reply: cut at the token limit, each delimiter the
-  reader repaired (what it dropped or inserted, and where: the line and column in source,
-  the reply as the reader gave it to the REPL, and that line), or nil."
-  {:malli/schema [:=> [:cat [:maybe :boolean] [:maybe :string] [:vector :map]] [:maybe :map]]}
-  [truncated? source repairs]
-  (let [rs (for [{:keys [at dropped inserted]} repairs :when (not= ";; " inserted)]
-             (cond-> {:near (near (or source "") at)}
-               (seq dropped) (assoc :dropped dropped)
-               (seq inserted) (assoc :inserted inserted)))]
-    (cond-> nil
-      truncated? (assoc :cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time.")
-      (seq rs) (assoc :repaired (vec rs)))))
+(defn repaired
+  "Each repair the forgiving reader (seon.reader/forgive) made to an eval call's code, as that
+  call's result tells it (:repaired, docs/prompt.md): what it dropped or inserted (a delimiter
+  it closed or removed, a ;; that made a line of prose a comment), and where, the line and
+  column in source (the code as the REPL ran it) and that whole line."
+  {:malli/schema [:=> [:cat :string [:vector :map]] :seon.eval/repairs]}
+  [source repairs]
+  (vec (for [{:keys [at dropped inserted]} repairs]
+         (cond-> {:near (near source at)}
+           (seq dropped) (assoc :dropped dropped)
+           (seq inserted) (assoc :inserted inserted)))))
 
 
 (defn taken-messages
@@ -772,7 +770,7 @@
   tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view,
   tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
-  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors source repairs]}]
+  [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
     (cond-> {;; a passing proof is its status; a red or unrun one shows its source, its failures
              ;; and the program functions it calls; one not defined yet says so
@@ -790,7 +788,7 @@
       max-turns (assoc :turn (str (inc turn) " of " max-turns))
       (seq (refused (vec reasons) (vec reds) #(some? (docs/source-of db %)))) (assoc :refused (refused (vec reasons) (vec reds) #(some? (docs/source-of db %))))
       (seq test-run-errors) (assoc :test-run {:failed (vec test-run-errors)})
-      (last-reply truncated? source (vec repairs)) (assoc :your-last-reply (last-reply truncated? source (vec repairs)))
+      truncated? (assoc :your-last-reply {:cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."})
       (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged)))))
 
 (defn current-state
@@ -818,15 +816,14 @@
   {:by :code :response}, the response spliced as printed."
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
   [{:seon.eval/keys [by record]} opts]
-  (let [{:keys [code prose content call-prose reasoning call-id call]} record
+  (let [{:keys [code prose content reasoning call-id call]} record
         text (print/record-text (cond-> record
                                   (seq (:fold opts)) (update :response folded (:fold opts))
                                   (:same-as opts) (assoc-in [:response :same-as] (:same-as opts))))]
     (if call-id
-      ;; as the model sent it: the reply's text, and the call's own prose argument when it gave one
-      ;; (a record with neither, from before the prose argument, replays its prose as the text)
-      [(cond-> {:role "assistant" :content (or content (when-not call-prose prose) "")
-                :tool-calls [(cond-> {:id call-id :code code} call-prose (assoc :prose call-prose))]}
+      ;; as the model sent it: the reply's text (its first call's :content) and the call's own prose
+      [(cond-> {:role "assistant" :content (or content "")
+                :tool-calls [(cond-> {:id call-id :code code} prose (assoc :prose prose))]}
          reasoning (assoc :reasoning reasoning)
          call (assoc :call call))
        {:role "tool" :tool-call-id call-id :content text}]
@@ -1091,15 +1088,12 @@
 
 (defn turn-input
   "What a turn's sections are made from (turn-state's input): the observations basis b holds,
-  what happened to the last model turn lst's reply (cut at the token limit, the delimiters
-  the reader repaired), the branch's unmerged entries on a merge task, and the turn count of
+  whether the last model turn lst's reply was cut at the token limit, the branch's unmerged entries on a merge task, and the turn count of
   a model turn (an outside agent's reads have none)."
   {:malli/schema [:=> [:cat :seon.host/db :map [:maybe :map]] :map]}
   [db {:keys [turn max-turns origin observed merge?]} lst]
-  (let [{:keys [text repairs]} (when lst (reader/forgive (str/join "\n" (map :code (:seon.turn/calls lst)))))]
-    (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :source text :repairs (vec repairs)
-                   :unmerged (when merge? (pm/unmerged db)))
-      (= :model origin) (assoc :turn turn :max-turns max-turns))))
+  (cond-> (assoc observed :truncated? (:seon.turn/truncated lst) :unmerged (when merge? (pm/unmerged db)))
+    (= :model origin) (assoc :turn turn :max-turns max-turns)))
 
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,

@@ -29,7 +29,7 @@
 (deftest a-turn-prints-its-new-records-flat-in-the-history
   (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
                :n "records of the run printed before (the cache)"
-               :work (str "the new record printed whole and collapsed, once, by the one printer, its fold looked up "
+               :work (str "the new record printed whole, once, by the one printer, its fold looked up "
                           "among the values the earlier records showed (a hash map by value and type); nothing of the "
                           "earlier records is printed again")
                :growth :constant

@@ -195,6 +195,9 @@
                                         ;; earlier reasoning sent back (:seon.config.ai/replay-reasoning)
                                         [:replay-reasoning {:optional true} :boolean]]]]
  :seon.model/request [:map [:messages [:vector :seon.model/message]] [:task :seon.task/id] [:turn :int]]
+ ;; what a scripted model (a test fixture, seon.model's :scripted provider) answers: a reply as the
+ ;; provider's reply is read (docs/prompt.md), its text and its eval calls; no :calls is a message
+ :seon.model/script-reply [:map {:closed true} [:text {:optional true} :string] [:calls {:optional true} [:vector [:map {:closed true} [:prose :string] [:code :string]]]]]
  :seon.model/completion [:map [:text :string] [:prompt-tokens {:optional true} :int] [:completion-tokens {:optional true} :int] [:ms number?]
                          ;; the counts are the scripted model's own estimate (seon.print.select/estimate), not a provider's measure
                          [:estimated {:optional true} :boolean]
