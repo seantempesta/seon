@@ -216,6 +216,12 @@
  ;; default scales with the parent heap (E10); a small trip keeps an agent's garbage, and so
  ;; its private pages, small.
  :seon.config.agent/trip-bytes 4194304
+ ;; Unit: bytes an agent may inherit outside Chez's static generation. The fork server freezes its
+ ;; heap into static at a fork when main's program moved or, after a collection outside static, its
+ ;; live non-static bytes pass this; a freeze keeps what is live then for the server's life, so it is not done every fork
+ ;; (measured 2026-10-28: 22.6 MB of static over 20 forks when it was). 16 MiB is what
+ ;; seon.agent-test/an-agent-inherits-a-static-heap holds an agent to. At the bound: the next fork freezes.
+ :seon.config.agent/inherited-bytes 16777216
  ;; Unit: bytes an agent's heap may grow past what it inherited. Past it an allocation throws
  ;; OutOfMemoryError in the form (an :err item), so a runaway agent cannot take the machine.
  :seon.config.agent/heap-extra-bytes 1073741824

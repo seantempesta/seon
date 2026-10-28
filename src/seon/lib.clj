@@ -179,6 +179,7 @@
            (let ([n (jolt-active-threads)]) (mutex-release #%$tc-mutex) (enable-interrupts) n))
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
+         (define (proto-non-static-live!) (collect (collect-maximum-generation)) (- (bytes-allocated) (bytes-allocated 'static)))
          ;; fork only while this is the one active Chez thread, checked once under the thread
          ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
          ;; Read through jolt-active-threads: a thread in a collect-safe call (a read) is parked, which
@@ -255,6 +256,7 @@
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
+(defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
 (defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] (scm/proc "proto-fork-alone"))
 
 (defn wait-status

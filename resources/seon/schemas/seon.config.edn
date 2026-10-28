@@ -49,6 +49,7 @@
   [:seon.config.agent/cwd :seon.config.agent/cwd]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]
   [:seon.config.agent/trip-bytes :seon.config.agent/trip-bytes]
+  [:seon.config.agent/inherited-bytes :seon.config.agent/inherited-bytes]
   [:seon.config.agent/heap-extra-bytes :seon.config.agent/heap-extra-bytes]
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]

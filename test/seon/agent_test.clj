@@ -585,6 +585,17 @@
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 1 :fail 0 :error 0} v) (pr-str r))))
 
+(deftest a-fork-servers-static-grows-only-with-the-program
+  ;; docs/machine.md#what-a-process-owns-in-memory: the fork server made its heap static before
+  ;; every fork, so what each fork replaced (main's db, the reach graph, the index) stayed in
+  ;; static for the server's life. Twenty forks with main moving (each a task of its own) but
+  ;; no program change: an agent's static at its start is the server's at that fork
+  ;; and main's live data growing as it does (each task's facts), not every fork: a freeze is a
+  ;; step of more than 64 KB in the server's static (measured: 19 in 20 forks before, 1 after)
+  (let [statics (vec (for [_ (range 20)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
+        freezes (count (filter #(> % 65536) (map - (rest statics) statics)))]
+    (is (<= freezes 2) (str freezes " freezes in 20 forks; the server's static at each: " (pr-str statics)))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
