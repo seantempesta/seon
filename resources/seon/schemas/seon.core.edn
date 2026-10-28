@@ -82,7 +82,7 @@
                       [:err {:optional true} :string] [:ex {:optional true} :map]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
                       [:text {:optional true} :string] [:record {:optional true} :string]
-                      [:recorded {:optional true} [:vector :any]] [:fns {:optional true} [:vector :map]]]
+                      [:recorded {:optional true} [:vector :symbol]] [:fns {:optional true} [:vector :map]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its
  ;; docstring): what it was, what it is now (a removed one absent), and each wiki section citing
  ;; the var with the form that reads it, so the agent sees the change it made and what text to update

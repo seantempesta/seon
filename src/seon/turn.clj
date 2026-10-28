@@ -314,20 +314,21 @@
             ;; result says why (seon.repl/unrun, docs/prompt.md)
             calls (reduce (fn [acc [i {:keys [id code prose]}]]
                             (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
+                                  ;; the forgiving reader's repairs, told on this call's own result (:repaired)
+                                  {src :text repairs :repairs} (reader/forgive code)
                                   ;; the reply's text heads its block, on its first call; each call keeps its own prose
                                   req (cond-> {:origin :model :call-id id :call i}
                                         (not (str/blank? prose)) (assoc :prose prose)
                                         content (assoc :content content)
-                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c)))
-                                  threw (some #(when (:ex (:response %)) (:id %)) acc)
-                                  ;; the forgiving reader's repairs, told on this call's own result (:repaired)
-                                  {src :text repairs :repairs} (reader/forgive code)
-                                  req (cond-> req (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                                  why (if threw
-                                        (contract/error :seon.turn/not-run #'act! (str "not run: call " threw " of this reply threw before it") {:after threw})
+                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
+                                        (seq repairs) (assoc :repaired (context/repaired src repairs)))
+                                  ;; a call that failed (threw, or was not prose and one form) stops the rest
+                                  failed (some #(when (:ex (:response %)) (:id %)) acc)
+                                  why (if failed
+                                        (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
                                         (call-problem prose src))]
                               (conj acc (if why
-                                          {:id id :code code :prose prose :not-run (some? threw)
+                                          {:id id :code code :prose prose :not-run (some? failed)
                                            :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
                                           {:id id :code code :prose prose :response (evaluated! src req)}))))
                           [] (map-indexed vector (:tool-calls c)))

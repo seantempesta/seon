@@ -42,7 +42,7 @@
   "The reply of the function :script names (data: :seon.config.ai/script), loaded by name: a
   test fixture (seon.fixtures, in test/) that a scripted root reads from the checkout's source
   (seon.main/checkout-roots!). One this process cannot find is :seon.model/no-script."
-  {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] [:or :seon.model/completion :seon.model/no-script]]}
+  {:malli/schema [:=> [:cat :seon.model/provider :seon.model/request] [:or :seon.model/completion :seon.model/no-script :seon.model/script-invalid]]}
   [{:keys [script]} request]
   (let [t0 (profile/now-ns)
         f (when (or (find-ns (symbol (namespace script))) (jolt.host/ns-source (namespace script)))
@@ -53,10 +53,16 @@
       ;; a script answers a model's reply as data, as the provider's reply is read (docs/prompt.md):
       ;; {:text :calls [{:prose :code}]}, each call given its id here; no :calls is a message
       ;; that ends the turn
-      (let [{:keys [text calls]} (f request)]
-        {:text (or text "") :tool-calls (vec (map-indexed (fn [i c] (assoc (select-keys c [:prose :code]) :id (str "call-" (:turn request) "-" i))) calls))
-         :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
-         :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}))))
+      (let [out (f request)
+            s (contract/schema :seon.model/script-reply)]
+        (if-not (contract/valid? s out)
+          (contract/error :seon.model/script-invalid #'seon.model/scripted
+                          (str "the scripted model " script " answered no :seon.model/script-reply") {:script script :seon.error/problems (contract/problems s out)})
+          (let [{:keys [text calls]} out]
+            ;; a reply's text is a string, empty when it gives none, as a provider's reply is read (reply-of)
+            {:text (or text "") :tool-calls (vec (map-indexed (fn [i c] (assoc c :id (str "call-" (:turn request) "-" i))) calls))
+             :prompt-tokens (reduce + (map (comp select/estimate :content) (:messages request)))
+             :completion-tokens (select/estimate (apply str text (map :code calls))) :estimated true :ms (profile/ms-since t0)}))))))
 
 (defn- body-text
   "A read response's whole body as text: its buffered bytes, or every piece its pull yields
@@ -93,7 +99,7 @@
   "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
   {:type "function"
    :function {:name "eval"
-              :description "Evaluate exactly one Clojure form at your REPL; prose and code are both required. A reply may make several calls; they run in order, and a call after one that threw is not run. The response is data, {:handle :value :out :err :ex :recorded :warnings :ms :ticks :bytes}: the form's value as Clojure answers it, what it wrote, its error, what it made program, and its cost; result/e<n>, its handle, holds it."
+              :description "Evaluate exactly one Clojure form at your REPL; prose and code are both required. A reply may make several calls; they run in order, and a call after one that threw is not run. The response is data, {:handle :value :out :err :ex :recorded :redefined :warnings :repaired :ms :ticks :bytes}, each key only when present: the form's value as Clojure answers it, what it wrote, its error, what it made program, the functions whose contract or docstring it changed, what to fix, what the reader changed of your code, and its cost; result/e<n>, its handle, holds it."
               ;; prose first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
                            :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}

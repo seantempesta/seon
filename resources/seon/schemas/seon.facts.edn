@@ -491,7 +491,7 @@
  ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/unrun): :after, that call's id
  :seon.turn/not-run [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-run]] [:after :string]]]
  ;; a model's eval call that is not prose and one form, not run (seon.turn/call-problem): :problem why, :forms how many it held
- :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} :int]]]
+ :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
  ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one

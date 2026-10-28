@@ -411,6 +411,12 @@
       (sum :ticks) (assoc :ticks (sum :ticks))
       (sum :alloc-bytes) (assoc :bytes (sum :alloc-bytes)))))
 
+(defn- repaired
+  "Response r with what the forgiving reader changed of its code before it ran (req's :repaired,
+  seon.context/repaired), so every call's own result tells it, a call not run included."
+  {:malli/schema [:=> [:cat :seon.eval/response :map] :seon.eval/response]}
+  [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
+
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by): the user (the page), an outside
   session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
@@ -499,7 +505,7 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (cond-> (response @answers handle) (seq (:repaired req)) (assoc :repaired (:repaired req)))] [r (print/response-text r (:seen @agent/state) render/summarized)]))
+     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r (:seen @agent/state) render/summarized)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -522,7 +528,7 @@
   {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.eval/response]}
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
-        r (response [{:tag :err :err e}] handle)]
+        r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
     (record! (assoc r :text (print/response-text r (:seen @agent/state) render/summarized)) code req)))
 
