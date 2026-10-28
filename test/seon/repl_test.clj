@@ -138,6 +138,26 @@
     (is (= :seon.agent/eval-error (:seon.error/type (:ex r))) "the error map itself")
     (is (str/includes? (:text r) "Divide by zero") "and printed under its handle")))
 
+(deftest a-new-process-takes-the-handle-after-the-branchs-highest
+  ;; the owner's watch, 2026-10-28 (a4's branch): a root restart killed run #4's seon.turn/work!
+  ;; eval (e218) before it was recorded, so the branch held one id fewer than its highest; run #5's
+  ;; process counted the ids and took e222 again, and its record replaced the model's eval e222 (an
+  ;; identity). A process's first handle follows the highest e<n> its branch holds: a gap, or an id
+  ;; that is no e<n> (root's own, inherited from main), moves nothing. See docs/agent.md#your-turn
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
+        _ (d/create-database cfg)
+        conn (d/connect cfg)
+        _ (d/transact conn [{:db/ident :seon.eval/id :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}])
+        ;; e2 and e3 cut off unrecorded, and one of root's ids
+        _ (d/transact conn [{:seon.eval/id "e1"} {:seon.eval/id "e4"} {:seon.eval/id "root-outside-17"}])
+        old @agent/state
+        [r1 r2] (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch) :db @conn})
+                     [(repl/eval-string "1" {}) (repl/eval-string "2" {})]
+                     (finally (reset! agent/state old)))]
+    (is (= 'result/e5 (:handle r1)) "after e4, the highest the branch holds: never e4 again")
+    (is (= 'result/e6 (:handle r2)) "then this process's own count")
+    (d/release conn)))
+
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a
   form (a double-backticked one is a pattern to fill in, never run)."
