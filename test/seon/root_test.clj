@@ -211,12 +211,12 @@
       ;; its watcher's roots are what its loaders read and the refs, never the checkout, whose builds,
       ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
       ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
-      (let [[roots dirs co] (ask "(let [co (seon.config/checkout)] [(:roots (:seon.root/watch (datahike.api/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co))) co])")]
+      (let [[roots dirs co] (ask "(let [co (seon.config/checkout)] [(:roots (:seon.root/watch (datahike.api/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co (or (#'my.root/source-root) co)))) co])")]
         (is (not-any? #{co} roots) (str "the checkout is no watched root: " roots))
         (is (= dirs (set (butlast roots))) "the loaders' dirs, then the refs")
         (is (str/ends-with? (last roots) "/refs") (str roots))
         ;; its task dir is outside its checkout, and a task file there is the task loader's
-        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) nil #{} [[:path \"" runs "/tasks/x.edn\"]])))")))
+        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) (seon.config/checkout) nil #{} [[:path \"" runs "/tasks/x.edn\"]])))")))
             "a task file in a task dir outside the checkout loads the tasks"))
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]

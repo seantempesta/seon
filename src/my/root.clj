@@ -295,21 +295,20 @@
 
 (defn- loader-dirs
   "Where each of main's loaders reads: {kind [dir]}, absolute. The wiki and the task files are the
-  checkout co's; the source is the source root's (Seon's own source tree, the write-back checkout
-  the import reads: seon.fx/read-source), or co's when root follows none."
-  {:malli/schema [:=> [:cat :string] [:map-of [:enum :docs :tasks :source] [:vector :string]]]}
-  [co]
-  (let [src (source-root)]
-    {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
-     :source (mapv #(str (or src co) "/" %) (config/value :seon.config.source/dirs))}))
+  checkout co's; the source is under src, the source root the import reads (Seon's own source
+  tree, the write-back checkout: seon.fx/read-source; co when root follows none)."
+  {:malli/schema [:=> [:cat :string :string] [:map-of [:enum :docs :tasks :source] [:vector :string]]]}
+  [co src]
+  {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]
+   :source (mapv #(str src "/" %) (config/value :seon.config.source/dirs))})
 
 (defn- loader
-  "Which of main's loaders reads path (absolute) under checkout co: :docs (a page, .md, under the
-  wiki's dir), :tasks (a task file, .edn, under the task dir, which a test root keeps outside its
-  checkout), :source (under a source dir), or nil: the dirs are loader-dirs, the ones watched."
-  {:malli/schema [:=> [:cat :string :string] [:maybe [:enum :docs :tasks :source]]]}
-  [co path]
-  (let [dirs (loader-dirs co)
+  "Which of main's loaders reads path (absolute), for checkout co and source root src: :docs (a
+  page, .md, under the wiki's dir), :tasks (a task file, .edn, under the task dir, which a test root
+  keeps outside its checkout), :source (under a source dir), or nil: the dirs are loader-dirs, the ones watched."
+  {:malli/schema [:=> [:cat :string :string :string] [:maybe [:enum :docs :tasks :source]]]}
+  [co src path]
+  (let [dirs (loader-dirs co src)
         under? (fn [k] (some #(str/starts-with? path (str % "/")) (get dirs k)))]
     (cond (and (under? :docs) (str/ends-with? path ".md")) :docs
           (and (under? :tasks) (str/ends-with? path ".edn")) :tasks
@@ -322,31 +321,32 @@
   merge on either) the source, and no other ref (another worktree's commit is not this root's); a rescan or a moved root (FSEvents
   coalesced or dropped what happened under it) the loaders reading under that path (a rescan of
   a loader's dir that loader), and of refs the source alone."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]]
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]]
                   [:map-of [:enum :docs :tasks :source] [:tuple :keyword :string]]]}
-  [co refs own batch]
-  (let [dirs (loader-dirs co)
+  [co src refs own batch]
+  (let [dirs (loader-dirs co src)
         overlap? (fn [p d] (or (= p d) (str/starts-with? d (str p "/")) (str/starts-with? p (str d "/"))))]
     (reduce (fn [m [kind path :as r]]
               (let [under-refs? (and refs (or (= path refs) (str/starts-with? path (str refs "/"))))
                     ks (cond (and (#{:rescan :root} kind) under-refs?) [:source]
                              (#{:rescan :root} kind) (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
                              under-refs? (when (own path) [:source])
-                             :else (keep identity [(loader co path)]))]
+                             :else (keep identity [(loader co src path)]))]
                 ;; the first record that made each kind keeps it
                 (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
             {} batch)))
 
 (defn source-changes
-  "The source files a watcher's batch changed, as relative paths under checkout co, when the batch
+  "The source files a watcher's batch changed, as paths relative to src, the source root the
+  import reads (:seon.config.source/root: .worktrees/merges for the standing root, else co), when the batch
   made root load the source by files alone: every record that makes the source load is a changed
   path to a .clj or .edn file under a source dir (a directory, made or removed, is not one). nil when any is a rescan, a moved root or a branch's own ref moving
   (a commit, a merge): the whole tree is then read. Cost: the batch."
-  {:malli/schema [:=> [:cat :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
-  [co refs own batch]
-  (let [source (filter #(contains? (watch-loads co refs own [%]) :source) batch)]
-    (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co path)) (re-find #"\.(clj|edn)$" path))) source))
-      (into #{} (map (fn [[_ path]] (str/replace-first path (str co "/") ""))) source))))
+  {:malli/schema [:=> [:cat :string :string [:maybe :string] [:set :string] [:vector [:tuple :keyword :string]]] [:maybe [:set :string]]]}
+  [co src refs own batch]
+  (let [source (filter #(contains? (watch-loads co src refs own [%]) :source) batch)]
+    (when (and (seq source) (every? (fn [[kind path]] (and (= :path kind) (= :source (loader co src path)) (re-find #"\.(clj|edn)$" path))) source))
+      (into #{} (map (fn [[_ path]] (str/replace-first path (str src "/") ""))) source))))
 
 (defn watch-died-tx
   "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
@@ -376,8 +376,9 @@
   [sys]
   (let [co (config/checkout)
         refs (fx/git-refs co)
+        src (or (source-root) co)
         own (into #{} (keep #(some-> % fx/head-ref)) [co (source-root)])
-        roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co))) [refs]))))
+        roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co src))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
@@ -395,9 +396,9 @@
                     r)))
         w (watch/start! roots
                         (fn [batch]
-                          (let [why (watch-loads co refs own batch)
+                          (let [why (watch-loads co src refs own batch)
                                 ks (set (keys why))
-                                changed (when (contains? ks :source) (source-changes co refs own batch))
+                                changed (when (contains? ks :source) (source-changes co src refs own batch))
                                 rescan (last (filter (comp #{:rescan :root} first) batch))]
                             ;; a batch no loader reads (root's own store under runs/, target/) writes
                             ;; nothing, so root's writes never feed its watcher
