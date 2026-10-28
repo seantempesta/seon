@@ -210,6 +210,16 @@
   (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_NEW_SIZE\" \"" (long trip) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
+(defchecked ^:private heap-reserve* [:=> [:cat :double] :any]
+  (scm/eval-string "(lambda (r) (heap-reserve-ratio r))"))
+
+(defn heap-reserve!
+  "Keep at most r times the non-static heap in use as free memory after a full collection, and
+  return the rest to the OS (Chez's heap-reserve-ratio, 1.0 unset: one free page per page in
+  use). See docs/machine.md#roots-heap."
+  {:malli/schema [:=> [:cat [:double {:min 0.0}]] :any]}
+  [r] (heap-reserve* r))
+
 (defchecked ^:private collect-sweepers* [:=> [:cat :int] :int]
   (scm/eval-string "(foreign-procedure \"(cs)collect_sweepers\" (iptr) iptr)"))
 

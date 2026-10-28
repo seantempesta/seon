@@ -195,6 +195,11 @@
   (pdb/after-fork! cfg)
   (let [conn (sock/conn fd)
         store (d/connect (assoc cfg :branch (pdb/main-branch cfg)))
+        ;; db0 at its commit, read through this process's own store; the boot server reads all
+        ;; of it once, so agents forked from here inherit it decoded (root does not hold it:
+        ;; docs/machine.md#what-a-process-owns-in-memory)
+        db0 (d/commit-as-db store (d/commit-id db0))
+        _ (when boot? (pdb/preload! db0))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
         kq (lib/kq-new)
         recv! (fn [] (loop []

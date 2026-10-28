@@ -16,4 +16,5 @@
  :seon.config.root/system-path [:string {:min 1 :seon.config/unit "path" :description "Root's system declaration (system.edn), read with aero."}]
  :seon.config.root/wiki-dirs [:vector {:seon.config/unit "directories" :description "The directories of the checkout whose .md files root loads into main as wiki sections at boot (docs/ is also watched); \".\" is the checkout's top level."} [:string {:min 1}]]
  :seon.config.root/tasks-dir [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The task files my.root/task-files reads: a place, each root's own (a test root's is under its runs, seon.test-store/start-root!), so it is no input of a test's result."}]
+ :seon.config.root/heap-reserve-ratio [:double {:min 0.0 :seon.config/unit "ratio" :description "Free memory root's Chez keeps after a full collection, as a ratio of its non-static heap in use; the rest goes back to the OS."}]
  :seon.config.root/gc-sweepers [:int {:min 0 :seon.config/unit "threads" :description "Chez parallel-collector sweepers in root, fixed at boot after the fork server is forked; 0: collect on the triggering thread."}]}
