@@ -167,9 +167,12 @@
 (defn always-wrong
   "The scripted model that never gets it right: every reply defines app.calc/add as
   subtraction (inv1's repro: add always wrong, with twice needing it)."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_]
-  "add is subtraction, surely.\n```clojure\n(in-ns 'app.calc)\n(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))\n```\n")
+  (let [prose "add is subtraction, surely."]
+    {:text prose
+     :calls [{:prose prose :code "(in-ns 'app.calc)"}
+             {:prose prose :code "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (- a b))"}]}))
 
 (defn expectation
   "Scenario k's {:check :expect} (seon.fixtures/scenarios); model? is a real model's run."

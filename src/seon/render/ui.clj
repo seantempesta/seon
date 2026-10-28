@@ -438,12 +438,10 @@
 
 (defn- shown-value
   "What an eval's recorded response shows as its value: the response less its handle and what
-  the row shows beside it (cost, the costliest functions, its error), each form's value when it
-  has them (its last is :value)."
+  the row shows beside it (cost, the costliest functions, its error)."
   {:malli/schema [:=> [:cat :map] :map]}
   [response]
-  (cond-> (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded)
-    (contains? response :values) (dissoc :value)))
+  (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded))
 
 (defn- based-value
   "The value eval e's record names by its basis (@ctx: the record of e's agent on branch db as of
