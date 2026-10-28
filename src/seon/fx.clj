@@ -898,13 +898,15 @@
        [(update st :n + (count ms)) {[(:owner st) :done] [(if (:batch m) {:batch done} (first done))]}]))))
 
 (defn model
-  "The model call (seon.model/complete) under root's provider (:ctx, which names the API
-  key's environment variable; root alone reads it); a request's :model overrides the
+  "The model call (seon.model/complete) under the request's provider (the agent resolves it at its
+  turn, seon.config/provider-at: it names the API key's environment variable, never the key; root
+  alone reads it), else root's boot provider (:ctx); a request's :model overrides the
   provider's model. Answers {:value completion :cost tokens} or the provider error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [req ctx]}]
-  (let [p (cond-> (:provider ctx) (and (:model req) (= :openai-compat (:kind (:provider ctx)))) (assoc :model (:model req)))
-        c (model/complete p (dissoc req :model))]
+  (let [base (or (:provider req) (:provider ctx))
+        p (cond-> base (and (:model req) (= :openai-compat (:kind base))) (assoc :model (:model req)))
+        c (model/complete p (dissoc req :model :provider))]
     (cond (contract/error? c) c
           (and (:prompt-tokens c) (:completion-tokens c)) {:value c :cost (+ (:prompt-tokens c) (:completion-tokens c))}
           :else {:value c})))

@@ -154,6 +154,23 @@
     (d/branch! conn (:branch cfg) child)
     (is (= c (config/from-db @(d/connect (assoc cfg :branch child)))))))))
 
+;; owner, 2026-10-28: "Fix the model provider not reading the config. A config can override at any point even
+;; between turns." The provider was copied once at boot (seon.root/start!); it is resolved at the call now
+(deftest the-provider-is-the-config-as-it-stands-at-the-call
+  (ts/test-branch! (fn [cfg conn]
+    (let [c (merge config/config {:seon.config.ai/provider :none})
+          tick! (fn [m] (d/transact conn {:tx-data [(assoc m :seon.root/id :root)]}))]
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6) (config/facts c {}))})
+      (is (= {:kind :none} (config/provider-at @conn @conn nil)) "main's config at the first turn")
+      (testing "a change to main's config applies at the next call, with no restart"
+        (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
+        (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn nil))))
+      (d/transact conn {:tx-data [{:seon.task/id "a/own" :seon.config.ai/provider :none} {:seon.task/id "a/other"}]})
+      (testing "a task's own setting wins over main's, from its next turn"
+        (is (= {:kind :none} (config/provider-at @conn @conn "a/own")))
+        (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider-at @conn @conn "a/other"))
+            "and a task that names none uses main's"))))))
+
 ;; a set-valued key written on main reads back as the same set, not the vector a pull of a
 ;; cardinality-many attribute answers (pure-tests 2026-10-23: :seon.config.source/process-vars)
 (deftest a-set-valued-key-reads-back-as-the-set-it-was
