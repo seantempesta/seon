@@ -584,12 +584,13 @@
 
 (defn read-verdict
   "The verdict file at path as data ({:key :digest :status ...}, write-verdicts!'s), nil when there
-  is none, or :seon.fx/io-error naming it: an unreadable or corrupt file is that error, never a miss."
-  {:malli/schema [:=> [:cat :string] [:or :nil :map]]}
+  is none (never written, or evicted, even between a listing and this read), or :seon.fx/io-error
+  naming it: a file there that cannot be read or is not EDN (corrupt) is that error, never a miss."
+  {:malli/schema [:=> [:cat :string] [:or :nil :seon.error/base :map]]}
   [path]
-  (when (.exists (java.io.File. ^String path))
-    (try (edn/read-string {:default tagged-literal} (slurp path))
-         (catch Throwable e (error #'seon.fx/read-verdict :seon.fx/io-error (str "reading " path ": " (step/error-msg e)) {:path path})))))
+  (try (edn/read-string {:default tagged-literal} (slurp path))
+       (catch java.io.FileNotFoundException _ nil)
+       (catch Throwable e (error #'seon.fx/read-verdict :seon.fx/io-error (str "reading " path ": " (step/error-msg e)) {:path path}))))
 
 (defn stored-results
   "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key. A green is
@@ -623,18 +624,19 @@
          [dg (keyword st) f])))
 
 (defn- evict!
-  "Leave key k at most :seon.config.proofs/results-per-test digests, removing the lowest digests first,
-  never kept (the one just written) nor a digest with a red file (a red or a flaky verdict is never
-  laundered by its eviction). Answers how many digests it removed."
-  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] :string] nat-int?]}
+  "Leave key k at most :seon.config.proofs/results-per-test digests, removing the lowest digest
+  strings first (digests are hashes, so which goes is arbitrary, never the oldest: a cache), never kept
+  (the one just written) nor a digest with a red file (a red or a flaky verdict is never laundered by
+  its eviction, so a key red at many digests keeps them all until its files are removed by hand). A
+  file that would not delete stays (an extra digest, never an error). Answers nil."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] :string] :nil]}
   [dir k kept]
   (let [files (verdict-files dir k)
         dgs (sort (distinct (map first files)))
         red (into #{} (keep (fn [[dg st]] (when (= :red st) dg))) files)
         excess (- (count dgs) (cfg/value :seon.config.proofs/results-per-test))
         gone (set (take (max 0 excess) (remove #(or (= kept %) (red %)) dgs)))]
-    (doseq [[dg _ ^java.io.File f] files :when (gone dg)] (.delete f))
-    (count gone)))
+    (doseq [[dg _ ^java.io.File f] files :when (gone dg)] (.delete f))))
 
 (defn write-verdicts!
   "Cache what ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes :fns :cost} or a
@@ -660,7 +662,7 @@
                         (:cost r) (assoc :cost (:cost r))
                         (seq (:fns r)) (assoc :fns (into {} (for [{:keys [var calls ticks self-ticks bytes self-bytes]} (:fns r)] [var [calls ticks self-ticks bytes self-bytes]]))))
                     w (write-file {:req {:path (verdict-path dir k (:digest r) (if (= :pass st) :pass :red))
-                                         :text (binding [*print-namespace-maps* false] (pr-str v))}})]
+                                         :text (sedn/encode v)}})]
                 (if (contract/error? w)
                   (reduced w)
                   (do (evict! dir k (:digest r)) (update acc :recorded inc)))))
@@ -676,7 +678,7 @@
   ([tests] (last-ms (cfg/value :seon.config.proofs/results-dir) tests))
   ([dir tests]
   (into {} (for [t (distinct tests)
-                 :let [ms (keep (fn [[_ _ f]] (let [v (read-verdict (str f))] (when (map? v) (:ms v)))) (verdict-files dir t))]
+                 :let [ms (keep (fn [[_ _ f]] (let [v (read-verdict (str f))] (when-not (contract/error? v) (:ms v)))) (verdict-files dir t))]
                  :when (seq ms)]
              [t (apply max ms)]))))
 
@@ -688,7 +690,7 @@
   ([cand] (details (cfg/value :seon.config.proofs/results-dir) cand))
   ([dir cand]
   (into {} (for [[t dg] cand
-                 :let [v (some #(let [v (read-verdict (verdict-path dir t dg %))] (when (map? v) v)) [:pass :red])]
+                 :let [v (some #(let [v (read-verdict (verdict-path dir t dg %))] (when (and (map? v) (not (contract/error? v))) v)) [:pass :red])]
                  :when (seq (:fns v))]
              [t (:fns v)]))))
 

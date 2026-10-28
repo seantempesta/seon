@@ -677,15 +677,15 @@
                               :when (= :test (:var/kind e))]
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
-    (-> (proofs/plan (some-> b :index (update-vals :digest)) cd
-                     ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results);
-                     ;; a cache that could not be read reuses nothing, so the selected run
-                     (let [r (fx/stored-results cd)] (if (contract/error? r) {} r))
-                     proofs)
-        (update :selected into (concat unrecorded (keys removed)))
-        (update :run into (concat unrecorded (keys removed)))
-        (assoc :digests cd :graph g :removed removed
-               :process (into (program/process-tests idx) removed-process))))))
+    ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results); a
+    ;; cache that could not be read is the plan's :unread, which a run answers (never zero greens)
+    (let [found (fx/stored-results cd) unread (when (contract/error? found) found)]
+      (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
+                  (update :selected into (concat unrecorded (keys removed)))
+                  (update :run into (concat unrecorded (keys removed)))
+                  (assoc :digests cd :graph g :removed removed
+                         :process (into (program/process-tests idx) removed-process)))
+        unread (assoc :unread unread))))))
 
 (defn stored-results
   "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
@@ -929,9 +929,9 @@
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
-  Each test that ran green is stored at its digest in test-plan's :dir through root's :file
-  owner (seon.proofs/store-verdicts!, greens and reds); a write refused is named under :unstored, and that test
-  runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
+  Each test that ran is cached at its digest, green or red (seon.fx/write-verdicts!); a write the
+  cache refused is named under :unstored, and those tests run again. A cache that cannot be read
+  answers its :seon.fx/io-error (test-plan's :unread): no test is run as if none were cached. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
@@ -947,19 +947,20 @@
   carrier), the loop never waits on the children: (handoff go) is called and this answers
   :seon.agent/running; go, called on a fiber of handoff's with its own say (what hands the loop a
   message to send: the loop is the one sender), runs the children to their end and answers the
-  thunk that finishes the answer, which the loop calls (its verdicts stored through root's :file
-  owner: only the loop takes from the intake)."
-  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]
+  thunk that finishes the answer, which the loop calls (only the loop takes from the intake)."
+  {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe :seon.host/fn]]
-                   [:or :seon.test/result :seon.test/fork-refused [:= :seon.agent/running]]]]}
+                   [:or :seon.test/result :seon.test/fork-refused :seon.error/base [:= :seon.agent/running]]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
   ([ticks proofs mode forked names handoff]
-  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
-        {judge :selected deferred :skipped} (run-selection plan names proofs)
+  (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))]
+  (if-let [unread (:unread plan)]
+    unread
+  (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
                    ;; the proofs as the plan selects them (one loaded but never recorded has
                    ;; no digest and is selected all the same), and the tests the branch changed
@@ -1003,13 +1004,13 @@
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
     ;; what ran, cached by digest (seon.fx/write-verdicts!), whoever asked for the run; a file the
-    ;; cache would not take is not cached, so that test runs again
-    (when-not (contract/error? res)
-      (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))]
-        (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)))
+    ;; cache would not take is named on the answer (:unstored), and those tests run again
     (if (contract/error? res)
       res
       (-> res
+        (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
+                      w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)]
+                  (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)]))))
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
@@ -1020,7 +1021,7 @@
     (cond
       ;; nothing to run, or no fiber to read them on: the answer now
       (or (empty? run) (nil? handoff)) (finish (run-all send!))
-      :else (do (handoff (fn [say] (let [res (run-all say)] #(finish res)))) ::running)))))
+      :else (do (handoff (fn [say] (let [res (run-all say)] #(finish res)))) ::running)))))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 

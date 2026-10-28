@@ -358,9 +358,9 @@
   (testing "a stored vector comes back in its order, duplicates kept"
     (ts/test-branch!
      (fn [_ conn]
-       (let [v '[b/x a/y b/x c/z b/x]
-             e (get (:tempids (d/transact conn [{:db/id "p" :seon.task/id "db-test/order" :seon.task/needs-names v}])) "p")]
-         (is (= v (:seon.task/needs-names (d/pull @conn [:seon.task/needs-names] e)))))))))
+       (let [v '[["b/x" 0.5] ["a/y" 0.9] ["b/x" 0.5] ["c/z" 0.1] ["b/x" 0.5]]
+             e (get (:tempids (d/transact conn [{:db/id "p" :seon.agent/key "db-test/order" :seon.agent/included v}])) "p")]
+         (is (= v (:seon.agent/included (d/pull @conn [:seon.agent/included] e)))))))))
 
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 

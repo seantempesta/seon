@@ -433,7 +433,7 @@
  ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
  :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
  ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
- ;; digest, status) (seon.proofs/write-result!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
+ ;; digest, status) (seon.fx/write-verdicts!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
  ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,
  ;; 2026-10-28). bin/env sets SEON_RESULTS_DIR to the main tree's target/results (git's common dir), so
  ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this

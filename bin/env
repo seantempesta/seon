@@ -42,7 +42,7 @@ export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GEN
 JOLT_COMPILER_OPTIONS=${JOLT_COMPILER_OPTIONS:-$(sed -nE 's#^ :seon\.config\.build/jolt-compiler-options "(.*)"$#\1#p' "$ROOT/resources/seon/config/default.edn")}
 export JOLT_COMPILER_OPTIONS
 # Test and check verdicts are a cache by digest, one directory in the main tree's target/ for every
-# checkout (:seon.config.proofs/results-dir, seon.proofs/write-result!), published by temp+rename as the
+# checkout (:seon.config.proofs/results-dir, seon.fx/write-verdicts!), published by temp+rename as the
 # build caches above are
 export SEON_RESULTS_DIR=${SEON_RESULTS_DIR:-$MAIN_TREE/target/results}
 # The embedding model (bin/build embed, seon.vector): EmbeddingGemma-2 as ggml-org's Q8_0 GGUF, one copy

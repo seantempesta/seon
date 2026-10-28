@@ -200,8 +200,9 @@
   ;; for main's key after joins that run or reads its answer. Open (task seon.proofs/an-agent-forked-after-finds-mains-results): an agent
   ;; forked after does not find them at its digests, and a named run after a program commit does not
   ;; reuse them (measured: [false false], :reused 0)
-  (let [booted (str "(let [r @(c/prove! sys nil)]"
-                    "  (pr-str {:key (:key r) :facts (vec (sort (seon.proofs/results r)))}))")
+  (let [booted (str "(let [r @(c/prove! sys nil) ts '[seon.patterns-test/a-backlog-is-the-unread-queue seon.patterns-test/workers-compete-for-one-shared-in-port]]"
+                    ;; its verdicts are cached by digest (the answer carries only proofs and reds: seon.proofs/answer)
+                    "  (pr-str {:key (:key r) :facts (vec (for [t ts :when (contains? (seon.fx/last-ms ts) t)] [t (if (zero? (+ (:fail r 0) (:error r 0))) :pass :red)]))}))")
         [a] (at/in-agent [{:op :eval :agent "root" :code booted}]
                          {:dirs ["src" "test/seon/patterns_test.clj"] :own-root? true :sets [":seon.config.proofs/prove-main-on-commit=true"]})
         a' (some-> (:value a) clojure.edn/read-string)]

@@ -62,7 +62,8 @@
      (rec! dir {'a/t {:test 'a/t :digest "dc" :pass 1 :fail 0 :error 0}})
      (spit (str dir "/a/t/dc.pass.edn") "{:status :pass")
      (let [r (fx/stored-results dir '{a/t "dc"})]
-       (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))))))
+       (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r)))
+     (is (nil? (fx/read-verdict (str dir "/a/t/gone.pass.edn"))) "a file that is not there (never written, or evicted meanwhile) is a miss"))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-test-holds-at-most-its-bound-of-digests-and-a-red-is-never-evicted
@@ -73,12 +74,12 @@
            _ (rec! dir {'a/t {:test 'a/t :digest "d000" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "red"}]})
            _ (doseq [i (range 1 (+ bound 3))]
                (rec! dir {'a/t {:test 'a/t :digest (format "d%03d" i) :pass 1 :fail 0 :error 0}}))
-           kept (fx/stored-results dir (into {} (for [i (range 0 (+ bound 3))] [(symbol "a" (str "t" i)) (format "d%03d" i)])))
-           held (->> (.listFiles (java.io.File. (str dir "/a/t"))) (map #(re-find #"^d\d+" (.getName %))) distinct sort)]
+           held (->> (.listFiles (java.io.File. (str dir "/a/t"))) (map #(re-find #"^d\d+" (.getName %))) distinct sort)
+           kept (fx/stored-results dir {'a/t "d000"})]
        (is (= bound (count held)) (pr-str held))
        (is (some #{"d000"} held) "the red stays")
        (is (some #{(format "d%03d" (+ bound 2))} held) "the digest just written stays")
-       (is (map? kept))))))
+       (is (= 1 (:fail (get kept "d000"))) (str "and reads back red: " (pr-str kept)))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-verdict-keeps-what-its-test-spent-per-function
