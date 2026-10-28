@@ -30,13 +30,20 @@
     (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \_ %) (= \- %)) % \_) s))))
 
 (defn view-param
-  "A view as its feed's ?view= names it (view-of reads it back)."
+  "A view as its feed's ?view= and its path name it (seon.web/view-of reads it back). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :any] :string]}
   [view]
-  (java.net.URLEncoder/encode ^String (cond (= :root view) "root" (keyword? view) (name view)
-                                            ;; [:debug v]: what agent v's model was sent (seon.web/view-of)
-                                            (vector? view) (str (java.net.URLDecoder/decode (view-param (second view)) "UTF-8") "/debug")
-                                            :else (str view)) "UTF-8"))
+  (let [;; a keyword's name with its namespace (main/task-x), else its text
+        of (fn [v] (if (keyword? v) (str (some-> (namespace v) (str "/")) (name v)) (str v)))]
+    (java.net.URLEncoder/encode ^String (cond (= :root view) "root"
+                                              (= [:debug :root] view) "root/debug"
+                                              ;; [:chat v]: agent v's chat, the page a person reads
+                                              (and (vector? view) (= :chat (first view))) (of (second view))
+                                              ;; [:debug v]: what agent v's model was sent (seon.web/view-of)
+                                              (vector? view) (str (of (second view)) "/context")
+                                              ;; an agent by its id or its branch: its debug view, every render of its ctx
+                                              (keyword? view) (str (of view) "/debug")
+                                              :else (str view)) "UTF-8")))
 
 (defn kname
   "A keyword's name with its namespace (:fx/model -> \"fx/model\"), \"–\" for nil, else as
@@ -302,20 +309,22 @@
 
 (defn- top-bar
   "The bar above every page: Seon's mark, home, then, on root's or an agent's page (focus :root
-  or its id), the toggle between its conversation and what its model reads (debug?, the debug
-  page)."
-  {:malli/schema [:=> [:cat :any :boolean] :any]}
-  [focus debug?]
-  (let [tab (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
-                                     :aria-current (when on? "page")} label])]
+  or its id), its tabs, tab the one shown: root's conversation and what its model reads; an
+  agent's chat (the page a person reads), its debug view (every render of its ctx) and what its
+  model was sent. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any [:enum :chat :debug :context]] :any]}
+  [focus tab]
+  (let [link (fn [on? href label] [:a {:href href :class (str "rounded px-2 py-0.5 " (if on? "bg-base-800 text-text-50" "text-text-400 hover:text-text-100"))
+                                      :aria-current (when on? "page")} label])]
     [:nav {:class "sticky top-0 z-10 -mx-3 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-3 py-2 sm:-mx-4 sm:px-4"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
      (when focus
        (let [base (if (= :root focus) "/" (str "/agent/" (kname focus)))]
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
           [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
-          (tab (not debug?) base "conversation")
-          (tab debug? (str (if (= :root focus) "/root" base) "/debug") "context")]))]))
+          (if (= :root focus)
+            (list (link (= :chat tab) base "conversation") (link (= :context tab) "/root/debug" "context"))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "debug") (link (= :context tab) (str base "/context") "context")))]))]))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -816,9 +825,7 @@
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
   its newest callers): its source; its tests, the newest :seon.config.ctx/callers deftests whose
   form names v, read here by one query (ctx's callers window holds callers of any kind, so newer
-  callers would push them out), each with its last result on main as db holds it (its
-  :seon.proof/latest's status, which only main's runs write, so a branch holds main's as of its
-  base; :none when there is none), and the form that reads every test whose reach includes v
+  callers would push them out), and the form that reads every test whose reach includes v
   (:reaching, my.agent/tests-reaching); then ctx's other callers, v itself left out. nil when the
   task cites no v. What the cited component draws, and the form its cut names."
   {:malli/schema [:=> [:cat :seon.host/db :map :qualified-symbol] [:maybe :map]]}
@@ -833,12 +840,11 @@
           ;; (forms written in one transaction tie on it: their names break the tie, so the cut is fixed)
           tests (->> (d/q '[:find ?n ?tx :in $ ?s :where [?f :form/refs ?s ?tx] [?e :var/form ?f] [?e :var/kind :test] [?e :var/name ?n] [(not= ?n ?s)]] db v)
                      (sort-by (juxt (comp - second) (comp str first))) (take (config/value :seon.config.ctx/callers)) (map first))
-          status #(proofs/latest-status db %)
           src (form-src db (:form cv))]
       (cond-> {;; the direct tests only: every test whose reach includes v is the agent's to ask
                :reaching (list 'my.agent/tests-reaching (list 'quote v))}
         src (assoc :source (print/code src))
-        (seq tests) (assoc :tests (into (sorted-map-by #(compare (str %1) (str %2))) (for [n tests] [n (status n)])))
+        (seq tests) (assoc :tests (vec (sort-by str tests)))
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
@@ -1068,6 +1074,16 @@
     [:section
      (render/html (if-let [k (:schema r)] {:schema k} {}) (ratom/realize (get-in r [:response :value])))]))
 
+(defn- conversation
+  "The conversation of ctx c's run: its evals, its run's turns and messages, in the order they were
+  written (the transaction of each member's identity datom, then its id: some ids are
+  content-derived, so an id is no order). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :map]] [:sequential :int]]}
+  [c db run]
+  (let [born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])]
+    (map second (sort (concat (map #(born :seon.eval/id %) (keys (:evals c))) (map #(born :seon.turn/id %) (keys (:turns run)))
+                              (map #(born :seon.message/id %) (keys (:messages run))))))))
+
 (defn render-ctx
   "The render of an agent's ctx, its layout (the declared html render of :seon.render/render-ctx,
   which an agent overrides on its branch like any render): its ctx, read through the view, as components placed in the
@@ -1085,10 +1101,7 @@
   (let [[rid run] (the-run c)
         task (when rid (held-task c rid))
         evals (:evals c)
-        ;; in the order written: the transaction of each member's identity datom, then its id
-        born (fn [a e] [(:tx (first (d/datoms db :eavt e a))) e])
-        conv (map second (sort (concat (map #(born :seon.eval/id %) (keys evals)) (map #(born :seon.turn/id %) (keys (:turns run)))
-                                       (map #(born :seon.message/id %) (keys (:messages run))))))
+        conv (conversation c db run)
         ev? (set (keys evals))
         tu? (set (keys (:turns run)))]
     [:div {:id "render-ctx"}
@@ -1115,6 +1128,73 @@
      [:aside {:id "p-tiles"}
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
+
+(defn chat-opening
+  "The task as the chat's opening message (a component over ctx): its name in words, then its plan
+  as Markdown under its budget, the printer's cut naming the rest. See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} rid]
+  (let [t (held-task c rid) id (ratom/realize (get t :seon.task/id)) plan (ratom/realize (get t :seon.task/plan))]
+    [:section
+     [:p {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
+     [:p {:class "font-bold"} (task-title (str id))]
+     (when plan
+       (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
+         (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))]))
+
+(defn chat-turn
+  "A model turn as the chat shows it (a component over ctx), a bubble on the left: its thinking
+  folded, its reply as Markdown. See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-start rounded-lg bg-base-900 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
+  [{c :seon.ctx/ctx} rid eid]
+  (let [t (get-in c [:runs rid :turns eid])
+        [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.turn/reply :seon.turn/reasoning :seon.turn/n])]
+    (when (or (not (str/blank? reply)) (not (str/blank? reasoning)))
+      [:section
+       [:p {:class "text-2xs text-text-500"} (str "agent" (when n (str " · turn " n)))]
+       (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
+       (when-not (str/blank? reply) (markdown reply))])))
+
+(defn chat-message
+  "A message to the run as the chat shows it (a component over ctx): who sent it, its body as
+  Markdown, a person's on the right. See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
+  [{c :seon.ctx/ctx} rid eid]
+  (let [m (get-in c [:runs rid :messages eid])
+        [from body] (map #(ratom/realize (get m %)) [:seon.message/from :seon.message/body])]
+    [:section
+     [:p {:class "text-2xs text-text-500"} (str from)]
+     (markdown (str body))]))
+
+(defn chat-end
+  "How the run stands as the chat's last line (a component over ctx): its status, how it ended and
+  why, its turns of its cap. See docs/render.md#the-page."
+  {:seon.render/style "text-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} rid]
+  (let [r (get-in c [:runs rid])
+        [status outcome reason turns max-turns] (map #(ratom/realize (get r %)) [:seon.run/status :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/max-turns])]
+    ;; nothing until the run has a status on its branch (it reaches the branch by take!)
+    (when (or outcome status)
+      [:p (str "— " (kname (or outcome status))
+               (when turns (str " · turn " turns (when max-turns (str " of " max-turns))))
+               (when-not (str/blank? reason) (str " · " reason)) " —")])))
+
+(defn chat-ctx
+  "An agent's chat, the page a person reads (the declared html render of :seon.render/chat-ctx,
+  over the same ctx as render-ctx, whose page is the agent's debug view): the task as the opening
+  message, then the conversation in the order written (the model's replies and the messages as
+  bubbles, each eval a compact line that opens to its value), then how the run stands. See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (let [[rid run] (the-run c)
+        ev? (set (keys (:evals c)))
+        tu? (set (keys (:turns run)))]
+    [:div {:id "chat-ctx"}
+     [:div {:id "p-task"} (when rid [#'chat-opening {} rid])]
+     [:ol {:id "c-rows"}
+      (for [id (conversation c db run)] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} rid id] :else [#'chat-message {} rid id]))
+      (when rid [#'chat-end {} rid])]]))
 
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
@@ -1292,15 +1372,17 @@
   placed in the list it was drawn in ({:id :container :rev :html}: the agents list, the head, the
   task's list, the conversation, the tiles), and its caption and input. Each unit's input is its
   revision, so the render proc sends one only when its output changed, and a new one into its list
-  where its walk placed it (an append). opts {:units :view :input :caption}; id, the page's focus."
+  where its walk placed it (an append). opts {:units :view :input :caption :tab}; id, the page's
+  focus; tab, which of its tabs it is (top-bar)."
   {:malli/schema [:=> [:cat :map :keyword] [:map [:seon.render/html :any] [:seon.render/units [:vector :map]]]]}
-  [{:keys [units view input caption]} id]
+  [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
         unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
-      (top-bar id false)
-      [:div {:class "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_20rem]"}
+      (top-bar id tab)
+      ;; a page with no tiles (an agent's chat) gives the conversation the tiles' width
+      [:div {:class (str "grid grid-cols-1 gap-4 " (if (seq (in "#p-tiles")) "lg:grid-cols-[12rem_minmax(0,1fr)_20rem]" "lg:grid-cols-[12rem_minmax(0,1fr)]"))}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
@@ -1330,7 +1412,7 @@
   (let [view (view-param [:debug id])]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-lg flex-col gap-3 p-3 sm:p-4"}
-      (top-bar id true)
+      (top-bar id :context)
       [:header {:class "flex flex-col gap-1"}
        [:h1 {:class "text-base font-semibold text-text-50"} (if context (str "What " (kname id) " reads") (str "What " (kname id) "'s model was sent"))]
        [:p {:class "text-text-400"} (if context

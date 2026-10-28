@@ -195,57 +195,29 @@
     (when (:seon.error/type r) (throw (ex-info (str "write failed: " (:seon.error/message r)) r)))
     r))
 
-(defn- main-tree
-  "The main tree's path (git's common dir's parent), whichever checkout this runs in."
-  []
-  (.getCanonicalPath (.getParentFile (io/file (str/trim (:out (sh/sh "git" "-C" (str (config/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))))))
-
-(defn- ask-root
-  "One request m to the standing root's server (port: default :seon.config.proofs/results-port;
-  bin/ask: one line, one reply line): its answer as data, or {:error ...} naming why none came (no
-  port, refused, the connection closed), each a failure point a caller reports."
-  ([m] (ask-root (config/value :seon.config.proofs/results-port) m))
-  ([port m]
-   (if (zero? port)
-     {:error :no-results-port}
-     (let [{:keys [out]} (sh/sh (str (config/checkout) "/bin/ask") (str port) :in (str (sedn/encode m) "\n"))]
-       (if (str/blank? out)
-         {:error :no-answer}
-         (try (edn/read-string {:default tagged-literal} out)
-              (catch Exception e {:error :unreadable :message (ex-message e)})))))))
-
 (defn read-results
-  "The results the root at port holds at digests (its :results op): {digest result}, or the typed
-  :seon.proofs/unread naming why none came (:why, ask-root's: the root refused the connection, as
-  it does while it restarts, closed it, or answered no results), never {} for a read that failed:
-  zero greens is an answer, a failed read is not."
-  [port digests]
-  (let [asked (ask-root port {:op :results :digests (vec digests)})]
-    (if (map? (:results asked))
-      (:results asked)
-      (contract/error :seon.proofs/unread 'test-runner/read-results
-                      (str "no results read from the root at port " port ": " (pr-str (or (:error asked) (:seon.error/message asked))))
-                      {:port port :why (or (:error asked) (:seon.error/type asked))}))))
+  "The verdicts cached for cand ({key digest}, seon.fx/stored-results): {digest result}, or the typed
+  :seon.proofs/unread naming the file that could not be read, never {} for a read that failed: zero
+  greens is an answer, a failed read is not."
+  [cand]
+  (let [r (fx/stored-results cand)]
+    (if (contract/error? r)
+      (contract/error :seon.proofs/unread 'test-runner/read-results (str "verdicts not read: " (:seon.error/message r)) {:why (:seon.error/type r)})
+      r)))
 
 (defn record-run!
-  "The results ran ({key result}) of run ({:id :tree}) and their failures recorded on the main of the
-  root at port (:seon.config.proofs/results-port; its :record op: seon.proofs/record!, the one
-  writer), :main? when this checkout is the main tree. One path: recorded, or the run is red.
-  Answers the unrecorded ([{:key :message}]: no root answered, as while it restarts, or it refused
-  them), empty when recorded."
-  [port run ran failures]
-  (let [r (ask-root port {:op :record :run run :ran ran :failures failures :main? (= (.getCanonicalPath (io/file (config/checkout))) (main-tree))})]
-    (cond
-      (:error r) [{:key :all :message (str "no root recorded them (port " port "): " (pr-str (:error r)))}]
-      (:seon.error/type r) [{:key :all :message (:seon.error/message r)}]
-      :else [])))
+  "The verdicts ran ({key result}) of run ({:id :tree}) and their failures cached (seon.fx/write-verdicts!).
+  One path: cached, or the run is red. Answers the unrecorded ([{:key :message}]: a file the cache would
+  not take), empty when cached."
+  [run ran failures]
+  (let [r (fx/write-verdicts! run ran failures)]
+    (if (contract/error? r) [{:key :all :message (:seon.error/message r)}] [])))
 
 (defn- measured-ms
-  "{test ms} of tests: each one's newest measured ms on the standing root's main (its :results
-  :ms, seon.proofs/last-ms): what the deal orders by, never what a test proves. No root
-  answering: none, and the deal counts every test alike."
+  "{test ms} of tests: the most ms each one's cached verdicts measured (seon.fx/last-ms): what the deal
+  orders by, never what a test proves."
   [tests]
-  (if (seq tests) (:ms (ask-root {:op :results :digests [] :tests (vec tests)}) {}) {}))
+  (if (seq tests) (fx/last-ms (vec tests)) {}))
 
 (defn shards
   "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
@@ -292,7 +264,7 @@
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
   red one printed (RED); then
-  its results, greens and reds, recorded at their digests in the results store in one commit (seon.proofs/record!:
+  its results, greens and reds, recorded at their digests in the results store in one commit (seon.fx/write-verdicts!:
   their failures and each test's contracted functions' cost with them), unless the tree is not the
   plan's before and after the run (an edit during the run: what ran is not what the digests name, so
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
@@ -324,10 +296,10 @@
           ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
           ;; tree-id per shard, not two)
           same? (= tree (fx/tree-id (System/getProperty "user.dir")))
-          ;; one request of the shard's results, their failures and each test's function costs
+          ;; the shard's verdicts, their failures and each test's function costs, cached
           unstored (when same?
                      (let [cost-of (proofs/costs {:reports @reports})]
-                       (record-run! (config/value :seon.config.proofs/results-port) {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
+                       (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
                                     (into {} (for [[t r] ran] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
                                     (proofs/failures {:reports @reports}))))
           red (count (remove proofs/green? (vals ran)))]
@@ -346,10 +318,10 @@
   (let [unread (volatile! nil)
         p (proofs/plan-of (tests-of root names store) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
-                  ;; the results main holds at the candidates' digests, from the standing root; a read
-                  ;; that failed is the plan's :unread (prove! stops on it), never zero greens
-                  (fn [digests]
-                    (let [r (read-results (config/value :seon.config.proofs/results-port) digests)]
+                  ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
+                  ;; :unread (prove! stops on it), never zero greens
+                  (fn [cand]
+                    (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
     (cond-> p @unread (assoc :unread @unread))))
 
@@ -381,9 +353,9 @@
         plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
-    (do (println (str "TEST FAILED: " (:seon.error/message u) " (the standing root restarting refuses until it listens: bin/root status)"))
+    (do (println (str "TEST FAILED: " (:seon.error/message u)))
         1)
-  (let [dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
+  (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} plan
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
@@ -437,7 +409,7 @@
 
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
-  (check-<step>, space separated) recorded green at its digest in the results store (seon.proofs/record!, one commit),
+  (check-<step>, space separated) cached green at its digest (seon.fx/write-verdicts!),
   unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
   than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
   stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
@@ -452,7 +424,7 @@
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
-                     (record-run! (config/value :seon.config.proofs/results-port) {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
+                     (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
                                   (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"

@@ -425,7 +425,20 @@
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
-  (is (= [:root :root :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "474"]))))
+  (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/debug" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
+
+(deftest a-branch-names-its-newest-agent
+  ;; docs/render.md#the-page: a branch is an agent's durable name: its newest agent, of any boot, ended or
+  ;; not, so a page opens from the store after the boot that made it is gone
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "old-boot/a4" :seon.agent/id :a4 :seon.agent/branch :main/task-x :seon.agent/status :ended}])
+        old (seon.db/eid db :seon.agent/key "old-boot/a4")
+        db2 (d/db-with db [{:seon.agent/key "new-boot/a1" :seon.agent/id :a1 :seon.agent/branch :main/task-x}
+                           {:seon.agent/key "new-boot/a2" :seon.agent/id :a2 :seon.agent/branch :main/task-y}])
+        newer (seon.db/eid db2 :seon.agent/key "new-boot/a1")]
+    (is (= old (#'p/location db :main/task-x)) "an ended agent of an earlier boot, by its branch")
+    (is (= old (#'p/location db [:chat :main/task-x])) "its chat")
+    (is (= newer (#'p/location db2 :main/task-x)) "the newest agent of the branch")
+    (is (nil? (#'p/location db2 :main/task-z)) "a branch no agent worked names none")))
 
 (deftest a-page-keeps-what-it-read
   ;; task seon.render/a-view-renders-once-per-change-of-its-reads (B): a page's walk runs inside
@@ -691,7 +704,7 @@
         (is (str/includes? html "and 2 records as turn 1 sent them") "a later row names what it shares")
         (is (str/includes? html "I call f.") "the call's prose")
         (is (= [:debug :a1] (#'seon.web/view-of (java.net.URLDecoder/decode (ui/view-param [:debug :a1]) "UTF-8"))) "its feed names it, and reads it back")
-        (is (= [:debug :a1] (#'seon.web/view-of "a1/debug")) "/agent/a1/debug")
+        (is (= [:debug :a1] (#'seon.web/view-of "a1/context")) "/agent/a1/context")
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with (get-in st [:branches [:debug :a1] :db])
                               [{:db/id e0 :seon.turn/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
@@ -994,18 +1007,6 @@
         text (seon.print/text (vary-meta page assoc :seon.print/full true))]
     (is (< (:part seon.print/budgets) (seon.print.select/estimate plan)) "a plan over a part's budget")
     (is (str/includes? text (subs plan (- (count plan) 60))) "the plan's end is on the page")))
-
-(deftest a-task-already-green-on-main-says-so-first
-  ;; root, 2026-10-27: a task whose proof is green on main says so in turn 1, before its plan
-  (let [[_ branch _] (paged-dbs)
-        db (d/db-with branch (conj (#'seon.context-test/program-facts [['demo/f-test "(deftest f-test (is true))" []]])
-                                   {:seon.proof/latest "demo/f-test" :seon.proof/status :pass}))
-        page (seon.context/page db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
-        text (seon.print/text (vary-meta page assoc :seon.print/full true))
-        at #(str/index-of text %)]
-    (is (some? (at "Already green on main: demo/f-test")) "the page says the proof is green on main")
-    ;; the plan's words (its `code` spans are drawn as code, so its backticks are no text of the page)
-    (is (< (at "Already green on main") (at "answer the tree")) "before the task's plan")))
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
@@ -1329,3 +1330,37 @@
     (is (str/includes? a3 "✗ bad-test") "a red proof")
     (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
     (is (str/includes? (card 2) "no task yet"))))
+
+(deftest an-agents-chat-reads-as-a-conversation
+  ;; docs/render.md#the-page (owner, 2026-10-28: a chat a person reads): the task opens it, a model turn is a
+  ;; bubble of its reply with its thinking folded, a message a bubble with its sender, the run's end its last line
+  (let [c {:runs {1 {:task {:seon.task/id "seon.print/a-long-string" :seon.task/plan "Make `seon.print/text` share its budget."}
+                     :seon.run/status :closed :seon.run/outcome :cap :seon.run/turns 8 :seon.run/max-turns 8 :seon.run/reason "it reached its cap"
+                     :turns {2 {:seon.turn/n 1 :seon.turn/reply "The string takes the whole budget; I'll **reproduce** it first." :seon.turn/reasoning "Read select first."}
+                             3 {:seon.turn/n 2 :seon.turn/reply "" :seon.turn/reasoning ""}}
+                     :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}}}
+        h #(h/html %)]
+    (testing "the task is the opening message, its plan as written"
+      (let [o (h (ui/chat-opening {:seon.ctx/ctx c} 1))]
+        (is (str/includes? o "A long string"))
+        (is (str/includes? o "Make `seon.print/text` share its budget."))))
+    (testing "a model turn is its reply, its thinking folded"
+      (let [t (h (ui/chat-turn {:seon.ctx/ctx c} 1 2))]
+        (is (str/includes? t "I'll **reproduce** it first."))
+        (is (str/includes? t "<details") "its thinking folded")
+        (is (str/includes? t "Read select first."))
+        (is (str/includes? t "turn 1")))
+      (is (nil? (ui/chat-turn {:seon.ctx/ctx c} 1 3)) "a turn that said nothing draws no bubble"))
+    (testing "a message is a bubble with its sender"
+      (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
+        (is (str/includes? m "user"))
+        (is (str/includes? m "Is the premise right?"))))
+    (testing "the run's end is the last line"
+      (is (= "— cap · turn 8 of 8 · it reached its cap —" (second (ui/chat-end {:seon.ctx/ctx c} 1)))))))
+
+(deftest a-page-path-names-its-view-and-back
+  ;; docs/render.md#the-page: an agent's chat, debug view and model context, by its id or its branch, and back
+  (doseq [[path view] [["a4" [:chat :a4]] ["a4/debug" :a4] ["a4/context" [:debug :a4]]
+                       ["main/task-x" [:chat :main/task-x]] ["main/task-x/debug" :main/task-x] ["root" :root] ["root/debug" [:debug :root]]]]
+    (is (= view (#'seon.web/view-of path)) path)
+    (is (= path (java.net.URLDecoder/decode (ui/view-param view) "UTF-8")) path)))

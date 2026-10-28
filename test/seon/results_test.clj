@@ -1,116 +1,150 @@
 (ns seon.results-test
-  "Results as facts on main (task seon.proofs/tests-are-facts, docs/merging.md#results-are-facts-on-main):
-  what ran is a fact at its digest, flaky a fact, a run's function costs one value, a function's
-  cost per call a fact written only when it moves, and the queries over them; on a branch of the
-  one test store."
-  (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts] [seon.proofs :as proofs]))
+  "Verdicts are a cache by digest outside the store (docs/merging.md#verdicts-are-a-cache): one file a
+  key, digest and status, flaky kept across writers, a red never evicted, the cost a test spent per
+  function kept with its verdict, and nothing written to the store; each test on a cache directory of
+  its own under target/tmp."
+  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
+            [seon.fx :as fx] [seon.proofs :as proofs]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
 
-(defn- write-on [conn] (fn [tx] (d/transact conn {:tx-data tx})))
+(defn- with-dir
+  "f called with a fresh cache directory under this checkout's target/tmp, removed after."
+  [f]
+  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-" (random-uuid))]
+    (try (f dir) (finally (sh/sh "rm" "-rf" dir)))))
 
 (defn- rec!
-  ([conn ran] (rec! conn ran {} false))
-  ([conn ran failures main?]
-   (proofs/record! (write-on conn) @conn {:run {:id (str "run " (random-uuid)) :tree "t"} :ran ran :failures failures :main? main?})))
+  ([dir ran] (rec! dir ran {}))
+  ([dir ran failures] (fx/write-verdicts! dir {:id (str "run " (random-uuid)) :tree "t"} ran failures)))
 
-(deftest a-digest-judged-green-and-red-is-flaky-whichever-came-last
-  (ts/test-branch!
-   (fn [_ conn]
-     (rec! conn {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}
-                 'a/u {:test 'a/u :digest "d-green" :pass 1 :fail 0 :error 0}})
+;; See docs/health.md#a-flaky-test
+(deftest a-digest-written-green-and-red-by-two-writers-is-flaky
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}
+                'a/u {:test 'a/u :digest "d-green" :pass 1 :fail 0 :error 0}})
      (is (= {"d-flip" {:digest "d-flip" :pass 1 :fail 0 :error 0} "d-green" {:digest "d-green" :pass 1 :fail 0 :error 0}}
-            (proofs/stored-results @conn ["d-flip" "d-green" "d-none"]))
-         "a green is reused; a digest with no result is none")
-     (rec! conn {'a/t {:test 'a/t :digest "d-flip" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "boom" :expected "1" :actual "2"}]} false)
-     (let [r (get (proofs/stored-results @conn ["d-flip"]) "d-flip")]
+            (fx/stored-results dir '{a/t "d-flip" a/u "d-green" a/none "d-none"}))
+         "a green is reused; a digest with no verdict is none")
+     ;; a second writer of the same digest, red: its own file, so neither verdict is lost
+     (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "boom" :expected "1" :actual "2"}]})
+     (let [r (get (fx/stored-results dir '{a/t "d-flip"}) "d-flip")]
        (is (:flaky r) (pr-str r))
        (is (not (proofs/green? r)) "flaky is red, never reused as green")
        (is (some #(= "boom" (:message %)) (:failures r)) "with the failures its red run recorded"))
-     (rec! conn {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}})
-     (is (:flaky (get (proofs/stored-results @conn ["d-flip"]) "d-flip")) "a green after the red leaves it flaky"))))
+     (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}})
+     (is (:flaky (get (fx/stored-results dir '{a/t "d-flip"}) "d-flip")) "a green after the red leaves it flaky"))))
 
+;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-red-is-reused-with-its-failures
-  (ts/test-branch!
-   (fn [_ conn]
-     (rec! conn {'a/r {:test 'a/r :digest "d-red" :pass 0 :fail 0 :error 1}} {'a/r [{:type :error :message "thrown"}]} false)
-     (let [r (get (proofs/stored-results @conn ["d-red"]) "d-red")]
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/r {:test 'a/r :digest "d-red" :pass 0 :fail 0 :error 1}} {'a/r [{:type :error :message "thrown"}]})
+     (let [r (get (fx/stored-results dir '{a/r "d-red"}) "d-red")]
        (is (= [1 false] [(:error r) (boolean (:flaky r))]) (pr-str r))
        (is (= ["thrown"] (map :message (:failures r))))))))
 
-(deftest flaky-and-unreported-results-record-nothing
-  (is (= []
-         (proofs/results-tx {:id "r"} {'a/f {:test 'a/f :digest "d1" :pass 0 :fail 1 :error 0 :flaky true}
-                                       'a/u {:test 'a/u :digest "d2" :pass 0 :fail 0 :error 1 :unreported true}
-                                       'a/n {:test 'a/n :pass 1 :fail 0 :error 0}} {}))))
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest flaky-and-unreported-results-write-nothing
+  (with-dir
+   (fn [dir]
+     (is (= {:recorded 0}
+            (rec! dir {'a/f {:test 'a/f :digest "d1" :pass 0 :fail 1 :error 0 :flaky true}
+                       'a/u {:test 'a/u :digest "d2" :pass 0 :fail 0 :error 1 :unreported true}
+                       'a/n {:test 'a/n :pass 1 :fail 0 :error 0}})))
+     (is (= {} (fx/stored-results dir '{a/f "d1" a/u "d2"}))))))
 
-(deftest a-refused-write-is-unrecorded
-  (let [refused {:seon.error/type :seon.writer/refused :seon.error/operation 'seon.writer/writer-one :seon.error/message "no"}
-        r (proofs/record! (fn [_] refused) nil {:run {:id "r"} :ran {'a/t {:test 'a/t :digest "d" :pass 1 :fail 0 :error 0}}})]
-    (is (= :seon.proofs/unrecorded (:seon.error/type r)) (pr-str r))))
+;; See docs/failure-points.md
+(deftest a-corrupt-verdict-file-is-an-error-never-a-miss
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/t {:test 'a/t :digest "dc" :pass 1 :fail 0 :error 0}})
+     (spit (str dir "/a/t/dc.pass.edn") "{:status :pass")
+     (let [r (fx/stored-results dir '{a/t "dc"})]
+       (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r)))
+     (is (nil? (fx/read-verdict (str dir "/a/t/gone.pass.edn"))) "a file that is not there (never written, or evicted meanwhile) is a miss"))))
 
-(deftest a-run-writes-what-ran-and-one-value-of-its-function-costs
-  (ts/test-branch!
-   (fn [_ conn]
-     (let [ran {'a/t1 {:test 'a/t1 :digest "d1" :pass 1 :fail 0 :error 0 :fns (into [(fc 'a/f 10 1000 900 64)] (for [i (range 40)] (fc (symbol "a" (str "g" i)) 1 50 50 0)))}
-                'a/t2 {:test 'a/t2 :digest "d2" :pass 1 :fail 0 :error 0 :fns [(fc 'a/f 2 300 100 8)]}}
-           tx (proofs/record-tx @conn {:run {:id "r1" :tree "t"} :ran ran})
-           before (count (d/datoms @conn :eavt))
-           _ (d/transact conn {:tx-data tx})
-           written (- (count (d/datoms @conn :eavt)) before)]
-       (testing "no datom a function or a call: two results, a run with one detail value"
-         (is (= 3 (count tx)) (pr-str (map keys tx)))
-         (is (< written 30) (str written " datoms for 2 tests calling 41 functions")))
-       (testing "which tests exercise a function, and how much, read from the runs that recorded them"
-         (is (= [['a/t1 10 1000 900] ['a/t2 2 300 100]] (mapv (juxt :test :calls :ticks :self-ticks) (proofs/exercising @conn 'a/f ["d1" "d2"]))))
-         (is (= ['a/t2] (mapv :test (proofs/exercising @conn 'a/f ["d2"]))) "only the tests at the digests asked"))
-       (testing "a run off main's tree writes no function facts"
-         (is (= [] (proofs/fns @conn))))))))
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-test-holds-at-most-its-bound-of-digests-and-a-red-is-never-evicted
+  (with-dir
+   (fn [dir]
+     (let [bound (cfg/value :seon.config.proofs/results-per-test)
+           ;; "d000" sorts lowest, so it is the first evicted were it green: a red never is
+           _ (rec! dir {'a/t {:test 'a/t :digest "d000" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "red"}]})
+           _ (doseq [i (range 1 (+ bound 3))]
+               (rec! dir {'a/t {:test 'a/t :digest (format "d%03d" i) :pass 1 :fail 0 :error 0}}))
+           held (->> (.listFiles (java.io.File. (str dir "/a/t"))) (map #(re-find #"^d\d+" (.getName %))) distinct sort)
+           kept (fx/stored-results dir {'a/t "d000"})]
+       (is (= bound (count held)) (pr-str held))
+       (is (some #{"d000"} held) "the red stays")
+       (is (some #{(format "d%03d" (+ bound 2))} held) "the digest just written stays")
+       (is (= 1 (:fail (get kept "d000"))) (str "and reads back red: " (pr-str kept)))))))
 
-(deftest a-functions-cost-per-call-is-written-only-when-it-moves
-  (ts/test-branch!
-   (fn [_ conn]
-     (rec! conn {'a/t1 {:test 'a/t1 :digest "m1" :pass 1 :fail 0 :error 0 :fns [(fc 'a/f 10 1000 1000 100) (fc 'a/g 4 400 400 0)]}} {} true)
-     (is (= {'a/f [100 10] 'a/g [100 0]} (into {} (map (juxt :var (juxt :self-ticks :self-bytes))) (proofs/fns @conn)))
-         "main's run: each function's cost per call, its sums over the calls")
-     (let [n (count (d/datoms @conn :eavt))]
-       (rec! conn {'a/t1 {:test 'a/t1 :digest "m2" :pass 1 :fail 0 :error 0 :fns [(fc 'a/f 10 1050 1050 100) (fc 'a/g 4 400 400 0)]}} {} true)
-       (is (= {'a/f 100} (into {} (map (juxt :var :self-ticks)) (filter #(= 'a/f (:var %)) (proofs/fns @conn)))) "5% is noise: not rewritten")
-       (is (< (- (count (d/datoms @conn :eavt)) n) 15) "only the result and the run were written"))
-     (rec! conn {'a/t1 {:test 'a/t1 :digest "m3" :pass 1 :fail 0 :error 0 :fns [(fc 'a/f 10 3000 3000 100) (fc 'a/g 4 400 400 0)]}} {} true)
-     (is (= 300 (:self-ticks (first (filter #(= 'a/f (:var %)) (proofs/fns @conn))))) "tripled: rewritten")
-     (testing "the slowest per call, by its own ticks"
-       (is (= ['a/f 'a/g] (mapv :var (proofs/slowest @conn 2)))))
-     (testing "what got slower: a tree's detail against main's facts"
-       (let [detail {'a/t1 {'a/f [10 9000 9000 100 100] 'a/g [4 400 400 0 0] 'a/new [1 9 9 0 0]}}]
-         (is (= [['a/f :self-ticks 300 900 3.0]] (mapv (juxt :var :by :before :after :ratio) (proofs/slower @conn detail)))
-             "f tripled again; g held; a function main never measured is new, not slower"))))))
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-verdict-keeps-what-its-test-spent-per-function
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/t1 {:test 'a/t1 :digest "d1" :pass 1 :fail 0 :error 0 :fns (into [(fc 'a/f 10 1000 900 64)] (for [i (range 40)] (fc (symbol "a" (str "g" i)) 1 50 50 0)))}
+                'a/t2 {:test 'a/t2 :digest "d2" :pass 1 :fail 0 :error 0 :fns [(fc 'a/f 2 300 100 8)]}})
+     (let [details (fx/details dir '{a/t1 "d1" a/t2 "d2"})]
+       (testing "which tests exercise a function, and how much"
+         (is (= [['a/t1 10 1000 900] ['a/t2 2 300 100]] (mapv (juxt :test :calls :ticks :self-ticks) (proofs/exercising details 'a/f))))
+         (is (= ['a/t2] (mapv :test (proofs/exercising (fx/details dir '{a/t2 "d2"}) 'a/f))) "only the tests at the digests asked"))
+       (testing "its cost per call over them"
+         (is (= {:calls 12 :ticks 108 :self-ticks 83 :bytes 6 :self-bytes 6} (get (proofs/per-call details) 'a/f))))))))
 
-(deftest a-tests-last-ms-is-its-newest-result-whatever-its-digest
-  (ts/test-branch!
-   (fn [_ conn]
-     (rec! conn {'a/t {:test 'a/t :digest "ms-1" :pass 1 :fail 0 :error 0 :ms 40}})
-     (rec! conn {'a/t {:test 'a/t :digest "ms-2" :pass 1 :fail 0 :error 0 :ms 900}
-                 'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
-     (is (= '{a/t 900 a/u 7} (proofs/last-ms @conn '[a/t a/u a/none])) "the newest, by test; a test never run is left out"))))
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-tests-last-ms-is-the-most-any-digest-measured
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/t {:test 'a/t :digest "ms-1" :pass 1 :fail 0 :error 0 :ms 40}})
+     (rec! dir {'a/t {:test 'a/t :digest "ms-2" :pass 1 :fail 0 :error 0 :ms 900}
+                'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
+     (is (= '{a/t 900 a/u 7} (fx/last-ms dir '[a/t a/u a/none])) "by test; a test never run is left out"))))
 
 (def ^:private red-cost
   "A red cost proof's report, as seon.cost/proof's :actual carries it."
   {:rows [{:n 10 :measured {:ticks 900.0 :bytes 100.0} :expected {:ticks 100.0 :bytes 100.0}}]
    :verdict {:ok? false :over [{:dim :ticks :n 10 :ratio 9.0}] :steeper [] :under [] :unmeasured []}})
 
+;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-reused-red-cost-proof-keeps-its-verdict
   ;; root via one-wait, 2026-10-27: a reused red cost proof lost its {:rows :verdict}, so the problems
   ;; cost class stayed empty and bin/check problems waited forever. The verdict is kept with the red
   ;; and comes back as its fresh run reported it
-  (ts/test-branch!
-   (fn [_ conn]
+  (with-dir
+   (fn [dir]
      (let [answer {:digests '{a.c-test/cost "dc"}
                    :reports [{:type :fail :var "#'a.c-test/cost" :message "over" :cost red-cost}]}
            {:keys [ran failures]} (proofs/answer-ran answer)
            fresh (proofs/costs {:reports (:reports answer)})]
-       (proofs/record! (write-on conn) @conn {:run {:id "r"} :ran ran :failures failures})
-       (let [r (get (proofs/stored-results @conn ["dc"]) "dc")]
+       (fx/write-verdicts! dir {:id "r"} ran failures)
+       (let [r (get (fx/stored-results dir '{a.c-test/cost "dc"}) "dc")]
          (is (= (get fresh 'a.c-test/cost) (:cost r)) (pr-str r))
          (is (= fresh (proofs/costs {:reports [(assoc (first (:failures r)) :var "#'a.c-test/cost" :cost (:cost r))]}))
              "the reused report (seon.agent/run-tests-forked's) answers proofs/costs as the fresh one did"))))))
+
+(defn- run-of
+  "A test run's answer of n green tests and reds red ones, each red with three failing assertions."
+  [n reds]
+  {:pass n :fail reds :error 0 :ran (+ n reds) :key "b@d"
+   :reports (vec (concat (for [i (range n)] {:type :pass :var (str "#'a.g-test/t" i)})
+                         (for [i (range reds) j (range 3)] {:type :fail :var (str "#'a.r-test/t" i) :message (str "boom " j) :expected "1" :actual "2"})))})
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-tests-answer-costs-its-reds-not-its-tests
+  ;; root, 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports)
+  (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))
+        bound (cfg/value :seon.config.proofs/answer-reds)]
+    (testing "green tests past the proofs cost nothing: n and 2n answer the same bytes but for the counts' digits"
+      (is (< (Math/abs (- (size (run-of 100 0)) (size (run-of 200 0)))) 5)))
+    (testing "the done rule reads it as it reads the whole run: the proof's pass and every red's failures"
+      (let [a (proofs/answer (run-of 50 3) '#{a.g-test/t0})]
+        (is (= '{a.g-test/t0 :pass a.r-test/t0 :fail a.r-test/t1 :fail a.r-test/t2 :fail} (proofs/results a)))
+        (is (= 3 (count (get (proofs/failures a) 'a.r-test/t1))))))
+    (testing "reds past the bound are counted, never carried"
+      (let [a (proofs/answer (run-of 10 (* 2 bound)) #{})]
+        (is (= bound (:reds-left a)))
+        (is (= bound (count (proofs/results a))))
+        (is (< (Math/abs (- (size (run-of 10 (* 2 bound))) (size (run-of 10 (* 4 bound))))) 5) "flat past the bound")))))
