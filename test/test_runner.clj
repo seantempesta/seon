@@ -34,7 +34,7 @@
 ;; ---- reach -----------------------------------------------------------------------------
 
 ;; The program db is a function of the git tree (owner via root, 2026-10-23, option B of
-;; claude_scratch/archive/test-fork-main-2026-10-23.md): kept as a branch named by the tree's id, a content key
+;; docs/source.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
 (defn- tree-prefix

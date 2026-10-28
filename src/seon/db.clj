@@ -277,7 +277,7 @@
   process writing it shares (native/ids.c): the file `ids` beside a durable store, or an
   anonymous page for a store in memory; a process forked from this one maps the same page.
   Each id is issued once across every branch and process, so a datom keeps its e and tx
-  wherever it travels (claude_scratch/global-ids/MEASURED.md §6: 28-34 ns an id, 200-240 ns with 10
+  wherever it travels (docs/storage.md: 28-34 ns an id, 200-240 ns with 10
   processes contending). The page is moved past every branch head's ids
   (datahike.writing/set-ids!), so an id issued but never committed is a gap, never reused,
   and a page lost in a crash is reseeded from the heads. A page the OS refuses is

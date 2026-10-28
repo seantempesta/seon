@@ -41,7 +41,7 @@ The entity whose unique attribute holds a value is found by `seon.db/eid`: one s
 
 Every entity id and every transaction id is issued once across the whole store: every branch, every process. So a datom names the same entity and the same transaction wherever it travels, onto main by a merge or into a query over several branches. The ids come from one page every process writing the store shares (```seon.db/ids!```, `native/ids.c`): two 64-bit words, the last entity id and the last transaction id issued, mapped from the file `ids` beside `data.mdb` (an anonymous page for a store in memory). A process forked from root (the fork server, an agent, a clone) maps the same page, so it needs nothing at fork. Datahike takes them through its id source (`datahike.ids`, `datahike.writing/set-ids!`):
 - a transaction takes its id when it begins, and a branch's t (`:max-tx`) is its last transaction's id: increasing on each branch, with gaps where other branches took ids;
-- each fresh entity id is one atomic fetch-add. Measured 2026-10-23: 28-34 ns an id, 200-240 ns with 10 processes contending, 30M ids with none lost or repeated; an LMDB counter key cost 9.6 us alone and ~500 us contended ([claude_scratch/global-ids/MEASURED.md](../claude_scratch/global-ids/MEASURED.md) §6);
+- each fresh entity id is one atomic fetch-add. Measured 2026-10-23: 28-34 ns an id, 200-240 ns with 10 processes contending, 30M ids with none lost or repeated; an LMDB counter key cost 9.6 us alone and ~500 us contended (docs/storage.md#ids);
 - the page is moved past every branch head's ids when a store opens (O(branches) head reads, once), so an id issued but never committed is a gap, never reused, and a page lost in a crash is rebuilt from the heads;
 - an explicit id in tx-data (a carried datom's) moves the page past it.
 
@@ -59,7 +59,7 @@ A merge decides what merges from the datoms that differ, never by reading whole 
 
 What merges is then carried as it is (```seon.merge/merge-tx```, ```seon.merge/carried-tx```): the datoms the branch wrote for the keys that merge, with their own entity ids and transaction ids, its retractions first (so a card-one change writes no extra retraction under the merge's transaction), and the facts of the transactions that made them (their instants, their runtime), after the Datahike declarations of the attributes those datoms use that main lacks (`attribute-declarations`). Ids are issued once across the store and identities take [content ids](#ids), so on main they name the same entities and transactions: a merge adds what the branch wrote, never a copy, and the same datom is one datom in every branch's history. Platform records (turns, evaluations, runs) bear no program key, so they stay where they were written. The writer's octopus merge and an agent's `merge-main!` both merge this way; a conflict's unmerged entry is still written by the merge. Datahike keeps a carried datom's tx (`transact-add`, `transact-retract-datom`). Proof: `seon.merge-test/a-merge-carries-the-branchs-own-datoms`. This deleted the old apply-tx and its five setters (94 lines), which re-transacted each key's content by identity under the merge's transaction.
 
-Measured 2026-10-23 (claude_scratch/global-ids/MEASURED.md §5): on a 115k-datom main, a merge's three program reads took 6.6 s of 6.7 s. `seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program` holds the three-way flat at about 7 ms from 100 to 10,000 forms, with one form changed on each side. That proof keeps a store on disk, because the in-memory test store gives index nodes no addresses, so a diff there shares nothing and reads everything.
+Measured 2026-10-23 (docs/storage.md): on a 115k-datom main, a merge's three program reads took 6.6 s of 6.7 s. `seon.merge-cost-test/a-three-way-costs-the-changes-not-the-program` holds the three-way flat at about 7 ms from 100 to 10,000 forms, with one form changed on each side. That proof keeps a store on disk, because the in-memory test store gives index nodes no addresses, so a diff there shares nothing and reads everything.
 
 ## The union
 
@@ -76,7 +76,7 @@ The owner's example, root's message on main and the agent's reply on its branch,
      (my.root/union sys) "demo/f#1")
 ```
 
-Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; claude_scratch/global-ids/bench/um.clj):
+Measured 2026-10-23 (REPL, LMDB, main 46,708 datoms, each branch one turn of ~15 datoms; docs/storage.md):
 
 | | 10 branches | 100 branches |
 |---|---|---|

@@ -703,7 +703,7 @@
                                                      :unmerged ["[:var app/f]"]))))))
 
 (deftest an-open-problem-its-work-caused-refuses-done
-  ;; claude_scratch/archive/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
+  ;; docs/health.md: recorded at its end (seon.problems/caused), refused by
   ;; the done rule, so the agent is told naming it (a :verdict); its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
     (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :open-problem :key msg}]}]
@@ -764,7 +764,7 @@
     {:kind :design :proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:proof-unknown]
     ;; a design that only rewrote its plan is not done: live agents, 2026-10-25, a design ended
     ;; green at its first plan edit, the proofs its plan named never written, and its implement
-    ;; started with none (claude_scratch/archive/live-2026-10-25.md D3)
+    ;; started with none (the archived paper live-2026-10-25.md (git history) D3)
     {:kind :design :proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:no-proofs]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
 
