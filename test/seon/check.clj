@@ -932,16 +932,22 @@
   server, an agent): a fork beside live runtime threads is refused whenever one is active at
   that instant. Each answers the data its test asserts."
   {"line-parks"
-   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's
-   #(in-child
-      (fn []
-        (let [[r w] (sock/socketpair)
-              ran (volatile! false)
-              _ (a/go (vreset! ran true))
-              _ (future (Thread/sleep 200) (sock/write-line! w "done"))
-              rd (sock/line-reader r)
-              lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
-          (and (= ["done"] lines) @ran))))
+   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. The line
+   ;; comes from a thread of the parent, 200 ms on (no fiber of the child could write it while its
+   ;; carrier is held): it was a future in the child, and a thread started in a forked child made
+   ;; collections that copied ever larger continuations (35 GB, minutes at 99% CPU, the reader's main
+   ;; thread waiting on the collector; Jolt's, filed). The verdict is which happened first, never how long.
+   #(let [[r w] (sock/socketpair)]
+      (lib/fork! {:child (fn []
+                           (let [ran (volatile! false)
+                                 _ (a/go (vreset! ran true))
+                                 rd (sock/line-reader r)
+                                 lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
+                             (lib/c-exit (if (and (= ["done"] lines) @ran) 0 1))))
+                  :refused (fn [n] {:refused n})
+                  :parent (fn [pid]
+                            (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
+                            (lib/wait-status pid))}))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
