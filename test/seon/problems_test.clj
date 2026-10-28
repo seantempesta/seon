@@ -1219,17 +1219,3 @@
         (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
 
-(deftest a-flaky-result-is-its-own-class
-  ;; seon.proofs/flaky's red, recorded as a test's newest result on main, is class :flaky, not
-  ;; :test-red: a defect at its cause, open until a change moves the test's digest
-  (let [latest (fn [t s fs] (cond-> {:seon.proof/latest t :seon.proof/status s :seon.proof/run "r" :seon.proof/branch "main" :seon.proof/t 1}
-                              (seq fs) (assoc :seon.proof/failures fs)))
-        db (d/db-with (ts/test-db) [(latest "app.f-test/flaky" :fail [{:type :fail :flaky true :message "flaky: green and red at digest d"}
-                                                                     {:type :fail :message "1 is not 2"}])
-                                    (latest "app.f-test/red" :fail [{:type :fail :message "1 is not 2"}])
-                                    (latest "app.f-test/green" :pass nil)])
-        classes (:classes (problems/report db))]
-    (is (= ['app.f-test/flaky] (mapv :test (get-in classes [:flaky :rows]))))
-    (is (= ['app.f-test/red] (mapv :test (get-in classes [:test-red :rows]))) "a red that judged one way stays :test-red")
-    (is (= "flaky app.f-test/flaky" (get-in classes [:flaky :rows 0 :signature])))
-    (is (true? (get-in classes [:flaky :rows 0 :evidence :flaky])))))

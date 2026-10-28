@@ -385,6 +385,12 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(defn- statuses
+  "The code of {test status} over the run that code x answers, every test it ran or reused (its
+  :digests): an answer carries only its proofs' passes and its reds (seon.proofs/answer), so every
+  other test it holds a digest of was green."
+  [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
+
 (deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
   ;; task seon.agent/an-agent-holds-mains-tests: the agent holds main's whole suite, and its
   ;; test run (root's :tests request, the one the judge sends) selects what the done rule
@@ -394,7 +400,7 @@
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
-                           {:op :eval :agent "root" :code (str "(seon.proofs/results @(seon.root/run-tests! sys :" (:agent %) "))")})
+                           {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
                           {:dirs ["src" "test"] :proofs #{proof}})]
     (is (= {proof :pass reached :pass} (:value run))
         "the proof and the one test reaching the change ran, green; nothing else ran")))
@@ -422,23 +428,32 @@
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
+(defn- cache-dir
+  "A fresh verdict cache directory under this checkout's target/tmp (seon.fx/write-verdicts!)."
+  [] (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid)))
+
+(defn- own-cache
+  "The --set that gives a test's root (and its agents) the verdict cache dir, one this test's own
+  process reads and writes too: a root per distinct :sets (in-agent)."
+  [dir] (str ":seon.config.proofs/results-dir=" (pr-str dir)))
+
 (deftest a-wide-reach-reuses-unchanged-results
   ;; task seon.proofs/prove-runs-what-a-change-reaches (and seon.agent/a-wide-reach-stays-cheap):
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
-  ;; against the main it forked from, and each green is a fact on the booted root's main (a root
-  ;; of its own here, so nothing an earlier run recorded is reused),
+  ;; against the main it forked from, and each green is cached by its digest (a test root's cache
+  ;; is its own: seon.test-store/start-root!, so nothing an earlier run cached is reused),
   ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
   ;; unchanged branch reruns nothing and answers the same results
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [(seon.proofs/results r) (:key r)])")
-        own "(select-keys (prove) [:results :ran :reused])"
-        ;; how many of the two tests' results main holds (as the agent hears it), at the digests the agent's plan gives
+        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [" (statuses "r") " (:key r)])")
+        own (str "(let [p (prove)] {:results " (statuses "p") " :ran (:ran p) :reused (:reused p)})")
+        ;; how many of the two tests' verdicts the cache holds at the digests the agent's plan gives
         ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
-        stored (str "(count (seon.proofs/stored-results (seon.agent/heard-main) (vec (vals (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
-                    (pr-str [proof reached]) ")))))")
+        stored (str "(count (seon.fx/stored-results (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
+                    (pr-str [proof reached]) ")))")
         [_ inputs first-run files judged second-run]
         ;; a real change that keeps them green (a vector of what the file's answers), so the reached
         ;; test is selected: the agent's change reaches it
@@ -456,7 +471,7 @@
                   {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (:value files)) "and both are facts on main at the agent's digests")
+    (is (= 2 (:value files)) "and both are cached at the agent's digests")
     ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
     (is (= {proof :pass reached :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
     (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
@@ -485,16 +500,16 @@
         (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
 (deftest a-red-at-its-digest-is-reused-with-its-failures
-  ;; task seon.proofs/a-red-at-its-digest-is-reused: the test service recorded r red at its
-  ;; digest; r is green if it runs, so a run would say :pass. The judge reuses the red, with the
-  ;; failure its run recorded, and forks nothing
+  ;; task seon.proofs/a-red-at-its-digest-is-reused: a run cached r red at its digest; r is green
+  ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
+  ;; cached, and forks nothing
   (let [[_ dg _ judge]
         (in-agent ["(ns reds-test (:require [clojure.test :refer [deftest is]]))
                    (deftest r (is true))"
                    "(get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)"
-                   "(seon.agent/transact! [{:seon.proof/digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r)
-                                           :seon.proof/test 'reds-test/r :seon.proof/status :fail :seon.proof/red :fail :seon.proof/run \"main@1\" :seon.proof/branch \"main\" :seon.proof/t 1
-                                           :seon.proof/failures [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]}])"
+                   "(seon.fx/write-verdicts! {:id \"main@1\"}
+                                             {'reds-test/r {:test 'reds-test/r :digest (get (:digests (seon.agent/test-plan (seon.agent/db) nil #{'reds-test/r})) 'reds-test/r) :pass 0 :fail 1 :error 0}}
+                                             {'reds-test/r [{:type :fail :message \"the recorded failure\" :expected \"1\" :actual \"2\"}]})"
                    "(let [r (seon.agent/run-tests-forked 100000000 #{'reds-test/r} :judge)]
                       [(seon.proofs/results r) (:ran r) (:reused r) (some? (:pid r)) (:fail r) (mapv (juxt :message :reused) (:reports r))])"]
                   {:dirs ["src" "test"] :proofs #{}})]
@@ -504,27 +519,22 @@
 
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
-  ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one store, keyed by
-  ;; the same digests, now the facts on root's main. The checkout records p1 green there; an
-  ;; agent on the same tree reuses it and runs p2, which is then a fact on main too, so the
-  ;; checkout's plan reuses the agent's p2
+  ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
+  ;; the same digests. The checkout caches p1 green there; an agent on the same tree reuses it and
+  ;; runs p2, which is then cached too, so the checkout's plan reuses the agent's p2
   (let [here (System/getProperty "user.dir")
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
-        ;; the checkout's green for p1, as root's writer records one (a run nested in this test's
-        ;; run would report through it)
-        record (str "(let [r (seon.proofs/record! #(deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}})) @(:conn sys) (quote "
-                    (pr-str {:run {:id "agent-test"} :ran {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}}}) "))] r)")
-        [_ recorded r after]
-        (in-agent ["nil"
-                   {:op :eval :agent "root" :code record}
-                   "(select-keys (prove) [:results :ran :reused])"
-                   {:op :eval :agent "root" :code (str "(seon.proofs/stored-results @(:conn sys) " (pr-str [(digests p2)]) ")")}]
+        dir (cache-dir)
+        ;; the checkout's green for p1, as bin/test caches one
+        recorded (fx/write-verdicts! dir {:id "agent-test"} {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}} {})
+        [_ r]
+        (in-agent ["nil" "(select-keys (prove) [:results :ran :reused])"]
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2}})
-        checkout (proofs/plan nil (select-keys digests [p2]) (:value after) #{})]
-    (is (true? (:ok (:value recorded))) (str "the checkout recorded its green for p1 on root's main: " (pr-str recorded)))
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2} :sets [(own-cache dir)]})
+        checkout (proofs/plan nil (select-keys digests [p2]) (fx/stored-results dir (select-keys digests [p2])) #{})]
+    (is (= {:recorded 1} recorded) (str "the checkout cached its green for p1: " (pr-str recorded)))
     (is (= {:results {p1 :pass p2 :pass} :ran 1 :reused 1} (:value r)) "the agent reuses the checkout's p1 and runs p2")
     (is (= [] (:run checkout)) "the checkout reuses the agent's p2")))
 
@@ -697,8 +707,7 @@
 
 (deftest the-judge-is-a-run-of-the-test-service
   ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at a run's end asks the test
-  ;; service (seon.prove), so its run is recorded on main, a fact per test digest and one for the
-  ;; run, keyed by the branch at its program's digest in mode :judge (no !turn)
+  ;; service (seon.prove), so its run's verdicts are cached by digest like any run's
   (let [[_ _ _ _ _ seen] (in-agent (fn [{:keys [agent run]}]
                                      [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
                                       "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
@@ -707,13 +716,11 @@
                                       {:op :eval :agent "root"
                                        :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                   " (let [db @(:conn sys)]"
-                                                  "  [(d/q '[:find [?id ...] :where [?r :seon.proof.run/id ?id]] db)"
-                                                  "   (d/q '[:find [?s ...] :where [?e :seon.proof/test demo-test/t] [?e :seon.proof/status ?s] [?e :seon.proof/digest]] db)"
+                                                  "  [(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/demo-test\")) .list vec)"
                                                   "   (:seon.run/outcome (get (seon.task/runs db) " (pr-str run) "))]))")}])
                                    {:own-root? true})
-        [runs statuses outcome] (:value seen)]
-    (is (some #(re-find #"@[0-9a-f]+$" %) runs) (str "a judge run on main, keyed branch@digest: " (pr-str seen)))
-    (is (= [:pass] statuses) "its result is a fact at the test's digest")
+        [cached outcome] (:value seen)]
+    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))
     (is (= :green outcome))))
 
 (deftest an-agent-finds-no-repository

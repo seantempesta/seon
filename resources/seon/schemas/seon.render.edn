@@ -71,6 +71,8 @@
                             [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; an agent's page: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
  :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
+ ;; an agent's chat, the page a person reads (seon.render.ui/chat-ctx), over the same ctx
+ :seon.render/chat-ctx [:map {:seon.render/html seon.render.ui/chat-ctx}]
  ;; root's page: its ctx as components (seon.render.ui/root-ctx, drawn by root's walk), which a branch may override
  :seon.render/root-ctx [:map {:seon.render/html seon.render.ui/root-ctx}]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them

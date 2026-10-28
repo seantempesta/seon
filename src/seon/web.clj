@@ -130,14 +130,21 @@
 
 (defn- view-of
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
-  agent's id in root's boot (a keyword), or an entity's id (a number); `<view>/debug` is
-  [:debug view], what that agent's model was sent (design section 5, two pages, two audiences)."
+  entity's id (a number), or an agent by its id in root's boot or its branch: `<agent>` is
+  [:chat agent], its chat; `<agent>/debug` the agent itself, every render of its ctx;
+  `<agent>/context` [:debug agent], what its model was sent; `root/debug` what root reads. The
+  inverse of seon.render.ui/view-param. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
   [s]
-  (cond (some->> s (re-matches #".+/debug")) [:debug (view-of (subs s 0 (- (count s) 6)))]
+  (cond (= "root/debug" s) [:debug :root]
+        ;; what agent v's model was sent
+        (some->> s (re-matches #".+/context")) [:debug (keyword (subs s 0 (- (count s) 8)))]
+        ;; agent v's debug view: every render of its ctx
+        (some->> s (re-matches #".+/debug")) (keyword (subs s 0 (- (count s) 6)))
         (or (str/blank? s) (= "root" s)) :root
         (re-matches #"\d+" s) (parse-long s)
-        :else (keyword s)))
+        ;; an agent by its id in this boot or its branch (main/task-x): its chat, the page a person reads
+        :else [:chat (keyword s)]))
 
 (defn handler
   "The routes, as an edge in front of the proc's :http in-port."
@@ -232,8 +239,10 @@
   (when body
     (str "<!doctype html>"
          (h/html (ui/shell (cond (= :root view) "Seon on Jolt · root"
+                                 ;; an agent's chat by its name; its model's context; its debug view
+                                 (and (vector? view) (= :chat (first view))) (str "Seon on Jolt · " (ui/kname (second view)))
                                  (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · context")
-                                 :else (str "Seon on Jolt · " (ui/kname view)))
+                                 :else (str "Seon on Jolt · " (ui/kname view) " · debug"))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 

@@ -285,8 +285,9 @@
  ;; done only when the plan differs from it (seon.reconcile/done-explain :no-design)
  :seon.run/plan :seon.task/plan
  :seon.run/uncontracted [:set :qualified-symbol]
- ;; indexed: a test's results across digests are one seek (seon.proofs/last-ms, the deal's order)
- :seon.proof/test [:and {:seon.db/index true} :qualified-symbol]
+ ;; a test's name and status in a run's results (:seon.run/results); verdicts themselves are cached by
+ ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
+ :seon.proof/test :qualified-symbol
  :seon.proof/status [:enum :pass :fail :error :none]
  ;; one entity per test, owned by the run
  :seon.run/results [:set {:seon.db/component true} :seon.db/ref]

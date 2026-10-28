@@ -724,9 +724,7 @@
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections it cites; the functions nearest its plan
-  by meaning that it does not name (`similar`); :green-on-main, each written proof whose last result
-  on main is green (seon.proofs/latest-status: the premise may already hold, so the agent checks
-  it before anything else). With write-set? false (the page's task part, whose cited vars are
+  by meaning that it does not name (`similar`). With write-set? false (the page's task part, whose cited vars are
   parts of their own, `cited`), no write set is made."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task] :map] [:=> [:cat :seon.host/db :seon.task/task :boolean] :map]]}
   ([db t] (task-data db t true))
@@ -753,9 +751,6 @@
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
-      ;; 4 of 6 picks for THE PLAN 0.7, and an outside agent's task, were already done on main
-      (some #(and (docs/source-of db %) (= :pass (proofs/latest-status db %))) proofs)
-      (assoc :green-on-main (vec (sort-by str (filter #(and (docs/source-of db %) (= :pass (proofs/latest-status db %))) proofs))))
       near (assoc :similar near)
       (not write-set?) (dissoc :write-set)))))
 

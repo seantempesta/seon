@@ -1,6 +1,6 @@
 (ns datahike.transaction-test
   "Datahike's transaction, as Seon's writers call it: what an entity map's values mean."
-  (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.test-store :as ts]))
+  (:require [clojure.test :refer [deftest is]] [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.profile :as profile] [datahike.db.utils :as dbu]))
 
 (deftest a-keyword-attributes-two-values-are-two-values
   ;; task datahike.transaction/a-keyword-attributes-two-values-are-two-values: maybe-wrap-multival
@@ -31,3 +31,25 @@
         "a ref moved: the old link retracted")
     (is (= #{} (datoms [[:db/add [:seon.run/id "r#1"] :seon.run/status :running]])) "a value asserted again changes nothing")
     (is (= #{[:seon.run/status :done true]} (datoms [[:db/add [:seon.run/id "r#2"] :seon.run/status :done]])) "a first value retracts nothing")))
+
+(deftest a-schema-transaction-rebuilds-the-reverse-schema-once-per-attribute-not-once-per-datom
+  ;; task datahike.transaction/a-schema-transaction-costs-its-attributes: update-rschema rebuilt the whole reverse
+  ;; schema (dbu/rschema: every attribute, every property, the tuple and secondary mappings) after EACH schema
+  ;; datom, so transacting Seon's 459 attributes allocated 599 MB (50: 22 MB, 150: 98 MB: ~n^1.9) and a new
+  ;; store cost a gigabyte, enough to kill an agent under its 1 GiB heap allowance. The reverse schema is updated for
+  ;; the attribute that changed, and equals the whole rebuild
+  (let [attrs (vec (remove #(#{:seon.tx/runtime :seon.tx/branch} (:db/ident %)) pdb/schema))
+        fresh #(let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false :writer {:backend :sync}}]
+                 (d/create-database cfg) (d/connect cfg))
+        alloc (fn [k] (let [conn (fresh) b0 (profile/alloc-bytes)]
+                        (d/transact conn {:tx-data (vec (take k attrs))})
+                        (let [b (- (profile/alloc-bytes) b0) db @conn]
+                          (d/release conn)
+                          {:bytes b :rschema (:rschema db) :whole (dbu/rschema (:schema db))})))
+        a150 (alloc 150) a450 (alloc (count attrs))]
+    (is (= (:whole a150) (:rschema a150)) "the reverse schema is the whole rebuild's, at 150 attributes")
+    (is (= (:whole a450) (:rschema a450)) "and at every attribute Seon declares")
+    (is (< (/ (:bytes a450) (:bytes a150)) (* 1.3 (/ (count attrs) 150.0)))
+        (str "linear in the attributes: " (quot (:bytes a150) 1048576) " MB for 150, " (quot (:bytes a450) 1048576) " MB for " (count attrs)))
+    (is (< (:bytes a450) (* 100 1048576)) "a store's whole schema costs under 100 MB")))
+
