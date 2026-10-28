@@ -25,7 +25,7 @@ Deliberately unused (researched in the `claude_scratch/` paper `jolt-debug-featu
 
 ## Problems
 
-Every problem Seon recorded is read by one function, ```seon.problems/report```: main's db in, one report out, by class; ```seon.problems/health``` is that report with the classes the program's facts make true now (dead citations, unnamed sites, stale pins and sections, orphan pages, uncited tasks) added.
+Every problem Seon recorded is read by one function, ```seon.problems/report```: main's db in, one report out, by class; ```seon.problems/health``` is that report with the classes the program's facts make true now (dead citations, unnamed sites, stale pins and sections, orphan pages, sections with no lead, uncited tasks) added.
 
 Its classes are the recorded errors counted by signature (`seon.problems/counted-classes`) and what a run or task holds (`seon.problems/run-classes`: red assertions, cost verdicts, merge conflicts and refused answers, a death, an error that ended the loop, overrun, task conflicts, and `:unrun`: a merge that left its process tests unrun), plus each root cause with what it blocks ([root](root.md#root-causes-at-quiescence)) and a task marked failed while it is held ([tasks](tasks.md#a-refused-run-is-held-for-root)). Each row carries what a task needs (producer, owning namespace, evidence, the proofs that reproduce it) and the tasks whose `:seon.task/evidence` already answers it (`seon.problems/answers`). Its cost follows the problems, never the program: each class is read through an index that holds only problem rows.
 
