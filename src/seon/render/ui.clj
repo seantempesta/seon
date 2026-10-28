@@ -1132,18 +1132,13 @@
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
         [#'eval-tile {} id])]]))
 
-(def ^:private bubble
-  "A chat bubble's classes: the agent's on the left, a person's on the right."
-  {:agent "max-w-[85%] self-start rounded-lg bg-base-900 px-3 py-2 text-sm text-text-100"
-   :person "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100"})
-
 (defn chat-opening
   "The task as the chat's opening message (a component over ctx): its name in words, then its plan
   as Markdown under its budget, the printer's cut naming the rest. See docs/render.md#the-page."
-  {:seon.render/style "flex flex-col" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  {:seon.render/style "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} rid]
   (let [t (held-task c rid) id (ratom/realize (get t :seon.task/id)) plan (ratom/realize (get t :seon.task/plan))]
-    [:section {:class (:person bubble)}
+    [:section
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
      [:p {:class "font-bold"} (task-title (str id))]
      (when plan
@@ -1151,14 +1146,14 @@
          (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))]))
 
 (defn chat-turn
-  "A model turn as the chat shows it (a component over ctx): its thinking folded, its reply as
-  Markdown. See docs/render.md#the-page."
-  {:seon.render/style "flex flex-col" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
+  "A model turn as the chat shows it (a component over ctx), a bubble on the left: its thinking
+  folded, its reply as Markdown. See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-start rounded-lg bg-base-900 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
   [{c :seon.ctx/ctx} rid eid]
   (let [t (get-in c [:runs rid :turns eid])
         [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.turn/reply :seon.turn/reasoning :seon.turn/n])]
     (when (or (not (str/blank? reply)) (not (str/blank? reasoning)))
-      [:section {:class (:agent bubble)}
+      [:section
        [:p {:class "text-2xs text-text-500"} (str "agent" (when n (str " · turn " n)))]
        (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
        (when-not (str/blank? reply) (markdown reply))])))
@@ -1166,11 +1161,11 @@
 (defn chat-message
   "A message to the run as the chat shows it (a component over ctx): who sent it, its body as
   Markdown, a person's on the right. See docs/render.md#the-page."
-  {:seon.render/style "flex flex-col" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
+  {:seon.render/style "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
   [{c :seon.ctx/ctx} rid eid]
   (let [m (get-in c [:runs rid :messages eid])
         [from body] (map #(ratom/realize (get m %)) [:seon.message/from :seon.message/body])]
-    [:section {:class (:person bubble)}
+    [:section
      [:p {:class "text-2xs text-text-500"} (str from)]
      (markdown (str body))]))
 
@@ -1181,9 +1176,11 @@
   [{c :seon.ctx/ctx} rid]
   (let [r (get-in c [:runs rid])
         [status outcome reason turns max-turns] (map #(ratom/realize (get r %)) [:seon.run/status :seon.run/outcome :seon.run/reason :seon.run/turns :seon.run/max-turns])]
-    [:p (str "— " (kname (or outcome status))
-             (when turns (str " · turn " turns (when max-turns (str " of " max-turns))))
-             (when-not (str/blank? reason) (str " · " reason)) " —")]))
+    ;; nothing until the run has a status on its branch (it reaches the branch by take!)
+    (when (or outcome status)
+      [:p (str "— " (kname (or outcome status))
+               (when turns (str " · turn " turns (when max-turns (str " of " max-turns))))
+               (when-not (str/blank? reason) (str " · " reason)) " —")])))
 
 (defn chat-ctx
   "An agent's chat, the page a person reads (the declared html render of :seon.render/chat-ctx,

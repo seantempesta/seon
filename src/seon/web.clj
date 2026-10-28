@@ -239,8 +239,10 @@
   (when body
     (str "<!doctype html>"
          (h/html (ui/shell (cond (= :root view) "Seon on Jolt · root"
+                                 ;; an agent's chat by its name; its model's context; its debug view
+                                 (and (vector? view) (= :chat (first view))) (str "Seon on Jolt · " (ui/kname (second view)))
                                  (vector? view) (str "Seon on Jolt · " (ui/kname (second view)) " · context")
-                                 :else (str "Seon on Jolt · " (ui/kname view)))
+                                 :else (str "Seon on Jolt · " (ui/kname view) " · debug"))
                            (str "/feed?view=" (ui/view-param view))
                            (h/raw body))))))
 
