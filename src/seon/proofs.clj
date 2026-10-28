@@ -67,7 +67,8 @@
          (or message "an error with no message"))))
 
 (defn failures
-  "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]},
+  "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
+  value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   the first :seon.config.proofs/max-assertions of each (expected and actual as the test child printed them)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
   [test-run]
@@ -75,7 +76,7 @@
    (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
               (if (and t (#{:fail :error} type) (< (count (get acc t)) kept))
-                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :flaky]))
+                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
                 acc)))
           {} (:reports test-run))))
 

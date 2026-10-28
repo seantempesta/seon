@@ -161,7 +161,8 @@
  :seon.run/error [:map]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
-                           [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
+                           [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
+                           [:got {:optional true} [:maybe :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
  :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
