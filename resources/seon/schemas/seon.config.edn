@@ -21,6 +21,7 @@
   [:seon.config.root/wiki-baseline :seon.config.root/wiki-baseline]
   [:seon.config.root/standby-every :seon.config.root/standby-every]
   [:seon.config.root/gc-sweepers :seon.config.root/gc-sweepers]
+  [:seon.config.root/heap-reserve-ratio :seon.config.root/heap-reserve-ratio]
   [:seon.config.root/runs-dir :seon.config.root/runs-dir]
   [:seon.config.root/store-path :seon.config.root/store-path]
   [:seon.config.root/main :seon.config.root/main]

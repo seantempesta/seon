@@ -244,10 +244,12 @@
                                              {:ok true :db (pdb/head conn b) :base base :base-t (:max-tx base)})
                                :else (refused (str "no branch " b) {}))))
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
-      ;; branch the last one saw is gone, and recorded on main through the batch
+      ;; branch the last one saw is gone, and recorded on main through the batch; then root's
+      ;; heap collected in full, which returns its free pages past the reserve to the OS
+      ;; (docs/machine.md#roots-heap)
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
                  (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
-                        {:ok true :collected r}))
+                        {:ok true :collected r :heap-live (lib/non-static-live!)}))
       (reply st (refused (str "unknown op " op) {})))))
 
 (defn- writer-one
