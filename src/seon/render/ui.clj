@@ -94,35 +94,42 @@
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
 (defn task-title
-  "A task's id as a person reads it: its name in words, capitalized (seon.print/a-long-string becomes
-  \"A long string\"); a run's id names its task before its #."
+  "A task's id as a person reads it: its name in words, its first letter capital (seon.print/a-long-string
+  becomes \"A long string\"); a run's id names its task before its #. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :string] :string]}
   [id]
-  (str/capitalize (str/replace (name (symbol (first (str/split id #"#")))) "-" " ")))
+  (let [s (str/replace (name (symbol (first (str/split id #"#")))) "-" " ")]
+    (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
 
 (defn- inline
-  "A line of Markdown prose as hiccup: `code` spans as code, **text** as bold, the rest as text."
+  "A line of Markdown prose as hiccup: `code` spans as code, **text** as bold, the rest as text; a
+  backtick no span closes is text. See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] :any]}
   [line]
-  (for [[i part] (map-indexed vector (str/split line #"`" -1))]
-    (if (odd? i)
-      [:code {:class "rounded bg-base-800 px-1 text-text-100"} part]
-      (for [[j b] (map-indexed vector (str/split part #"\*\*" -1))] (if (odd? j) [:b b] b)))))
+  (let [parts (str/split line #"`" -1)
+        ;; an even count of parts is an odd count of backticks: the last opens no span
+        parts (if (even? (count parts)) (conj (vec (drop-last 2 parts)) (str (last (butlast parts)) "`" (last parts))) parts)]
+    (for [[i part] (map-indexed vector parts)]
+      (if (odd? i)
+        [:code {:class "rounded bg-base-800 px-1 text-text-100"} part]
+        (for [[j b] (map-indexed vector (str/split part #"\*\*" -1))] (if (odd? j) [:b b] b))))))
 
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
-  parse (seon.ref/scan), a paragraph as a paragraph, a list as a list, fenced code as highlighted
-  code, a heading as a heading, each line's code spans as code. See docs/render.md#prose-and-the-one-string-cutter."
+  parse (seon.ref/scan): a heading at its level, a paragraph, a list (numbered when its first
+  marker is a number), fenced code highlighted, a quote or a table as its lines, each line's code
+  spans as code. See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] :any]}
   [text]
   (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed"}]
-        (for [{:seon.ref/keys [kind from to heading]} (:seon.ref/blocks (ref/scan text))
+        (for [{:seon.ref/keys [kind from to heading heading-level]} (:seon.ref/blocks (ref/scan text))
               :let [body (subs text from to)]]
           (case kind
-            :heading [:h3 {:class "font-bold text-text-100"} (inline heading)]
-            (:fence :code) (code (str/replace body #"(?m)\A```.*\n|\n?```\s*\z" "") (config/value :seon.config.render/value-budget))
-            :list (into [:ul {:class "list-disc pl-5"}]
-                        (for [item (rest (str/split (str "\n" body) #"\n\s*(?:[-*+]|\d+[.)])\s+"))] [:li (inline (str/replace item #"\s*\n\s*" " "))]))
+            :heading [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} (inline heading)]
+            (:fence :code) (code (str/replace body #"(?m)\A\s*(```|~~~).*\n|\n?\s*(```|~~~)\s*\z" "") (config/value :seon.config.render/value-budget))
+            :list (into [(if (re-find #"\A\s*\d" body) :ol :ul) {:class (if (re-find #"\A\s*\d" body) "list-decimal pl-5" "list-disc pl-5")}]
+                        (for [item (rest (str/split (str "\n" body) #"\n(?:[-*+]|\d+[.)])\s+"))] [:li (inline (str/replace item #"\s*\n\s*" " "))]))
+            (:quote :table) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
             :break [:hr]
             [:p (inline (str/replace body #"\s*\n\s*" " "))]))))
 
@@ -799,7 +806,10 @@
                [:details [:summary "how the agent works it"]
                 [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})]])
              ;; what the task is: its plan, as the Markdown it is written in
-             (when-let [plan (get-in data [:task :seon.task/plan])] (markdown plan))
+             ;; drawn as Markdown when it fits its budget, else the printer's cut, which names the form for the rest
+             (when-let [plan (get-in data [:task :seon.task/plan])]
+               (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
+                 (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
              ;; the rest folds: a person opens what they want, the model reads it all
              (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main))]
                (when (seq shown)
@@ -1238,13 +1248,14 @@
 (defn agent-card
   "An agent of root's as its board shows it (a component over root's ctx, its :agents member eid):
   its id linking to its page, its status, then its newest run: the task in words, its model, the turns
-  it took of its cap, how it ended or why it waits, and each proof's result."
+  it took of its cap, how it ended or why it waits, and each proof's result. See docs/render.md#the-page."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
-  (let [a (ratom/realize (get-in c [:agents eid]))
-        {:seon.agent/keys [id status]} a
+  (let [a (get-in c [:agents eid])
+        ;; its id, status and runs alone, so another agent's eval redraws no card
+        id (get a :seon.agent/id) status (get a :seon.agent/status)
         on? (contains? #{:busy :running} status)
-        r (last (sort-by :seon.run/start-ms (vals (:runs a))))
+        r (last (sort-by :seon.run/start-ms (vals (ratom/realize (get a :runs)))))
         {:seon.run/keys [model turns max-turns outcome reason results] run-id :seon.run/id run-status :seon.run/status} r]
     [:section
      [:p {:class "flex items-baseline gap-2"}
