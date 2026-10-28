@@ -67,7 +67,8 @@
          (or message "an error with no message"))))
 
 (defn failures
-  "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]},
+  "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
+  value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   the first :seon.config.proofs/max-assertions of each (expected and actual as the test child printed them)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
   [test-run]
@@ -75,7 +76,7 @@
    (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
               (if (and t (#{:fail :error} type) (< (count (get acc t)) kept))
-                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :flaky]))
+                (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
                 acc)))
           {} (:reports test-run))))
 
@@ -112,8 +113,9 @@
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
-  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit)."
-  #{"laws" "lmdb-kill" "lmdb-sem" "forks"})
+  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit), health
+  (bin/test --health, over the program store's kept trees)."
+  #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step

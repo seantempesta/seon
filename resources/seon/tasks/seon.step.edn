@@ -6,5 +6,5 @@
              #{seon.step-test/a-reload-retries-the-held-message
                seon.step-test/a-throw-holds-the-message-and-records-the-cause}}
  {:seon.task/name "an-event-is-stamped-one-way"
-  :seon.task/plan "Found by the one-offs survey (claude_scratch/archive/one-offs-2026-10-23.md; owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 9. What exists: System/currentTimeMillis read at 30 sites; docs/clocks.md names them, but seon.reconcile (7) and seon.root (9) stamp inline instead of through seon.step/event. Correct: one stamp (seon.step's), so bin/laws measures lists one site where a recorded time is made."
+  :seon.task/plan "Found by the one-offs survey (the archived paper one-offs-2026-10-23.md (git history); owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 9. What exists: System/currentTimeMillis read at 30 sites; docs/clocks.md names them, but seon.reconcile (7) and seon.root (9) stamp inline instead of through seon.step/event. Correct: one stamp (seon.step's), so bin/laws measures lists one site where a recorded time is made."
   :seon.task/kind :work}]

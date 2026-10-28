@@ -14,7 +14,7 @@
     collection). docs/failure-points.md, \"Physics\".
   - The socket's buffer is the bounded channel: a full buffer makes the sender wait."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config] [jolt.io-poller :as poller] [clojure.string :as str]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [jolt.ffi :as ffi] [seon.lib :as lib] [konserve.jolt.fasl :as codec] [seon.config :as config] [jolt.io-poller :as poller] [jolt.socket.native :as native] [clojure.string :as str]))
 
 (ffi/load-library)
 
@@ -22,7 +22,7 @@
 (lib/defc c-fcntl "fcntl" [:int :int :varargs :int] :int)
 (lib/defc c-setsockopt "setsockopt" [:int :int :int :pointer :int] :int)
 (lib/defc c-memmove "memmove" [:pointer :pointer :size_t] :pointer)
-(lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true})
+(lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true :capture-native-error true})
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
 (lib/defc c-recv-nb "recv" [:int :pointer :size_t :int] :ssize_t)
@@ -47,6 +47,7 @@
 (def ^:private F-SETFL 4)
 (def ^:private F-SETOWN 6)
 (def ^:private O-ASYNC 0x40)
+
 
 (def BUF
   "Each socket's send and receive buffer, bytes (:seon.config.agent/sock-buf-bytes)."
@@ -236,15 +237,42 @@
 
 ;; ---- writing ----------------------------------------------------------------
 
-(defn- write-all! {:malli/schema [:=> [:cat :seon.lib/fd :seon.ffi/address :int] :seon.sock/sent]}
-  [fd p n]
-  (loop [off 0]
-    (if (= off n)
-      true
-      (let [r (lib/c-write fd (+ p off) (- n off))]
-        (if (neg? r)
-          (if (= 4 (ffi/errno)) (recur off) :epipe) ; EINTR retries
-          (recur (+ off r)))))))
+(declare write-all!)
+
+(defn- write-result
+  "One write's or sendmsg's [r errno], off of n bytes of the frame already gone: [:sent r], :again
+  (EINTR; EAGAIN and ENOBUFS once fd can take bytes again) or :epipe (EPIPE, ECONNRESET: the peer
+  is gone); any other errno throws :seon.sock/write-failed. The wait is poll POLLOUT
+  (jolt.socket.native/poll-one), a blocking call: no fiber writes into the middle of this one's
+  frame, and nothing else in the process runs meanwhile (parking is task
+  seon.sock/a-send-parks-like-a-receive); a kernel short of buffers with the socket already writable
+  retries at once, for as long as it stays short. docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:=> [:cat :seon.lib/fd [:tuple :int :int] :int :int] [:or [:tuple [:= :sent] :int] [:enum :again :epipe]]]}
+  [fd [r e] off n]
+  (cond (>= r 0) [:sent r]
+        (native/eintr? e) :again
+        (or (native/eagain? e) (native/enobufs? e)) (do (native/poll-one fd native/pollout -1) :again)
+        (or (= e native/epipe) (= e native/econnreset)) :epipe
+        :else (let [x (contract/error :seon.sock/write-failed #'seon.sock/write-all!
+                                      (str "the kernel refused a write to fd " fd " (errno " e ") after " off " of " n " bytes")
+                                      {:errno e :fd fd :sent off :of n})]
+                (throw (ex-info (:seon.error/message x) x)))))
+
+(defn- write-all!
+  "Write the n bytes at p to fd whole, from off (a partial sendmsg's rest), going on from where a
+  short write stopped: true, or :epipe (the peer is gone); `write-result` classifies a failed write.
+  docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd :seon.ffi/address :int] :seon.sock/sent]
+                  [:=> [:cat :seon.lib/fd :seon.ffi/address :int :int] :seon.sock/sent]]}
+  ([fd p n] (write-all! fd p n 0))
+  ([fd p n off]
+   (if (= off n)
+     true
+     (let [w (write-result fd (lib/c-write fd (+ p off) (- n off)) off n)]
+       (case w
+         :again (recur fd p n off)
+         :epipe :epipe
+         (recur fd p n (+ off (second w))))))))
 
 (defn frame
   "v encoded once, as the bytes of one frame (to send to several peers)."
@@ -292,8 +320,8 @@
                     (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8"))))))))))))))
 
 (defn send-frame!
-  "Write frame bytes f to fd; with pass-fd, the descriptor travels with them
-  (SCM_RIGHTS). Answers true, or :epipe (the peer is gone)."
+  "Write frame bytes f to fd whole; with pass-fd, the descriptor travels with them
+  (SCM_RIGHTS). Answers true or :epipe (the peer is gone); a refused write throws (`write-all!`)."
   {:malli/schema [:function [:=> [:cat :seon.lib/fd :seon.host/bytes] :seon.sock/sent] [:=> [:cat :seon.lib/fd :seon.host/bytes [:maybe :seon.lib/fd]] :seon.sock/sent]]}
   ([fd ^bytes f] (send-frame! fd f nil))
   ([fd ^bytes f pass-fd]
@@ -309,10 +337,9 @@
          (ffi/write m :uint64 0 0) (ffi/write m :uint32 0 8)
          (ffi/write m :uint64 (ffi/address iov) 16) (ffi/write m :int 1 24)
          (ffi/write m :uint64 (ffi/address ctl) 32) (ffi/write m :uint32 16 40) (ffi/write m :int 0 44)
-         (let [r (c-sendmsg fd m 0)]
-           (cond (neg? r) :epipe
-                 (< r n) (write-all! fd (+ p r) (- n r))
-                 :else true)))))))))
+         ;; the descriptor goes with the first bytes the kernel takes; the rest follows as plain writes
+         (let [w (loop [] (let [w (write-result fd (c-sendmsg fd m 0) 0 n)] (if (= :again w) (recur) w)))]
+           (if (= :epipe w) w (write-all! fd p n (second w)))))))))))
 
 (defn send!
   "Encode v and write it as one frame to fd (with pass-fd, a descriptor goes with it)."

@@ -473,10 +473,20 @@
 
 (def ^:private observed-sizes [10 500 1000])
 
-(defn- observed-path
-  "Where the index proof keeps its store of size n."
-  {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "user.dir") "/target/tmp/observed-" n))
+(def ^:private disk-store
+  "This process's one store on disk for the cost proofs below, seeded once with the test store's 2,000 datoms
+  (seon.db/seed-tx), under target/tmp: each proof size is a branch of it (one store, many branches, as in
+  production and as the test store is; a seeded store of its own per size cost 366 MB of allocation each, a
+  gigabyte under the quadratic schema transaction), and its nodes are at addresses, which is why these proofs
+  are not on the in-memory test store. Removed when the process ends."
+  (delay (let [path (str (System/getProperty "user.dir") "/target/tmp/observed-" (random-uuid))]
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
+           path)))
+
+(defn- disk-main
+  "The connection to main branch b of the proofs' disk store (made from its seeded :db when it has none)."
+  {:malli/schema [:=> [:cat :keyword] :seon.host/conn]}
+  [b] (:conn (pdb/open! :lmdb @disk-store 2000 b)))
 
 (defn observed-input
   "The cost proof's input at n, on a store on disk of its own (the one-store rule's last resort:
@@ -484,13 +494,11 @@
   share; the test store's in-memory values keep none, and there every diff walks its attribute's
   datoms, a cost no root's main has): main seeded as the test store is with n unrelated tasks
   released, its index, that db, and the db after one task's plan improved (one datom differs).
-  The store is made afresh at observed-path; the proof's end releases and removes it."
+  The store is the proofs' one disk store (disk-store), n's branch of it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.reconcile/index :seon.host/db :seon.host/db]]}
   [n]
-  (let [path (observed-path n)
-        _ (sh/sh "rm" "-rf" path)
-        ;; seeded with the test store's 2,000 datoms (seon.db/seed-tx), so the two inputs differ only in where they keep their nodes
-        {:keys [conn]} (pdb/open! :lmdb path 2000 :db)
+  (let [;; seeded with the test store's 2,000 datoms (seon.db/seed-tx), so the two inputs differ only in where they keep their nodes
+        conn (disk-main (keyword (str "observed-" n)))
         decls (mapv #(decl (str "u" %)) (range n))]
     (d/transact conn (task/create-tx @conn decls))
     (d/transact conn (task/execution-tx (mapv #(task/task-id 'demo (:seon.task/name %)) decls) :running))
@@ -500,7 +508,7 @@
       [(r/index db0) db0 @conn])))
 
 (deftest an-index-is-observed-at-the-cost-of-what-changed
-  (try
+  (do
     (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/observed-input
                  :n "unrelated tasks on main, beside one whose plan changed"
                  :work (str "a datahike.api/datoms-diff of each of the 84 watched attributes' ranges, each one cached "
@@ -515,12 +523,7 @@
                  ;; the 84 descents are task seon.reconcile/one-observe-descends-once
                  :fixed {:ticks 1200000.0 :bytes 5900000.0}
                  :per-n {:ticks 300.0 :bytes 100.0}
-                 :sizes observed-sizes})
-    (finally
-      ;; each store made, released whatever holds it and removed
-      (doseq [n observed-sizes :let [path (observed-path n)] :when (pdb/store? path)]
-        (d/release (d/connect (pdb/store-cfg :lmdb path)) true)
-        (sh/sh "rm" "-rf" path)))))
+                 :sizes observed-sizes})))
 
 (def ^:private listed-sizes [10 300 600])
 
@@ -530,9 +533,7 @@
   (out of line, as a task file's is), three proofs, and chains of five along :needs, released."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n]
-  (let [path (str (observed-path n) "-listed")
-        _ (sh/sh "rm" "-rf" path)
-        {:keys [conn]} (pdb/open! :lmdb path 2000 :db)
+  (let [conn (disk-main (keyword (str "listed-" n)))
         plan (apply str (repeat 40 "Make the reconciler's index cost its tasks. "))
         decls (mapv (fn [i] (cond-> (assoc (decl (str "u" i)) :seon.task/plan (str plan i)
                                            :seon.task/proofs (set (map #(symbol "demo-test" (str "u" i "-" %)) (range 3))))
@@ -546,7 +547,7 @@
 (deftest an-index-is-listed-at-the-cost-of-its-tasks
   ;; an agent's first request build lists the index (seon.turn/index!); every reconciler helper
   ;; takes the index, so its contract checks it shallowly (each entry is checked where it enters)
-  (try
+  (do
     (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/listed-input
                  :n "tasks on main, in chains of five along :needs"
                  :work (str "one pull of each task, run and root entity, then each task derived once in "
@@ -560,11 +561,7 @@
                  ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
                  :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
                  :per-n {:ticks 36000.0 :bytes 180000.0 :calls 11.0}
-                 :sizes listed-sizes})
-    (finally
-      (doseq [n listed-sizes :let [path (str (observed-path n) "-listed")] :when (pdb/store? path)]
-        (d/release (d/connect (pdb/store-cfg :lmdb path)) true)
-        (sh/sh "rm" "-rf" path)))))
+                 :sizes listed-sizes})))
 
 (deftest with-merge-chains-work-through-merges
   (let [db (mdb [(decl "a") (decl "b" :needs ["a"])])]
@@ -703,7 +700,7 @@
                                                      :unmerged ["[:var app/f]"]))))))
 
 (deftest an-open-problem-its-work-caused-refuses-done
-  ;; claude_scratch/archive/health-design-2026-10-23.md: recorded at its end (seon.problems/caused), refused by
+  ;; docs/health.md: recorded at its end (seon.problems/caused), refused by
   ;; the done rule, so the agent is told naming it (a :verdict); its evaluations were never refused
   (let [msg "docs/x.md#y cites app/f, which names nothing"]
     (is (= [{:op :verdict :run "demo/a#1" :task "demo/a" :reasons [{:reason :open-problem :key msg}]}]
@@ -764,7 +761,7 @@
     {:kind :design :proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:proof-unknown]
     ;; a design that only rewrote its plan is not done: live agents, 2026-10-25, a design ended
     ;; green at its first plan edit, the proofs its plan named never written, and its implement
-    ;; started with none (claude_scratch/archive/live-2026-10-25.md D3)
+    ;; started with none (the archived paper live-2026-10-25.md (git history) D3)
     {:kind :design :proofs #{} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :plan "B" :plan-before "A"} [:no-proofs]
     {:kind :work :proofs #{'p/a} :results {'p/a :fail} :main-green #{} :allowed-red #{} :uncontracted #{}} [:proof-red]))
 

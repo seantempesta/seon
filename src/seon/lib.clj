@@ -34,7 +34,7 @@
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-close "close" [:int] :int)
 (defc c-shutdown "shutdown" [:int :int] :int)
-(defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
+(defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true :capture-native-error true})
 (defc c-signal "signal" [:int :pointer] :pointer)
 (defc c-kill "kill" [:int :int] :int)
 (defc c-setpgid "setpgid" [:int :int] :int)
@@ -62,6 +62,30 @@
 
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
 (defc kq-poll "e13_poll" [:int :int] :long)
+(defc c-getppid "getppid" [] :int)
+(defc end-with* "e13_end_with" [:int :int] :long)
+(defc end-again* "e13_end_with_again" [] :long)
+(defc end-watched "e13_end_watched" [] :long)
+
+(declare end-with!)
+
+(defn- armed
+  "end-with!'s answer: nil once the watch thread runs; the OS refusing it is :seon.lib/starter-unwatched, thrown."
+  {:malli/schema [:=> [:cat :int [:maybe :seon.lib/pid]] :nil]}
+  [r pid]
+  (when (neg? r)
+    (let [e (contract/error :seon.lib/starter-unwatched #'seon.lib/end-with! (str "the OS refused the thread that ends this process with " (or pid "its starter")) {:pid pid})]
+      (throw (ex-info (:seon.error/message e) e)))))
+
+(defn end-with!
+  "End this process when pid exits (parent? true: pid is its parent): a native thread waits on pid's
+  NOTE_EXIT and SIGKILLs this process's group if it leads one, else this process, so nothing it
+  started outlives what started it, even a process whose runtime holds a lock and runs no Scheme. What
+  it forks watches the same pid (fork! arms it again in the child). nil; a thread the OS refused
+  throws :seon.lib/starter-unwatched. docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:function [:=> [:cat :seon.lib/pid :boolean] :nil] [:=> [:cat] :nil]]}
+  ([pid parent?] (armed (end-with* pid (if parent? 1 0)) pid))
+  ([] (armed (end-again*) nil)))
 
 (defn wait-fd-or-exit
   "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
@@ -155,7 +179,7 @@
            (let ([n (jolt-active-threads)]) (mutex-release #%$tc-mutex) (enable-interrupts) n))
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
-         (define (proto-set-trip! n) (collect-trip-bytes n))
+         (define (proto-non-static-live!) (collect (collect-maximum-generation)) (- (bytes-allocated) (bytes-allocated 'static)))
          ;; fork only while this is the one active Chez thread, checked once under the thread
          ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
          ;; Read through jolt-active-threads: a thread in a collect-safe call (a read) is parked, which
@@ -176,12 +200,14 @@
       true))
 
 (defn heap-cap!
-  "Bound this process's heap at n bytes: Jolt's own ceiling (JOLT_MAX_HEAP), re-installed
-  here; past it an allocation throws OutOfMemoryError. Built binaries only (source mode
-  installs no collector policy)."
-  {:malli/schema [:=> [:cat :int] :any]}
-  [n]
-  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") "
+  "Bound this process's heap at n bytes and start its collections every trip bytes: Jolt's own
+  ceiling (JOLT_MAX_HEAP) and nursery floor (JOLT_NEW_SIZE), re-installed here in one go; past
+  the ceiling an allocation throws OutOfMemoryError, and the adaptive nursery never sizes the
+  trip below the floor. Built binaries only (source mode installs no collector policy). See
+  docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat :int :int] :any]}
+  [n trip]
+  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_NEW_SIZE\" \"" (long trip) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
 (defchecked ^:private collect-sweepers* [:=> [:cat :int] :int]
@@ -230,7 +256,7 @@
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
-(defchecked set-trip! [:=> [:cat :int] :any] (scm/proc "proto-set-trip!"))
+(defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
 (defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] (scm/proc "proto-fork-alone"))
 
 (defn wait-status
@@ -253,7 +279,7 @@
   (let [pid (fork-alone*)]
     (if (zero? pid)
       (let [status (volatile! 1) said? (volatile! false)]
-        (try (when (or (not double?) (zero? (c-fork))) (child))
+        (try (when (or (not double?) (zero? (c-fork))) (end-with!) (child))
              (vreset! status 0)
              (catch Throwable e
                (vreset! said? true)

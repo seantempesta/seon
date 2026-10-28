@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check: laws, health, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
+# mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
 # resume, scale N (default N = 100). A run's steps run at once, :seon.config.proofs/jobs at a
@@ -29,6 +29,8 @@
 # seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
 # step's next run. Only logs stay, in target/check/<time>/.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# health reads the program store's kept trees, no binary and no store branch (bin/test --health)
+[[ ${1:-} == health ]] && exec "$ROOT/bin/test" --health "${@:2}"
 "$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 [[ -z ${1:-} ]] && exec "$ROOT/bin/prove" --checks
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
@@ -42,6 +44,13 @@ fi
 unsetopt BG_NICE
 . "$ROOT/bin/env"
 export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
+# a check's fixture tests (app.*) keep their verdicts in this invocation's own cache, removed at exit:
+# in the main tree's shared one a fixture's verdict was reused by the next check run, so the run judged
+# nothing (robust's spin test, fx's test fork; docs/merging.md#verdicts-are-a-cache)
+mkdir -p "$ROOT/target/tmp"
+CHECK_RESULTS=$(mktemp -d "$ROOT/target/tmp/check-results.XXXXXX")
+export SEON_RESULTS_DIR=$CHECK_RESULTS
+trap 'rm -rf "$CHECK_RESULTS"' EXIT
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
@@ -85,7 +94,7 @@ mkdir -p "$ROOT/target/tmp"; "$ROOT/bin/held" --reclaim "$ROOT/target/tmp"
 rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
 export SEON_STARTER_FIFO=$STARTER
 # gone with this run, however it ends but SIGKILL (which no handler sees: bin/held --reclaim removes it)
-trap 'rm -f "$STARTER"' EXIT
+trap 'rm -f "$STARTER"; rm -rf "$CHECK_RESULTS"' EXIT
 trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
 run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&- 3>&-) }
@@ -149,7 +158,7 @@ if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed health fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
+STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
@@ -172,7 +181,7 @@ u-lmdb-sem() {
 }
 # forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
 u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
-u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" run health }
+u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" "$ROOT/bin/test" --health }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
 u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
 u-mg-check() {

@@ -64,6 +64,17 @@
   (let [{from :db idx :index} (:index st)]
     (cond-> st (not (identical? from (:db st))) (assoc :index {:db (:db st) :index (r/index idx from (:db st))}))))
 
+(defn static-due?
+  "Whether the fork server freezes its heap into static before this fork: main's program moved
+  since the last freeze (its compiled code is what agents must share), or, after a collection of
+  everything outside static (what forks replaced is freed there, never frozen), what an agent
+  would inherit outside the static generation has passed :seon.config.agent/inherited-bytes. A
+  freeze keeps whatever is live then for the server's life, so it is done only when due. See
+  docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [st]
+  (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
+
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
   that exited, by its pid); out :ev (events for root). The fork is this process's own
@@ -79,6 +90,8 @@
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
   ([{:keys [db cfg store conn graph index kq]}]
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
+    ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
+    :static-due true
     :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
     ;; listed here when the server boots; a standby inherits its server's
     :index (or index {:db db :index (r/index db)})})
@@ -103,7 +116,7 @@
                  db' (d/commit-as-db (:store st) (:commit m))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
-                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true))
+                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled
                  errs (seq (program/load-changes! db' (:tx-data m)))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
@@ -113,13 +126,15 @@
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (index-at-fork st)
-                 ;; the heap made static first, so the agent's collections never trace (and un-share)
-                 ;; what it inherits (design agent-loop section 2: 163 MB of this heap sat in
-                 ;; generations 3-4 at fork; static, an agent's work left 106 MB where it left 333).
-                 ;; Every fork: a spawn writes its run on main, so main has moved by the next one
-                 ;; anyway, and a static of an unmoved heap costs what is new (6 ms measured)
+                 ;; the heap made static when it is due (static-due?), so the agent's collections never
+                 ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
+                 ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
+                 ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
+                 ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
                  t1 (profile/now-ns)
-                 _ (lib/static!)
+                 due? (static-due? st)
+                 _ (when due? (lib/static!))
+                 st (dissoc st :static-due)
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
@@ -170,7 +185,10 @@
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
-  (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
+  ;; the boot server watches root, its parent, and leads the group of every agent, clone, test child and
+  ;; standby, which watch root too (fork! arms them): root's death ends the group even where no Scheme
+  ;; runs to read the EOF (seon.lib/end-with!)
+  (when boot? (lib/c-setpgid 0 0) (lib/end-with! (lib/c-getppid) true) (dev-classpath!)
     (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
   ;; it reads main's commits from the store itself, opened as an agent opens it
   ;; (seon.db/after-fork!): the parent's handles are not used across fork

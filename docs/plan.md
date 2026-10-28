@@ -1,56 +1,67 @@
 # The plan
 
-What is in flight, what the owner has not yet ruled, and the steps from here to the goal (Seon agents doing real work, measured as turns to green); [AGENTS.md](../AGENTS.md) says who does what and the method, the [map](README.md) how the system works, [decisions](decisions.md) the owner's standing rulings, and git the history (`claude_scratch/merge-log.md` names every merge and how it was verified).
+What Seon is for, where it stands, the one step being worked now, and the steps after it. [AGENTS.md](../AGENTS.md) is how a session works; the [map](README.md) is how the system works; [decisions](decisions.md) are the owner's rulings; git is the history.
 
-## Now (2026-10-27, evening)
+## The goal
 
-Pins (docs/forks.md): Jolt 260a1667 on its way (forked children run none of the parent's hooks or fibers); Datahike 24e7ecda; konserve 3d7ff89. Paid model runs: none spent.
+**A user asks for something, and a Seon agent does it, end to end, while the user watches.** In full:
 
-**Where it stands.** Main takes batches continuously (docs/merging.md): a branch proves its own tip, the merge session merges every ready branch and runs one `bin/prove --merge` per batch, and nothing waits on a lock. Main is not yet green: each red has an owning session, named in the last merge-log reading. Test digests now cover only what a test reaches, so a one-function edit reruns tens of tests, not hundreds; the daily full run (cron, `bin/test --all`) is the net for what reach misses.
+1. **A request becomes a task**: its plan (what to change and why) and its proofs (the tests that say it's done).
+2. **An agent works the task at a real REPL**, in its own forked process on its own branch, in few turns:
+   - it sees its world as data (`@ctx`, pulled from the db), with the task, the code its plan cites and what it last did;
+   - every eval answers small: its value or an error, plus one line of what changed;
+   - main's difference from its branch is in that line every time, so nothing at the end is a surprise;
+   - the tests its change reaches run by themselves, by digest; a failure comes back as data it can fix.
+3. **Done means green and merged**: the done rule checks the proofs at the branch's commit; the branch merges into main; main runs the result next.
+4. **The user watches it live**: the agent's page is a chat (the task, the agent's prose, each eval with a one-line outcome), and the agent sees what the user sees.
 
-**What the day found.** A forked child ran its parent's shutdown hooks and could run its fibers, which explains the day's hangs (replies swallowed, agents parked in `recv!`) and is the likely cause of a collector crash in test children; fixed in Jolt, verifying. The automatic run of main's tests on every program commit queued every `(prove)` behind it; it is off by default. The first work done entirely through the server (step 0.7) and a blind run of a task from its context alone both worked their tasks through `seon_eval` in 10-14 evals and were held only by the harness: proofs proved by name counting as unknown, a dead unrelated test making a run's proofs unknown, and cost proofs measuring an agent's own overhead.
+**Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
-**The direction.** The harness findings first (they block 0.7's merge), then the task render the blind agent measured, then relevance in search and in the render's related part.
+## Where it stands (2026-10-28, midday)
 
-## In flight
+A real agent, working through the server on a fresh store, fixed a printer bug in 4 evals: it reproduced it, wrote a test that went red, fixed it, ran the namespace green. It could not finish. The loop breaks after the work:
+- the done rule refused it as "behind" main, which had moved during the run;
+- the done rule's test run went red on ~140 unrelated tests, likely because a test child inherits the agent's absolute heap ceiling;
+- `seon_done` answered 73,856 characters;
+- the dead agent then wedged its task, so it could not be re-attached.
 
-Each Claude session owns an area and takes its next task itself (AGENTS §3); root's list of sessions and their current work is the app's linked sessions.
+So the work itself is within reach; the harness around it is what fails. Since then: the standing store was erased (fresh, 40 MB); store creation went from 1.05 GB to 366 MB (Datahike's schema transaction was quadratic); test verdicts left Datahike (slice 1, to be revisited below); the chat page merged. The way of working changed too: the owner and one Claude session, with one-use helpers ([AGENTS](../AGENTS.md) §2), after a night of ten parallel sessions built infrastructure instead of the product.
 
-| Area | Next |
-|---|---|
-| test service as an agent sees it | names-proved results count; a short prove answer |
-| agent-root asks; forks | every ask answered; children run only their own thunk |
-| Jolt and Chez | the timer-then-fork deadlock; the collector crash, under the heap verifier |
-| renders | Phase B (an eval's tests never block the loop), then `observe` removed, then the blind agent's render fixes |
-| the outside REPL | MCP answers are the agent's own turn messages (one producer) |
-| relevance | search's `:relevance`/`:min`; a cross-encoder benchmarked on the judged labels |
-| tests as facts | results on the standing root through its one writer; per-function cost from every run |
-| step 0.7 | the held print fix's `seon_done` retried once the harness fixes land |
+## Now: one step
+
+**Step 1: one real task, end to end, through Seon.** Done when an agent attached to a real task file entry finishes it: green, merged by Seon into main, written back, and the owner can watch the whole run on its chat page. Nothing else is built until this works. The known problems in its way, in order (each is a task with its proof):
+
+| # | Problem | Done when |
+|---|---|---|
+| 1 | A test child inherits the agent's heap ceiling, so tests die out of memory in the judge's fork | `seon.reconcile-test` runs green in a test child forked from an agent |
+| 2 | An agent's reply can be lost: a large frame fails on "try again", read as a dead peer, and the error is ignored | a frame larger than the socket buffer to a slow live peer arrives whole; a failed send is an error to the asker |
+| 3 | Orphans: a process outlives its parent for hours | killing a parent ends its children |
+| 4 | Every eval answer doesn't say how main differs from the branch | each eval's line names main's merges since the base, the names both changed, and a would-be conflict |
+| 5 | The done rule refuses "behind" and answers 74 KB; its reds carry no messages | done answers one line and a handle; a red carries its first failure; behind is told, not a surprise |
+| 6 | A dead agent leaves its task running and attach returns the dead agent | a death is a fact; attach starts a fresh agent on the same branch |
+| 7 | The run concept (approved schema design: the agent is the unit, no stored judgement, turns bounded per wake) and test results (open: per-test facts with running averages and no history, in place of slice 1's file cache) | an agent's record is its turns, evals and messages; a test's status, failure and averages are queryable facts |
+| 8 | ~~The agent's page isn't a chat~~ merged (db03b7a6fb); live after `bin/update` | `/agent/<branch>` shows the conversation; the tiles move to `/debug` |
+| 9 | A one-function prove takes 30 s | everything but the reached tests' own run takes milliseconds |
+| 10 | Jolt: the background-GC hang (1 in 5) | its cause found and fixed in Jolt, every gate green |
+| 11 | Making a store allocated 1.05 GB: fixed in Datahike (linear schema transaction, ea53e8d580); tests branching the seeded store is on a branch | store creation linear; tests make no store of their own |
+| 12 | Root's heap is 1.22 GB on a fresh store (expected ~600 MB): a 740 MB boot image, a node cache weighed at 4 KB per 12 KB node, strings copied per index, a 124 MB `*e` | each part measured before and after; root under ~600 MB; an agent's cap bounds only what it allocates itself |
+| 13 | The `line-parks` fork test grew to 35 GB: a thread started in a forked child loops in Jolt's collector | the test starts no thread in a child (on a branch); Jolt refuses or survives such a thread |
+| 14 | Jolt: a full collection in a tight forked heap doesn't reclaim garbage; Chez keeps up to ~530 MB of free pages per agent; the fork server freezes replaced data into static | each measured before and after |
+| 15 | The infrastructure built for parallel sessions (merge batches, worktree roots, shared test roots, the test service, stall watcher) | one measured pass: each piece's cost (lines, run time, defects) against what it saves now; most of it deleted |
+
+**Not now** (no session builds these until step 1 is done): relevance and ranking work, new renders beyond the chat page, self-modifying environments, declared design, new config keys or namespaces that no problem above needs, Jolt pin bumps that fix no red on main.
+
+## After that
+
+Each step is done when its demo runs, measured.
+2. **Ten real tasks in a row**, each through step 1's path, unattended: turns to green and tasks merged recorded per task; every failure a task.
+3. **Context that earns its tokens**: the context selection recalibrated on real working turns (tests ranked too), measured against what agents read.
+4. **All work inside Seon**: Claude sessions work as outside agents (`seon_attach`, `seon_eval`, `seon_done`); worktrees only for what the store doesn't hold yet (docs, bin, pins, native code), each a task to bring it inside.
+5. **Work the system can check**: contracts with cost bounds on every function a change touches, the composed bound within the task's budget.
+6. **Root is main, one system**, then a **self-modifying environment**.
+
+Beside these, the missing and partial rows of [parity](parity.md) are the backlog.
 
 ## Waiting on the owner
 
 Nothing.
-
-## THE PLAN
-
-The destination is **E: a request worked as one whole task by a Seon agent, end to end, measured as turns to green.** In order:
-
-0. **All work inside Seon; worktrees retired** (owner, 2026-10-27: "The goal is to stop using the worktrees and to do all work within seon itself"). Claude sessions work as outside agents (seon_attach, seon_eval at their branch's REPL, seon_done), merged by Seon's one gate and written back by root. The steps that move it forward, in order, each a task with its proofs:
-   1. **Main follows the checkout** (merged).
-   2. (merged) **A merge's write-back is never lost** (seon.root/root-repairs-a-failed-merge-from-its-repl, gaps 1-2): a failed write-back is a root cause with a retry (my.root/write-back!), and a worktree root never writes the shared merges ref.
-   3. **An outside agent is a first-class worker:** attach no longer leaves the task's model "outside" for good (gap 5); my.root/hold! takes a running run back (gap 6); a merge never stays :behind forever, and :behind reruns are bounded (gaps 3-4); a behind branch merges main before it is judged (gap 7).
-   4. (merged: digests by reach, no whole-tree inputs; the daily full run is the net) **The gate is cheap:** results reused across bin/test and the root's judge (today 0 of 917, because :env digests the whole config in force; seon.merge/an-outside-branch-hands-back-through-the-store), so a merge reruns only what it moved.
-   5. **The tools an agent needs at the REPL are there:** tests-reaching merged, the root-repair playbook written into docs/merging.md with runnable forms, and help that names every form an outside agent uses.
-   6. (merged) **Watchable:** 3b-root finished, so root's page and an agent's page and debug panel show the work live.
-   7. (in progress: worked twice through `seon_eval`, held by the harness) **The first real piece of work done entirely through the server** on the standing root by a Claude session: one small src change from the task files, attached, worked at its branch's REPL, merged by Seon, written back. Every place it needed git, a worktree or a workaround becomes a task.
-   8. **From then on, new work starts as a Seon task worked through the server;** a worktree only for what the store doesn't hold yet (docs/, bin/, deps.edn, pins, native code), each such case a task to bring it inside: docs and task files are already data in the store, so their write-back comes first.
-
-1. **No hang goes unseen** (mostly done): every wait ends on its peer's exit or answer; a stall is a fact with its evidence and root's task; the fiber dump names any wait; flaky results are kept and shown. Left: one process mode, the fiber dump in a private wait.
-2. **One rendering system** (build 3 merged; 3b-root and build 4 left): one walk, one cache, the model reads the render of ctx; root's page through the same walk.
-3. **Context for about 20 turns** (in progress): the page holds cited source, tests with their last results and section text (D1–D5), cut to budget; the one-go instructions (reproduce first; stop reading once the output is wrong; build inputs like the existing tests); requests checked not done on main. Measured by the next live run.
-4. **Merge only when it can, by definitions:** a work task merges itself through the one gate (main's tests on the merged program, results reused by digest); conflicts are per var and root repairs them from its REPL (the playbook); Seon's merge path is kept whole and exercised before anything of it is cut; Claude worktree branches come through the store only once an end-to-end hand-back writes back a tree equal to the branch.
-5. **Work the system can check** (owner, 2026-10-26: "reduce programming to its more mathematical origins"): a contract carries `:seon.cost/bound`; a solution passes only when every function it defines or modifies, and every project function its code references (`:form/refs`), has a contract and a bound, and the composed bound fits the task's budget. Declared design (functions declared with contract and bound before they exist, tests red) is the experiment; one whole task stays the default until it proves out. A score of the rules (claude_scratch/rules-score/) is revised before any agent sees it: it ranked the deleted parts layer first.
-6. **Root is main, one system:** root's work as tasks, root's page through the same walk, the fork server's boot order and one process mode.
-7. **Self-modifying environment:** agents change their own ctx (swap!), renders, layout and pull pattern, seen at once.
-
-Beside E, the missing and partial rows of `docs/parity.md` are the parity backlog; the task files hold the rest of the work.

@@ -573,7 +573,8 @@
   "The threads root runs, as {:roster {name-stem n} :gc-sweepers n} (stems as thread-roster
   folds them). Without a system, the process's own: main, Jolt's shutdown watcher, timer, io
   poller, all-asleep detector (started with the carriers when boot's main carrier returns) and
-  fiber carriers, and the GC sweepers fixed at boot. The timer starts at the
+  fiber carriers, the GC sweepers fixed at boot, and :native, the C thread that ends it with its
+  starter (seon.lib/end-with!). The timer starts at the
   first timeout and the io poller at the first socket wait (an agent's), so a root has both
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
@@ -582,7 +583,9 @@
   pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
   roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
-       :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
+       :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
+       ;; the C thread that ends this process with its starter (seon.lib/end-with!), outside Jolt's roster
+       :native (if (pos? (lib/end-watched)) 1 0)})
   ([sys]
    (let [pm (:procs @(get-in sys [:bindings :system]))
          procs (vals pm)
@@ -605,12 +608,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster, the sweepers and the declared :foreign ones."
+  counts threads beyond the roster, the sweepers and the declared :foreign and :native ones."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0) (:native decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -925,16 +928,22 @@
   server, an agent): a fork beside live runtime threads is refused whenever one is active at
   that instant. Each answers the data its test asserts."
   {"line-parks"
-   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's
-   #(in-child
-      (fn []
-        (let [[r w] (sock/socketpair)
-              ran (volatile! false)
-              _ (a/go (vreset! ran true))
-              _ (future (Thread/sleep 200) (sock/write-line! w "done"))
-              rd (sock/line-reader r)
-              lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
-          (and (= ["done"] lines) @ran))))
+   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. The line
+   ;; comes from a thread of the parent, 200 ms on (no fiber of the child could write it while its
+   ;; carrier is held): it was a future in the child, and a thread started in a forked child made
+   ;; collections that copied ever larger continuations (35 GB, minutes at 99% CPU, the reader's main
+   ;; thread waiting on the collector; Jolt's, filed). The verdict is which happened first, never how long.
+   #(let [[r w] (sock/socketpair)]
+      (lib/fork! {:child (fn []
+                           (let [ran (volatile! false)
+                                 _ (a/go (vreset! ran true))
+                                 rd (sock/line-reader r)
+                                 lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
+                             (lib/c-exit (if (and (= ["done"] lines) @ran) 0 1))))
+                  :refused (fn [n] {:refused n})
+                  :parent (fn [pid]
+                            (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
+                            (lib/wait-status pid))}))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
@@ -956,6 +965,56 @@
        :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
                                       (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
+   "ends-with-its-starter"
+   ;; a process ends with the pid it watches (seon.lib/end-with!), and so does what it forks: mid
+   ;; watches itself, so its child inherits the watch of mid; the child parks in a read that never
+   ;; comes. mid is killed: its child ends with it, though nothing in its own code would
+   #(let [[r w] (sock/socketpair)
+          [hold _] (sock/socketpair)
+          park (fn [_] (sock/recv! (sock/conn hold)))
+          mid (lib/fork! {:child (fn []
+                                   (lib/end-with! (lib/c-getpid) false)
+                                   (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                               :refused park :parent park}))
+                          :refused (fn [n] {:refused n}) :parent identity})
+          rd (sock/line-reader r)
+          child (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
+          {:keys [wait close]} (lib/wait-fd-or-exit hold child)]
+      (lib/c-kill mid 9)
+      (let [st (lib/wait-status mid) ended (wait)]
+        (close)
+        {:mid st :child ended}))
+   "ends-with-a-gone-pid"
+   ;; a pid already gone when it is watched ends the process at once (its watch's ESRCH)
+   #(let [gone (lib/fork! {:child (fn [] :done) :refused (fn [n] {:refused n}) :parent identity})]
+      (lib/wait-status gone)
+      (lib/fork! {:child (fn [] (lib/end-with! gone false) (sock/recv! (sock/conn (first (sock/socketpair)))))
+                  :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+   "ends-its-group"
+   ;; a process that leads its group ends the group with it: its sibling in the group, parked in a
+   ;; read and watching nothing that ends, ends too
+   #(let [[r w] (sock/socketpair)
+          [hold _] (sock/socketpair)
+          park (fn [_] (sock/recv! (sock/conn hold)))
+          anchor (lib/fork! {:child (fn [] (park nil)) :refused (fn [n] {:refused n}) :parent identity})
+          leader (lib/fork! {:child (fn []
+                                      (lib/c-setpgid 0 0)
+                                      (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                                  :refused park
+                                                  :parent (fn [_] (lib/end-with! anchor false) (park nil))}))
+                             :refused (fn [n] {:refused n}) :parent identity})
+          rd (sock/line-reader r)
+          member (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
+          {:keys [wait close]} (lib/wait-fd-or-exit hold member)]
+      (lib/c-kill anchor 9)
+      (let [st [(lib/wait-status anchor) (lib/wait-status leader)] ended (wait)]
+        (close)
+        {:anchor (first st) :leader (second st) :member ended}))
+   "forks-beside-the-watch"
+   ;; 200 forks from a process whose watcher thread runs: each child runs and exits 0
+   #(do (lib/end-with! (lib/c-getpid) false)
+        (frequencies (for [_ (range 200)]
+                       (lib/fork! {:child (fn [] :ran) :refused (fn [n] {:refused n}) :parent lib/wait-status}))))
    "child-throws"
    ;; a child whose code throws: unwound out of lib/fork! it would run this case's catch in the
    ;; child (exit 7); it ends at fork!, exit 1. One whose code returns exits 0
@@ -1328,67 +1387,6 @@
                 :remove-stops-only-it (and (= #{:probe2} (set (:stopped r3))) (empty? (:started r3)))
                 :running-set-after (= (conj expect :probe) after)}}))))
 
-(defn branch-health
-  "A branch's health (root's ruling, 2026-10-23): what head caused that base had not, the done rule's
-  own reading (seon.problems/caused-split), judged on classes (every class caused-split reads when nil).
-  {:caused [{:class :message}] :attention [{:class :message}] :checks {:no-<class> bool}}: a
-  problem base already had is not the branch's, and is root's to show (its context and page)."
-  [base head classes]
-  (let [{:keys [rows]} (seon.problems/caused-split base head)
-        attention? (:seon.problems/attention (contract/properties :seon.problems/class))
-        derived seon.problems/caused-classes
-        ;; a class asked for that no verdict judges (not read by caused-split, or attention: it never fails a branch) is refused, never a green
-        _ (when-let [bad (seq (remove #(and (derived %) (not (attention? %))) classes))]
-            (throw (ex-info (str "health judges the derived classes that fail a branch, not " (clojure.string/join ", " (map name bad))) {})))
-        cs (or (seq classes) (sort derived))
-        made (filterv (comp (set cs) :class) rows)]
-    {:caused (filterv (complement (comp attention? :class)) made)
-     :attention (filterv (comp attention? :class) made)
-     :checks (into {} (for [c cs :when (not (attention? c))]
-                        [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
-
-(defn- base-db
-  "db as the tree at dir holds it: its program (the :source read of dirs, seon.source/replace-tx),
-  its wiki (seon.docs/load-dir-tx) and its tasks (seon.task/load-tx), each by root's own loader."
-  [sys db dir dirs]
-  (let [r @(c/call! sys {:op :fx :kind :source :req {:root dir :dirs dirs}})
-        _ (when (contract/error? r) (throw (ex-info (:seon.error/message r) r)))
-        db (d/db-with db (seon.source/replace-tx db (:value r)))
-        db (d/db-with db (seon.docs/load-dir-tx db dir "docs" {}))]
-    (d/db-with db (seon.task/load-tx db (my.root/task-files (str dir "/" (seon.config/value :seon.config.root/tasks-dir)))))))
-
-(defn health-check
-  "The health step (root's ruling, 2026-10-23): what this checkout caused since its base
-  (seon.fx/base-commit: its merge base with git's main; on main, the previous main), the done
-  rule's reading (branch-health) of classes (every class `caused-split` reads when none is named). A root
-  booted on this checkout's source (src and the schemas) and its task files, its wiki loaded once
-  they are (a prose word is a citation when it names something), is the head; the base is that
-  db with the base commit's tree loaded by the same loaders (base-db). One line per row the
-  branch caused (its class and message), one per row it changed under the wiki (attention), and
-  how many rows of those classes the head holds open in all, which are root's to show."
-  [classes]
-  (let [root (seon.config/checkout)
-        dirs ["src" "resources/seon/schemas"]]
-    (run-check "HEALTH" {:datoms 0 :source {:root root :dirs dirs}}
-     (fn [sys]
-       (my.root/load-tasks! sys)
-       (my.root/load-docs! sys)
-       (let [head @(:conn sys)
-             base (seon.fx/base-commit root)
-             _ (when-not base (throw (ex-info (str "no base: " root " has no commit before this one on " (seon.config/value :seon.config.source/main) ", or no commit, or no branch of that name") {})))
-             ;; the base's tree, removed once read (one health run per checkout: its store branch, check-health, is one too)
-             dir (str root "/target/tmp/health-base-" base)
-             based (try (base-db sys head (seon.fx/checkout-at root base (into dirs ["docs" (seon.config/value :seon.config.root/tasks-dir)]) dir) dirs)
-                        (finally (clojure.java.shell/sh "rm" "-rf" dir)))
-             {:keys [caused attention checks]} (branch-health based head classes)
-             health (seon.problems/health head)
-             open (reduce + 0 (for [c (or (seq classes) (sort seon.problems/caused-classes))]
-                                (get-in health [:classes c :n] 0)))]
-         (doseq [r caused] (out! (name (:class r)) " " (:message r)))
-         (doseq [r attention] (out! "attention " (name (:class r)) " " (:message r)))
-         {:report {:base base :caused (count caused) :attention (count attention) :open-in-head open}
-          :checks checks})))))
-
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
   agent's [:seon.agent/id id], or root's [:seon.root/id :root], each its record with who
@@ -1472,7 +1470,8 @@
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
   tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
   An agent evaluates, collects, runs its tests in a fork and is cloned; then the fork
-  server, the agent and the clone each have one thread."
+  server, the agent and the clone each have one thread, beside the C thread that ends it with
+  root (seon.lib/end-with!)."
   []
   (run-check "THREADS" {:datoms 2000}
    (fn [sys]
@@ -1485,7 +1484,9 @@
           res {:fork-server (os-threads (get-in st [:fork-server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
                :clone (os-threads (get-in st [:agents cl :pid]))}]
       {:report (assoc res :tests tests :clone-eval cl-eval)
-       :checks {:each-forking-process-one-thread (= 1 (:fork-server res) (:agent res) (:clone res))
+       ;; one Chez thread each, beside the C thread that ends it with root (seon.lib/end-with!): the
+       ;; collector never sees a thread Chez did not make, so it starts no sweeper for it
+       :checks {:each-forking-process-one-thread (= (+ 1 (if (pos? (lib/end-watched)) 1 0)) (:fork-server res) (:agent res) (:clone res))
                 :its-test-passed (= 1 (:pass tests)) :the-clone-evaluates (= "42" cl-eval)}}))))
 
 (defn ids
@@ -1728,7 +1729,6 @@
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))
      "problems" (fn [n more] (problems-check))
-     "health" (fn [n more] (health-check (map keyword (remove nil? (cons n more)))))
      "threads" (fn [n more] (threads-check))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated

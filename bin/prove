@@ -22,15 +22,15 @@
 # runs every test and step with no green at its digest, the ones that
 # reach a process too (nothing left out, none named by hand: bin/check contracts and bin/check smoke
 # are steps of that same run, keyed by digest, never run again beside it); ends on MERGE OK / MERGE
-# FAILED from its exit status alone, naming each red and anything that did not run; and appends its line to claude_scratch/merge-log.md: the sha, the
-# plan's counts, the verdicts, the reds, the src delta of HEAD against its first parent and the
-# keys left out against main's last merge line.
+# FAILED from its exit status alone, naming each red and anything that did not run; and prints its line
+# for the merge commit's message: the sha, the plan's counts, the verdicts, the reds, the src delta of
+# HEAD against its first parent and the keys left out against main's last merge message.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # merge_verdict OUT ST: the merge's one verdict from prove's exit status alone (its steps include
-# contracts and smoke), with the reds named from its log in OUT; its line appended to MERGE_LOG
-# (claude_scratch/merge-log.md). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
+# contracts and smoke), with the reds named from its log in OUT; its line printed for the merge
+# commit's message (git keeps every merge's numbers). Exits 0 for MERGE OK. (bin/prove --merge-verdict OUT ST runs it alone.)
 merge_verdict() {
-  local out=$1 st=$2 log=${MERGE_LOG:-$ROOT/claude_scratch/merge-log.md}
+  local out=$1 st=$2
   v() { (( $1 == 0 )) && echo OK || echo "FAILED (exit $1)"; }
   local reds=$(grep -hE "^RED |^FAILED " "$out/prove.log" 2>/dev/null | sed -E 's/ \{.*//' | sort -u | tr '\n' ';' | sed 's/;$//')
   local counts=$(grep -E "^prove: [0-9]+ keys" "$out/prove.log" 2>/dev/null | sed -E 's/^prove: //; s/; selected in.*//')
@@ -40,12 +40,11 @@ merge_verdict() {
     srcd=$(git -C "$ROOT" diff --shortstat HEAD^1 HEAD -- src | sed -E 's/^ *//'); srcd=${srcd:-unchanged}
   else srcd="unknown (no first parent)"; fi
   local left=$(grep -oE "[0-9]+ left out\)?$" "$out/prove.log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
-  local main_left=$(grep -oE "[0-9]+ process keys left out|left out [0-9]+" "$log" 2>/dev/null | tail -1 | grep -oE "[0-9]+")
+  local main_left=$(git -C "$ROOT" log --first-parent -50 --format=%B HEAD^1 2>/dev/null | grep -oE "left out [0-9]+" | head -1 | grep -oE "[0-9]+")
   local verdict="MERGE FAILED"
   (( st == 0 )) && verdict="MERGE OK"
   [[ -z $reds && $verdict == "MERGE FAILED" ]] && reds="none named (see the logs in $out)"
   local line="$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): $verdict; prove $(v $st) (${counts:-no plan line}; ${merged:-no merge line}); reds: ${reds:-none}; src $srcd; left out ${left:-not measured} (main's last line: ${main_left:-none recorded})"
-  echo "$line" >> "$log"
   echo "$line"
   echo "$verdict"
   [[ $verdict == "MERGE OK" ]]

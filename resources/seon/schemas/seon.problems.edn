@@ -1,4 +1,4 @@
-;; Problems as typed facts (session D2, claude_scratch/option3-D2-problems.md): the error variants every
+;; Problems as typed facts (session D2, the session design papers in git history): the error variants every
 ;; producer builds through seon.contract/error (the one error map), the recorded error (one
 ;; entity per signature on main, R4's seon.error), the problem members of a run's end,
 ;; and the shape of the one read, seon.problems/report.
@@ -32,6 +32,8 @@
  ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
  ;; ends with its root only when it next reads that socket (task seon.agent/an-agent-ends-with-its-root)
  :seon.sock/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/unwatched]] [:errno :int]]]
+ ;; the kernel refused a write for a reason other than a gone peer (task seon.sock/a-frame-is-written-whole)
+ :seon.sock/write-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.sock/write-failed]] [:errno :int] [:fd :int] [:sent :int] [:of :int]]]
  :seon.agent/stalled [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/stalled]] [:agent :keyword]
                                              [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
  ;; a resumed agent's branch program that did not load (seon.program/load-diff!): main's ran instead
@@ -76,6 +78,8 @@
  ;; ends :error with the line's head, and the agent goes on (seon.agent/child-line)
  :seon.test/unreadable-line [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/unreadable-line]]]]
  :seon.lib/unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/unwatched]] [:fd :int] [:pid :int]]]
+ ;; the OS refused the thread that ends a process with its starter (seon.lib/end-with!)
+ :seon.lib/starter-unwatched [:and :seon.error/base [:map [:seon.error/type [:= :seon.lib/starter-unwatched]] [:pid [:maybe :int]]]]
  :seon.test/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/ticks-spent]] [:ticks :int] [:budget :int]
                                                 [:test {:optional true} :string]]]
  :seon.fx/io-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.fx/io-error]]]]
@@ -157,7 +161,8 @@
  :seon.run/error [:map]
  ;; failing assertions per red test (at most 8 each, printed by seon.print under :part)
  :seon.problems/assertion [:map [:type [:enum :fail :error]] [:message {:optional true} [:maybe :string]] [:flaky {:optional true} :boolean]
-                           [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]]
+                           [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]
+                           [:got {:optional true} [:maybe :string]] [:seon.error/type {:optional true} :qualified-keyword]]
  ;; one clojure.test report as the test child keeps it (seon.agent/test-report)
  :seon.test/report [:map [:type :keyword] [:var {:optional true} [:maybe :string]] [:message {:optional true} [:maybe :string]]
                     [:expected {:optional true} [:maybe :string]] [:actual {:optional true} [:maybe :string]]

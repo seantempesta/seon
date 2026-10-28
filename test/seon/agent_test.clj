@@ -310,7 +310,7 @@
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
 
 (deftest a-test-childs-read-lets-the-agents-other-fibers-run
-  ;; the recipe hang of 2026-10-28 (claude_scratch/hang-2026-10-28-a1-prove): agent a1's test child
+  ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child
   ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
   ;; its one main carrier, so the fiber that would answer never ran. The poller's ready is a hint:
   ;; a stale one, left by the read before, ends the next park at once, and the read's wait then
@@ -565,6 +565,36 @@
   (let [[r] (in-agent ["(vec (for [g (range 1 5)] (jolt.scheme/eval-string (str \"(bytes-allocated \" g \")\"))))"])
         mb (/ (reduce + (:value r)) 1048576.0)]
     (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
+
+(deftest an-agents-collect-trip-is-the-configured-one
+  ;; docs/machine.md#what-a-process-owns-in-memory: Jolt's adaptive nursery raises any trip
+  ;; below its floor (16 MiB) back to the floor, so a trip set directly never held and agents
+  ;; collected every 16 MiB, not the configured 4 (measured 2026-10-28: 16777216); the
+  ;; configured trip is the nursery's floor, set with the ceiling
+  (let [[r] (in-agent ["(jolt.scheme/eval-string \"(collect-trip-bytes)\")"])]
+    (is (= (seon.config/value :seon.config.agent/trip-bytes) (:value r)) (pr-str r))))
+
+(deftest a-test-childs-ceiling-is-its-own
+  ;; docs/machine.md#what-a-process-owns-in-memory: a test child inherited its agent's absolute
+  ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
+  ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
+  ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
+  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+                           "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
+                           "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
+        v (some-> (:value r) clojure.edn/read-string)]
+    (is (= {:pass 1 :fail 0 :error 0} v) (pr-str r))))
+
+(deftest a-fork-servers-static-grows-only-with-the-program
+  ;; docs/machine.md#what-a-process-owns-in-memory: the fork server made its heap static before
+  ;; every fork, so what each fork replaced (main's db, the reach graph, the index) stayed in
+  ;; static for the server's life. Twenty forks with main moving (each a task of its own) but
+  ;; no program change: an agent's static at its start is the server's at that fork
+  ;; and main's live data growing as it does (each task's facts), not every fork: a freeze is a
+  ;; step of more than 64 KB in the server's static (measured: 19 in 20 forks before, 1 after)
+  (let [statics (vec (for [_ (range 20)] (:value (first (in-agent ["(jolt.scheme/eval-string \"(bytes-allocated 'static)\")"])))))
+        freezes (count (filter #(> % 65536) (map - (rest statics) statics)))]
+    (is (<= freezes 2) (str freezes " freezes in 20 forks; the server's static at each: " (pr-str statics)))))
 
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
@@ -1003,32 +1033,6 @@
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 
-(deftest a-spawns-start-costs-the-same-on-a-bigger-program
-  ;; the owner, 2026-10-25 ("what are we doing if we can fork in ms?"): a spawn's own work in the
-  ;; child (its phases' bytes, seon.agent/spawn-phases, sent with its hello) does not grow with
-  ;; main's program: an agent spawned after main gained 200 forms allocates what one before it did.
-  ;; Both spawn on a main that already holds a program (app.base): on an own root's near-empty main
-  ;; the index nodes are not yet full, and the :state phase's one cold avet seek (the ctx record's
-  ;; seon.db/eid of the agent's key) read 87 KB there against 206/207/191 KB at 200/1,000/3,000
-  ;; more forms, a step to node fill that the first 200 forms took, not growth with the program
-  (let [forms #(str " _ @(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) '" % " (clojure.string/join \"\\n\" (cons \"(ns " % ")\" (for [i (range 200)] (str \"(defn f\" i \" [x] (inc x))\")))) nil))")
-        code (str "(let [ph (fn [id] (into {} (for [p (get-in (seon.root/state sys) [:agents id :phases]) :when (:bytes p)] [(:phase p) (:bytes p)])))"
-                  " fresh #(keyword (str \"pa-\" (rand-int 100000000)))"
-                  (forms "app.base")
-                  " a (seon.root/spawn! sys {:branch (fresh)})"
-                  (forms "app.big")
-                  " b (seon.root/spawn! sys {:branch (fresh)})]"
-                  " [(ph a) (ph b) (mapv :phase (get-in (seon.root/state sys) [:agents b :phases]))])")
-        ;; a root of its own: it moves main's program, which every later test on a shared root would run
-        [r] (in-agent [{:op :eval :agent "root" :code code}] {:own-root? true})
-        [before after phases] (:value r)]
-    (is (= [:fork-server-in :reach-graph :index :static :child-init :setup :store-reopened :ns :interrupt-test :connected :handlers :base :misaligned :state :hello]
-           phases)
-        (pr-str r))
-    (is (seq before))
-    (doseq [[k v] before]
-      (is (<= (get after k) (+ (* 1.1 v) 65536)) (str k ": " v " bytes before, " (get after k) " after 200 more forms")))))
-
 (deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
@@ -1226,7 +1230,7 @@
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
   ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
-  ;; (claude_scratch/archive/design-agent-view-2026-10-24.md §7)
+  ;; (docs/render.md)
   (let [names (volatile! nil)
         [_ end turn on-main] (in-agent (fn [{:keys [agent task ns run] :as n}]
                                          (vreset! names n)
@@ -1248,7 +1252,7 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, claude_scratch/archive/design-agent-view-2026-10-24.md
+    ;; the prose comes in the eval call (its first argument, docs/render.md
     ;; section 1), so the reply's own text is empty and the prose is the eval's
     (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))

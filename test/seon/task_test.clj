@@ -188,7 +188,7 @@
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
 
 (deftest a-task-is-its-members-not-its-plans-vector
-  ;; live agents, 2026-10-25 (claude_scratch/archive/live-2026-10-25.md D1): the plan's embedding is written on the
+  ;; live agents, 2026-10-25 (the archived paper live-2026-10-25.md (git history) D1): the plan's embedding is written on the
   ;; task's entity (seon.vector), and (my.task/current) and my.task/update! printed its bytes as
   ;; #object[[B ...] under :also; a task's value is its own members, the vector is the index's
   (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [(decl "Make t true.")]))

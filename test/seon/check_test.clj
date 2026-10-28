@@ -5,7 +5,7 @@
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib] [seon.contract :as contract]))
+            [seon.db :as pdb] [clojure.core.async :as a] [seon.check] [test-runner] [seon.docs] [seon.problems] [seon.fx] [seon.source] [clojure.string] [clojure.string :as str] [seon.lib] [seon.contract :as contract]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -228,9 +228,19 @@
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" (symbol (namespace v) "no-such-var") "`.\n")]
     [(d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page})) v]))
 
+(deftest the-health-step-reads-the-task-files-relative-to-the-checkout
+  ;; test-runner/health!: the config holds :seon.config.root/tasks-dir resolved against the
+  ;; checkout, and the base's task files are read from the base's tree extracted elsewhere, so
+  ;; the step takes the directory relative to the checkout (an absolute one read no base task)
+  (let [rel (#'test-runner/tasks-dir)]
+    (is (not (str/starts-with? rel "/")) rel)
+    (is (= (str (.getCanonicalFile (java.io.File. (str (seon.config/checkout) "/" rel))))
+           (str (.getCanonicalFile (java.io.File. (str (seon.config/value :seon.config.root/tasks-dir))))))
+        "it names the configured directory under the checkout")))
+
 (deftest a-problem-the-base-had-is-not-the-branchs
   (let [[base] (cited-db)
-        h (seon.check/branch-health base base nil)]
+        h (test-runner/branch-health base base nil)]
     (is (pos? (get-in (seon.problems/health base) [:classes :dead-citation :n])) "the base has an open problem")
     (is (= [] (:caused h)) "the branch changed nothing, so it caused none")
     (is (every? true? (vals (:checks h))) "and its health is green")))
@@ -238,25 +248,25 @@
 (deftest a-problem-the-branch-made-fails-it
   (let [[base v] (cited-db)
         head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])
-        h (seon.check/branch-health base head nil)]
+        h (test-runner/branch-health base head nil)]
     (is (= [{:class :dead-citation :message (str "demo/p.md#p cites " v ", which names nothing")}] (:caused h)))
     (is (false? (get-in h [:checks :no-dead-citation])) "its health is red on the class it made")
     (testing "the classes asked for are the ones judged (bin/laws catch asks for :unnamed-site)"
-      (is (= {:no-unnamed-site true} (:checks (seon.check/branch-health base head [:unnamed-site])))))
+      (is (= {:no-unnamed-site true} (:checks (test-runner/branch-health base head [:unnamed-site])))))
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
-      (is (thrown? Exception (seon.check/branch-health base head [:stale-section]))))))
+      (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
 (deftest a-class-the-health-step-does-not-read-is-refused
   (let [[base v] (cited-db)
         head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
     (doseq [c [:orphan-page :stalled :stale-pin :leadless-section :uncited-task :problem-unlinked]]
-      (is (thrown? Exception (seon.check/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
+      (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
 (deftest the-health-steps-checks-are-the-classes-caused-reads
   (let [[base v] (cited-db)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
     (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
-           (set (keys (:checks (seon.check/branch-health base base nil))))))
+           (set (keys (:checks (test-runner/branch-health base base nil))))))
     (let [head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
       (is (every? seon.problems/caused-classes (map :class (:rows (seon.problems/caused-split base head))))
           "every class caused-split answers is one the health step judges"))))
@@ -393,25 +403,25 @@
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's exit status alone (contracts and smoke are steps of
-  ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and appends
-  ;; its line to the merge log itself (so a line cannot say green over a red exit);
-  ;; bin/prove --merge-verdict runs that part alone
+  ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and prints
+  ;; its line for the merge commit's message (so a line cannot say green over a red exit; git keeps
+  ;; every merge's numbers, docs/merging.md); bin/prove --merge-verdict runs that part alone
   (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
-        log (str dir "/merge-log.md")
-        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st) :env (assoc (into {} (System/getenv)) "MERGE_LOG" log)))]
+        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st)))
+        line-of (fn [r] (first (filter #(str/includes? % " bin/prove --merge ") (str/split-lines (:out r)))))]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"
                                       "RED seon.x-test/a-red {:pass 1, :fail 1, :error 0}\nPROVE FAILED\n"))
-    (spit log "x one earlier line, 195 process keys left out\n")
     (try
-      (let [r (run 1) line (last (str/split-lines (slurp log)))]
+      (let [r (run 1) line (line-of r)]
         (is (= 1 (:exit r)) (:out r))
         (is (str/ends-with? (str/trim (:out r)) "MERGE FAILED"))
-        (is (str/includes? line "MERGE FAILED; prove FAILED (exit 1)") line)
-        (is (str/includes? line "reds: RED seon.x-test/a-red") line)
-        (is (str/includes? line "main's last line: 195") line))
-      (let [r (run 0) line (last (str/split-lines (slurp log)))]
+        (is (str/includes? (str line) "MERGE FAILED; prove FAILED (exit 1)") (:out r))
+        (is (str/includes? (str line) "reds: RED seon.x-test/a-red") (:out r))
+        (is (re-find #"main's last line: (\d+|none recorded)\)$" (str line)) "the left-out count of main's last merge message, or none recorded"))
+      (let [r (run 0) line (line-of r)]
         (is (zero? (:exit r)))
-        (is (str/includes? line "MERGE OK") line))
+        (is (str/includes? (str line) "MERGE OK") (:out r)))
+      (is (not (.exists (java.io.File. (str dir "/merge-log.md")))) "nothing is written beside the run")
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
