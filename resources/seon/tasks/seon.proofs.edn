@@ -77,4 +77,51 @@
   :seon.task/proofs #{seon.prove-test/a-test-in-a-prove-run-that-reaches-observe-ends-with-its-result}}
  {:seon.task/name "a-test-run-answers-small"
   :seon.task/plan "Found 2026-10-28 (the 0.7 confirm, (raw evidence not kept; summarized here): an agent's :tests answer (seon.agent/handle! :tests, run-tests-forked's result) was about 3 MB: about 60 tests' reports, many carrying an OutOfMemoryError's trace. That breaks the owner's ruling that an eval's answer stays small with the value behind a handle (owner, 2026-10-27), and it is the frame the kernel dropped (task seon.sock/a-frame-is-written-whole). Correct: the results are facts recorded on main by digest (seon.proofs/results-tx, the :record frame), so the :tests answer carries the run's counts and the digests, and a reader reads the reports from the results it already records (the schema design's test-results cache, regenerable from the db at t: docs/decisions.md, 2026-10-28), never inline. Proof to write: a run of many failing tests answers a frame whose size does not grow with its reports."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "test-results-are-a-few-facts"
+  :seon.task/plan "Test results go back into the database as a few facts per test and per function, through root's one writer, with no
+history, replacing slice 1's file cache (8564dea1d5, `target/results`). Owner rulings: \"one writer for sure\"; \"never
+300k new records per test run … just the essentials\" (2026-10-27); \"We want to be able to query things in the db,
+functions, tests, schemas and understand what tests are failing and timings\" (2026-10-28); derived data may be
+cached, always regenerable (AGENTS §5).
+
+What is stored (all `:db/noHistory` via `:seon.db/no-history?`, overwritten in place):
+- On the test's var entity (`:var/name`, kind `:test`, resources/seon/schemas/seon.facts.edn ~57-66):
+  `:seon.test/digest` (the reach digest it was last judged at), `:seon.test/status` (`:green` `:red` `:flaky`: green
+  and red at one digest), `:seon.test/failure` (the first failing assertion, bounded by the printer; present only while
+  red, retracted on green), and running sums `:seon.test/runs` `:seon.test/ms` `:seon.test/ticks` `:seon.test/bytes`.
+  A run at a new digest resets the sums to that run; at the same digest it adds. Mean = sum / runs, computed on read.
+- On each contracted function's var entity: running sums `:seon.fn/calls` `:seon.fn/ticks` `:seon.fn/bytes` (from the
+  test's `seon.profile` epoch, seon.fx/details' 5-number rows), plus `:seon.fn/form-digest`; a changed form resets them.
+- A red test's full output, when kept, is a value on the test (stored out of line by Datahike's large-value store when
+  ≥ 1 KB), retracted on green.
+- Nothing per run. A run's logs stay in `target/prove/<run-id>` (pruned by :seon.config.proofs/runs-kept).
+
+Who writes:
+- `bin/test` / `bin/prove` shards: through root's server (restore the `:record` op path from before 8564dea1d5:
+  seon.server's `:record`, test_runner's ask-root), root's writer transacts on main. Root not running: the run says
+  `UNRECORDED` (an error as data), never silently.
+- An agent's own runs: on its branch (`seon.agent/transact!`), so each branch shows its own tests; main's facts are
+  written by main's prove.
+
+Readers, each moved from the file cache to these facts (file:line from the 2026-10-28 map):
+- reuse: seon.proofs/plan, plan-of, found (green at the same digest → reused; flaky → rerun once code changes);
+  test_runner/plan-of, read-results, measured-ms (shards by mean ms).
+- seon.agent/test-plan (:684), seon.agent/stored-results (:692); my.task/status (:48); seon.reconcile/done-explain (:43);
+  seon.problems classes :red :cost :unrun (:41, :685, :709); seon.proofs/answer (:199, bounded: counts, reds with
+  their first failure up to :seon.config.proofs/answer-reds, a handle); the dashboard's verdict-box, cost-report and
+  per-form :fns table (seon.render.ui :377, :385, :505); my.agent's per-call view (:120-137).
+
+Deleted: seon.fx key-dir, verdict-path, read-verdict, stored-results, verdict-files, evict, write-verdicts!, last-ms
+(file cache, ~150 lines); config keys :seon.config.proofs/results-dir and results-per-test; bin/env's
+SEON_RESULTS_DIR; the per-check `target/tmp/check-results.*` dirs (3c6db9e711) become unneeded; seon.test-store's
+results-dir. The old per-digest and per-run entities stay deleted.
+
+Size: ~1,100 tests × 7 + contracted functions × 4 ≈ 14k datoms, constant; a full run rewrites only the tests that ran.
+
+Proofs, to write red first: a test run writes one fact set per test that ran and nothing for a reused one (count datoms per run); the sums: two runs at one digest give runs 2 and the summed ms; a run at a new digest resets them; red → green retracts the failure (and the out-of-line output); green and red at one digest → :flaky, rerun after the code changes; noHistory holds: the history db shows no older values of the overwritten attributes; reuse: an unchanged tree's second `bin/prove` runs nothing (reads the facts); root down: `bin/test` answers UNRECORDED and exits non-zero; an agent's run writes on its branch, not main; the eval answer stays under its bound with 300 reds; cost proof: writing a run's results costs O(tests run), not O(all tests).
+
+Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts
+and docs/storage.md updated; `bin/prove` green; a one-function prove's result lookup still milliseconds."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

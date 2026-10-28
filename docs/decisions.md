@@ -11,6 +11,27 @@ The owner's rulings of 2026-10-28, each with where it is now stated; they stand 
 ### Derived data may be cached; it is always regenerable from the db at t (owner, 2026-10-28)
 "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
 
+### One session works with the owner; helpers are one-use (owner, 2026-10-28)
+"let's stick with just you and me"; "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too"; "We won't need all these separate worktrees anymore either". The owner and one Claude session work in the main tree; plans are written into task entries; long well-planned work goes to a fresh Sonnet agent, short context-heavy work to a fork, lookups to Haiku. claude_scratch/ and the merge session are retired. Stated: AGENTS §2, §3, §7, §9.
+
+### Test results are a few facts per test and per function, with no history (owner, 2026-10-28)
+"We want to be able to query things in the db, functions, tests, schemas and understand what tests are failing and timings so don't remove everything from the db"; on means, "Okay do it". Per test, on its var: the digest it was judged at, its status, its first failure while red, and running sums (runs, ms, ticks, bytes) that reset when the digest changes; per contracted function, running sums of calls, ticks and bytes that reset when its form changes; all `:db/noHistory`; written through root's one writer; a big value out of line; nothing per run. Replaces slice 1's file cache. Stated: task seon.proofs/test-results-are-a-few-facts.
+
+### A kept db value is a reference, {:branch :commit :t} (owner, 2026-10-28)
+"I don't want us carrying around large values for no reason. At those points we need to change db's into whatever facts we need to re-create that point in time." A db value is used, then let go; whatever keeps it past its moment keeps `{:branch :commit :t}` and re-creates it. Errors keep data, not a Throwable that pins the system. Stated: AGENTS §4.
+
+### No surprises from main (owner, 2026-10-28)
+"we are supposed to be telling the agent always at every eval reply what is different with main so as main moves they are aware they need to fix things. They can ignore it and work and then merge at the end, but there are never any surprises." Every eval answer carries main's difference from the branch, computed from the db at t, never stored. Stated: task seon.context/the-agent-page-shows-what-the-agent-knows.
+
+### Context is structure first; ranking is judged by turns to green (owner, 2026-10-28)
+"I don't think the ranker was built right if it barely moved the needle at all. We should be seeing 90% relevance and then the agent actually using it and shorter number of turns to achieve a goal as proof something is working"; "sure let's start with structure first". What the task's plan cites (functions, their tests, users and uses, sections, proofs) is shown by structure; ranking only fills a small second tier, later; shown items are append-only for the session. Stated: task seon.context/the-agent-page-shows-what-the-agent-knows.
+
+### The cron stays, written well (owner, 2026-10-28)
+"We do need a cron, that's fine if it's well written." Stated: task seon.cron entry (the infra audit's verdict "delete" is overruled).
+
+### The store is erased outright (owner, 2026-10-28)
+"Yes, erase it outright with no archive copy." Done 2026-10-28; the standing store is test data until Seon holds a user's data.
+
 ## 2026-10-27 day rulings
 The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
 
