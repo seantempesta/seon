@@ -104,6 +104,8 @@ The failure points met without a catch, where the edge answers with data.
 | Datahike refuses an agent's own write (its run-ahead apply) | `datahike.writer/apply!` (the library's edge), called by `seon.agent/transact!` | the exception as its answer; `seon.agent/transact!` throws its message into the agent's eval (an `:err` item). Inside a test fork the transaction applies with `d/with` to the fork's value only |
 | A process dies inside an LMDB write txn while other processes hold the store's env open (a root SIGKILLed mid-commit, a crash check) | LMDB's own writer lock, built robust (`bin/build lmdb`, below) | the kernel releases the dead holder's lock (SysV `SEM_UNDO`); the txn is lost, the next writer commits |
 
+- **A unix socket's failed write is not always a dead peer.** ```seon.sock/write-all!``` retries EINTR and answers `:epipe` for every other errno, so a frame the kernel refuses whole (a `:tests` answer of about 3 MB to a slow live reader) reads as a gone peer and is lost without a record. The proof is on the sockets' own counters: macOS `netstat -anv -f unix` shows Recv-Q as 0 whatever is buffered, so read `rxbytes` and `txbytes` (rx is counted at delivery, whether read or not): a healthy pair has tx equal to its peer's rx, and the lost frame's pair showed 5,176,484 sent against 2,164,731 delivered.
+
 ## Physics: who may run threads
 
 Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
@@ -203,6 +205,8 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   of its own on a socket a pump also writes (`seon.agent-proc/send-fd!`), sent only while
   that pump is idle: the agent asks for it (`:fd-ready`) and the agent proc holds its other
   messages until it is sent.
+
+- **A child that cannot end.** A child stuck in a mutex wait with a zombie grandchild ignores SIGTERM, so only SIGKILL ends it, and `kill -INFO` writes nothing for it. Jolt's all-asleep check never ends a process: it throws to the waiters it finds and counts a timed wait, a blocking foreign call or a thread in `recv` as running, so a process whose starter died before `-main` left its watch empty lives on. A test child that reaches Jolt's heap ceiling (about 2.14 GB on 25010632) may park instead of dying, and its `kill -INFO` answers "fiber dump failed: out of memory". Take `sample`, `lsof` and the thread list before killing ([AGENTS §2](../AGENTS.md)).
 
 ## Contracts over host objects are proved by deftests, never by generation
 

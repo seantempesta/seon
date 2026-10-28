@@ -33,6 +33,8 @@ A merge's verification is one command, `bin/prove --merge`.
 - **No lock.** Nothing waits on main's verification (owner, 2026-10-27: "Remove it"): it runs niced like any run. It rarely runs, since a branch that holds main and proved its tip merges with no run on main, and load is kept down by not running the same work twice, not by ordering runs.
 - How many heavy runs go at once is AGENTS' number (§2), not a gate here.
 
+A root that is restarting (`bin/update`) refuses connections for the moment, so a plan run that meets it prints `TEST FAILED` for the connection, a rerun and not a red; the verdict to read is the one a run ends on once root is up.
+
 ## A merge runs what the change reaches
 
 A merge runs what the change reaches, not every check. The merge's proof is `bin/prove` on the merged tree, then `bin/check smoke`; `bin/laws` (every law's sites) and `health` ([health](health.md)) run inside it as steps keyed by the whole tree. One rule selects for everyone: a key runs exactly when no green result is recorded at its reach digest (```seon.proofs/plan```), in the verdict cache every checkout shares ([verdicts](#verdicts-are-a-cache)), so an unchanged tree runs nothing and a result proven in any checkout is reused in every other.
@@ -78,6 +80,8 @@ Root reads every merge's `src` diff stat before merging, against the goal of abo
 ## Conflicts and pins
 
 A conflict is resolved by copying each side's lines, never retyping; the lines after `>>>>>>>` may belong to both sides; each resolved file's forms must balance as its parents' do. Submodule pin bumps happen only in root's merges into main, never in a worktree session's merge of main. A pin bump reaches everything, so its merge also runs the cost proofs `bin/prove` leaves out (`bin/test seon.program-cost-test seon.record-cost-test`): Jolt 0d39edc3 passed prove and still made reach-update grow n^1.96. Commits in the forks ([forks](forks.md): Jolt, Chez, Datahike, konserve) carry no AI trailers. After a merge, root archives the worktree session first (its `bin/mcp` holds the worktree open), then removes its worktree ([machine](machine.md#disk-stays-bounded)).
+
+A pin bump is verified in a worktree with every Jolt gate, run as `make -o submodules GATE` (plain `make` runs `git submodule update`, which fails in a worktree); a Jolt pin that skipped a gate regressed once, so it counts as ready only with each gate's verdict (the one environmental red is fiberspoll's socket test, red on stock Chez too, because macOS refuses a connect to a full backlog at once). `bin/build` resets every submodule checkout to the pin in HEAD, so a pin bump is committed before building, or a gate run on the checkout tests the old code. Stage explicit paths: `git add -A` staged lagging submodule checkouts as gitlink changes.
 
 ## Seon's merge is a three-way merge of the program
 

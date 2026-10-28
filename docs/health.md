@@ -75,6 +75,8 @@ Every problem class declares the section of the wiki that says what it is and ho
 
 Nothing gates an evaluation. An agent may break a citation in one eval and fix it three evals later (AGENTS §4: get out of an agent's way). A merge needs no rule of its own: a branch behind main is refused `:behind` and judged again after merging main.
 
+Health is computed on the trees as they are kept and needs no built binary: the verdict itself (`seon.problems/caused-split`) takes 22 ms, and the 8-14 s the whole takes replaced a 27 s run on the binary plus a 50 s build, which had built two whole databases from scratch (root's boot 5.1 s and 3.7 GB, the base's 2.4 s and 2.3 GB, the wiki loaded twice). The base's db reads the base's task files through the checkout's own path: a tasks directory held absolute in the config names nothing under another root. ```seon.program/graph-index``` selects, per test, only the config its reach names (232 to 119 MB and 33.7 to 17.0 M ticks over 1,049 tests and 37 roots, with identical digests).
+
 ## Every writer: root loads what changed
 
 Root watches what its loaders read (the wiki, the task files, the source dirs: `my.root/loader-dirs`) and its repository's refs, never the whole checkout, whose builds, stores and other worktrees no loader reads, so whoever writes (a Claude session, a Seon agent, the owner's editor, git) reaches the same facts with no script of their own (owner, 2026-10-23: "seon code detecting and updating, not external scripts").
