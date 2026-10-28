@@ -131,7 +131,8 @@
 
 (deftest a-branch-cut-before-form-keywords-gains-them-on-resume
   ;; root, 2026-10-25 (ctx-atom's finding): a branch cut before :form/keywords killed its agent at
-  ;; resume, schema-dependents reading an attribute its schema lacks. A branch keeps the schema it
+  ;; resume, schema-dependents reading an attribute its schema lacks (now it reads none of its
+  ;; datoms, docs/forks.md). A branch keeps the schema it
   ;; was cut with; resumed, it gains this program's attributes (seon.db/install-missing!, as a kept
   ;; store does when a root opens it) and its forms the facts they were recorded without (gained-tx)
   (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :keep-history? false}
@@ -141,7 +142,8 @@
         _ (d/transact conn (vec (remove #(= :form/keywords (:db/ident %)) pdb/schema)))
         _ (d/transact conn [{:db/id "n" :ns/name 'app.old} {:db/id "f" :form/id "app.old/f" :form/src "(defn f [m] (:app.old/thing m))" :form/ns "n" :form/order 0 :form/defines #{"v"}}
                             {:db/id "v" :var/name 'app.old/f :var/form "f" :var/kind :fn :var/contract (seon.edn/encode [:=> [:cat [:map [:app.old/thing :int]]] :int])}])]
-    (is (thrown? Exception (program/schema-dependents @conn #{:app.old/thing})) "cut before the attribute: the read refuses it, as the agent died")
+    (is (= [] (program/schema-dependents @conn #{:app.old/thing}))
+        "cut before the attribute: it holds none of its datoms, so nothing depends on it (Datahike 7eea478b; before, the read threw and the agent died)")
     (is (= [] (program/gained-tx @conn)) "the attribute not yet installed: nothing to derive")
     (let [added (pdb/install-missing! conn)
           _ (d/transact conn (program/gained-tx @conn))]
