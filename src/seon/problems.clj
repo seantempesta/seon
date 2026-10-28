@@ -443,53 +443,27 @@
 
 (defn old-word-hits
   "The old words (of words, `old-word-spellings`) each text uses: [[key word] ...], key being the text's
-  own, line by line without the spans `old-word-span` keeps. One contracted call however many texts. A whole-word
-  match is what (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here). The texts are
-  lower-cased and joined by newlines in chunks of about 100,000 characters and each spelling is searched through a
-  chunk once, so the searches are the spellings' per chunk and not per text (an indexOf call costs ~1.2 KB of
-  allocation however short its text is: 3,785 forms x 21 spellings was 90 MB); a match marks its text and the
-  search goes on at the next, and only the texts it marks are read a line at a time."
+  own, line by line without the spans `old-word-span` keeps. One contracted call however many texts: a
+  whole-word match is what (?<!\\w)s s?(?!\\w) matches, found by indexOf (a regex costs ~140 us a line here)."
   {:malli/schema [:=> [:cat [:sequential [:tuple :any :string]] [:sequential [:tuple :string [:vector :string]]]] [:vector [:tuple :any :string]]]}
   [texts words]
   (let [word-char? (fn [c] (let [c (int c)] (or (<= 97 c 122) (<= 48 c 57) (= c 95))))
-        whole-word-at (fn [^String low ^String s from]
-                        (let [n (.length low) k (.length s)]
-                          (loop [i (.indexOf low s (int from))]
-                            (if (neg? i)
-                              -1
-                              (let [e (+ i k)]
-                                (if (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
-                                         (or (>= e n) (not (word-char? (.charAt low e)))
-                                             (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))
-                                  i
-                                  (recur (.indexOf low s (inc i)))))))))
-        used? (fn [low ss] (some #(<= 0 (whole-word-at low % 0)) ss))
-        texts (vec texts)
-        spellings (vec (mapcat second words))
-        users (loop [lo 0 found #{}]
-                (if (>= lo (count texts))
-                  found
-                  (let [hi (loop [hi lo n 0] (if (and (< hi (count texts)) (< n 100000)) (recur (inc hi) (+ n (count (second (texts hi))))) hi))
-                        chunk (mapv second (subvec texts lo hi))
-                        starts (into (sorted-map) (map vector (reductions + 0 (map #(inc (count %)) chunk)) (range lo hi)))
-                        low (str/lower-case (str/join "\n" chunk))]
-                    (recur hi (reduce (fn [found sp]
-                                        (loop [from 0 found found]
-                                          (let [i (whole-word-at low sp from)]
-                                            (if (neg? i)
-                                              found
-                                              (let [t (val (first (rsubseq starts <= i)))
-                                                    nxt (some-> (first (subseq starts > i)) key)]
-                                                (if nxt (recur nxt (conj found t)) (conj found t)))))))
-                                      found spellings)))))]
-    (vec (distinct (for [i (sort users)
-                         :let [[k text] (texts i)]
+        whole-word? (fn [^String low ^String s]
+                      (let [n (.length low) k (.length s)]
+                        (loop [i (.indexOf low s 0)]
+                          (when (<= 0 i)
+                            (let [e (+ i k)]
+                              (or (and (or (zero? i) (not (word-char? (.charAt low (dec i)))))
+                                       (or (>= e n) (not (word-char? (.charAt low e)))
+                                           (and (= \s (.charAt low e)) (or (>= (inc e) n) (not (word-char? (.charAt low (inc e))))))))
+                                  (recur (.indexOf low s (inc i)))))))))]
+    (vec (distinct (for [[k text] texts
                          line (str/split-lines text)
                          :let [low (str/lower-case line)]
-                         :when (some (fn [[_ ss]] (used? low ss)) words)
+                         :when (some (fn [[_ ss]] (some #(whole-word? low %) ss)) words)
                          :let [kept (str/lower-case (str/replace line old-word-span ""))]
                          [w ss] words
-                         :when (used? kept ss)]
+                         :when (some #(whole-word? kept %) ss)]
                      [k w])))))
 
 (defn old-words-in
@@ -502,33 +476,22 @@
   {:malli/schema [:=> [:cat :seon.host/db :map [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]]]] [:vector :seon.problems/row]]}
   [db ans {:keys [vars sections tasks]}]
   (let [words (old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
-        ;; many places: each attribute read by one :aevt scan on its first use, held by the map it builds (a seek is
-        ;; ~12 KB of allocation, a scanned datom ~100 B); a few: a seek each, so a few places cost a few seeks
-        many? (< 64 (+ (count vars) (count sections) (count tasks)))
-        scans (volatile! {})
-        scan (fn [a rev?] (let [k [a rev?]]
-                            (or (@scans k)
-                                (let [m (into {} (map (if rev? (juxt :v :e) (juxt :e :v))) (d/datoms db :aevt a))]
-                                  (vswap! scans assoc k m)
-                                  m))))
-        val-of (if many? (fn [e a] (get (scan a false) e)) (fn [e a] (:v (first (d/datoms db :eavt e a)))))
-        ent-of (if many? (fn [a v] (get (scan a true) v)) (fn [a v] (:e (first (d/datoms db :avet a v)))))
         texts (vec (concat
                      (for [v (sort vars)
-                           :let [form (some-> (ent-of :var/name v) (val-of :var/form))
-                                 path (when form (or (some-> (val-of form :form/ns) (val-of :ns/file)) (str "src/" (namespace v))))]
+                           :let [e (:e (first (d/datoms db :avet :var/name v))) form (some-> e (as-> e (:var/form (d/entity db e))))
+                                 path (when form (or (:ns/file (:form/ns form)) (str "src/" (namespace v))))]
                            :when (and form (not (old-word-kept path)))]
-                       [[:var (str v) path] (val-of form :form/src)])
+                       [[:var (str v) path] (:form/src form)])
                      (for [a (sort sections)
-                           :let [e (ent-of :seon.section/address a)
+                           :let [e (:e (first (d/datoms db :avet :seon.section/address a)))
                                  path (first (str/split a #"#" 2))]
                            :when (and e (not (old-word-kept path)))]
-                       [[:section a path] (val-of e :seon.section/text)])
+                       [[:section a path] (:seon.section/text (d/pull db [:seon.section/text] e))])
                      (for [t (sort tasks)
-                           :let [e (ent-of :seon.task/id t)
-                                 path (when e (str "resources/seon/tasks/" (val-of e :seon.task/ns) ".edn"))]
-                           :when (and e (not (old-word-kept path)))]
-                       [[:task t path] (val-of e :seon.task/plan)])))]
+                           :let [e (:e (first (d/datoms db :avet :seon.task/id t))) tk (when e (d/pull db [:seon.task/ns :seon.task/plan] e))
+                                 path (str "resources/seon/tasks/" (:seon.task/ns tk) ".edn")]
+                           :when (and tk (not (old-word-kept path)))]
+                       [[:task t path] (:seon.task/plan tk)])))]
     (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
                :let [s (str "old-word " path " " (name kind) " " id " " w)]]
            (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": AGENTS.md section 7a says what to say instead")
