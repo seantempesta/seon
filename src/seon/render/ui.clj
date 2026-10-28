@@ -1386,7 +1386,7 @@
         unit (fn [u] {:id (:id u) :input {:rev (:rev u)} :html (:html u) :container (:container u)})]
     {:seon.render/html
      [:div {:id "app" :class "mx-auto flex max-w-screen-2xl flex-col gap-3 p-3 sm:p-4" :data-view view}
-      (top-bar id (or tab :chat))
+      (top-bar id tab)
       ;; a page with no tiles (an agent's chat) gives the conversation the tiles' width
       [:div {:class (str "grid grid-cols-1 gap-4 " (if (seq (in "#p-tiles")) "lg:grid-cols-[12rem_minmax(0,1fr)_20rem]" "lg:grid-cols-[12rem_minmax(0,1fr)]"))}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}

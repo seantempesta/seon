@@ -427,6 +427,19 @@
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/debug" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
 
+(deftest a-branch-names-its-newest-agent
+  ;; docs/render.md#the-page: a branch is an agent's durable name: its newest agent, of any boot, ended or
+  ;; not, so a page opens from the store after the boot that made it is gone
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "old-boot/a4" :seon.agent/id :a4 :seon.agent/branch :main/task-x :seon.agent/status :ended}])
+        old (seon.db/eid db :seon.agent/key "old-boot/a4")
+        db2 (d/db-with db [{:seon.agent/key "new-boot/a1" :seon.agent/id :a1 :seon.agent/branch :main/task-x}
+                           {:seon.agent/key "new-boot/a2" :seon.agent/id :a2 :seon.agent/branch :main/task-y}])
+        newer (seon.db/eid db2 :seon.agent/key "new-boot/a1")]
+    (is (= old (#'p/location db :main/task-x)) "an ended agent of an earlier boot, by its branch")
+    (is (= old (#'p/location db [:chat :main/task-x])) "its chat")
+    (is (= newer (#'p/location db2 :main/task-x)) "the newest agent of the branch")
+    (is (nil? (#'p/location db2 :main/task-z)) "a branch no agent worked names none")))
+
 (deftest a-page-keeps-what-it-read
   ;; task seon.render/a-view-renders-once-per-change-of-its-reads (B): a page's walk runs inside
   ;; d/with-reads and the proc indexes its reads by key, so a transaction finds the pages it

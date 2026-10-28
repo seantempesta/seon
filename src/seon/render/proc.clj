@@ -18,8 +18,9 @@
   coalescing window: no step sleeps). The answer is joined with health and the events into root's
   process value (process-value), which is part of root's ctx (process!). Every page is the render
   of a ctx through the one walk (seon.render/walker): / root's (root-walk, root's ctx on main),
-  /agent/{id} an agent's (its process's walk, else its branch's drawn by root), /agent/{id}/debug
-  what its model was sent; each laid out by seon.render.ui/page-chrome into units. Then, per unit: inputs
+  /agent/{name} an agent's chat (drawn by root from its branch), /agent/{name}/debug every
+  render of its ctx (its process's walk, else its branch's drawn by root), /agent/{name}/context
+  what its model was sent, a name its id in this boot or its branch; each laid out by seon.render.ui/page-chrome into units. Then, per unit: inputs
   before render (an unchanged input renders nothing), bytes before send (an unchanged fragment
   sends nothing); a page renders only the rows a tab has scrolled to (:more raises them). The web
   proc serializes each patch once and fans it out; a tab that opened or fell behind gets a
@@ -178,7 +179,8 @@
   "The entity view names on main db: root's for :root, the agent of that id in root's boot (its
   key, seon.task/agent-key, or the session's agent it continues) for an agent's id, the newest
   agent of a branch for its branch (:main/task-x, a durable name: an agent of any boot, ended or
-  not, opens from the store), else the entity id it is; nil when main names none (no boot fact
+  not, opens from the store; a query over the agents' branches, asked only for a branch's name,
+  until the agent is keyed by its branch, the schema design's D1), else the entity id it is; nil when main names none (no boot fact
   yet, or no agent of that id in this boot). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
@@ -305,7 +307,7 @@
                               :value {:id (:seon.agent/id e) :live? (live? st id)
                                       :held (d/q '[:find ?id . :in $ ?a :where [?r :seon.run/agent ?a] [?r :seon.run/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
-                     (or id (:seon.agent/branch e)))))
+                     (or id (:seon.agent/branch e) (:seon.agent/id e)))))
 
 (defn- root-walk
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
@@ -377,7 +379,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [st]
   (when-let [{:keys [w]} (:root-walk st)]
-    (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :input {:schema :seon.render/root-input :value {}}} :root)))
+    (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
 
 (defn- page-value
   "View's page: root's (root-page), an agent's debug page (debug-value) or an agent's
@@ -393,7 +395,7 @@
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
      db (contract/error :seon.render/no-location #'seon.render.proc/page-value
-                        (str "no " (if (keyword? view) (str "agent " (ui/kname view) " in root's boot " (task/boot-of db)) (ui/kname view))
+                        (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (ui/kname v) " in root's boot " (task/boot-of db)) (ui/kname v)))
                              " on main: an agent's id names one of this boot's (ids start again each boot)")
                         {:view (ui/kname view)}))))
 
