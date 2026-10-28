@@ -260,9 +260,10 @@
     bs))
 
 (defn preload!
-  "Read every node of db's indexes, so this process holds the whole db in its heap and
-  forked children (the fork server, agents) never read the store: an LMDB env must not
-  be used across fork. Answers the datom count."
+  "Read every node of db's indexes into this process's node cache, so the children it forks
+  (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
+  server calls it once, through its own store, after its fork (docs/machine.md#roots-heap).
+  Answers the datom count."
   {:malli/schema [:=> [:cat :seon.host/db] :int]}
   [db]
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))

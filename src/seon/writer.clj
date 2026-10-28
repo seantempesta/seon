@@ -249,7 +249,7 @@
       ;; (docs/machine.md#roots-heap)
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
                  (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
-                        {:ok true :collected r :heap-live (lib/non-static-live!)}))
+                        (do (lib/non-static-live!) {:ok true :collected r})))
       (reply st (refused (str "unknown op " op) {})))))
 
 (defn- writer-one
