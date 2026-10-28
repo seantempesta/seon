@@ -432,19 +432,20 @@
  ;; 2026-10-22): <dir>/<sha>-<uuid>, a worktree of the merges head with the candidate's files,
  ;; removed after its run; its log stays beside it (<dir>/<sha>-<uuid>.tests.log).
  :seon.config.source/tests-dir #join [#ref [:seon.config.root/runs-dir] "/merge-tests"]
- ;; Unit: port. The standing root whose main holds every test and check result (owner via root,
- ;; 2026-10-27: results are facts on the standing root's main, written by its one writer): bin/test's
- ;; shards and bin/prove's steps send theirs to its server (:record) and read results by digest from it
- ;; (:results). bin/env sets SEON_RESULTS_PORT to the main tree's server port; 0 (unset): none, so a
- ;; run's plan fails loudly (TEST FAILED, the typed :seon.proofs/unread), never as zero greens. A root records its own
- ;; test service's results on its own main whatever this says.
- :seon.config.proofs/results-port #long #or [#env SEON_RESULTS_PORT 0]
- ;; Unit: ratio. How far a function's self ticks or self bytes per call must move from what main
- ;; holds before a run of main's tree writes it again, and before seon.proofs/slower calls it slower.
- ;; Provenance: estimate, 2026-10-27: a test's ticks at one digest are exact, but a function's per-call
- ;; cost is over whichever tests called it; 10% keeps a one-test change from rewriting every function.
- ;; At the bound: the function's fact is not rewritten, nor named slower.
- :seon.config.proofs/fn-noise 0.1
+ ;; Unit: path. Where every checkout's test and check verdicts are kept, one small file per (key,
+ ;; digest, status) (seon.proofs/write-result!, docs/merging.md#verdicts-are-a-cache): a verdict is derived
+ ;; data, a function of the code its test reaches, so it is an evictable cache outside the store (owner,
+ ;; 2026-10-28). bin/env sets SEON_RESULTS_DIR to the main tree's target/results (git's common dir), so
+ ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this
+ ;; checkout's own. At the bound: a missing directory is made by the first write.
+ :seon.config.proofs/results-dir #or [#env SEON_RESULTS_DIR #seon/checkout "target/results"]
+ ;; Unit: digests. How many digests of one test (or check step) the cache keeps: the writer of a test's next
+ ;; digest removes the excess, lowest digest first, never the one it writes nor a digest judged red
+ ;; (a red, or flaky, is never laundered by its eviction). Provenance: estimate, 2026-10-28: the live
+ ;; trees (main, the merges tree, five worktree sessions, the agents' branches) hold up to ~15 digests of
+ ;; a widely reached test (16,598 results for 1,075 tests over the store's life); 32 leaves room. At the
+ ;; bound: an evicted digest's test runs again once.
+ :seon.config.proofs/results-per-test 32
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:

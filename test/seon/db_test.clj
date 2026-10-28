@@ -359,8 +359,8 @@
     (ts/test-branch!
      (fn [_ conn]
        (let [v '[b/x a/y b/x c/z b/x]
-             e (get (:tempids (d/transact conn [{:db/id "p" :seon.proof.run/skipped-process v}])) "p")]
-         (is (= v (:seon.proof.run/skipped-process (d/pull @conn [:seon.proof.run/skipped-process] e)))))))))
+             e (get (:tempids (d/transact conn [{:db/id "p" :seon.task/id "db-test/order" :seon.task/needs-names v}])) "p")]
+         (is (= v (:seon.task/needs-names (d/pull @conn [:seon.task/needs-names] e)))))))))
 
 ;; ---- history (task seon.db/history-is-kept: v1's ruling 23, Datahike's default) --------------
 

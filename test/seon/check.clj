@@ -437,9 +437,9 @@
   generate its arguments; seon.proofs reads and writes results)."
   '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
      seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
-     ;; seon.proofs reads and writes results (stored-results, record!, run-tests!): its pure part
+     ;; seon.proofs runs tests (run-tests!): its pure part (the verdict cache is seon.fx's)
      seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/test-run-errors
-     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/results-tx seon.proofs/detail seon.proofs/per-call
+     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/per-call
      seon.proofs/plan})
 
 (defn- fn-without-gen

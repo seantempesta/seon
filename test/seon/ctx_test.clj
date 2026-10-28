@@ -560,9 +560,7 @@
   ;; the live-agents context audit (2026-10-26): the task's record held each cited var's tests and
   ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
   ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
-  (let [db (d/db-with (seeded 3) [{:seon.proof/latest "app.x-test/t0" :seon.proof/status :fail :seon.proof/run "r"
-                                   :seon.proof/branch "main" :seon.proof/t 1}
-                                  ;; a second test, with no result on main, and a caller that is no test
+  (let [db (d/db-with (seeded 3) [;; a second test, and a caller that is no test
                                   {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
@@ -571,8 +569,8 @@
         part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
         cited (part "cited-")
         task (pr-str (part "task-data-"))]
-    (is (some #(and (= {'app.x-test/t0 :fail 'app.x-test/t1 :none} (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
-        (str "the cited var's tests with their last results on main (none for one main never ran), then its other callers: " (pr-str cited)))
+    (is (some #(and (= '[app.x-test/t0 app.x-test/t1] (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
+        (str "the cited var's tests, then its other callers: " (pr-str cited)))
     (is (str/includes? task "What x does.") "the cited section's text, not only its address")
     (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
 

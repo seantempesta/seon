@@ -194,7 +194,7 @@
 (defn- run-tx
   "The facts a run of answer leaves on main, as its two writers write them: the agent's record of
   what ran (seon.proofs/answer-ran and results-tx, seon.agent/run-tests-forked's :record) and the
-  test service's run and main's newest results (seon.prove/result-tx, db nil: no function's facts)."
+  test service's run and main's newest results (seon.fx/write-verdicts!, db nil: no function's facts)."
   [run answer]
   (let [{:keys [ran failures]} (proofs/answer-ran answer)]
     (into (proofs/results-tx {:id (str (name (:branch run)) " record") :branch (:branch run)} ran failures)

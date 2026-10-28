@@ -624,10 +624,10 @@
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
-  those digests (the result facts on db and on main, greens and reds, whoever ran them: seon.proofs/stored-results) and proofs. The digests' inputs with no program facts are this boot's
+  those digests (the verdict cache, greens and reds, whoever ran them: seon.fx/stored-results) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
-  results on its root's main (seon.prove/result-tx;
+  verdict cache (seon.fx/write-verdicts!;
   DECISIONS, Agents share greens: a test green at its digest never runs again, \"especially
   when freshly branched\"; every eval is a recorded form, so the digest covers what ran); a
   root with no such fact this boot shares nothing and reuses nothing (the
@@ -678,9 +678,9 @@
                           [v (str (when head (str head "\n")) (:form/src (:var/form e)))])))
         removed-process (program/process-tests (select-keys (:index b) (keys removed)))]
     (-> (proofs/plan (some-> b :index (update-vals :digest)) cd
-                     ;; the results recorded at the digests, on main (every run's: the test service's, bin/test's
-                     ;; through the standing root's server), over what the branch holds of them since it last merged main
-                     (merge (proofs/stored-results db (vec (vals cd))) (some-> main (proofs/stored-results (vec (vals cd)))))
+                     ;; the verdicts cached at the digests (every run's, whoever ran it: seon.fx/stored-results);
+                     ;; a cache that could not be read reuses nothing, so the selected run
+                     (let [r (fx/stored-results cd)] (if (contract/error? r) {} r))
                      proofs)
         (update :selected into (concat unrecorded (keys removed)))
         (update :run into (concat unrecorded (keys removed)))
@@ -689,9 +689,8 @@
 
 (defn stored-results
   "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
-  result as the test service recorded it, its :failures among it), for each with a result at that
-  digest (the test service's facts and the shared results directory, on this branch and on main as
-  last heard: test-plan's :reused), whichever run recorded it (a named prove, a bare one, a turn's,
+  result as its run cached it, its :failures among it), for each with a verdict at that digest in
+  the one cache (seon.fx/stored-results: test-plan's :reused), whichever run cached it (a named prove, a bare one, a turn's,
   root's judge); a test with none is left out (unknown). Cost: the test plan's walk (its digests),
   once per call."
   {:malli/schema [:=> [:cat [:maybe [:set :qualified-symbol]]] [:map-of :qualified-symbol :map]]}
@@ -926,7 +925,7 @@
   pipe to its end: no clock; the child ends by finishing or by dying (then the last test it
   started is named). Each selected test with a result at its digest is reused, marked :reused: a
   green as one :pass report, a red as the failures its run recorded (the test service's facts,
-  seon.proofs/stored-results: each assertion's type, message, expected and actual); when every
+  seon.fx/stored-results: each assertion's type, message, expected and actual); when every
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
@@ -1003,11 +1002,11 @@
                          :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
-    ;; what ran, recorded on main by root's writer (the agent proc's :record), whoever asked for the run
+    ;; what ran, cached by digest (seon.fx/write-verdicts!), whoever asked for the run; a file the
+    ;; cache would not take is not cached, so that test runs again
     (when-not (contract/error? res)
-      (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))
-            tx (proofs/results-tx {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state)} ran failures)]
-        (when (and (seq tx) (= :dead (send! {:op :record :tx-data tx}))) (lib/c-exit 0))))
+      (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))]
+        (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)))
     (if (contract/error? res)
       res
       (-> res

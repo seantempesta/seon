@@ -36,7 +36,7 @@
   [conn cand] (proofs/stored-results @conn (vec (vals cand))))
 
 (defn- store!
-  "Record ran ({key result}) on conn through seon.proofs/record!, as root's writer does (one commit)."
+  "Record ran ({key result}) on conn through seon.fx/write-verdicts!, as root's writer does (one commit)."
   ([conn ran] (store! conn ran {}))
   ([conn ran failures] (proofs/record! (fn [tx] (d/transact conn {:tx-data tx})) @conn {:run {:id "proofs-test"} :ran ran :failures failures})))
 
@@ -453,7 +453,7 @@
   ;; (seon.agent/test-run-answer's report with its :exit) was an :error result, so the judge held
   ;; a task whose change never reached it as a stray red. A death is no verdict: the test has no
   ;; result (a proof the child died in is unknown, an unrelated test is nothing to the judge),
-  ;; as its digest keeps none (seon.prove/result-tx)
+  ;; as its digest keeps none (seon.fx/write-verdicts!)
   (let [run {:reports [{:type :pass :var "#'a.b-test/ok"}
                        {:type :fail :var "#'a.b-test/red"}
                        {:type :pass :var "#'a.b-test/died"}

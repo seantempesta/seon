@@ -201,12 +201,6 @@
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
                   :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}}
-   :record {:doc "Record a test run's results on main, by root's one writer: one request per bin/test shard or bin/prove step run, its tests' results at their digests (only what ran), the run with what each test's contracted functions cost (one value), and, for a run of main's tree, the functions whose cost per call moved (seon.proofs/record!). Answers {:recorded n :t} (the datoms written, main's t), or why not."
-            :args {:run {:type "object" :description "{:id, :tree}"} :ran {:type "object" :description "{key result}: {:test or :step, :digest, :pass :fail :error, :ms :ticks :bytes :fns}"}
-                   :failures {:type "object"} :main? {:type "boolean" :description "a run of main's tree"}}
-            :required ["run" "ran"]}
-   :results {:doc "The results main holds at digests (seon.proofs/stored-results): {:results {digest {:pass :fail :error :failures :flaky}}}, a digest with none left out: what a run reuses instead of running; and, for the tests named, each one's newest measured ms (:ms {test ms}, seon.proofs/last-ms): what orders a run's shards."
-             :args {:digests {:type "array" :items {:type "string"}} :tests {:type "array" :items {:type "string"}}} :required ["digests"]}
    :done {:doc "Hand the run the agent works back to root: the agent writes the run's end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it: the run's status (done, merged, or closed with its task held), outcome and reason, and for a held task the done rule's reasons; a defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -269,22 +263,6 @@
       (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
-
-(defmethod op-answer :record [sys _ req]
-  (let [write! #(deref (c/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}}))
-        r (proofs/record! write! @(:conn sys) (select-keys req [:run :ran :failures :main?]))]
-    (if (contract/error? r)
-      ;; refused: an :effect row on main, open until a later record of the run's id writes it
-      (let [w (write! (err/asked-tx @(:conn sys) (assoc r :seon.fx/at-ms (System/currentTimeMillis)) :seon.proof.run/id
-                                    [{:seon.proof.run/id (str (get-in req [:run :id]))}]))]
-        ;; the row refused too: the answer says so, never as if written
-        (cond-> r (contract/error? w) (assoc :unrecorded-row (:seon.error/message w))))
-      {:recorded (:datoms r) :t (:t r)})))
-
-(defmethod op-answer :results [sys _ req]
-  (let [db @(:conn sys)]
-    (cond-> {:results (proofs/stored-results db (vec (:digests req)))}
-      (seq (:tests req)) (assoc :ms (proofs/last-ms db (mapv symbol (:tests req)))))))
 
 (defmethod op-answer :done [sys ag _]
   (if-let [{:keys [run task env]} (run-of sys ag)]

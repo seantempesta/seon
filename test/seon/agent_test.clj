@@ -437,7 +437,7 @@
         own "(select-keys (prove) [:results :ran :reused])"
         ;; how many of the two tests' results main holds (as the agent hears it), at the digests the agent's plan gives
         ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
-        stored (str "(count (seon.proofs/stored-results (seon.agent/heard-main) (vec (vals (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
+        stored (str "(count (seon.fx/stored-results (seon.agent/heard-main) (vec (vals (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
                     (pr-str [proof reached]) ")))))")
         [_ inputs first-run files judged second-run]
         ;; a real change that keeps them green (a vector of what the file's answers), so the reached
@@ -511,13 +511,13 @@
         digests (program/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
         ;; the checkout's green for p1, as root's writer records one (a run nested in this test's
         ;; run would report through it)
-        record (str "(let [r (seon.proofs/record! #(deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}})) @(:conn sys) (quote "
+        record (str "(let [r (seon.fx/write-verdicts! #(deref (seon.root/call! sys {:op :write :req {:op :tx :branch :db :tx-data %}})) @(:conn sys) (quote "
                     (pr-str {:run {:id "agent-test"} :ran {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}}}) "))] r)")
         [_ recorded r after]
         (in-agent ["nil"
                    {:op :eval :agent "root" :code record}
                    "(select-keys (prove) [:results :ran :reused])"
-                   {:op :eval :agent "root" :code (str "(seon.proofs/stored-results @(:conn sys) " (pr-str [(digests p2)]) ")")}]
+                   {:op :eval :agent "root" :code (str "(seon.fx/stored-results @(:conn sys) " (pr-str [(digests p2)]) ")")}]
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs): one program, one digest
                   {:dirs (cfg/value :seon.config.source/dirs) :proofs #{p1 p2}})
         checkout (proofs/plan nil (select-keys digests [p2]) (:value after) #{})]

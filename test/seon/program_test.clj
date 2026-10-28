@@ -200,8 +200,8 @@
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
-    (is (= dg (program/program-digest (d/db-with db [{:seon.proof.run/id "main@1" :seon.proof.run/branch "main"}])))
-        "a write of data (a run's fact) leaves it")
+    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+        "a write of data (a message) leaves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn f [x] (inc x))"))) "a replaced form moves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn g [x] x)"))) "an added form moves it")
     (is (not= dg (program/program-digest (d/db-with db [{:schema/key :app.pt-pd/s :schema/form ":int"}]))) "a schema entry moves it")

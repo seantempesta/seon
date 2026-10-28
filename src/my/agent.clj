@@ -31,7 +31,7 @@
     source reads this branch's own definitions first, then a library's file"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
-            [seon.config :as cfg] [seon.proofs :as proofs] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
+            [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
@@ -100,42 +100,41 @@
     (or (when (symbol? x) (no-var db x)) (docs/callers db x))))
 
 (defn tests-reaching
-  "The tests whose reach includes var x on this branch, nearest first, each with its last result on
-  main as this branch holds it ({:test :status}, :none when main holds none): the tests a change to
+  "The tests whose reach includes var x on this branch, nearest first, each {:test}: the tests a change to
   x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same
   reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
   this on the function you will change, before writing its proof, to find the test that goes red
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
   library's var, which the reach graph holds no form of, answers []. A symbol that names no var
   answers so (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol] [:status :keyword]]] :my.agent/no-var]]}
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol]]] :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
     (or (no-var db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
-          (into [] (comp (filter agent/judges?) (map (fn [t] {:test t :status (proofs/latest-status db t)})))
+          (into [] (comp (filter agent/judges?) (map (fn [t] {:test t})))
                 (program/tests-reaching g x))))))
 
 (defn cost
   "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
-  ticks, bytes and calls per call as main's runs last recorded them (in all and its own: self-ticks,
-  self-bytes; seon.proofs/fns), and :tests, the tests at this branch's digests that called it, each
-  with its calls, ticks and bytes, most ticks first, read from the runs that recorded their results
-  (seon.proofs/exercising). :unmeasured counts the tests reaching x with no measure yet (their
+  ticks, bytes and calls per call over the tests at this branch's digests that called it (in all and
+  its own: self-ticks, self-bytes; seon.proofs/per-call), and :tests, those tests, each with its
+  calls, ticks and bytes, most ticks first, read from their cached verdicts (seon.fx/details,
+  seon.proofs/exercising). :unmeasured counts the tests reaching x with no measure yet (their
   digest moved since they last ran, or none ran). A symbol that names no var answers so
   (:my.agent/no-var)."
   {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or :map :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
     (or (no-var db x)
-        (let [main (or (agent/heard-main) db)
-              plan (agent/test-plan db (:base @agent/state) #{} main)
-              rows (proofs/exercising main x (vec (vals (:digests plan))))
+        (let [plan (agent/test-plan db (:base @agent/state) #{} (or (agent/heard-main) db))
+              details (fx/details (into {} (filter (comp symbol? key)) (:digests plan)))
+              rows (proofs/exercising details x)
               reaching (set (filter (:digests plan) (program/tests-reaching (:graph plan) x)))
-              measured (some #(when (= x (:var %)) %) (proofs/fns main))]
+              measured (get (proofs/per-call details) x)]
           (cond-> {:var x :tests rows :unmeasured (count (remove (set (map :test rows)) reaching))}
-            measured (assoc :per-call (dissoc measured :var)))))))
+            measured (assoc :per-call measured))))))
 
 (defn callees
   "The vars var sym's recorded definition names on this branch (its :form/refs: program,
