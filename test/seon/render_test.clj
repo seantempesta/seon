@@ -1290,27 +1290,19 @@
       (is (str/includes? (h/html (r/html {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
 
 (deftest markdown-draws-each-block
-  ;; docs/render.md#prose-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped
+  ;; docs/render.md#prose-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
+  ;; each block's text as written (its backticks pick what a citation pulls, and the model reads it)
   (let [h (h/html (ui/markdown "# Title\n\nA `code` and **bold** line\ncontinued.\n\n- one\n  more\n- two\n\n1. first\n2. second\n\n```clojure\n(+ 1 2)\n```\n\n---\n\ntail"))]
     (is (str/includes? h "<h3") "a heading at its level")
-    (is (str/includes? h "<code") "a code span")
-    (is (str/includes? h "<b>bold</b>") "bold")
-    (is (= 2 (count (re-seq #"<li" (subs h 0 (str/index-of h "<ol"))))) "two bullets")
+    (is (str/includes? h "A `code` and **bold** line\ncontinued.") "a paragraph as written")
+    (is (str/includes? h "<ul") "a bulleted list")
     (is (str/includes? h "<ol") "a numbered list stays numbered")
     (is (= 4 (count (re-seq #"<li" h))) "two bullets and two numbered items")
-    (is (str/includes? h "one more") "a continuation line stays with its item")
+    (is (str/includes? h "one\n  more") "a continuation line stays with its item")
     (is (str/includes? h "(+ 1 2)") "fenced code kept")
     (is (not (str/includes? h "```")) "fence marks are not text")
     (is (str/includes? h "<hr") "a break")
     (is (str/includes? h "tail") "nothing after the fence is lost")))
-
-(deftest an-unclosed-backtick-is-text
-  ;; docs/render.md#prose-and-the-one-string-cutter: a backtick no span closes keeps the text after it as text
-  (is (str/includes? (h/html (ui/markdown "see `open and more")) "see `open and more") "one backtick: all text")
-  ;; three: the first two pair (CommonMark's first closer), the third is text
-  (let [h (h/html (ui/markdown "see `a and ` b` after"))]
-    (is (str/includes? h ">a and </code>") "the first pair is the span")
-    (is (str/includes? h " b` after") "the last backtick and its text kept")))
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's or a run's id as its title

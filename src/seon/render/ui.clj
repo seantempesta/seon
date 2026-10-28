@@ -101,37 +101,26 @@
   (let [s (str/replace (name (symbol (first (str/split id #"#")))) "-" " ")]
     (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
 
-(defn- inline
-  "A line of Markdown prose as hiccup: `code` spans as code, **text** as bold, the rest as text; a
-  backtick no span closes is text. See docs/render.md#prose-and-the-one-string-cutter."
-  {:malli/schema [:=> [:cat :string] :any]}
-  [line]
-  (let [parts (str/split line #"`" -1)
-        ;; an even count of parts is an odd count of backticks: the last opens no span
-        parts (if (even? (count parts)) (conj (vec (drop-last 2 parts)) (str (last (butlast parts)) "`" (last parts))) parts)]
-    (for [[i part] (map-indexed vector parts)]
-      (if (odd? i)
-        [:code {:class "rounded bg-base-800 px-1 text-text-100"} part]
-        (for [[j b] (map-indexed vector (str/split part #"\*\*" -1))] (if (odd? j) [:b b] b))))))
-
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list (numbered when its first
-  marker is a number), fenced code highlighted, a quote or a table as its lines, each line's code
-  spans as code. See docs/render.md#prose-and-the-one-string-cutter."
+  marker is a number), fenced code highlighted, a quote or a table as its lines. Each block's text
+  is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
+  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] :any]}
   [text]
-  (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed"}]
+  (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
         (for [{:seon.ref/keys [kind from to heading heading-level]} (:seon.ref/blocks (ref/scan text))
               :let [body (subs text from to)]]
           (case kind
-            :heading [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} (inline heading)]
+            :heading [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
             (:fence :code) (code (str/replace body #"(?m)\A\s*(```|~~~).*\n|\n?\s*(```|~~~)\s*\z" "") (config/value :seon.config.render/value-budget))
-            :list (into [(if (re-find #"\A\s*\d" body) :ol :ul) {:class (if (re-find #"\A\s*\d" body) "list-decimal pl-5" "list-disc pl-5")}]
-                        (for [item (rest (str/split (str "\n" body) #"\n(?:[-*+]|\d+[.)])\s+"))] [:li (inline (str/replace item #"\s*\n\s*" " "))]))
+            :list (let [ol? (re-find #"\A\s*\d" body)]
+                    (into [(if ol? :ol :ul) {:class (if ol? "list-decimal pl-5" "list-disc pl-5")}]
+                          (for [item (rest (str/split (str "\n" body) #"\n(?:[-*+]|\d+[.)])\s+"))] [:li item])))
             (:quote :table) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
             :break [:hr]
-            [:p (inline (str/replace body #"\s*\n\s*" " "))]))))
+            [:p body]))))
 
 (def utc-offset-ms
   "Jolt has no time zones: the local offset is :seon.config.web/utc-offset (`date +%z`)."
