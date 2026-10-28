@@ -118,7 +118,15 @@
     (let [html (h/html (r/html {} behind))]
       (is (str/includes? html "main changed 3 key(s)"))
       (is (str/includes? html "fix: A merge task merges main"))
-      (is (str/includes? html "seon.merge/behind in seon.writer/merge-refused")))))
+      (is (str/includes? html "seon.merge/behind in seon.writer/merge-refused"))))
+  ;; an outside eval on root returned select-keys of its recorded errors, no operation among them,
+  ;; and root's page threw on error-box's contract (2026-10-28)
+  (let [picked {:seon.error/type :seon.agent/load-failed :seon.error/message "the branch program did not load"
+                :seon.error/count 1 :seon.error/signature "f4c715c4eb3d54a7"}]
+    (testing "a map holding an error's type but not the rest of an error is no error, and draws as data"
+      (is (not= :seon.error/base (r/schema-of picked nil)))
+      (is (not= :seon.agent/load-failed (r/schema-of picked nil)))
+      (is (str/includes? (h/html (r/html {} [picked])) "the branch program did not load")))))
 
 (def ^:private failed-task
   (assoc task :seon.task/execution :held :seon.task/needs #{"calc/sub"}

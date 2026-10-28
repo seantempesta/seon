@@ -150,12 +150,16 @@
 ;; ---- Chez introspection and GC controls, defined once in Scheme ----
 (defonce scheme-defs
   (do (scm/eval-string
-        "(define (proto-active-threads) (#%$top-level-value '$active-threads))
+        "(define (proto-active-threads)
+           (disable-interrupts) (mutex-acquire #%$tc-mutex)
+           (let ([n (jolt-active-threads)]) (mutex-release #%$tc-mutex) (enable-interrupts) n))
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
          (define (proto-set-trip! n) (collect-trip-bytes n))
          ;; fork only while this is the one active Chez thread, checked once under the thread
          ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
+         ;; Read through jolt-active-threads: a thread in a collect-safe call (a read) is parked, which
+         ;; our Chez counts only once converted (docs/forks.md, jolt/a-thread-in-c-is-not-active).
          ;; Parked threads are not active, so the fork can leave jolt's carriers, timer and shutdown
          ;; watcher behind: the child drops their bookkeeping first (jolt-after-fork-child!), and
          ;; they start afresh on first use there
@@ -164,7 +168,7 @@
              (lambda ()
                (disable-interrupts)
                (mutex-acquire #%$tc-mutex)
-               (let ([pid (if (= (#%$top-level-value '$active-threads) 1) (fork) -2)])
+               (let ([pid (if (= (jolt-active-threads) 1) (fork) -2)])
                  (mutex-release #%$tc-mutex)
                  (enable-interrupts)
                  (when (= pid 0) (jolt-after-fork-child!))

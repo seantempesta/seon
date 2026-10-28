@@ -1177,18 +1177,14 @@
   is not read again), :ns, :defines, :refs, :quoted (the names its quoted data holds: an edge
   in a test's namespace, reach-step) and the config keys it reads (config-reads), and none of
   the other facts, which no edge, digest or flag reads. Each attribute is read once, for all of es together: one pass over its index when scan?
-  (es is most of the db's forms), else a seek per entity. An attribute db does not declare (a merge
-  base cut before it) holds no datoms there, so its forms have none of it."
+  (es is most of the db's forms), else a seek per entity."
   {:malli/schema [:=> [:cat :seon.host/db [:set :int] :boolean] [:vector :map]]}
   [db es scan?]
   (let [pins (pin-rules (cfg/value :seon.config.source/pin-namespaces))
-        declared (:schema db)
-        at (fn [a es] (cond
-                        (not (contains? declared a)) {}
-                        scan?
+        at (fn [a es] (if scan?
                         (persistent! (reduce (fn [m dt] (let [e (:e dt)] (if (contains? es e) (assoc! m e (conj (get m e []) (:v dt))) m)))
                                              (transient {}) (d/datoms db :aevt a)))
-                        :else (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
+                        (into {} (for [e es :let [vs (mapv :v (d/datoms db :eavt e a))] :when (seq vs)] [e vs]))))
         id (at :form/id es) nsv (at :form/ns es) dv (at :form/defines es) rv (at :form/refs es) kv (at :form/keywords es) qv (at :form/quoted es) ov (at :form/ops es)
         ds (set (mapcat val dv))
         nn (at :ns/name (set (mapcat val nsv)))
