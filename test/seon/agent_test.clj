@@ -566,6 +566,25 @@
         mb (/ (reduce + (:value r)) 1048576.0)]
     (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
 
+(deftest an-agents-collect-trip-is-the-configured-one
+  ;; docs/machine.md#what-a-process-owns-in-memory: Jolt's adaptive nursery raises any trip
+  ;; below its floor (16 MiB) back to the floor, so a trip set directly never held and agents
+  ;; collected every 16 MiB, not the configured 4 (measured 2026-10-28: 16777216); the
+  ;; configured trip is the nursery's floor, set with the ceiling
+  (let [[r] (in-agent ["(jolt.scheme/eval-string \"(collect-trip-bytes)\")"])]
+    (is (= (seon.config/value :seon.config.agent/trip-bytes) (:value r)) (pr-str r))))
+
+(deftest a-test-childs-ceiling-is-its-own
+  ;; docs/machine.md#what-a-process-owns-in-memory: a test child inherited its agent's absolute
+  ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
+  ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
+  ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
+  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+                           "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
+                           "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
+        v (some-> (:value r) clojure.edn/read-string)]
+    (is (= {:pass 1 :fail 0 :error 0} v) (pr-str r))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)

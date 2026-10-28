@@ -903,7 +903,9 @@
                  (sock/write-line! w (sedn/encode {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (:seon.error/message unwatched)}]}))
                  (lib/c-exit 0))
                (intr/exit-at-eof! #(sock/peer-gone? w))
-               (lib/set-trip! (* 16 1048576))
+               ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
+               ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
+               (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
                (swap! state assoc :mode :test :evaluating false)
                (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks tests)
                               (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
@@ -1246,8 +1248,7 @@
   ;; end means this process is gone
   (sock/clofork! fd)
   ;; the config this process was forked holding (root read it; an agent reads no environment)
-  (lib/set-trip! (cfg/value :seon.config.agent/trip-bytes))
-  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)))
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
