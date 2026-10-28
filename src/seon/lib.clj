@@ -34,7 +34,7 @@
 (defc c-waitpid "waitpid" [:int :pointer :int] :int {:blocking true})
 (defc c-close "close" [:int] :int)
 (defc c-shutdown "shutdown" [:int :int] :int)
-(defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true})
+(defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true :capture-native-error true})
 (defc c-signal "signal" [:int :pointer] :pointer)
 (defc c-kill "kill" [:int :int] :int)
 (defc c-setpgid "setpgid" [:int :int] :int)
