@@ -16,9 +16,8 @@
        resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
        guessed: the producer names it (opts :schema, or the value's metadata
-       :seon.render/schema), an error map's is its :seon.error/type (else :seon.error/base),
-       when it holds every key of an error,
-       and a pulled entity's is the schema with a declared render holding its identity
+       :seon.render/schema), an error map's (one holding every key :seon.error/base requires)
+       is its :seon.error/type (else :seon.error/base), and a pulled entity's is the schema with a declared render holding its identity
        attribute;
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
@@ -90,16 +89,14 @@
              [a k])))
 
 (def ^:private error-keys
-  "The keys every error map holds (:seon.error/base's required ones): a map holding
-  :seon.error/type without them is data that names an error (a recorded error's picked keys),
-  not an error."
+  "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a
+  map before it draws it as an error. See docs/render.md#render-what-a-person-or-a-model-reads."
   (vec (keep #(when (and (vector? %) (not (:optional (when (map? (second %)) (second %))))) (first %))
              (rest (get contract/forms :seon.error/base)))))
 
 (defn schema-of
   "The named schema of v: hint (its producer's), the one its metadata names, an error map's
-  variant (its registered :seon.error/type, else :seon.error/base) when it holds every key
-  of an error (error-keys), or the schema its identity attribute names."
+  variant (error-keys), or the schema its identity attribute names. See docs/render.md#render-what-a-person-or-a-model-reads."
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :qualified-keyword]]}
   [v hint]
   (or hint (:seon.render/schema (meta v))
