@@ -889,50 +889,83 @@
   [db cid] (d/commit-as-db (:store db) cid))
 
 (defn merge-view
-  "Whether the branch can merge into main now (a component over the db; main's and its merge
-  base's commits its children, ctx's environment): what main changed since the base and which of
-  those the branch changed too (seon.merge/readiness, the three-way a merge of main runs). It runs
-  again when main or the base moves, or the branch's db reads change."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :any] :any]}
-  [{db :seon.db/db} main base]
-  (let [{:keys [main-moved conflicts]} (pm/readiness (commit-db db base) db (commit-db db main))]
-    [:section [:h2 "merge"]
-     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.merge/readiness (:base @seon.agent/state) (seon.agent/db) (seon.agent/heard-main))}
-      {:main-moved main-moved :conflicts conflicts}]]))
+  "Whether the branch can merge into main now (main's and its merge base's commits its
+  children): what main changed since the base and which of those the branch changed too
+  (seon.merge/readiness, the three-way a merge of main runs); with moved, the datoms that differ
+  between the base and the branch (seon.merge/content-datoms), which branch-views already read.
+  See docs/render.md#the-branchs-views."
+  {:seon.render/style panel-style
+   :malli/schema [:function [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :any] :any]
+                  [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :any [:sequential :any]] :any]]}
+  ([o main base] (merge-view o main base nil))
+  ([{db :seon.db/db} main base moved]
+   (let [b (commit-db db base) m (commit-db db main)
+         {:keys [main-moved conflicts]} (if moved (pm/readiness b db m moved) (pm/readiness b db m))]
+     [:section [:h2 "merge"]
+      [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.merge/readiness (:base @seon.agent/state) (seon.agent/db) (seon.agent/heard-main))}
+       {:main-moved main-moved :conflicts conflicts}]])))
 
 (defn caused-view
-  "What the branch's own work made wrong since its merge base (a component over the db; the base's
-  commit its child): seon.problems/caused-split's open problems it caused, which the done rule
-  refuses, and what it changed under the wiki (:attention); nothing when it caused none."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} base]
-  (let [{:keys [caused attention]} (problems/caused-split (commit-db db base) db)]
-    (when (or (seq caused) (seq attention))
-      [:section [:h2 "caused"]
-       [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
-        {:caused caused :attention attention}]])))
+  "What the branch's own work made wrong since its merge base (the base's commit its child):
+  seon.problems/caused-split's open problems it caused, which the done rule refuses, and what it
+  changed under the wiki (:attention); nothing when it caused none. With ch, the branch's changes
+  since the base (seon.merge/delta-changes), which branch-views already read.
+  See docs/render.md#the-branchs-views."
+  {:seon.render/style panel-style
+   :malli/schema [:function [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]
+                  [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :seon.merge/changes] :any]]}
+  ([o base] (caused-view o base nil))
+  ([{db :seon.db/db} base ch]
+   (let [b (commit-db db base)
+         {:keys [caused attention]} (if ch (problems/caused-split b db ch) (problems/caused-split b db))]
+     (when (or (seq caused) (seq attention))
+       [:section [:h2 "caused"]
+        [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
+         {:caused caused :attention attention}]]))))
 
 (defn gaps-view
-  "The functions the branch defines without a contract since its merge base (a component over the
-  db; the base's commit its child): seon.merge/uncontracted over the branch's own changes, what
-  root's judge and the merge gate ask; nothing when it defines none."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} base]
-  (let [gaps (vec (sort-by str (pm/uncontracted (pm/delta-changes (commit-db db base) db #{}))))]
-    (when (seq gaps)
-      [:section [:h2 "without a contract"]
-       [#'render/html {:budget (config/value :seon.config.render/value-budget)} gaps]])))
+  "The functions the branch defines without a contract since its merge base (the base's commit
+  its child): seon.merge/uncontracted over the branch's own changes, what root's judge and the
+  merge gate ask; nothing when it defines none. With ch, the changes branch-views already read.
+  See docs/render.md#the-branchs-views."
+  {:seon.render/style panel-style
+   :malli/schema [:function [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]
+                  [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :seon.merge/changes] :any]]}
+  ([o base] (gaps-view o base nil))
+  ([{db :seon.db/db} base ch]
+   (let [gaps (vec (sort-by str (pm/uncontracted (or ch (pm/delta-changes (commit-db db base) db #{})))))]
+     (when (seq gaps)
+       [:section [:h2 "without a contract"]
+        [#'render/html {:budget (config/value :seon.config.render/value-budget)} gaps]]))))
 
 (defn divergence-view
-  "What the branch's merge carries to main (a component over the db; the base's commit its child):
-  seon.merge/divergence, the vars it added, redefined and removed and the schema keys it changed;
-  nothing when it carries none."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} base]
-  (let [carried (pm/divergence (pm/delta-changes (commit-db db base) db #{}))]
-    (when (seq carried)
-      [:section [:h2 "its merge carries"]
-       [#'render/html {:budget (config/value :seon.config.render/value-budget)} carried]])))
+  "What the branch's merge carries to main (the base's commit its child): seon.merge/divergence,
+  the vars it added, redefined and removed and the schema keys it changed; nothing when it
+  carries none. With ch, the changes branch-views already read.
+  See docs/render.md#the-branchs-views."
+  {:seon.render/style panel-style
+   :malli/schema [:function [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]
+                  [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any :seon.merge/changes] :any]]}
+  ([o base] (divergence-view o base nil))
+  ([{db :seon.db/db} base ch]
+   (let [carried (pm/divergence (or ch (pm/delta-changes (commit-db db base) db #{})))]
+     (when (seq carried)
+       [:section [:h2 "its merge carries"]
+        [#'render/html {:budget (config/value :seon.config.render/value-budget)} carried]]))))
+
+(defn branch-views
+  "What the branch's work since its merge base shows, as one component over the db (the base's
+  commit, and main's when the task merges itself, its children): the sections of caused-view,
+  gaps-view, divergence-view and, with a main commit, merge-view, from the one diff of the branch
+  against its base (seon.merge/content-datoms read once, and the changes made from it), where each
+  view read it again (5 diffs a draw). It runs again when main or the base moves, or a datom
+  those diffs read changes. See docs/render.md#the-branchs-views."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any [:maybe :any]] :any]}
+  [{db :seon.db/db :as o} base main]
+  (let [moved (vec (pm/content-datoms (commit-db db base) db #{}))
+        ch (pm/delta-changes (commit-db db base) db #{} moved)]
+    (list (caused-view o base ch) (gaps-view o base ch) (divergence-view o base ch)
+          (when main (merge-view o main base moved)))))
 
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
@@ -1116,9 +1149,8 @@
                        ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
                        ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
                        (when-let [b (:seon.agent/base-commit c)]
-                         (list [#'caused-view {} b] [#'gaps-view {} b] [#'divergence-view {} b]
-                               ;; a task that merges itself: whether it can merge now
-                               (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) [#'merge-view {} (:seon.agent/main-commit c) b])))))
+                         ;; a task that merges itself also shows whether it can merge now (main's commit)
+                         [#'branch-views {} b (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) (:seon.agent/main-commit c))])))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns run)) [#'run-head {} rid])
       (when rid [#'own-problems {} rid])

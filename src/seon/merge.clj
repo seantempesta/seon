@@ -219,7 +219,7 @@
                     k (entity-keys side many e das)]
                 k))))
 
-(defn- content-datoms
+(defn content-datoms
   "The datoms that differ between base and db in the attributes a key's content reads (the
   program's, program/attr-namespaces, or declared data, data-attr?), what `touched-by` takes as
   moved: for data-attrs a set, one datahike.api/datoms-diff :aevt range per such attribute, so the
@@ -247,21 +247,27 @@
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
   same answer, at the cost of what changed on each side since base, not of the program
-  (task seon.merge/program-cost-follows-what-changed)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]}
-  [base ours theirs data-attrs]
-  (let [ks (vec (touched-keys base [ours theirs] data-attrs))]
-    (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs))))
+  (task seon.merge/program-cost-follows-what-changed). With ours-moved, the datoms that differ
+  between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] :seon.merge/result]]}
+  ([base ours theirs data-attrs] (delta-three-way base ours theirs data-attrs (content-datoms base ours data-attrs)))
+  ([base ours theirs data-attrs ours-moved]
+   (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))]
+     (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs)))))
 
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
   only: what main changed since base, their merge base (:main-moved, its program keys), and which
   of those the branch changed too (:conflicts, the keys a merge of main would leave unmerged).
-  The three-way a merge runs (delta-three-way), so it costs what changed on each side since base."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]}
-  [base ours theirs]
-  (let [r (delta-three-way base ours theirs #{})]
-    {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))}))
+  The three-way a merge runs (delta-three-way), so it costs what changed on each side since base.
+  With ours-moved, the datoms that differ between base and ours (`content-datoms`), ours is not diffed again."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :any]] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]]}
+  ([base ours theirs] (readiness base ours theirs (content-datoms base ours #{})))
+  ([base ours theirs ours-moved]
+   (let [r (delta-three-way base ours theirs #{} ours-moved)]
+     {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))})))
 
 (defn delta-changes
   "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
