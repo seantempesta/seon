@@ -202,8 +202,8 @@
   :seon.config.proofs/answer-reds red tests (those among proofs first), each test's first
   :seon.config.proofs/max-assertions. The rest is counted (:reds-left, the red tests left out) and
   is in the verdict cache under the run's digests (an agent reads one whole by
-  seon.agent/stored-results). So the answer costs its reds, never the tests run:
-  an agent's whole run was about 3 MB in one frame (root, 2026-10-28). results, failures, costs and
+  seon.agent/stored-results). So the answer costs its reds, never the tests run (an agent's whole run
+  was about 3 MB in one frame): docs/merging.md#verdicts-are-a-cache. results, failures, costs and
   died read it as they read the whole run."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
   [r proofs]

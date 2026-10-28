@@ -645,7 +645,7 @@
   write-file (staged, then renamed over), then the key's excess evicted. A flaky result (judged, not run),
   an :unreported one (no verdict of its own) and one with no :digest write nothing. Answers {:recorded n},
   or the first write's :seon.fx/io-error: those verdicts are not cached, so they run again. Nothing is
-  written to the store (owner, 2026-10-28: a verdict is derived data). dir: the cache's
+  written to the store: a verdict is derived data (docs/merging.md#verdicts-are-a-cache). dir: the cache's
   (:seon.config.proofs/results-dir unless given)."
   {:malli/schema [:function [:=> [:cat :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]
                   [:=> [:cat :string :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]]}
