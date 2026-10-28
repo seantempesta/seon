@@ -608,7 +608,7 @@
   agent's own work takes over from (the owner: \"the plan will often be fairly empty
   ... we need to adapt to whatever they are doing\"); and the words of its last :seon.config.render/relevance-words evals, the
   plan's before any. {:vector :words}, nil when neither the plan nor any eval has a vector yet.
-  Measured on 44 recorded turns of 10 runs (the relevance replay of 2026-10-27, docs/vector.md): R@10 0.441 and
+  Measured on 44 recorded turns of 10 runs (the relevance replay, docs/vector.md): R@10 0.441 and
   0.55 within 800 tokens of what the agent read next, against 0.402 and 0.48 by the plan alone and
   0.411 and 0.49 with the plan held at full weight beside the evals."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe [:map [:vector [:vector number?]] [:words :string]]]]}
