@@ -33,8 +33,10 @@
   "The first 16 hex digits of the SHA-256 of s: a content identity."
   {:malli/schema [:=> [:cat :string] [:string {:min 16 :max 16}]]}
   [s]
-  (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))]
-    (apply str (map #(format "%02x" (bit-and % 0xff)) (take 8 b)))))
+  ;; the first 8 bytes as one long in hex, left-padded: the same digits as each byte's two, with no per-byte format
+  (let [b (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes ^String s))
+        h (Long/toHexString (.getLong (java.nio.ByteBuffer/wrap b)))]
+    (str (subs "0000000000000000" (count h)) h)))
 
 (defn cause
   "The cause of error map e, as a value: its variant, operation, member, the paths and

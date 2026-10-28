@@ -29,6 +29,8 @@
 # seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
 # step's next run. Only logs stay, in target/check/<time>/.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# health reads the program store's kept trees, no binary and no store branch (bin/test --health)
+[[ ${1:-} == health ]] && exec "$ROOT/bin/test" --health "${@:2}"
 "$ROOT/bin/ports" --write   # the port keys under their current names (bin/ports)
 [[ -z ${1:-} ]] && exec "$ROOT/bin/prove" --checks
 # a full run is niced; full runs from different worktrees run in parallel (no lock: each
@@ -93,8 +95,6 @@ run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
-  # health reads the program store's kept trees, no binary and no store branch (bin/test --health)
-  [[ $1 == health ]] && exec "$ROOT/bin/test" --health "${@:2}"
   # quiet when it works; a seed or a drop that fails prints its own output and the mode's verdict
   # line (AGENTS section 9: a step never ends without one)
   quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }

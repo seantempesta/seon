@@ -1420,19 +1420,19 @@
   {:malli/schema [:=> [:cat :map :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]}
   [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree config]} roots]
   (let [var-form #(peek (get defs %))
+        ;; each config key's line of a digest, and the :seon.env/* keys, made once for every key's answer
+        line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
+        env-keys (filterv #(= "seon.env" (namespace %)) (keys config))
         answer (fn [k ids]
                  (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
-                       ks (map #(:config (flags %)) cs)
-                       ;; the values of the config keys its reach reads (config-reads)
-                       kvs (select-keys config (into #{} cat ks))
+                       ;; the config keys its reach reads (config-reads) that the config holds
+                       ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
                        ;; a reader of files or a process (the tree, a root, the binary) can read any class of
                        ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
                        ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
-                       kvs (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs)
-                             (into kvs (filter (fn [[ck]] (= "seon.env" (namespace ck)))) config)
-                             kvs)]
+                       ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
                    {:digest (error/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots (:reads f)))) cs) tree)
-                                                 (concat (sort (map cd cs)) (for [[ck v] (sort-by key kvs)] (str "\n" ck " " v)))))
+                                                 (concat (sort (map cd cs)) (map line (sort ks)))))
                     :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
