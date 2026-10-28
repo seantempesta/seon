@@ -1217,24 +1217,30 @@
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
             ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
-            merge (h/html (ui/merge-view {:seon.db/db ours} main base))
-            carries (h/html (ui/divergence-view {:seon.db/db ours} base))
-            gaps (h/html (ui/gaps-view {:seon.db/db ours} base))]
-        (is (str/includes? merge "demo/k") "what main changed since the base")
-        (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
-        (is (str/includes? carries "demo/h") "what the branch's merge carries")
-        (is (not (str/includes? carries "demo/k")) "never main's change")
-        (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
-        (is (not (str/includes? gaps "demo/f")) "never one it did not change")
+            [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
+            b (d/commit-as-db (:store ours) base)
+            ch (seon.merge/delta-changes b ours #{})]
+        (is (nil? caused) "nothing caused")
+        (is (= [gaps carries merge]
+               [(ui/gaps-view ch) (ui/divergence-view ch) (ui/merge-view (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)))])
+            "the one diff draws what each view draws from its own read")
+        (let [merge (h/html merge) carries (h/html carries) gaps (h/html gaps)]
+          (is (str/includes? merge "demo/k") "what main changed since the base")
+          (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
+          (is (str/includes? carries "demo/h") "what the branch's merge carries")
+          (is (not (str/includes? carries "demo/k")) "never main's change")
+          (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
+          (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: its views draw nothing, not a header over an empty answer
         (let [same (d/commit-as-db conn base)]
-          (is (every? nil? [(ui/divergence-view {:seon.db/db same} base) (ui/gaps-view {:seon.db/db same} base) (ui/caused-view {:seon.db/db same} base)])
+          (is (every? nil? (ui/branch-views {:seon.db/db same} base nil))
               "a view with no rows is nil"))))))
 
 (deftest an-unrelated-change-redraws-none-of-the-merge-views
-  ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; each is a component
-  ;; drawn again only when what it reads moves. An unrelated change of ctx redraws none; main
-  ;; moving redraws the view of main (merge) and none of the base's
+  ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; their one component
+  ;; (branch-views, from the one diff of the branch against its base: docs/render.md#the-branchs-views)
+  ;; is drawn again only when what it reads moves. An unrelated change of ctx redraws it not; main
+  ;; moving redraws it (its merge section reads main)
   (ts/test-branch!
     (fn [_ conn]
       (doseq [tx [[{:seon.root/id :root :seon.root/boot "b1"}]
@@ -1248,11 +1254,11 @@
             tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
-            views '#{seon.render.ui/merge-view seon.render.ui/caused-view seon.render.ui/gaps-view seon.render.ui/divergence-view}
+            views '#{seon.render.ui/branch-views}
             ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
         (try
           (r/frame! w nil)
-          (is (= views (set (keys (ran)))) "each view drawn once, as a component of the task's list")
+          (is (= views (set (keys (ran)))) "the views drawn once, as one component of the task's list")
           (let [r0 (ran)]
             (swap! a assoc :seon.agent/description "an unrelated change")
             (r/frame! w nil)
@@ -1261,9 +1267,8 @@
             (swap! a assoc :seon.agent/main-commit (d/commit-id @conn))
             (r/frame! w nil)
             (let [r1 (ran)]
-              (is (= #{'seon.render.ui/merge-view}
-                     (set (for [[f n] r1 :when (not= n (r0 f))] f)))
-                  "main moving redraws the view of main (a whole task merges itself), and none of the base's")))
+              (is (= views (set (for [[f n] r1 :when (not= n (r0 f))] f)))
+                  "main moving redraws the views (a whole task merges itself: its merge section reads main)")))
           (finally (r/dispose-walk! w)))))))
 
 (deftest a-prove-is-drawn-on-its-eval-red-and-died

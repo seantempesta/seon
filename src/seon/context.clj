@@ -767,8 +767,7 @@
   rule refuses (regressions, stray reds, contract gaps), and a test run that failed as a whole;
   the branch's unmerged entries (base, ours, theirs); what happened to the last reply; turns
   left. What its merge carries, whether it can merge, what it changed under the wiki and its
-  tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view,
-  tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
+  tests are the task render's views (seon.render.ui/branch-views, tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
   [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]
@@ -1048,18 +1047,21 @@
   render: the system prompt's section as of its t (system-text), an eval by eval-messages with the
   fold its ref names (what it showed of an earlier record, as the form that reads it there), a
   message by its render, the page at a turn or what changed since the turn before ([:page a c0
-  c1], `world`, re-derived from the branch at those commits): what the request sent, the same bytes. No request is built
-  again: the same records, rendered."
+  c1], `world`, re-derived from the branch at those commits, each page drawn once: a page ref's c1 is the next one's c0, taken from the draw before): what the request sent, the same bytes. No request is built
+  again: the same records, rendered. See docs/render.md#the-branchs-views."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
   [db refs]
-  (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])]
-    (mapv (fn [[kind x t :as ref]]
-            [ref (case kind
-                   :section [{:role "system" :content (system-text (d/as-of db t))}]
-                   :eval (eval-messages (ev x) (cond (:same-as t) t (map? t) {:fold t} :else {}))
-                   :page (world db x t (nth ref 3))
-                   :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))])
-          refs)))
+  (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])
+        ;; pages, {commit page} of the pages drawn so far: page n's c1 is page n+1's c0, drawn once
+        step (fn [[done pages] [kind x t :as ref]]
+               (let [ms (case kind
+                          :section [{:role "system" :content (system-text (d/as-of db t))}]
+                          :eval (eval-messages (ev x) (cond (:same-as t) t (map? t) {:fold t} :else {}))
+                          :page (world db x t (nth ref 3) pages)
+                          :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))
+                     m (meta ms)]
+                 [(conj done [ref ms]) (if (and (= :page kind) (:commit m)) (assoc pages (:commit m) (:page m)) pages)]))]
+    (first (reduce step [[] {}] refs))))
 
 (defn messages-tokens
   "Messages ms in tokens, by the printer's sizer over their contents and their calls' code, sized

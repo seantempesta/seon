@@ -19,6 +19,10 @@
  :seon.merge/schema-entry [:map [:form :string] [:file :string]]
  :seon.merge/program [:map-of :seon.merge/program-key :any]
  :seon.merge/changes [:map-of :seon.merge/program-key [:tuple :any :any]]
+ ;; the datoms that differ between a base and a db in what a key's content reads (seon.merge/content-datoms), read once and passed on
+ :seon.merge/moved [:sequential :seon.host/datom]
+ ;; whether a branch can merge into main now (seon.merge/readiness)
+ :seon.merge/readiness [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]
  :seon.merge/conflict-kind [:enum :both-modified :both-added :deleted-by-us :deleted-by-them]
  :seon.merge/conflict [:map [:key :seon.merge/program-key] [:kind :seon.merge/conflict-kind]
                         [:base {:optional true} :any] [:ours {:optional true} :any] [:theirs {:optional true} :any]]

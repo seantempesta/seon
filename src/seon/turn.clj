@@ -78,8 +78,8 @@
   (seon.problems/caused, as root's judge asks it), the done rule over them, and
   the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing
   else. What else a reader wants of the branch (whether it can merge, what its merge carries,
-  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/merge-view,
-  divergence-view, caused-view, tests-view), drawn when what it reads moves, never per turn."
+  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/branch-views,
+  tests-view), drawn when what it reads moves, never per turn."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now

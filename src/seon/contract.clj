@@ -52,6 +52,7 @@
             ;; a db value, or one as of a t (d/as-of: a turn's records read as they were sent)
             (pred :seon.host/db #(or (instance? datahike.db.DB %) (instance? datahike.db.AsOfDB %)))
             (pred :seon.host/conn #(instance? datahike.connector.Connection %))
+            (pred :seon.host/datom #(instance? datahike.datom.Datom %))
             (pred :seon.host/thread #(instance? Thread %))
             (pred :seon.host/queue #(instance? java.util.concurrent.LinkedBlockingQueue %))
             (pred :seon.host/persistent-queue #(instance? clojure.lang.PersistentQueue %))
