@@ -883,7 +883,8 @@
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
-  ;; the tree when what it reaches reads it, and a test scanning the checkout (file-seq) does.
+  ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
+  ;; namespace (a file reader, or a var whose own form reads them) does.
   (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (program/reach-digests db (in "t1"))
@@ -895,7 +896,11 @@
     ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
       (is (contains? moved 'seon.docs-test/no-text-uses-an-old-word) "a scan of the checkout takes the tree")
-      (is (< (count moved) 30) (str (count moved) " tests scan the checkout: a few, not the 286 that read a file"))
+      ;; and so does a test reading a file itself (slurp) or through a var whose own form reads
+      ;; them (seon.docs/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
+      (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
+      (is (contains? moved 'seon.docs-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
+      (is (< (count moved) 80) (str (count moved) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
       (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
 

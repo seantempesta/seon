@@ -1063,6 +1063,11 @@
   bin/check: what such a test proves is the whole program the binary is built from."
   '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
 
+(def file-readers
+  "The tree-readers that read the checkout's files (binary-sh runs the binary: its tests are
+  digested by what they reach, docs/source.md#tests-run-by-reach)."
+  (disj tree-readers 'seon.test-store/binary-sh))
+
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts
   (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
@@ -1293,10 +1298,6 @@
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
-        ;; a test namespace's form walking a directory (file-seq) scans the checkout: what it judges is the
-        ;; files themselves, so the tests reaching it take the tree (seon.docs-test/no-text-uses-an-old-word
-        ;; judged two trees by one digest, red in one and green in the other, and was marked flaky)
-        scans (flag :scans #(and (test-nss (:ns %)) (contains? (:refs %) 'clojure.core/file-seq)))
         ;; a form that starts a process (a process var, the binary) reaches what that process runs
         ;; for it, over a socket and as a quoted form it is sent, edges no reference shows: the
         ;; entry vars' forms (the agent's turn) and, of an entry multimethod (the server's
@@ -1326,6 +1327,16 @@
                   (into holders)
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
+        ;; a test namespace's form reading the checkout's files, itself (file-readers) or through a var
+        ;; whose own form reads them (seon.fx/read-source, seon.docs/load-dir-tx), judges those files:
+        ;; the tests reaching it take the tree (no-text-uses-an-old-word, one-printer-and-no-cut-before-it
+        ;; and every-section-of-the-wiki-has-a-lead were reused over edits to what they read, and read
+        ;; as flaky). Judged again for the dirty forms, which name a var that changed
+        scans (let [reader? (fn [s] (or (file-readers s) (some-> (var-form s) reads)))
+                    judged (into (set (map :id added)) dirty)]
+                (into (apply disj (:scans g) (concat removed judged))
+                      (comp (map rows) (filter #(and (test-nss (:ns %)) (some reader? (:refs %)))) (map :id))
+                      judged))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (if bulk?
               (indexed (for [id dirty t (adj id)] [t id]) true)
@@ -1410,7 +1421,7 @@
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
   roots, {key [var ...]}): a key's digest is of its name, :env, :tree when it is a root (a
   check step) and what it reaches reads the tree, or when it reaches a test namespace's form that
-  walks a directory (a scan of the checkout, :scans: what it judges is the files themselves); any
+  reads the checkout's files (a file reader, or a var whose own form reads them, :scans: what it judges is the files themselves); any
   other test never takes the tree: it is digested by what it reaches, a file it reads or a binary
   it runs not in its reach is the full run's to catch, bin/test --all, docs/merging.md), its
   starting forms' components' digests (its forms and their
