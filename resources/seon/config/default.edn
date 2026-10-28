@@ -142,8 +142,8 @@
  ;; Unit: bytes. The node cache of a process (Datahike's :store-cache-bytes): index nodes read
  ;; back from the store, kept by address and shared by every connection and branch db of the
  ;; store in that process (datahike.index.interface/node-cache-key), least recently used out
- ;; first; Jolt's cache counts every node as 4,096 bytes (datahike.index.node-cache), so this
- ;; is 32,768 nodes. At the bound a node is evicted and its next read goes to the store again
+ ;; first; Jolt's cache weighs each node by what its keys retain (datahike.index.node-cache/
+ ;; node-bytes, about 12.4 KB a node here), so this is about 10,000 nodes. At the bound a node is evicted and its next read goes to the store again
  ;; (65-75 us cold against 8.6 us warm per seek). Provenance, measured 2026-10-23
  ;; (docs/storage.md): Datahike's default of 1,000 nodes thrashed on a scan
  ;; of one 115k-datom index (3,704 nodes: a second scan read all again, 270 ms, as cold), and a
@@ -216,6 +216,12 @@
  ;; default scales with the parent heap (E10); a small trip keeps an agent's garbage, and so
  ;; its private pages, small.
  :seon.config.agent/trip-bytes 4194304
+ ;; Unit: bytes an agent may inherit outside Chez's static generation. The fork server freezes its
+ ;; heap into static at a fork when main's program moved or, after a collection outside static, its
+ ;; live non-static bytes pass this; a freeze keeps what is live then for the server's life, so it is not done every fork
+ ;; (measured 2026-10-28: 22.6 MB of static over 20 forks when it was). 16 MiB is what
+ ;; seon.agent-test/an-agent-inherits-a-static-heap holds an agent to. At the bound: the next fork freezes.
+ :seon.config.agent/inherited-bytes 16777216
  ;; Unit: bytes an agent's heap may grow past what it inherited. Past it an allocation throws
  ;; OutOfMemoryError in the form (an :err item), so a runaway agent cannot take the machine.
  :seon.config.agent/heap-extra-bytes 1073741824

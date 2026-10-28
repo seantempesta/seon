@@ -179,7 +179,7 @@
            (let ([n (jolt-active-threads)]) (mutex-release #%$tc-mutex) (enable-interrupts) n))
          (define (proto-bytes-in-heap) (bytes-allocated))
          (define (proto-static!) (collect (collect-maximum-generation) 'static))
-         (define (proto-set-trip! n) (collect-trip-bytes n))
+         (define (proto-non-static-live!) (collect (collect-maximum-generation)) (- (bytes-allocated) (bytes-allocated 'static)))
          ;; fork only while this is the one active Chez thread, checked once under the thread
          ;; mutex; -2 when another is active (an agent's second thread is a defect, never waited out).
          ;; Read through jolt-active-threads: a thread in a collect-safe call (a read) is parked, which
@@ -200,12 +200,14 @@
       true))
 
 (defn heap-cap!
-  "Bound this process's heap at n bytes: Jolt's own ceiling (JOLT_MAX_HEAP), re-installed
-  here; past it an allocation throws OutOfMemoryError. Built binaries only (source mode
-  installs no collector policy)."
-  {:malli/schema [:=> [:cat :int] :any]}
-  [n]
-  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") "
+  "Bound this process's heap at n bytes and start its collections every trip bytes: Jolt's own
+  ceiling (JOLT_MAX_HEAP) and nursery floor (JOLT_NEW_SIZE), re-installed here in one go; past
+  the ceiling an allocation throws OutOfMemoryError, and the adaptive nursery never sizes the
+  trip below the floor. Built binaries only (source mode installs no collector policy). See
+  docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat :int :int] :any]}
+  [n trip]
+  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_NEW_SIZE\" \"" (long trip) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
 (defchecked ^:private collect-sweepers* [:=> [:cat :int] :int]
@@ -254,7 +256,7 @@
 (defchecked active-threads [:=> [:cat] :int] (scm/proc "proto-active-threads"))
 (defchecked bytes-in-heap [:=> [:cat] :int] (scm/proc "proto-bytes-in-heap"))
 (defchecked static! [:=> [:cat] :any] (scm/proc "proto-static!"))
-(defchecked set-trip! [:=> [:cat :int] :any] (scm/proc "proto-set-trip!"))
+(defchecked non-static-live! [:=> [:cat] :int] (scm/proc "proto-non-static-live!"))
 (defchecked ^:private fork-alone* [:=> [:cat] :seon.lib/pid] (scm/proc "proto-fork-alone"))
 
 (defn wait-status
