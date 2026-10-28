@@ -10,7 +10,7 @@
  :seon.config.ai/thinking [:enum {:seon.config/unit "mode" :description "DeepSeek's thinking mode; absent: the provider's default."} :enabled :disabled]
  :seon.config.ai/replay-reasoning [:boolean {:seon.config/unit "flag" :description "Whether a request sends earlier turns' stored reasoning back (true) or leaves it out (false); stored and shown either way."}]
  ;; a model's thinking and replay as one pair: DeepSeek with thinking on and tools answers 400
- ;; when any earlier reasoning_content is left out (measured 2026-10-24, claude_scratch/step0/no-replay.edn;
+ ;; when any earlier reasoning_content is left out (measured 2026-10-24, docs/model.md;
  ;; api-docs.deepseek.com thinking guide), and Anthropic's thinking blocks must go back unmodified
  ;; in a tool loop: every request declares the eval tool, so thinking :enabled needs replay true
  :seon.config.ai/reasoning-pair [:or {:description "A model's thinking with its reasoning replay: thinking :enabled with tools needs every earlier reasoning sent back, so replay-reasoning false is refused with it."}

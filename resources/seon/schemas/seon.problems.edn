@@ -1,4 +1,4 @@
-;; Problems as typed facts (session D2, claude_scratch/option3-D2-problems.md): the error variants every
+;; Problems as typed facts (session D2, the session design papers in git history): the error variants every
 ;; producer builds through seon.contract/error (the one error map), the recorded error (one
 ;; entity per signature on main, R4's seon.error), the problem members of a run's end,
 ;; and the shape of the one read, seon.problems/report.

@@ -357,7 +357,7 @@
 (deftest thinking-on-refuses-reasoning-left-out
   ;; owner ruling 2026-10-24 (docs/decisions.md, "A config key does what it says"): with
   ;; thinking :enabled and tools, DeepSeek answers 400 when earlier reasoning_content is left
-  ;; out (measured live, claude_scratch/step0/no-replay.edn), so that config is refused at load, naming
+  ;; out (measured live, docs/model.md), so that config is refused at load, naming
   ;; each model and explained by m/explain; thinking off may leave it out
   (let [r (refused #(config/resolved (assoc config/config :seon.config.ai/thinking :enabled :seon.config.ai/replay-reasoning false)))]
     (is (= :seon.config/refused (:seon.error/type r)) (pr-str r))

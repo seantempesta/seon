@@ -36,7 +36,7 @@ Each v1 function of the agent's REPL and where it stands here.
 | v1 | next | Status |
 |---|---|---|
 | `my.task/current`, `update!`, `send-back!`; `my.turn/wait` | `current`, `update!`, `fail!` (send-back replaced: a failure is task data, held for root: [tasks](tasks.md#a-refused-run-is-held-for-root)); `my.turn/wait` | present (an agent holds its task from the fork: [tasks](tasks.md#the-agent-knows-its-task)) |
-| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers`, `callees`, `grep`, `source-fn`; `seon.program/reach-digests` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
+| `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers` (a var's callers, or the functions using a qualified keyword), `callees`, `grep`, `source-fn`; `seon.program/reach-digests` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
 | `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | `my.agent/similar` ('ns/f or text); `seon.vector/near` in any query; fused with the call graph ([vectors](vector.md)); EmbeddingGemma-2 in process (llama.cpp) where v1 ran MLX over HTTP | present, better |
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |

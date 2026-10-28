@@ -27,12 +27,18 @@ How we keep the first version's spirit: run, then right, then fast; the demo is 
 
 ## 2. Who does what
 
-**One focused session works one task, start to merge, in one conversation** (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive … I want to do more focused sessions with one agent and they stay in one focused conversation and they are only launching sub agents for research and testing like haiku and sonnet").
+**The owner and one Claude session work together, in one conversation** (owner, 2026-10-28: "let's stick with just you and me and any subtasks you do are one use agents that are sonnet and haiku and mostly just to find info for you to read and you can preprocess and run longer tests on well spec'ed ideas (especially repl interactive building) with sonnet"; and before it, "This system of launching 10+ agents just burned my tokens and was not productive"). Ten sessions at once, each re-deriving context and reworking the others' branches, burned a fifth of a week's tokens in one night and flooded the machine.
 
-- **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time, with evidence and, for a big one, priced options (the simplest viable first, your recommendation marked).
-- **A session** works one task: it reads the task and its context, plans in a few lines, proves, codes, tests what its change reaches, merges (§3) and updates the wiki. It does the work itself, in its own conversation. It never starts another Claude session and never hands its work to one; more than one session runs only when the owner starts them, each on its own task and worktree.
-- **Subagents are for research and testing only:** Haiku for web search and reading many files, Sonnet for a review of the diff, a measurement or a browser check. One or two at a time, each with a complete brief (below), and only when a few tool calls can't answer it. A subagent never writes the task's code.
-- **Seon agents** are forked processes working tasks through the server (§6). What a session finds missing from their context is a task for Seon.
+- **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time, with evidence and, for a big one, priced options (the simplest viable first, your recommendation marked). Explain before changing when he asks to understand.
+- **The session** does the work itself: it reads, plans in a few lines, proves, codes, tests what the change reaches, merges into main (§3) and updates the wiki. It keeps the thread: what is in flight is what this conversation is doing, and `docs/plan.md` "Now" says it.
+- **It never starts another Claude session**, never runs a merge session, and never hands its work to a standing worker. Coordination files, wake pipes and orders to other sessions are not used.
+- **Subagents are one-use helpers**, started for one question and done when they answer:
+  - **Haiku** finds and reads: searches the code, the wiki, the web; returns paths, quotes and facts for the session to read.
+  - **Sonnet** preprocesses and runs longer work on a well-specified idea: a measurement, a profile, a review of a diff, a browser check, or building and trying a function at a REPL (an agent's REPL through the `seon` MCP tools is the place for interactive building), returning numbers and file:line.
+  - **A fork of the session** (the same model, the whole conversation, its prefix cached) does a processing task that needs the conversation's context: it writes its result to a file and answers in a few lines, so the session's own context grows by the answer, not the work. Prefer a fork for few-step work that leans on what was decided here; prefer Sonnet for long, mechanical, many-step work, which a fork pays for on every step by re-reading the whole conversation.
+  - One or two at a time, each with a complete brief (below), read-only unless the brief says what it may run. A subagent never merges and never edits the main tree; the session checks what it returns before acting on it.
+  - This split is an experiment (owner, 2026-10-28: "experiment and lets refine the process … on real work"): note what each helper cost and returned, and refine this section from it.
+- **Seon agents** are forked processes working tasks through the server (§6). What the session finds missing from their context is a task for Seon.
 
 ### A session's working rules
 
@@ -58,25 +64,25 @@ Check what a subagent returns (a reproduction, a file:line, a number) before act
 
 ## 3. How work moves
 
-The same method serves our worktree sessions and Seon's agents: small changes, integrated often, testing the merged result and running only what the change reaches.
+The same method serves the session and Seon's agents: small changes, integrated often, testing the merged result and running only what the change reaches.
 
 **Work is tasks.** All work is a task in ``resources/seon/tasks/<owning-ns>.edn`` (`my.root/load-tasks!`):
 - `:seon.task/plan`: what exists, what v1 did, the cause, what it replaces and deletes;
 - `:seon.task/proofs`: the deftests and cost proofs that say it is done;
 - `:seon.task/needs`: what must merge first.
 
-Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **A worktree session's brief is its task** (owner, 2026-10-21: process, not whim): whoever writes the task puts what it needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface merges first as its own small task), then fixes.
+Its references are derived from the plan's citations by the one parser ([references](docs/references.md)), and the names it changes are its write set. **The session's brief is its task** (owner, 2026-10-21: process, not whim): whoever writes the task puts what it needs into the task and the wiki sections it cites. What anyone learns goes back into the task or that section, never only into a report. Order: delete first, then foundations (a shared interface merges first as its own small task), then fixes.
 
-**One task at a time, in its own worktree.** A session works in its own worktree (`bin/worktree NAME`: `.worktrees/NAME` on `jolt/NAME`) on its own root and stores, may change any file, tests there what its change reaches, merges, and removes the worktree (`bin/worktree --remove NAME`). It takes the task the owner names, or the first ready task in THE PLAN's order (`resources/seon/tasks/`, `:needs` merged). Claude sessions use worktrees until Seon agents can do this work inside the system (owner, 2026-10-23); the end goal is Seon agents in the system, with git only to commit the changes Seon writes back.
+**One task at a time, in the main tree.** The session works in the main tree (`~/src/seon-next`) on a short topic branch, `jolt/<task-name>`, tests there what its change reaches, and merges it into main (below); no standing worktrees (owner, 2026-10-28: "We won't need all these separate worktrees anymore either"). A helper's long run that must not see the tree change under it may use a temporary worktree (`bin/worktree NAME`), removed the moment the run ends (`bin/worktree --remove NAME`). The session takes the task the owner names, or the first ready task in THE PLAN's order (`resources/seon/tasks/`, `:needs` merged). The end goal is Seon agents doing this work inside the system, with git only to commit the changes Seon writes back (owner, 2026-10-23).
 
-**A worktree session's method:**
+**The method:**
 1. **Learn:** find the wiki sections, tasks and code for the problem; read what v1 did (`~/src/seon`, read-only); research the field's best known way (web, `bin/agy-agent`), and verify it. Cite what you find in the plan; where a section and the code disagree, that is a wiki edit the task owes.
 2. **Plan in a few lines:** the primitive, the write set, what it deletes, the tests, its wiki section. A change to a dependency or a design rule waits for the owner's go. No new layers, runners or wrappers.
 3. **Prove first:** prove the idea in a REPL at n ≤ 100, write a cost proof for anything whose input grows, and write the proofs and watch them fail for the right reason.
 4. **Act:** write the simplest code that passes, at the cause, in the owner of the bad value.
 5. **Work it as a Seon agent would**, through the server (§6): attach, read the context, evaluate, `seon_done`. What the context lacked is a task. If the owner will see it (a page, a render), have a subagent with the browser compare the page against the facts.
 
-**Merge small and often.** Merge main into the branch whenever main moves. To merge: the branch holds current main; one Sonnet subagent reviews `git diff main...HEAD` (and any fork commits it pins) against §4, §5, §9 and §7a, with file:line findings, and rates it worth it, questionable or overbuilt; the session fixes the findings; plain `nice -n 15 bin/prove` is green at that tip (the in-process tests and process tests its change reaches); then `git merge --no-ff` into main, with a message carrying the step of THE PLAN, the `src` delta, what it replaces and its measured number. Its tree is the proved tip, so nothing reruns on main (owner, 2026-10-27: "Why are we reverifying on main?"). Then `bin/update`, and check that a just-merged var's entity is on root's main. A pin bump also runs its fork's gates and the cost proofs, and merges alone. The mechanics: [merging](docs/merging.md).
+**Merge small and often.** To merge a topic branch: one Sonnet subagent reviews `git diff main...HEAD` (and any fork commits it pins) against §4, §5, §9 and §7a, with file:line findings, and rates it worth it, questionable or overbuilt; the session fixes the findings; plain `nice -n 15 bin/prove` is green at that tip; then `git merge --no-ff` into main, with a message carrying the step of THE PLAN, the `src` delta, what it replaces and its measured number. Its tree is the proved tip, so nothing reruns on main (owner, 2026-10-27: "Why are we reverifying on main?"). Then `bin/update`, and check that a just-merged var's entity is on root's main. A pin bump also runs its fork's gates and one full run. The mechanics: [merging](docs/merging.md).
 
 **Every change earns its place** (restart of 2026-10-24, docs/restart.md). A branch's report states the step of THE PLAN it moves, what it replaces or deletes, its `src` line delta and its measured value (turns to green, ticks, bytes, wall time). It compares each number with main's before it; a number that got worse is refused unless the report names its reason and who follows it up (owner, 2026-10-26: "don't accept regressions for no reason"). A merge that grows `src` with no measured value, or adds a namespace, a config key, a schema attribute, a proc, a route or a second way to do something, waits for the gate below (the four questions below) with its evidence; "nothing reads it yet" is a reason to wait, not to merge.
 
@@ -86,15 +92,15 @@ Its references are derived from the plan's citations by the one parser ([referen
 
 **A view is a render of what already exists, checked in a browser** (owner, 2026-10-24: "the debug page should be doing basically zero work … in the past I've asked for the debug page and entirely separate machinery that is somehow slower is built"). A page shows records through their views and the render cache; it never recomputes what the system already computed (a debug page shows what was sent, as recorded, not a rebuilt request), and its cost proof shows it costs what changed. A session whose work changes what an agent is sent or what the owner sees opens the page in a browser (a subagent with the built-in browser) before it reports.
 
-**Measure before and after.** Every perf or cost claim carries numbers from the same input before and after, and every "faster" is checked by an independent run. `claude_scratch/perf-<date>.md` stays current; a regression found there is a task the same day.
+**Measure before and after.** Every perf or cost claim carries numbers from the same input before and after, and every "faster" is checked by an independent run. The numbers go in the commit message and the wiki section they concern; a regression found is a task the same day.
 
 ### Testing: compute only what is needed
 
-**Every computation must earn its time** (owner, 2026-10-22: "I want faster development"; "We should always be trying to minimize extra computations and do smarter testing"). A run that cannot tell you anything new is waste, and waste slows every worktree on the machine.
+**Every computation must earn its time** (owner, 2026-10-22: "I want faster development"; "We should always be trying to minimize extra computations and do smarter testing"). A run that cannot tell you anything new is waste, and waste slows the machine.
 - **Run only what your change reaches: `bin/prove`.** It runs the tests and the `bin/check` steps whose reach digest has no green result, and reuses every other (§5, results reused by input digest), so an unchanged tree runs nothing; `bin/test` and `bin/check` without arguments are its two halves, `bin/test NS` one namespace, `bin/check MODE` one step. Seon agents run the same selection (`(my.agent/prove)`, the turn's observe, the judge's `:tests`). Then `bin/check smoke`.
 - **Iterate at the REPL first.** Prove an idea at n ≤ 100 in a REPL before any suite runs.
-- **Long runs only when the work is done** (owner, 2026-10-22: "Don't run long tests unless we are pretty sure it's done"): the full `bin/test` and `bin/check 100` (about 10 minutes) run once per worktree session, when it believes its task is finished and its review findings are fixed. Never while iterating, never twice for the same tree, never "just to be safe".
-- **Main's batch runs the process tests once:** `bin/prove --merge` on the merged batch (in-process greens come back by digest wherever the batch did not move them); the full suite runs once a day.
+- **Long runs only when the work is done** (owner, 2026-10-22: "Don't run long tests unless we are pretty sure it's done"): the full `bin/test` and `bin/check 100` (about 10 minutes) run once per task, when the session believes its task is finished and its review findings are fixed. Never while iterating, never twice for the same tree, never "just to be safe".
+- **`bin/prove --merge` is for a tree nobody has proved** (two branches combined); a branch proved at its tip that holds main merges with no rerun.
 - **Never repeat a run on an unchanged tree.** A green result at a digest is the answer; reuse it. A flaky result is a defect to fix at its cause (a clock, a race), never a reason to re-run.
 - **The full runs are explicit:** `bin/test --all` and `bin/check 100`.
 
@@ -200,9 +206,9 @@ Where each kind of information lives, and how the wiki that holds the system's m
   - a var: ``ns/name`` (a `#'` before it is punctuation); a schema key: ``:ns/keyword``; a task: ``ns/task-name``; a file: its path (never ``path:line``: cite the var);
   - **the delimiter picks the depth** (bare word summary, one backtick or a link doc, three backticks code; two backticks a literal that cites nothing; a word inside a `"..."` string is data): [references](docs/references.md#the-delimiter-picks-the-depth) has the rules and their limits, which this section does not restate.
   - Example, a docstring's text: Writes the merged files back to the merges branch. See docs/source.md#commit-the-merges-branch.
-  - A comment that records where a number or a choice came from (its provenance, in `default.edn` or a source file) may name an archived scratch paper; what a reader needs to understand the mechanism is in the wiki.
+  - A comment that records where a number or a choice came from (its provenance, in `default.edn` or a source file) names the commit whose message holds the numbers; what a reader needs to understand the mechanism is in the wiki.
 - **Merging a change updates its section in the same commit.** Before reporting, read your task's context through the server and confirm it pulls what the task needs.
-- **`claude_scratch/` is the Claude sessions' scratch space,** for working papers, evidence and logs a session needs while it works (`merge-log.md` is written there). It is never system documentation. Anything in it that is still true moves to the wiki, and then the paper moves to `claude_scratch/archive/` in the same commit; no live doc cites a scratch paper as current.
+- **Working papers are temporary.** The session and its helpers write working papers, measurements and evidence to the session's scratchpad, outside the repository. Anything still true moves to the wiki, a task entry or a commit message in the commit that makes it true; nothing cites a working paper. Hang evidence stays only while its defect is open, named on the defect's task.
 
 ### Where information lives
 
@@ -213,7 +219,7 @@ Each kind of information has one home, and a fact found anywhere else is moved t
 - **DECISIONS** (`docs/decisions.md`): the owner's standing rulings, one line each with its quote, date and where it is now stated;
 - **the plan** (`docs/plan.md`): what is in flight, the open owner questions and THE PLAN, on one screen;
 - **git**: history: who did what, when, and every number a merge measured (in its commit message);
-- **`claude_scratch/`**: a session's working papers only (above).
+- **the session's scratchpad**: temporary working papers, never cited (above).
 
 ## 7a. Words
 
@@ -245,12 +251,12 @@ Library words stay: proc, step-fn, transact, branch, merge, schema, registry, co
 The machine Seon is built on and for, and the rules that keep it from being flooded.
 
 - **The target is a 16 GB MacBook M1** (owner, 2026-10-22). Seon stays within `:seon.config.machine/memory-mb`, and `bin/check scale` fails past it.
-- **Builds:** `nice -n 15 bin/build`, in parallel, no lock. Full checks run niced, each in its own worktree. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
+- **Builds:** `nice -n 15 bin/build`, one heavy run at a time, at load under ~8. Every process on a store uses the same LMDB build. Details, and the disk rules (worktrees removed at merge, no new top-level directories, pruning): [machine](docs/machine.md).
 - **Never flood it.** Anything that makes threads or processes starts at n ≤ 100 under `nice -n 15`; kill your own process past 200 threads. One experiment at a time.
 - **Leave nothing running when you finish,** and say so. A process that must outlive a tool call is double-forked (`bin/root` does).
 - **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"; "cleanup garbage when you see it"). A leftover process (an orphan whose session is gone, an old binary's relay, a lock helper in a dead scratch folder), a merged worktree, a finished experiment's store or output: end or delete it now, and say what went. Garbage is what nothing live uses; check that first, by PID, path and working directory (`lsof -a -p PID -d cwd`), never by pattern (`pkill`, `killall`, `pgrep -f`). Keep what is evidence or someone's work in progress: the standing store (`runs/store`), anything git or the store records, a worktree with unmerged commits or uncommitted changes, a live session's checkout (check every session's `cwd` with `list_sessions` before removing a worktree: a session whose folder is gone can no longer be reached). Reclaiming a record (a store, a branch, history) stays the owner's act ([machine](docs/machine.md#disk-stays-bounded)).
 - **A root's processes end with it:** kill the root, or its fork server's process group (`kill -9 -PGID`), never a fork server by pid. Killing the fork server first skips the group kill that ends its agents ([failure points](docs/failure-points.md), root dies).
-- **Git in a worktree:** `git -C` on your own checkout only; never `git submodule` in a worktree (after merging main, `bin/worktree --sync NAME` from the main tree); never bare `git stash`; never `checkout`, `restore` or `reset` on paths you don't own; commit explicit paths; never push this repository's branches. A fork commit your branch pins is pushed to its fork, ``seantempesta/<lib>``, on a ``jolt/<topic>`` branch, with no ask (owner, 2026-10-23: "You don't have to ask me to push public repos anymore"): no force, never a fork's main, verified with `gh api` after.
+- **Git:** commit explicit paths; never bare `git stash`; never `checkout`, `restore` or `reset` on paths you didn't change; never `git submodule` in a temporary worktree (`bin/worktree --sync NAME` from the main tree); never push this repository's branches. A fork commit a branch pins is pushed to its fork, ``seantempesta/<lib>``, on a ``jolt/<topic>`` branch, with no ask (owner, 2026-10-23: "You don't have to ask me to push public repos anymore"): no force, never a fork's main, verified with `gh api` after.
 - **Secrets are never printed.** Paid model runs spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it they need the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
 ## 9. Mistakes we have made, and do not repeat
@@ -258,6 +264,7 @@ The machine Seon is built on and for, and the rules that keep it from being floo
 The mistakes made so far, each stated so it is not made again.
 
 - **Fanning out** (owner, 2026-10-28): ten and more sessions and subagents at once, each re-deriving context, waking each other and reworking each other's branches, burned a fifth of a week's tokens in one night on churn and flooded the machine to a memory limit. One focused session per task; subagents only for research and testing.
+- **Building infrastructure instead of the product** (owner, 2026-10-28: "we built out a lot of infrastructure thinking it would speed things up and it really hasn't"): a merge session, a worktree with its own root per lane, shared test roots, a test service, wake pipes and orders files, all for parallel work. A one-function prove took 113 s, hangs and orphans came from the tooling itself, and no agent finished a real task. Before building tooling, ask whether it moves an agent finishing a real task; prefer deleting what served parallel work.
 - **Trees before the forest:** a detail chased past its worth with no step of THE PLAN asking for it; guessing at a cause instead of measuring it.
 - **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a recorded fact (blocked, stalled, dead).
 - **A swallowed error, an ignored answer, a fake default.** Unknown is not `{}`, `0`, `nil` or `:ok`, and a proc answers every request it took.
@@ -278,7 +285,7 @@ The mistakes made so far, each stated so it is not made again.
 - **Merging on a check nobody read,** or copying whole files over newer changes.
 - **Re-running everything on every change,** a full run while iterating, or a second run of an unchanged tree (§3, Testing).
 - **Deleting a record** (a store, a branch, history). Runs are kept, and reclaiming space is the owner's act. The one exception: until Seon holds a user's data, the standing store is test data, erased (never migrated) when its schema changes, on the owner's go ([machine](docs/machine.md#disk-stays-bounded)).
-- **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A worktree is removed as soon as its branch is merged and nothing in it is unsaved: commits merged, scratch papers filed (to the wiki or `claude_scratch/archive/`), and a store or run output recorded or handed to the owner.
+- **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code"). Before rewriting, read what an earlier branch, worktree or note did and keep what it learned (its measurements, its proofs, its cause); then write the clean implementation once, with no repeated or slow code. A branch or temporary worktree is removed as soon as it is merged and nothing in it is unsaved: commits merged, findings written to the wiki or a task, and a store or run output recorded or handed to the owner.
 - **Flooding the machine,** killing by pattern, leaving things running, or walking past garbage (a leftover process, a merged worktree) because someone else left it.
 
 ## 10. Done

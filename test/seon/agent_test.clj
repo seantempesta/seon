@@ -310,7 +310,7 @@
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
 
 (deftest a-test-childs-read-lets-the-agents-other-fibers-run
-  ;; the recipe hang of 2026-10-28 (claude_scratch/hang-2026-10-28-a1-prove): agent a1's test child
+  ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child
   ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
   ;; its one main carrier, so the fiber that would answer never ran. The poller's ready is a hint:
   ;; a stale one, left by the read before, ends the next park at once, and the read's wait then
@@ -1226,7 +1226,7 @@
   ;; fact on its branch before its commit and names it by id in its basis, so the window and every
   ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
-  ;; (claude_scratch/archive/design-agent-view-2026-10-24.md §7)
+  ;; (docs/render.md)
   (let [names (volatile! nil)
         [_ end turn on-main] (in-agent (fn [{:keys [agent task ns run] :as n}]
                                          (vreset! names n)
@@ -1248,7 +1248,7 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, claude_scratch/archive/design-agent-view-2026-10-24.md
+    ;; the prose comes in the eval call (its first argument, docs/render.md
     ;; section 1), so the reply's own text is empty and the prose is the eval's
     (is (= "" reply) "the reply's text: the prose came in its call")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
