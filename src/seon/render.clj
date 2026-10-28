@@ -17,6 +17,7 @@
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
        guessed: the producer names it (opts :schema, or the value's metadata
        :seon.render/schema), an error map's is its :seon.error/type (else :seon.error/base),
+       when it holds every key of an error,
        and a pulled entity's is the schema with a declared render holding its identity
        attribute;
     3. the one value printer (seon.print/print-value), the default render.
@@ -88,15 +89,22 @@
                  a (map-keys form) :when (identity-attr? a)]
              [a k])))
 
+(def ^:private error-keys
+  "The keys every error map holds (:seon.error/base's required ones): a map holding
+  :seon.error/type without them is data that names an error (a recorded error's picked keys),
+  not an error."
+  (vec (keep #(when (and (vector? %) (not (:optional (when (map? (second %)) (second %))))) (first %))
+             (rest (get contract/forms :seon.error/base)))))
+
 (defn schema-of
   "The named schema of v: hint (its producer's), the one its metadata names, an error map's
-  variant (its registered :seon.error/type, else :seon.error/base), or the schema its
-  identity attribute names."
+  variant (its registered :seon.error/type, else :seon.error/base) when it holds every key
+  of an error (error-keys), or the schema its identity attribute names."
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :qualified-keyword]]}
   [v hint]
   (or hint (:seon.render/schema (meta v))
       (when (map? v)
-        (if-let [t (:seon.error/type v)]
+        (if-let [t (when (every? #(contains? v %) error-keys) (:seon.error/type v))]
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 
