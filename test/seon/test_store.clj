@@ -167,7 +167,8 @@
   runs per main makes unreachable. Its task files are its own (:seon.config.root/tasks-dir under
   runs, unless args name another): the checkout's are every session's, and an event on one (a
   merge's write, which FSEvents also delivers to a watcher begun just after it) made a test root
-  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks). The test
+  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks), and so is its
+  verdict cache (:seon.config.proofs/results-dir under runs, docs/merging.md#verdicts-are-a-cache). The test
   running it (clojure.test/*testing-vars*) is the root's --started-by, so its merge gate never
   runs the test that started it (docs/merging.md#a-merge-runs-what-the-change-reaches); called
   outside a test, it names none, and every deferred test is gated."
@@ -179,7 +180,10 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (-> ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))]
+  (root-sh root "start" (-> ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
+                             ;; its verdict cache is its own too, so no verdict an earlier test run cached is
+                             ;; reused (the store's results were per main; the cache outlives a run)
+                             "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))]
                             ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
                             (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
                                     ["--started-by" (str (ns-name ns) "/" name)]))
