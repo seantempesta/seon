@@ -26,18 +26,29 @@
    {:name "abs" :needs ["neg"] :stub "(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
     :proof "(deftest abs-test (is (= 5 (app.calc/abs -5))) (is (= 5 (app.calc/abs 5))))"}])
 
-(defn- fenced {:malli/schema [:=> [:cat :string :string] :string]} [prose code] (str prose "\n```clojure\n" code "\n```\n"))
+(defn- calls
+  "A scripted reply of eval calls: the text is prose, and each code string (exactly one form)
+  is a call that carries the same prose (docs/prompt.md)."
+  {:malli/schema [:=> [:cat :string [:* :string]] :seon.model/script-reply]}
+  [prose & codes]
+  {:text prose :calls (mapv (fn [c] {:prose prose :code c}) codes)})
+
+(defn- says
+  "A scripted reply of text and no call: a message, which ends the turn (docs/prompt.md)."
+  {:malli/schema [:=> [:cat :string] :seon.model/script-reply]}
+  [text]
+  {:text text})
 
 (def calc-replies
   "The scripted model's replies by task name and turn. square answers wrong first (its proof
   stays red, the next turn sees the failure and fixes it); neg is slow."
-  {"add" [(fenced "add adds." "(in-ns 'app.calc)\n(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))")]
-   "twice" [(fenced "twice is add with itself." "(in-ns 'app.calc)\n(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (add x x))")]
-   "square" [(fenced "Squaring doubles?" "(in-ns 'app.calc)\n(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (twice x))")
-             (fenced "The proof shows 6, not 9: square multiplies." "(in-ns 'app.calc)\n(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")]
-   "sum-sq" [(fenced "Sum of squares." "(in-ns 'app.calc)\n(defn sum-sq {:malli/schema [:=> [:cat :int :int] :int]} [a b] (add (square a) (square b)))")]
-   "neg" [(fenced "Thinking slowly first." "(Thread/sleep 8000)\n(in-ns 'app.calc)\n(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] (- x))")]
-   "abs" [(fenced "abs via neg." "(in-ns 'app.calc)\n(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] (if (neg? x) (neg x) x))")]})
+  {"add" [(calls "add adds." "(in-ns 'app.calc)" "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))")]
+   "twice" [(calls "twice is add with itself." "(in-ns 'app.calc)" "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (add x x))")]
+   "square" [(calls "Squaring doubles?" "(in-ns 'app.calc)" "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (twice x))")
+             (calls "The proof shows 6, not 9: square multiplies." "(in-ns 'app.calc)" "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")]
+   "sum-sq" [(calls "Sum of squares." "(in-ns 'app.calc)" "(defn sum-sq {:malli/schema [:=> [:cat :int :int] :int]} [a b] (add (square a) (square b)))")]
+   "neg" [(calls "Thinking slowly first." "(Thread/sleep 8000)" "(in-ns 'app.calc)" "(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] (- x))")]
+   "abs" [(calls "abs via neg." "(in-ns 'app.calc)" "(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] (if (neg? x) (neg x) x))")]})
 
 (defn program-txs
   "Two transactions writing the program of specs on main (db): the subjects (each spec's
@@ -105,22 +116,22 @@
                        :plan "Make `app.m/f` pass its proof `app.proofs/b-test`. Write its body as (inc x)."}]
               :after {"b-merge" "a-merge"}
               :check "(app.m/f 41)" :expect ["42"]
-              :replies {"a" [(fenced "f adds one." (str "(in-ns 'app.m)\n" (defn1 "f" "(+ x 1)")))]
-                        "b" [(fenced "f increments." (str "(in-ns 'app.m)\n" (defn1 "f" "(inc x)")))]}}
+              :replies {"a" [(calls "f adds one." "(in-ns 'app.m)" (defn1 "f" "(+ x 1)"))]
+                        "b" [(calls "f increments." "(in-ns 'app.m)" (defn1 "f" "(inc x)"))]}}
    :semantic {:specs [{:name "a" :ns 'app.m :var "scale" :stub (defn1 "scale" "(* x 2)") :plan "Make `app.m/scale` pass `app.proofs/a-test`." :proof "(deftest a-test (is (= 9 (app.m/scale 3))))"}
                       {:name "b" :ns 'app.m :var "six" :plan "Make `app.m/six` pass `app.proofs/b-test`, using `app.m/scale`." :stub "(defn six {:malli/schema [:=> [:cat] :int]} [] 0)"
                        :proof "(deftest b-test (is (= 6 (app.m/six))))"}]
               :after {"b-merge" "a-merge"}
               :check "[(app.m/scale 3) (app.m/six)]" :expect ["[9 6]"]
-              :replies {"a" [(fenced "scale triples." (str "(in-ns 'app.m)\n" (defn1 "scale" "(* x 3)")))]
-                        "b" [(fenced "six is scale of 3." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] (scale 3))")]
-                        "b-merge" [(fenced "Main's scale triples now, so six must not use it." "(in-ns 'app.m)\n(defn six {:malli/schema [:=> [:cat] :int]} [] 6)")]}}
+              :replies {"a" [(calls "scale triples." "(in-ns 'app.m)" (defn1 "scale" "(* x 3)"))]
+                        "b" [(calls "six is scale of 3." "(in-ns 'app.m)" "(defn six {:malli/schema [:=> [:cat] :int]} [] (scale 3))")]
+                        "b-merge" [(calls "Main's scale triples now, so six must not use it." "(in-ns 'app.m)" "(defn six {:malli/schema [:=> [:cat] :int]} [] 6)")]}}
    :sibling {:specs [{:name "a" :ns 'app.s :var "f" :stub (defn1 "f" "0") :plan "Make `app.s/f` pass `app.proofs/a-test`." :proof "(deftest a-test (is (= 2 (app.s/f 1))))"}
                      {:name "b" :ns 'app.s :var "g" :stub (defn1 "g" "0") :plan "Make `app.s/g` pass `app.proofs/b-test`." :proof "(deftest b-test (is (= 30 (app.s/g 10))))"}]
              :after {"b-merge" "a-merge"}
              :check "[(app.s/f 1) (app.s/g 10)]" :expect ["[2 30]"]
-             :replies {"a" [(fenced "f adds one." (str "(in-ns 'app.s)\n" (defn1 "f" "(+ x 1)")))]
-                       "b" [(fenced "g triples, through a helper." (str "(in-ns 'app.s)\n" (defn1 "h3" "(* x 3)") "\n" (defn1 "g" "(h3 x)")))]}}
+             :replies {"a" [(calls "f adds one." "(in-ns 'app.s)" (defn1 "f" "(+ x 1)"))]
+                       "b" [(calls "g triples, through a helper." "(in-ns 'app.s)" (defn1 "h3" "(* x 3)") (defn1 "g" "(h3 x)"))]}}
    :newns {:specs [{:name "n" :ns 'app.m :proofs #{'app.newns-test/triple-test}
                     :plan "Create the namespace `app.newns` with `triple` (three times x), and its tests in `app.newns-test`, which refers `triple`."}]
            :after {}
@@ -136,24 +147,22 @@
            :model {:check (str "(let [r (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test))]"
                                " [(app.newns/triple 3) (pos? (:pass r)) (zero? (+ (:fail r) (:error r)))])")
                    :expect ["[9 true true]"]}
-           :replies {"n" [(fenced "A new namespace and its tests, as at any REPL."
-                                  (str/join "\n" ["(ns app.newns)"
-                                                  "(defn triple {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"
-                                                  "(def ops '(inc 1))"
-                                                  "(def syms '[a b])"
-                                                  "(def ^:dynamic *depth* 0)"
-                                                  "(ns app.newns-test"
-                                                  "  (:require [clojure.test :refer [deftest is]]"
-                                                  "            [app.newns :refer [triple]]))"
-                                                  "(deftest triple-test (is (= 9 (triple 3))))"
-                                                  "(in-ns 'user)"
-                                                  "(def scratch-x 41)"]))]}}
+           :replies {"n" [(calls "A new namespace and its tests, as at any REPL."
+                                 "(ns app.newns)"
+                                 "(defn triple {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))"
+                                 "(def ops '(inc 1))"
+                                 "(def syms '[a b])"
+                                 "(def ^:dynamic *depth* 0)"
+                                 "(ns app.newns-test\n  (:require [clojure.test :refer [deftest is]]\n            [app.newns :refer [triple]]))"
+                                 "(deftest triple-test (is (= 9 (triple 3))))"
+                                 "(in-ns 'user)"
+                                 "(def scratch-x 41)")]}}
    :loop {:specs [{:name "gen" :ns 'seon.generation :proofs #{'app.proofs/gen-test} :proof "(deftest gen-test (is (= 2 (seon.generation/generation))))"
                    :plan "Seon's own source is the program: make `seon.generation/generation` answer 2, so its proof `app.proofs/gen-test` passes."}]
           :after {}
-          :replies {"gen" [(fenced "The next generation of Seon's own source."
-                                   (str "(in-ns 'seon.generation)\n"
-                                        "(defn generation\n  \"Which generation of Seon's own source this binary was built from: the loop's subject\n"
+          :replies {"gen" [(calls "The next generation of Seon's own source."
+                                  "(in-ns 'seon.generation)"
+                                  (str "(defn generation\n  \"Which generation of Seon's own source this binary was built from: the loop's subject\n"
                                         "  (seon.e2e/loop-run). A task redefines it on its branch, the merge is written back and\n"
                                         "  committed on the merges branch, and the binary built from that commit answers the new\n"
                                         "  value.\"\n  {:malli/schema [:=> [:cat] :int]}\n  [] 2)"))]}}
@@ -162,9 +171,9 @@
    :loop-2 {:specs [{:name "gens" :ns 'seon.generation :proofs #{'app.proofs/gens-test} :proof "(deftest gens-test (is (= [1 2] ((resolve 'seon.generation/generations)))))"
                      :plan "Seon's own source is the program: define `seon.generation/generations`, the generations so far, so its proof `app.proofs/gens-test` passes."}]
             :after {}
-            :replies {"gens" [(fenced "The generations so far."
-                                      (str "(in-ns 'seon.generation)\n"
-                                           "(defn generations\n  \"The generations of Seon's own source so far: the loop's second subject.\"\n"
+            :replies {"gens" [(calls "The generations so far."
+                                     "(in-ns 'seon.generation)"
+                                     (str "(defn generations\n  \"The generations of Seon's own source so far: the loop's second subject.\"\n"
                                            "  {:malli/schema [:=> [:cat] [:vector :int]]}\n  [] [1 2])"))]}}
    :hairy {:specs (into [{:name "a" :ns 'app.m :var "f1" :stub (defn1 "f1" "0") :proofs #{'app.proofs/a-test}
                           :proof "(deftest a-test (is (= [2 3 4 5] [(app.m/f1 1) (app.m/f2 1) (app.m/f3 1) (app.m/f4 1)])))"}
@@ -173,8 +182,8 @@
                         (for [k [2 3 4]] {:var (str "f" k) :ns 'app.m :stub (defn1 (str "f" k) "0")}))
            :after {"b-merge" "a-merge"} :held {"b-merge" ":seon.config.merge/max-conflicts"}
            :check "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" :expect ["[11 12 13 14]"]
-           :replies {"a" [(fenced "Each fK adds K." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))))]
-                     "b" [(fenced "Each fK adds K, other way round." (str "(in-ns 'app.m)\n" (str/join "\n" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))))]}}})
+           :replies {"a" [(apply calls "Each fK adds K." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))]
+                     "b" [(apply calls "Each fK adds K, other way round." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))]}}})
 
 (defn swarm-specs
   "n tasks over 5 shared definitions: task sK rewrites app.sw/v(K mod 5) to add (K mod
@@ -188,30 +197,30 @@
            :plan (str "Make `app.sw/v" j "` add " j "; its proof is `app.proofs/s" k "-test`.")})))
 
 (defn- swarm-reply
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :string] [:maybe :seon.model/script-reply]]}
   [nm]
   (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
     (let [j (mod k 5)]
-      (fenced "Rewrite in my own words." (str "(in-ns 'app.sw)\n" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")")))))))
+      (calls "Rewrite in my own words." "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
 
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
   every unmerged entry; a design agent improves the plan and waits."
-  {"-merge" (fenced "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
-   "-design" (fenced "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")\n(my.turn/wait)")})
+  {"-merge" (calls "Take main's version of each conflict." "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :theirs))")
+   "-design" (calls "Main's code is the base now." "(my.task/update! :seon.task/plan str \" Design: build on main's definitions as they are.\")" "(my.turn/wait)")})
 
 (def measure-replies
   "A scripted run whose evals answer values as a real run's do (a source, a vector of rows, a
   long vector, the task's status, one value again), for measuring what a turn sends (tokens per
   turn) before and after a change to how records print, on task seon.ref/a-summary-says-there-is-more."
   {"seon.ref/a-summary-says-there-is-more"
-   [(fenced "Read the function the plan names." "(clojure.repl/source seon.ref/shown)")
-    (fenced "A table of rows." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
-    (fenced "A long value." "(vec (range 400))")
-    (fenced "The task's state." "(my.task/status)")
-    (fenced "The rows again." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
-    (fenced "A small value." "(+ 1 2)")
-    (fenced "Done reading." "(my.turn/wait)")]})
+   [(calls "Read the function the plan names." "(clojure.repl/source seon.ref/shown)")
+    (calls "A table of rows." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (calls "A long value." "(vec (range 400))")
+    (calls "The task's state." "(my.task/status)")
+    (calls "The rows again." "(vec (for [i (range 120)] {:i i :name (str \"item-\" i) :tags #{:a :b}}))")
+    (calls "A small value." "(+ 1 2)")
+    (calls "Done reading." "(my.turn/wait)")]})
 
 (def requests
   "The ten requests a live run measures, as a user would ask for them: a short problem
@@ -249,87 +258,100 @@
 (defn same-call
   "The scripted model in a loop (seon.agent-test): every reply makes the same call,
   whatever it saw (the step E dry run's first real design made one pair of calls 18 times)."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [_] "(+ 1 1)")
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] (calls "Add one and one." "(+ 1 1)"))
 
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its
   code holds what it saw before it was made."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [messages]}]
   (if-let [seen (some #(when (= "tool" (:role %)) (edn/read-string (:content %))) (rseq messages))]
-    (str "(+ 1 " (:value seen) ")")
-    "(+ 20 21)"))
+    (calls "Add one to the value the last call showed." (str "(+ 1 " (:value seen) ")"))
+    (calls "Add twenty and twenty-one." "(+ 20 21)")))
 
 (defn calls-one-throws
   "The scripted model of a reply whose second call throws (seon.agent-test): three calls, the
   third never run (docs/prompt.md)."
-  {:malli/schema [:=> [:cat :seon.model/request] [:map [:calls [:vector :string]]]]}
-  [_] {:calls ["(def a 1)" "(throw (ex-info \"boom\" {}))" "(inc a)"]})
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] {:calls [{:prose "Define a." :code "(def a 1)"}
+               {:prose "Throw." :code "(throw (ex-info \"boom\" {}))"}
+               {:prose "Increment a." :code "(inc a)"}]})
+
+(defn two-forms-in-a-call
+  "The scripted model of a reply whose first call holds two forms (seon.agent-test): it is not
+  run, and the call after it is answered not run (docs/prompt.md)."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] {:calls [{:prose "Define g and increment it." :code "(def g 1) (inc g)"}
+               {:prose "Add five and six." :code "(+ 5 6)"}]})
 
 (defn thinking-call
   "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):
-  one form, and the prose beside it (the scripted provider's reply text)."
-  {:malli/schema [:=> [:cat :seon.model/request] [:map [:code :string] [:thinking :string]]]}
-  [_] {:code "(+ 1 2)" :thinking "check the sum before the proof"})
+  one form, and the prose beside it."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] (calls "check the sum before the proof" "(+ 1 2)"))
 
 (defn wait-call
   "The scripted model of a session that waits (seon.agent-test): every turn waits for a message
   (my.turn/wait), so each run parks and the next message wakes it (design agent-loop section 2)."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [_] "(my.turn/wait)")
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] (calls "Wait for a message." "(my.turn/wait)"))
 
 (defn fail-call
   "The scripted model of a run that refutes its premise (seon.agent-test): every turn fails the
   task (my.task/fail!), the agent's own verdict."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
-  [_] "(my.task/fail! \"the premise is refuted\" '(= 1 2))")
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] (calls "The premise is refuted, so fail the task." "(my.task/fail! \"the premise is refuted\" '(= 1 2))"))
 
 (defn stages
   "The scripted model of a request's stages on one session (seon.agent-test): the design writes
-  a proof red, registers it and adds to its plan, then ends its turn with prose (done: its proof
-  red and run, its plan changed); the implement and the merge wait (each parks)."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  a proof red, registers it and adds to its plan, a call per form, then ends its turn with a
+  message and no call (done: its proof red and run, its plan changed); the implement and the
+  merge wait (each parks)."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
-  (cond (or (str/ends-with? task "-implement") (str/ends-with? task "-merge")) "(my.turn/wait)"
-        (zero? turn) (fenced "Write the proof, red, and say what implement changes."
-                             (str "(in-ns 'app.stages-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
-                                  "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)\n"
-                                  "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")"))
-        :else "The proof is written and red, and the plan says what implement changes."))
+  (cond (or (str/ends-with? task "-implement") (str/ends-with? task "-merge")) (calls "Wait for a message." "(my.turn/wait)")
+        (zero? turn) (calls "Write the proof, red, and say what implement changes."
+                            "(in-ns 'app.stages-test)"
+                            "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+                            "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)"
+                            "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
+        :else (says "The proof is written and red, and the plan says what implement changes.")))
 
 (defn whole-green
   "The scripted model of a whole task that goes green (seon.agent-test): it writes a proof that
   passes and registers it; the done rule then passes and the run ends, for root to merge."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [turn]}]
   (if (zero? turn)
-    (fenced "Write the proof, and register it."
-            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 1)))\n"
-                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
-    "The proof passes."))
+    (calls "Write the proof, and register it."
+           "(in-ns 'app.whole-test)"
+           "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
+           "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
+    (says "The proof passes.")))
 
 (defn whole-red
   "The scripted model of a whole task whose proof stays red (seon.agent-test): it writes a red
   proof and registers it, then waits (my.turn/wait), so its run parks with the proof red."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [turn]}]
   (if (zero? turn)
-    (fenced "Write the proof, red, and register it."
-            (str "(in-ns 'app.whole-test)\n(clojure.test/deftest t (clojure.test/is (= 1 2)))\n"
-                 "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)"))
-    "(my.turn/wait)"))
+    (calls "Write the proof, red, and register it."
+           "(in-ns 'app.whole-test)"
+           "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+           "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
+    (calls "Wait for a message." "(my.turn/wait)")))
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
   repeats); a swarm task's reply is generated from its index; a merge or design task
-  without a script gets the generic reply of its kind; any other task, prose without code."
-  {:malli/schema [:=> [:cat :seon.model/request] :string]}
+  without a script gets the generic reply of its kind; any other task, a message without a call."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
   (let [nm (subs task (inc (str/index-of task "/")))]
     (if-let [rs (or (get all-replies task) (get all-replies nm))]
       (nth rs (min turn (dec (count rs))))
       (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
           (swarm-reply nm)
-          "No script for this task."))))
+          (says "No script for this task.")))))

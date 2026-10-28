@@ -209,12 +209,11 @@
 
 (defn value-of
   "The value a response r showed (an eval's, :seon.eval/response), read back from its :text (the
-  response printed under its handle, as Clojure prints it: a var among its :values reads as
-  (var x); tagged literals kept; nothing evaluated): its :value, or the last of its :values
-  (each form's value, the last shown once), or nil when that text does not read back (a cut)."
+  response printed under its handle, as Clojure prints it: a var reads as (var x); tagged
+  literals kept; nothing evaluated): its :value, or nil when that text does not read back (a cut)."
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
   [r] (try (let [m (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string (str (:text r))))]
-             (if (contains? m :value) (:value m) (peek (:values m))))
+             (:value m))
            (catch Exception _ nil)))
 
 (defn ask

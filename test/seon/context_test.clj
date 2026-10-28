@@ -142,16 +142,17 @@
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
 
-(deftest a-repair-is-shown-next-turn
-  (let [db (db-with-program)
-        t (task-f db)
-        reply "Here is f.\n```clojure\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))\n```"
-        {:keys [text repairs]} (reader/forgive reply)
-        block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
-    (is (seq repairs) "the reader repaired the extra close")
-    (is (= [{:near {:line 3 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}]
-           (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")))
+(deftest a-repair-is-told-on-its-call
+  ;; owner, 2026-10-28: the forgiving reader may complete a form or make prose a comment, and
+  ;; says exactly what it did on that call's own result (:repaired, docs/prompt.md)
+  (let [code "Here is f.\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))"
+        {:keys [text repairs]} (reader/forgive code)
+        r (context/repaired text repairs)]
+    (is (some #{{:near {:line 2 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}} r)
+        "the extra close: what was dropped, what replaced it, and where")
+    (is (some #{{:near {:line 1 :column 1 :text ";; Here is f."} :inserted ";; "}} r)
+        "and the prose made a comment, told too")
+    (is (= [] (context/repaired "(+ 1 2)" (:repairs (reader/forgive "(+ 1 2)")))) "code that reads is not repaired")))
 
 (deftest only-program-tests-judge
   ;; a deftest in a scratch namespace never merges, so it never judges the branch
@@ -280,7 +281,7 @@
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (docs/render.md, the request is a render)
-  (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
+  (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :content prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
@@ -733,7 +734,7 @@
                                      (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
                                      [b messages])))
             [b0 r0] (request 0 {:seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]})
-            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :content "I call f." :reasoning "why"})
             [_ r1] (request 1 {})]
         (is (= ["system" "user"] (mapv :role r0)) "turn 0: the system prompt, then the page whole")
         (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))

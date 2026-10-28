@@ -177,6 +177,22 @@
            :origin origin :observed (merge (dissoc observed :merge?) taken)}
     (:merge? observed) (assoc :merge? true)))
 
+(defn- call-problem
+  "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
+  result is, or nil: a call is prose and exactly one form (owner, 2026-10-28; docs/prompt.md).
+  Code that does not read is left to the REPL, whose read error says where."
+  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
+  [prose code]
+  (let [forms (reader/read-text code 'user)]
+    (cond
+      (str/blank? prose)
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
+      (and forms (not= 1 (count forms)))
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      (str "one form per call: this code holds " (count forms) " forms; make each its own call. None was run")
+                      {:problem :forms :forms (count forms)}))))
+
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
   branch as it lands (seon.agent/commit!), so a page shows each eval then, not at the turn's end
@@ -294,21 +310,26 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            ;; a call after one that threw is not run: its result says so (seon.repl/not-run, docs/prompt.md)
+            ;; a call that is not prose and one form, or after one that threw, is not run: its one
+            ;; result says why (seon.repl/unrun, docs/prompt.md)
             calls (reduce (fn [acc [i {:keys [id code prose]}]]
                             (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
-                                  shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))
+                                  ;; the reply's text heads its block, on its first call; each call keeps its own prose
                                   req (cond-> {:origin :model :call-id id :call i}
-                                        shown (assoc :prose shown)
+                                        (not (str/blank? prose)) (assoc :prose prose)
                                         content (assoc :content content)
-                                        (not (str/blank? prose)) (assoc :call-prose prose)
                                         (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c)))
                                   threw (some #(when (:ex (:response %)) (:id %)) acc)
-                                  src (:text (reader/forgive code))]
-                              (conj acc (if threw
-                                          {:id id :code code :prose shown :not-run true
-                                           :response (let [r (repl/not-run src req threw)] (agent/commit!) r)}
-                                          {:id id :code code :prose shown :response (evaluated! src req)}))))
+                                  ;; the forgiving reader's repairs, told on this call's own result (:repaired)
+                                  {src :text repairs :repairs} (reader/forgive code)
+                                  req (cond-> req (seq repairs) (assoc :repaired (context/repaired src repairs)))
+                                  why (if threw
+                                        (contract/error :seon.turn/not-run #'act! (str "not run: call " threw " of this reply threw before it") {:after threw})
+                                        (call-problem prose src))]
+                              (conj acc (if why
+                                          {:id id :code code :prose prose :not-run (some? threw)
+                                           :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
+                                          {:id id :code code :prose prose :response (evaluated! src req)}))))
                           [] (map-indexed vector (:tool-calls c)))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
