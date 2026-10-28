@@ -567,11 +567,138 @@
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [out] ["nice" "-n" "15" "bin/test" "--prove" "tests" out "--all"])
 
+;; ---- verdicts: a cache by digest, outside the store (docs/merging.md#verdicts-are-a-cache) ----
+
+(defn- key-dir
+  "Key k's directory in the verdict cache at dir (:seon.config.proofs/results-dir): a test's
+  <ns>/<name>, a bin/check step's steps/<step>."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] :string]}
+  [dir k] (str dir "/" (if (string? k) (str "steps/" k) (str (namespace k) "/" (name k)))))
+
+(defn- verdict-path
+  "The file of key k's verdict at digest dg: <digest>.pass.edn for a green, <digest>.red.edn for a
+  red (failed or errored). One file a (digest, status), each written once: green and red both is
+  flaky, so two writers of one digest never lose either."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] :string [:enum :pass :red]] :string]}
+  [dir k dg st] (str (key-dir dir k) "/" dg "." (name st) ".edn"))
+
+(defn read-verdict
+  "The verdict file at path as data ({:key :digest :status ...}, write-verdicts!'s), nil when there
+  is none (never written, or evicted, even between a listing and this read), or :seon.fx/io-error
+  naming it: a file there that cannot be read or is not EDN (corrupt) is that error, never a miss."
+  {:malli/schema [:=> [:cat :string] [:or :nil :seon.error/base :map]]}
+  [path]
+  (try (edn/read-string {:default tagged-literal} (slurp path))
+       (catch java.io.FileNotFoundException _ nil)
+       (catch Throwable e (error #'seon.fx/read-verdict :seon.fx/io-error (str "reading " path ": " (step/error-msg e)) {:path path}))))
+
+(defn stored-results
+  "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key. A green is
+  {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
+  proof, the verdict it was judged by (:cost {:rows :verdict}); a digest cached both green and red is
+  flaky (seon.proofs/verdict), judged red. A test's verdict is a function of its digest, so a red is
+  reused as a green is. Answers the first :seon.fx/io-error a file gives, never a partial answer. dir:
+  the cache's (:seon.config.proofs/results-dir unless given)."
+  {:malli/schema [:function [:=> [:cat [:map-of [:or :qualified-symbol :string] :string]] [:or [:map-of :string :map] :seon.error/base]]
+                  [:=> [:cat :string [:map-of [:or :qualified-symbol :string] :string]] [:or [:map-of :string :map] :seon.error/base]]]}
+  ([cand] (stored-results (cfg/value :seon.config.proofs/results-dir) cand))
+  ([dir cand]
+  (reduce (fn [acc [k dg]]
+            (let [g (read-verdict (verdict-path dir k dg :pass)) r (read-verdict (verdict-path dir k dg :red))]
+              (cond (contract/error? g) (reduced g)
+                    (contract/error? r) (reduced r)
+                    :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
+                                                     (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
+                                                                      :failures (vec (:failures r))}
+                                                               (:cost r) (assoc :cost (:cost r)))))]
+                            (assoc acc dg v)
+                            acc))))
+          {} cand)))
+
+(defn- verdict-files
+  "Key k's cached verdict files, each [digest status file]."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] [:vector [:tuple :string :keyword :any]]]}
+  [dir k]
+  (vec (for [^java.io.File f (or (seq (.listFiles (java.io.File. ^String (key-dir dir k)))) [])
+             :let [[_ dg st] (re-matches #"([^.]+)\.(pass|red)\.edn" (.getName f))] :when dg]
+         [dg (keyword st) f])))
+
+(defn- evict!
+  "Leave key k at most :seon.config.proofs/results-per-test digests, removing the lowest digest
+  strings first (digests are hashes, so which goes is arbitrary, never the oldest: a cache), never kept
+  (the one just written) nor a digest with a red file (a red or a flaky verdict is never laundered by
+  its eviction, so a key red at many digests keeps them all until its files are removed by hand). A
+  file that would not delete stays (an extra digest, never an error). Answers nil."
+  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] :string] :nil]}
+  [dir k kept]
+  (let [files (verdict-files dir k)
+        dgs (sort (distinct (map first files)))
+        red (into #{} (keep (fn [[dg st]] (when (= :red st) dg))) files)
+        excess (- (count dgs) (cfg/value :seon.config.proofs/results-per-test))
+        gone (set (take (max 0 excess) (remove #(or (= kept %) (red %)) dgs)))]
+    (doseq [[dg _ ^java.io.File f] files :when (gone dg)] (.delete f))))
+
+(defn write-verdicts!
+  "Cache what ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes :fns :cost} or a
+  step's {:step :digest ...}) of run ({:id, and :tree or :branch :t}, the writer every file names), with
+  failures ({key [assertion]}, seon.proofs/failures): one file a key at its digest and status, written by
+  write-file (staged, then renamed over), then the key's excess evicted. A flaky result (judged, not run),
+  an :unreported one (no verdict of its own) and one with no :digest write nothing. Answers {:recorded n},
+  or the first write's :seon.fx/io-error: those verdicts are not cached, so they run again. Nothing is
+  written to the store: a verdict is derived data (docs/merging.md#verdicts-are-a-cache). dir: the cache's
+  (:seon.config.proofs/results-dir unless given)."
+  {:malli/schema [:function [:=> [:cat :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]
+                  [:=> [:cat :string :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]]}
+  ([run ran failures] (write-verdicts! (cfg/value :seon.config.proofs/results-dir) run ran failures))
+  ([dir run ran failures]
+  (let [writer (select-keys run [:id :tree :branch :t :agent])]
+    (reduce (fn [acc [k r]]
+              (let [st (proofs/status-of r)
+                    v (cond-> {:key k :digest (:digest r) :status st :writer writer}
+                        (:ms r) (assoc :ms (long (:ms r)))
+                        (:ticks r) (assoc :ticks (:ticks r))
+                        (:bytes r) (assoc :bytes (:bytes r))
+                        (seq (failures k)) (assoc :failures (vec (failures k)))
+                        (:cost r) (assoc :cost (:cost r))
+                        (seq (:fns r)) (assoc :fns (into {} (for [{:keys [var calls ticks self-ticks bytes self-bytes]} (:fns r)] [var [calls ticks self-ticks bytes self-bytes]]))))
+                    w (write-file {:req {:path (verdict-path dir k (:digest r) (if (= :pass st) :pass :red))
+                                         :text (sedn/encode v)}})]
+                (if (contract/error? w)
+                  (reduced w)
+                  (do (evict! dir k (:digest r)) (update acc :recorded inc)))))
+            {:recorded 0}
+            (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r)))) ran)))))
+
+(defn last-ms
+  "{test ms} of tests: the most ms any of a test's cached verdicts measured, whatever its digest: what
+  orders a run's deal of tests into shards, never what a test proves. A test with none is left out; an
+  unreadable file is passed over (an order, never a verdict)."
+  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]
+                  [:=> [:cat :string [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]]}
+  ([tests] (last-ms (cfg/value :seon.config.proofs/results-dir) tests))
+  ([dir tests]
+  (into {} (for [t (distinct tests)
+                 :let [ms (keep (fn [[_ _ f]] (let [v (read-verdict (str f))] (when-not (contract/error? v) (:ms v)))) (verdict-files dir t))]
+                 :when (seq ms)]
+             [t (apply max ms)]))))
+
+(defn details
+  "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
+  verdict at that digest measured it: {test {var [calls ticks self-ticks bytes self-bytes]}}."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]
+                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]]}
+  ([cand] (details (cfg/value :seon.config.proofs/results-dir) cand))
+  ([dir cand]
+  (into {} (for [[t dg] cand
+                 :let [v (some #(let [v (read-verdict (verdict-path dir t dg %))] (when (and (map? v) (not (contract/error? v))) v)) [:pass :red])]
+                 :when (seq (:fns v))]
+             [t (:fns v)]))))
+
 (defn test-results
   "Each of tests' status from its result at its digest: plan is what prove's plan wrote in the
   tree it ran in (out/tests.edn: {:digests {test digest}}; nil when the plan never ran), found the
-  results main holds at those digests ({digest result}, the standing root's :results answer, which
-  the run's shards recorded). :pass when a green is recorded (it ran green, or was green at its
+  verdicts cached at those digests ({digest result}, stored-results, which the run's shards wrote).
+  :pass when a green is cached (it ran green, or was green at its
   digest), :fail when a red is (flaky, or a red), :error with none: a run that never reached it
   (its plan or its build failed, it died) says nothing of it passing. The record read, never
   prove's printed output."
@@ -580,17 +707,6 @@
   [plan found tests]
   (into {} (for [t tests :let [r (some-> (get-in plan [:digests t]) found)]]
              [t (cond (nil? r) :error (proofs/green? r) :pass :else :fail)])))
-
-(defn- results-at
-  "The results the results root's main holds at digests (its server's :results op on port, through
-  bin/ask): {digest result}, or the io-error saying why none came."
-  {:malli/schema [:=> [:cat :int [:sequential :string]] :map]}
-  [port digests]
-  (let [{:keys [out]} (sh/sh (str (cfg/checkout) "/bin/ask") (str port) :in (str (sedn/encode {:op :results :digests (vec digests)}) "\n"))
-        r (when-not (str/blank? out) (edn/read-string {:default tagged-literal} out))]
-    (if (map? (:results r))
-      (:results r)
-      (error #'seon.fx/results-at :seon.fx/io-error (str "no results from the root at port " port ": " (or (:seon.error/message r) "its answer holds no :results")) {:path (str port)}))))
 
 (defn branch-head
   "The commit branch names in the repository at repo, or the commit HEAD names when the branch is not
@@ -633,20 +749,15 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
-        ;; the results root, or this root itself when none is named (a test's root), at the port it
-        ;; bound: where the run's shards record and where its results are read back
-        results (let [p (cfg/value :seon.config.proofs/results-port) s (cfg/value :seon.config.root/server-port)]
-                  (cond (pos? p) p (pos? s) s :else (bound-port (cfg/value :seon.config.root/runs-dir))))
         ;; the tree's own environment: what bin/env and bin/root export name this root's checkout,
         ;; and a runner inheriting SEON_SOURCE_ROOT listed its test namespaces from that checkout, not
         ;; the tree it ran in (measured 2026-10-27: the first full run's plan named seon.cron-test,
         ;; a test of the root's working tree that main does not hold, and its shard died at once)
         clean ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
                "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"]
-        at (when (and results (not (contract/error? sha))) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
+        at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
-      (nil? results) (error #'seon.fx/run-tests :seon.fx/io-error (str "no results root: :seon.config.proofs/results-port names none, and this root's bound port is not in " (cfg/value :seon.config.root/runs-dir) "/root.port") {:path dir})
       (not (zero? (:exit at))) (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
       (try
@@ -658,16 +769,16 @@
           (if (and b (not (zero? (:exit b))))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-tests :seon.fx/io-error (str "bin/build seon exited " (:exit b) "; its log: " log) {:path dir}))
-            ;; the tree's shards record on the results root's main, named to them, so the results
-            ;; read below are the ones its run recorded
+            ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
+            ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
-                  r (apply sh/sh (concat clean [(str "SEON_RESULTS_PORT=" results)]
+                  r (apply sh/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
                                          (if all? (full-run-command out) (test-command (sort (distinct (map (comp symbol namespace) tests))) out))
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
                   tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
-                  found (when plan (results-at results (vec (vals (:digests plan)))))]
+                  found (when plan (stored-results (:digests plan)))]
               (cond
                 ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
                 ;; answer, with the end of what it said, never a run whose tests all read :error with no reason

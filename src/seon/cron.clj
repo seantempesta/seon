@@ -2,8 +2,8 @@
   "The cron proc (AGENTS section 4, the one place a schedule may put a message on a queue): at
   the time of day :seon.config.proofs/full-run-at names (UTC, \"hh:mm\"; \"\": never), it puts one
   full-run request for main on the test service's queue (seon.prove, :full mode), and arms the
-  next day's. It decides nothing: the service runs the tests, records what happened and the
-  :test-red rows say which are red.
+  next day's. It decides nothing: the service runs the tests, and their verdicts are cached by
+  digest as any run's are.
   The wait is one core.async timeout to the next time (docs/core-async.md, a delayed message):
   no poll, no ping, nothing runs while it waits. A root started after the time waits for the
   next one (a missed day is not made up: the daily run is the net, and the next one is a day

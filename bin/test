@@ -45,7 +45,7 @@ if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 st=0 P=()
-# each shard a process of its own; its tests' ms are in their results (:ms), on the standing root's main
+# each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/last-ms)
 for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
 # a stalled test is named, never ended: a running shard quiet since its last "started" line past
 # that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test

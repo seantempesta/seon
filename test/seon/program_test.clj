@@ -9,7 +9,7 @@
   definitions are recorded for the merge to judge; a file analyzed without running gives
   the REPL's facts."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
+            [datahike.api :as d] [clojure.java.shell]
             [seon.db :as pdb]
             [seon.program :as program] [seon.docs] [seon.server]
             [seon.proofs :as proofs]
@@ -200,8 +200,8 @@
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
-    (is (= dg (program/program-digest (d/db-with db [{:seon.proof.run/id "main@1" :seon.proof.run/branch "main"}])))
-        "a write of data (a run's fact) leaves it")
+    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+        "a write of data (a message) leaves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn f [x] (inc x))"))) "a replaced form moves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn g [x] x)"))) "an added form moves it")
     (is (not= dg (program/program-digest (d/db-with db [{:schema/key :app.pt-pd/s :schema/form ":int"}]))) "a schema entry moves it")
@@ -446,16 +446,21 @@
     (is (= (program/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
         "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
-(defn- run-plan "bin/test's plan of digests against the results the store on conn holds." [digests conn]
-  (proofs/plan nil digests (proofs/stored-results @conn (vec (vals digests))) #{}))
+(defn- with-dir
+  "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
+  [f] (let [dir (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid))]
+        (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+
+(defn- run-plan "bin/test's plan of digests against the verdicts the cache at dir holds." [digests dir]
+  (proofs/plan nil digests (seon.fx/stored-results dir digests) #{}))
 
 (defn- record-ran!
-  "Record ran ({test result}) on conn as bin/test does, one commit."
-  [conn ran] (proofs/record! (fn [tx] (d/transact conn {:tx-data tx})) @conn {:run {:id "program-test"} :ran ran}))
+  "Cache ran ({test result}) at dir as bin/test does."
+  [dir ran] (seon.fx/write-verdicts! dir {:id "program-test"} ran {}))
 
 (deftest a-second-run-with-nothing-changed-runs-nothing
-  (ts/test-branch!
-   (fn [_ conn]
+  (with-dir
+   (fn [conn]
   (let [db (calc-db)
         digests (select-keys (program/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
         plan #(run-plan digests conn)
@@ -478,7 +483,7 @@
     d))
 
 (deftest a-result-recorded-in-one-checkout-is-reused-in-another
-  (ts/test-branch! (fn [_ conn]
+  (with-dir (fn [conn]
   (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
         a (checkout! "a" files)
         b (checkout! "b" files)
@@ -845,8 +850,8 @@
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
-    (ts/test-branch!
-     (fn [_ rconn]
+    (with-dir
+     (fn [rconn]
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
        (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 

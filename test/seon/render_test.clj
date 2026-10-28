@@ -995,18 +995,6 @@
     (is (< (:part seon.print/budgets) (seon.print.select/estimate plan)) "a plan over a part's budget")
     (is (str/includes? text (subs plan (- (count plan) 60))) "the plan's end is on the page")))
 
-(deftest a-task-already-green-on-main-says-so-first
-  ;; root, 2026-10-27: a task whose proof is green on main says so in turn 1, before its plan
-  (let [[_ branch _] (paged-dbs)
-        db (d/db-with branch (conj (#'seon.context-test/program-facts [['demo/f-test "(deftest f-test (is true))" []]])
-                                   {:seon.proof/latest "demo/f-test" :seon.proof/status :pass}))
-        page (seon.context/page db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
-        text (seon.print/text (vary-meta page assoc :seon.print/full true))
-        at #(str/index-of text %)]
-    (is (some? (at "Already green on main: demo/f-test")) "the page says the proof is green on main")
-    ;; the plan's words (its `code` spans are drawn as code, so its backticks are no text of the page)
-    (is (< (at "Already green on main") (at "answer the tree")) "before the task's plan")))
-
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
   ;; printer, [#'seon.render/html opts value], which the page's serializer expands when it writes the

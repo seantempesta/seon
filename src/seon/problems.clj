@@ -27,10 +27,6 @@
                                     never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
-    :test-red                       a test whose newest result the test service recorded is red
-                                    (seon.prove): closed by a later green, written by nothing
-    :flaky                          a test whose newest result judged green and red at one digest
-                                    (seon.proofs/flaky): red until a change moves its digest
     :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
                                     the gitlink root's source import recorded
 
@@ -716,30 +712,6 @@
                        ;; the changed namespaces its gate could not read, and why
                        (:seon.run/gate-unread p) (assoc :unread (:seon.run/gate-unread p)))]))))
 
-(defn test-reds
-  "Each test whose newest result on main (the test service's, seon.prove/result-tx: the entity per
-  test under :seon.proof/latest) is red, as a :test-red row naming the test, the branch and tx it
-  ran at and the change that asked. A later green is the newer result of that entity, so it closes
-  the row with nothing written; the older result stays in the history. A red on an agent's branch is
-  not on main, so it is not here. A result that judged green and red at one digest
-  (seon.proofs/flaky: its failures say so) is a :flaky row instead (:evidence :flaky true): a
-  defect at its cause, open until a change moves the test's digest. Cost: one datom per test, and a
-  pull per red one."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (vec (for [{:keys [e v]} (d/datoms db :aevt :seon.proof/latest)
-             :when (not= :pass (:v (first (d/datoms db :eavt e :seon.proof/status))))
-             :let [r (d/pull db '[*] e) t (symbol v)
-                   flaky? (boolean (some :flaky (:seon.proof/failures r)))
-                   s (str (if flaky? "flaky " "test-red ") v)]]
-         {:signature s :test t :status (:seon.proof/status r) :open? true :branch (:seon.proof/branch r) :t (:seon.proof/t r)
-          :run (:seon.proof/run r) :change (:seon.proof/change r) :failures (:seon.proof/failures r)
-          :message (str t " is " (if flaky? "flaky (green and red at one digest)" (name (:seon.proof/status r))) " at " (:seon.proof/branch r) " t " (:seon.proof/t r)
-                        (when-let [a (get-in r [:seon.proof/change :agent])] (str ", asked by " (name a))))
-          :producer nil :owner-ns (symbol (namespace t)) :proofs [t]
-          :evidence (cond-> {:kind :test-red :test t :run (:seon.proof/run r) :failures (:seon.proof/failures r)} flaky? (assoc :flaky true))
-          :answered-by (get-in ans [:signature s] []) :at-ms nil})))
-
 (defn- report-with
   "`report` over the answers its caller read; with only (run entity ids) the run classes hold just
   those runs' rows, found without scanning the runs' attributes (`health-moved` carries the rest)."
@@ -759,17 +731,14 @@
                                                        :seon.run/conflicts :seon.run/unmerged :seon.run/task-conflicts])
                                    (mapcat (fn [s] (map :e (d/datoms db :avet :seon.run/status s))) (conj death-statuses :behind)))))
         by-class (apply merge-with into (map #(run-rows db ans %) runs))
-        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))
-        {flaky true reds false} (group-by (comp boolean :flaky :evidence) (test-reds db ans))]
+        failed (mapv #(failed-row db ans %) (es db :seon.task/failure))]
     ^{:seon.render/schema :seon.problems/report}
     {:t (:max-tx db)
      :classes (merge (into {} (for [c counted-classes :let [rows (vec (sort-by (comp - :count) (get errors c)))]]
                                 [c {:n (reduce + 0 (map :count rows)) :rows rows}]))
                      (into {} (for [c run-classes :let [rows (vec (sort-by #(- (or (:end-ms %) 0)) (get by-class c)))]]
                                 [c {:n (count rows) :rows rows}]))
-                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}
-                      :test-red {:n (count reds) :rows (vec reds)}
-                      :flaky {:n (count flaky) :rows (vec flaky)}})}))
+                     {:failed {:n (count failed) :rows (vec (sort-by #(- (or (:at-ms %) 0)) failed))}})}))
 
 (defn report
   "Every problem recorded on main db, by class: {:t :classes {class {:n :rows}}}. Counted

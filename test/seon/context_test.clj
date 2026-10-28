@@ -525,16 +525,6 @@
         r (first (:refused (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})))]
     (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
-(deftest a-proof-green-on-main-is-said
-  ;; 4 of 6 picks for THE PLAN 0.7 were already done on main, found only after turns spent: a
-  ;; written proof whose last result on main is green is named, so the premise is checked first
-  (let [db (db-with-program)]
-    (is (nil? (:green-on-main (context/task-data db (task-f db) false))) "a proof main never ran green: nothing said")
-    (is (= ['demo-test/f-test] (:green-on-main (context/task-data (d/db-with db [{:seon.proof/latest "demo-test/f-test" :seon.proof/status :pass}]) (task-f db) false)))
-        "green on main: named")
-    (is (nil? (:green-on-main (context/task-data (d/db-with db [{:seon.proof/latest "demo-test/f-test" :seon.proof/status :fail}]) (task-f db) false)))
-        "red on main: nothing said")))
-
 (deftest a-cited-task-shows-its-plan-at-that-depth
   ;; wiki audit 2026-10-23 R4: a plan citing another task by its ns/name sees that task's
   ;; plan as a section at the citation's depth, not an unresolved name
