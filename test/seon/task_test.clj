@@ -231,3 +231,14 @@
     (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])]
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
+
+(deftest a-need-on-a-task-declared-in-the-same-write-is-that-task
+  ;; the owner's report: a fresh store's load of every file was refused with a conflicting upsert for a task one entry
+  ;; declares and another names in :needs (seon.ref.edn); not reproduced here in either order or when main already
+  ;; holds the needed task, so this holds the shape: the need and the declaration are one entity
+  (let [decl (fn [n & needs] (cond-> {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "p"} (seq needs) (assoc :seon.task/needs (set needs))))]
+    (doseq [decls [[(decl "a") (decl "b" "demo/a")] [(decl "b" "demo/a") (decl "a")]]]
+      (let [db (ts/test-db)
+            after (d/db-with db (task/load-tx db {'demo decls}))]
+        (is (= #{"demo/a"} (:seon.task/needs (task/task after "demo/b"))) "the need is the declared task")
+        (is (= 2 (count (d/datoms after :aevt :seon.task/id))) "one entity a task")))))
