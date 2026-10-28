@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
-# mode of seon.check: laws, health, contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
+# mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
 # resume, scale N (default N = 100). A run's steps run at once, :seon.config.proofs/jobs at a
@@ -93,6 +93,8 @@ run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
+  # health reads the program store's kept trees, no binary and no store branch (bin/test --health)
+  [[ $1 == health ]] && exec "$ROOT/bin/test" --health "${@:2}"
   # quiet when it works; a seed or a drop that fails prints its own output and the mode's verdict
   # line (AGENTS section 9: a step never ends without one)
   quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }
@@ -172,7 +174,7 @@ u-lmdb-sem() {
 }
 # forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
 u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
-u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" run health }
+u-health() { echo "== health (the program's and the wiki's derived problems: dead citations, unnamed sites, stale sections, orphan pages, unlinked classes)"; step health "" "$ROOT/bin/test" --health }
 u-contracts() { echo "== contracts"; step contracts ":contracted|:uncontracted|^CONTRACTS " run contracts }
 u-test-inputs() { echo "== test-inputs (every test read of a clock, random, environment, sleep or deadline is named with its reason)"; step test-inputs ":unnamed|:named-not-read|^TEST-INPUTS " run test-inputs }
 u-mg-check() {

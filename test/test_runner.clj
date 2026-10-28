@@ -11,7 +11,8 @@
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
-            [seon.edn :as sedn] [seon.error :as error] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]))
+            [seon.edn :as sedn] [seon.error :as error] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
+            [seon.docs :as docs] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
 (defn- test-namespaces
   "Namespace symbols of <tree>/test/**/*_test.clj(c): tree the checkout planned (source-tree, or
@@ -458,6 +459,70 @@
                   (when (seq red) (str ": " (str/join " " red)))))
     (if (and (empty? red) (empty? unstored)) 0 1)))
 
+(defn branch-health
+  "A branch's health (root's ruling, 2026-10-23): what head caused that base had not, the done rule's
+  own reading (seon.problems/caused-split), judged on classes (every class caused-split reads when nil).
+  {:caused [{:class :message}] :attention [{:class :message}] :checks {:no-<class> bool}}: a
+  problem base already had is not the branch's, and is root's to show (its context and page)."
+  [base head classes]
+  (let [{:keys [rows]} (problems/caused-split base head)
+        attention? (:seon.problems/attention (contract/properties :seon.problems/class))
+        derived problems/caused-classes
+        ;; a class asked for that no verdict judges (not read by caused-split, or attention: it never fails a branch) is refused, never a green
+        _ (when-let [bad (seq (remove #(and (derived %) (not (attention? %))) classes))]
+            (throw (ex-info (str "health judges the derived classes that fail a branch, not " (str/join ", " (map name bad))) {})))
+        cs (or (seq classes) (sort derived))
+        made (filterv (comp (set cs) :class) rows)]
+    {:caused (filterv (complement (comp attention? :class)) made)
+     :attention (filterv (comp attention? :class) made)
+     :checks (into {} (for [c cs :when (not (attention? c))]
+                        [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
+
+(defn- tasks-dir
+  "The task files' directory relative to the checkout (:seon.config.root/tasks-dir, which the
+  config holds resolved against it), so it names the same files in a tree extracted elsewhere."
+  [] (str (.relativize (.toPath (io/file (str (config/checkout)))) (.toPath (io/file (config/value :seon.config.root/tasks-dir))))))
+
+(defn- with-wiki
+  "Program db db with the tasks and the wiki of the checkout at dir, by root's own loaders
+  (seon.task/load-tx, then seon.docs/load-dir-tx: a prose word is a citation when it names a task
+  too). A task file that does not read throws its error: no tasks is no answer."
+  [db dir]
+  (let [tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
+        _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))
+        db (d/db-with db tx)]
+    (d/db-with db (docs/load-dir-tx db dir "docs" {}))))
+
+(defn- health!
+  "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
+  base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db
+  and the base the base tree's, both kept in the program store (program-db: a tree it never saw is
+  the nearest kept tree with the changed files refreshed), each with its tasks and wiki (with-wiki):
+  it costs what the trees differ by and two wiki loads, never a root booted or the program imported
+  whole. One line per row the branch caused, one per attention row, the report, and HEALTH OK or
+  HEALTH FAILED. Answers the exit status."
+  [classes]
+  (let [root (str (config/checkout))
+        base (fx/base-commit root)]
+    (if-not base
+      (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
+      (let [store (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+            head (with-wiki (program-db root store) root)
+            ;; the base's tasks and wiki, as git holds them, removed once read
+            dir (str root "/target/tmp/health-base-" base)
+            based (try (with-wiki (program-db root store (fx/tree-of root base))
+                                  (fx/checkout-at root base ["docs" (tasks-dir)] dir))
+                       (finally (sh/sh "rm" "-rf" dir)))
+            {:keys [caused attention checks]} (branch-health based head classes)
+            h (problems/health head)
+            open (reduce + 0 (for [c (or (seq classes) (sort problems/caused-classes))] (get-in h [:classes c :n] 0)))]
+        (doseq [r caused] (println (name (:class r)) (:message r)))
+        (doseq [r attention] (println "attention" (name (:class r)) (:message r)))
+        (println (pr-str {:base base :caused (count caused) :attention (count attention) :open-in-head open :checks checks}))
+        (let [ok (every? val checks)]
+          (println (if ok "HEALTH OK" "HEALTH FAILED"))
+          (if ok 0 1))))))
+
 (defn -main [& args]
   (let [[flag & more] args]
     (System/exit
@@ -467,4 +532,6 @@
                    (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
-        "--store-steps" (store-steps! (first more))))))
+        "--store-steps" (store-steps! (first more))
+        ;; --health [CLASS ...]: bin/check's health step
+        "--health" (health! (map keyword more))))))
