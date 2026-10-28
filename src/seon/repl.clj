@@ -69,7 +69,8 @@
 
 (defn- do-body
   "The text inside a top-level do form's own text src, after its do: what Clojure's compiler
-  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it)."
+  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it),
+  each with its own budget of ticks, as each top-level form has. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string] :string]}
   [src] (subs src (count (re-find #"^\(\s*do\s" src)) (dec (count src))))
 
@@ -95,7 +96,12 @@
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
                    (loop [ns ns prev 0]
-                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))]
+                     (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))
+                           ;; where the reader stopped after the form (an eval never moves it), its text and the comments before it
+                           end (when-not (or (= ::eof form) (instance? Throwable form))
+                                 (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r))))
+                           src (when end (form-src code @starts form end))
+                           lead (when end (reader/lead code prev end))]
                        (cond
                          (= ::eof form) [ns :eof]
 
@@ -105,12 +111,10 @@
                                    :err-text (nrepl/err->msg form {:phase :read-source})})
                            [ns :read])
 
-                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms
-                         (and (seq? form) (= 'do (first form)) (next form)
-                              (some->> (form-src code @starts form (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r))))
-                                       (re-find #"^\(\s*do\s")))
-                         (let [end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
-                               [ns' how] (forms! (do-body (form-src code @starts form end)) ns)]
+                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
+                         ;; the comments before the do leading the first of them
+                         (and (seq? form) (= 'do (first form)) (next form) src (re-find #"^\(\s*do\s" src))
+                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns)]
                            (if (= :eof how) (recur ns' end) [ns' how]))
 
                          :else
@@ -123,9 +127,6 @@
                                [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
                                                         (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
                                                       (catch Throwable e [:err e ns (outer-frames)]))
-                               end (+ (@starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))
-                               lead (reader/lead code prev end)
-                               src (form-src code @starts form end)
                                ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
                                                :repl/src src}
@@ -436,7 +437,7 @@
   references on db, parsed here once by the one reference parser, seon.ref/references, so no
   render parses it again; read on db, the branch as the eval began, so a name the eval itself
   defines is not yet one; none without a db: root's page before main is read), its value in one line, or its error's message (:line, the one printer
-  under the line budget: what a collapsed eval shows), the provider's call id, its reasoning, its run, its costliest
+  under the line budget: an eval's row on the page), the provider's call id, its reasoning, its run, its costliest
   functions and what it recorded."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]

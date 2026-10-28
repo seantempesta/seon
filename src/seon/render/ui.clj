@@ -1437,8 +1437,7 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, the page at a turn
-  (whole, or what changed since the turn before), an eval, an eval sent collapsed to its line, a
-  message, the history the budget left out: every ref kind
+  (whole, or what changed since the turn before), an eval, a message: every ref kind
   seon.context/request names (:seon.turn/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t c]]
