@@ -22,7 +22,9 @@
 (lib/defc c-fcntl "fcntl" [:int :int :varargs :int] :int)
 (lib/defc c-setsockopt "setsockopt" [:int :int :int :pointer :int] :int)
 (lib/defc c-memmove "memmove" [:pointer :pointer :size_t] :pointer)
-(lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true})
+(lib/defc c-sendmsg "sendmsg" [:int :pointer :int] :ssize_t {:blocking true :capture-native-error true})
+(lib/defc c-write "write" [:int :pointer :size_t] :ssize_t {:blocking true :capture-native-error true})
+(lib/defc c-poll "poll" [:pointer :int :int] :int {:blocking true})
 (lib/defc c-recvmsg "recvmsg" [:int :pointer :int] :ssize_t {:blocking true})
 (lib/defc c-recvmsg-nb "recvmsg" [:int :pointer :int] :ssize_t)
 (lib/defc c-recv-nb "recv" [:int :pointer :size_t :int] :ssize_t)
@@ -47,6 +49,13 @@
 (def ^:private F-SETFL 4)
 (def ^:private F-SETOWN 6)
 (def ^:private O-ASYNC 0x40)
+(def ^:private POLLOUT 0x4)
+;; a write's errnos (macOS): retried, waited out, or the peer gone; any other is write-failed
+(def ^:private EINTR 4)
+(def ^:private EAGAIN 35)
+(def ^:private ENOBUFS 55)
+(def ^:private EPIPE 32)
+(def ^:private ECONNRESET 54)
 
 (def BUF
   "Each socket's send and receive buffer, bytes (:seon.config.agent/sock-buf-bytes)."
@@ -236,15 +245,46 @@
 
 ;; ---- writing ----------------------------------------------------------------
 
-(defn- write-all! {:malli/schema [:=> [:cat :seon.lib/fd :seon.ffi/address :int] :seon.sock/sent]}
+(defn- wait-writable!
+  "Wait until fd can take bytes (poll POLLOUT, no timeout): a declared blocking call, so no other
+  fiber runs and writes in the middle of this one's frame."
+  {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
+  [fd]
+  (with-mem [pfd 8] (ffi/write pfd :int fd 0) (ffi/write pfd :uint32 POLLOUT 4) (c-poll pfd 1 -1)))
+
+(declare write-all!)
+
+(defn- write-result
+  "One write's or sendmsg's [r errno] after off of n bytes went: :sent r, :again (EINTR; EAGAIN and
+  ENOBUFS once fd can take bytes again), :epipe (the peer is gone), or :seon.sock/write-failed."
+  {:malli/schema [:=> [:cat :seon.lib/fd [:tuple :int :int] :int :int] [:or [:tuple [:= :sent] :int] [:enum :again :epipe] :seon.sock/write-failed]]}
+  [fd [r e] off n]
+  (cond (>= r 0) [:sent r]
+        (= EINTR e) :again
+        (#{EAGAIN ENOBUFS} e) (do (wait-writable! fd) :again)
+        (#{EPIPE ECONNRESET} e) :epipe
+        :else (contract/error :seon.sock/write-failed #'seon.sock/write-all!
+                              (str "the kernel refused a write to fd " fd " (errno " e ") after " off " of " n " bytes")
+                              {:errno e :fd fd :sent off :of n})))
+
+(defn- done
+  "write-result's end: :epipe as it is; a :seon.sock/write-failed thrown, so no caller drops it."
+  {:malli/schema [:=> [:cat [:or [:= :epipe] :seon.sock/write-failed]] [:= :epipe]]}
+  [w] (if (= :epipe w) w (throw (ex-info (:seon.error/message w) w))))
+
+(defn- write-all!
+  "Write n bytes at p to fd whole, going on from where a short write stopped: true, or :epipe
+  (the peer is gone); a write the kernel refused for another reason throws
+  :seon.sock/write-failed (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
+  {:malli/schema [:=> [:cat :seon.lib/fd :seon.ffi/address :int] :seon.sock/sent]}
   [fd p n]
   (loop [off 0]
     (if (= off n)
       true
-      (let [r (lib/c-write fd (+ p off) (- n off))]
-        (if (neg? r)
-          (if (= 4 (ffi/errno)) (recur off) :epipe) ; EINTR retries
-          (recur (+ off r)))))))
+      (let [w (write-result fd (c-write fd (+ p off) (- n off)) off n)]
+        (cond (vector? w) (recur (+ off (second w)))
+              (= :again w) (recur off)
+              :else (done w))))))
 
 (defn frame
   "v encoded once, as the bytes of one frame (to send to several peers)."
@@ -292,8 +332,8 @@
                     (vec (remove str/blank? (str/split-lines (String. (java.util.Arrays/copyOfRange q 0 nl) "UTF-8"))))))))))))))
 
 (defn send-frame!
-  "Write frame bytes f to fd; with pass-fd, the descriptor travels with them
-  (SCM_RIGHTS). Answers true, or :epipe (the peer is gone)."
+  "Write frame bytes f to fd whole; with pass-fd, the descriptor travels with them
+  (SCM_RIGHTS). Answers true or :epipe (the peer is gone); a refused write throws (`write-all!`)."
   {:malli/schema [:function [:=> [:cat :seon.lib/fd :seon.host/bytes] :seon.sock/sent] [:=> [:cat :seon.lib/fd :seon.host/bytes [:maybe :seon.lib/fd]] :seon.sock/sent]]}
   ([fd ^bytes f] (send-frame! fd f nil))
   ([fd ^bytes f pass-fd]
@@ -309,10 +349,9 @@
          (ffi/write m :uint64 0 0) (ffi/write m :uint32 0 8)
          (ffi/write m :uint64 (ffi/address iov) 16) (ffi/write m :int 1 24)
          (ffi/write m :uint64 (ffi/address ctl) 32) (ffi/write m :uint32 16 40) (ffi/write m :int 0 44)
-         (let [r (c-sendmsg fd m 0)]
-           (cond (neg? r) :epipe
-                 (< r n) (write-all! fd (+ p r) (- n r))
-                 :else true)))))))))
+         ;; the descriptor goes with the first bytes the kernel takes; the rest follows as plain writes
+         (let [w (loop [] (let [w (write-result fd (c-sendmsg fd m 0) 0 n)] (if (= :again w) (recur) w)))]
+           (if (vector? w) (write-all! fd (+ p (second w)) (- n (second w))) (done w))))))))))
 
 (defn send!
   "Encode v and write it as one frame to fd (with pass-fd, a descriptor goes with it)."

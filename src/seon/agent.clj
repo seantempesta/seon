@@ -42,9 +42,11 @@
 ;; first multi-threaded collection).
 
 (defn send!
-  "Send a message {:op k ...} to root, one frame; :dead when root is gone."
-  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:or [:= true] [:= :dead]]]}
-  [m] (if (= :epipe (sock/send! (:fd @state) m)) :dead true))
+  "Send a message {:op k ...} to root, one frame, whole: true. Root gone (:epipe) ends this
+  process, as reading its EOF does, so no caller drops it; a write the kernel refused throws
+  (seon.sock/send!, docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data)."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:= true]]}
+  [m] (if (= :epipe (sock/send! (:fd @state) m)) (lib/c-exit 0) true))
 
 (defn- intake
   "This process's one intake: a channel of root's messages ({:op k ...}, then :dead at EOF or
@@ -217,7 +219,7 @@
 (defn send-message
   "Send body to the agents tos (ids); root delivers it by id. nil."
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
-  [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
+  [tos body] (send! {:op :send :to (vec tos) :body body}) nil)
 
 (def ^:dynamic *waiting*
   "True while the loop waits for an answer of its own (await-op!): a :tests request taken there is
@@ -356,7 +358,7 @@
   (if (= :test (:mode @state))
     (fx-test kind req)
     (let [k (:tx-seq (swap! state update :tx-seq inc))]
-      (when (= :dead (send! (merge opts {:op :fx :k k :kind kind :req req}))) (lib/c-exit 0))
+      (send! (merge opts {:op :fx :k k :kind kind :req req}))
       (swap! state update :fx-pending (fnil assoc {}) k kind)
       k)))
 
@@ -721,9 +723,8 @@
   ;; inherits it and the turn's other readers find it held (branch-changes)
   (branch-changes (:base @state) (db))
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
-    (when (= :dead (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
-                            (seq names) (assoc :names names))))
-      (lib/c-exit 0))
+    (send! (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/program-digest (db)) :mode mode}
+             (seq names) (assoc :names names)))
     (:result (await-op! :reply k :tests)))))
 
 (defn- load-removed!
@@ -1007,7 +1008,7 @@
     (when-not (contract/error? res)
       (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))
             tx (proofs/results-tx {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state)} ran failures)]
-        (when (and (seq tx) (= :dead (send! {:op :record :tx-data tx}))) (lib/c-exit 0))))
+        (when (seq tx) (send! {:op :record :tx-data tx}))))
     (if (contract/error? res)
       res
       (-> res
@@ -1134,7 +1135,7 @@
   (vec (for [[[_ n0 b0] [k n1 b1]] (partition 2 1 (cons [:request t-req-ns nil] marks))]
          (cond-> {:phase k :ms (lib/r2 (/ (- n1 n0) 1e6))} (and b0 b1) (assoc :bytes (- b1 b0))))))
 
-(defn hello! {:malli/schema [:=> [:cat :int :map] [:or [:= true] [:= :dead]]]}
+(defn hello! {:malli/schema [:=> [:cat :int :map] [:= true]]}
   [t-req-ns extra]
   (send! (merge {:op :hello :pid (lib/c-getpid) :start-ms (profile/ms-since t-req-ns) :mem-mb (mem-mb) :t (:max-tx (db))
                  :phases (spawn-phases t-req-ns (conj (:marks @state []) [:hello (profile/now-ns) (profile/alloc-bytes)]))}
