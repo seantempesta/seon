@@ -982,6 +982,37 @@
       (let [st (lib/wait-status mid) ended (wait)]
         (close)
         {:mid st :child ended}))
+   "ends-with-a-gone-pid"
+   ;; a pid already gone when it is watched ends the process at once (its watch's ESRCH)
+   #(let [gone (lib/fork! {:child (fn [] :done) :refused (fn [n] {:refused n}) :parent identity})]
+      (lib/wait-status gone)
+      (lib/fork! {:child (fn [] (lib/end-with! gone false) (sock/recv! (sock/conn (first (sock/socketpair)))))
+                  :refused (fn [n] {:refused n}) :parent lib/wait-status}))
+   "ends-its-group"
+   ;; a process that leads its group ends the group with it: its sibling in the group, parked in a
+   ;; read and watching nothing that ends, ends too
+   #(let [[r w] (sock/socketpair)
+          [hold _] (sock/socketpair)
+          park (fn [_] (sock/recv! (sock/conn hold)))
+          anchor (lib/fork! {:child (fn [] (park nil)) :refused (fn [n] {:refused n}) :parent identity})
+          leader (lib/fork! {:child (fn []
+                                      (lib/c-setpgid 0 0)
+                                      (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                                  :refused park
+                                                  :parent (fn [_] (lib/end-with! anchor false) (park nil))}))
+                             :refused (fn [n] {:refused n}) :parent identity})
+          rd (sock/line-reader r)
+          member (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
+          {:keys [wait close]} (lib/wait-fd-or-exit hold member)]
+      (lib/c-kill anchor 9)
+      (let [st [(lib/wait-status anchor) (lib/wait-status leader)] ended (wait)]
+        (close)
+        {:anchor (first st) :leader (second st) :member ended}))
+   "forks-beside-the-watch"
+   ;; 200 forks from a process whose watcher thread runs: each child runs and exits 0
+   #(do (lib/end-with! (lib/c-getpid) false)
+        (frequencies (for [_ (range 200)]
+                       (lib/fork! {:child (fn [] :ran) :refused (fn [n] {:refused n}) :parent lib/wait-status}))))
    "child-throws"
    ;; a child whose code throws: unwound out of lib/fork! it would run this case's catch in the
    ;; child (exit 7); it ends at fork!, exit 1. One whose code returns exits 0
