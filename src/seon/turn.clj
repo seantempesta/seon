@@ -179,7 +179,7 @@
 
 (defn- call-problem
   "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
-  result is, or nil: a call is prose and exactly one form (owner, 2026-10-28; docs/prompt.md).
+  result is, or nil: a call is prose and exactly one form (docs/prompt.md).
   Code that does not read is left to the REPL, whose read error says where."
   {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
   [prose code]

@@ -368,8 +368,8 @@
 
 (defn response
   "A request's answers (in order) as its one response (:seon.eval/response): its handle, the
-  last form's value (:value, as load-string answers and *1 holds it; owner, 2026-10-28: match
-  Clojure, so (do (+ 1 1) (+ 2 2)) answers 4),
+  last form's value (:value, as load-string answers and *1 holds it, so (do (+ 1 1) (+ 2 2))
+  answers 4; docs/prompt.md),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
   seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
