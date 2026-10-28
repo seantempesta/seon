@@ -1217,18 +1217,23 @@
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
             ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
-            merge (h/html (ui/merge-view {:seon.db/db ours} main base))
-            carries (h/html (ui/divergence-view {:seon.db/db ours} base))
-            gaps (h/html (ui/gaps-view {:seon.db/db ours} base))]
-        (is (str/includes? merge "demo/k") "what main changed since the base")
-        (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
-        (is (str/includes? carries "demo/h") "what the branch's merge carries")
-        (is (not (str/includes? carries "demo/k")) "never main's change")
-        (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
-        (is (not (str/includes? gaps "demo/f")) "never one it did not change")
+            [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
+            b (d/commit-as-db (:store ours) base)
+            ch (seon.merge/delta-changes b ours #{})]
+        (is (nil? caused) "nothing caused")
+        (is (= [gaps carries merge]
+               [(ui/gaps-view ch) (ui/divergence-view ch) (ui/merge-view (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)))])
+            "the one diff draws what each view draws from its own read")
+        (let [merge (h/html merge) carries (h/html carries) gaps (h/html gaps)]
+          (is (str/includes? merge "demo/k") "what main changed since the base")
+          (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
+          (is (str/includes? carries "demo/h") "what the branch's merge carries")
+          (is (not (str/includes? carries "demo/k")) "never main's change")
+          (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
+          (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: its views draw nothing, not a header over an empty answer
         (let [same (d/commit-as-db conn base)]
-          (is (every? nil? [(ui/divergence-view {:seon.db/db same} base) (ui/gaps-view {:seon.db/db same} base) (ui/caused-view {:seon.db/db same} base)])
+          (is (every? nil? (ui/branch-views {:seon.db/db same} base nil))
               "a view with no rows is nil"))))))
 
 (deftest an-unrelated-change-redraws-none-of-the-merge-views

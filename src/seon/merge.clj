@@ -207,7 +207,7 @@
   nothing again): the keys borne, on base or on db, by each entity of a moved datom whose attribute is one a
   key's content reads (the program's, program/attr-namespaces, or declared data, data-attr?), never a platform
   record such as an embedding."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] [:set :seon.merge/program-key]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] [:set :seon.merge/program-key]]}
   [base db data-attrs moved]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
@@ -226,15 +226,17 @@
   platform's records are never walked (a whole :eavt diff read every datom that differs, the
   22,000 embedding datoms of a main that embedded after an agent forked: 313M ticks and 640 MB for
   no key); for :all (every attribute the store declares) the one :eavt diff. Cost: a set, one
-  descent per content attribute and the datoms of those that differ; :all, the datoms that differ."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:sequential :any]]}
+  descent per content attribute and the datoms of those that differ; :all, the datoms that differ.
+  Read once, a vector, so every reader it is passed to reads the same datoms
+  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:vector :seon.host/datom]]}
   [base db data-attrs]
   (if (= :all data-attrs)
-    (apply concat (d/datoms-diff base db :eavt []))
+    (into [] cat (d/datoms-diff base db :eavt []))
     (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)
           content? (fn [a] (and (keyword? a) (or (program/attr-namespaces (namespace a)) (das-b a) (das-d a))))]
-      (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a])))
-              (filter content? (set (concat (keys (:schema base)) (keys (:schema db)))))))))
+      (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
+            (filter content? (set (concat (keys (:schema base)) (keys (:schema db)))))))))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over
@@ -250,7 +252,7 @@
   (task seon.merge/program-cost-follows-what-changed). With ours-moved, the datoms that differ
   between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] :seon.merge/result]]}
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/result]]}
   ([base ours theirs data-attrs] (delta-three-way base ours theirs data-attrs (content-datoms base ours data-attrs)))
   ([base ours theirs data-attrs ours-moved]
    (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))]
@@ -262,8 +264,8 @@
   of those the branch changed too (:conflicts, the keys a merge of main would leave unmerged).
   The three-way a merge runs (delta-three-way), so it costs what changed on each side since base.
   With ours-moved, the datoms that differ between base and ours (`content-datoms`), ours is not diffed again."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:sequential :any]] [:map [:main-moved [:vector :seon.merge/program-key]] [:conflicts [:vector :seon.merge/program-key]]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/readiness]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/readiness]]}
   ([base ours theirs] (readiness base ours theirs (content-datoms base ours #{})))
   ([base ours theirs ours-moved]
    (let [r (delta-three-way base ours theirs #{} ours-moved)]
@@ -273,7 +275,7 @@
   "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
   differ (which a caller already read), nothing is diffed again."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :any]] :seon.merge/changes]]}
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/changes]]}
   ([from to data-attrs] (delta-changes from to data-attrs (content-datoms from to data-attrs)))
   ([from to data-attrs moved]
    (let [ks (vec (touched-by from to data-attrs moved))]

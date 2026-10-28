@@ -767,8 +767,7 @@
   rule refuses (regressions, stray reds, contract gaps), and a test run that failed as a whole;
   the branch's unmerged entries (base, ours, theirs); what happened to the last reply; turns
   left. What its merge carries, whether it can merge, what it changed under the wiki and its
-  tests are the task render's views (seon.render.ui/divergence-view, merge-view, caused-view,
-  tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
+  tests are the task render's views (seon.render.ui/branch-views, tests-view). The messages delivered are the conversation's (`conversation`), not the block's."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :map] :map]}
   [db t {:keys [results reds turn max-turns unmerged truncated? reasons test-run-errors]}]
   (let [{:keys [proofs]} (:seon.task/accumulated t)]

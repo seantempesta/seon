@@ -50,8 +50,8 @@
   failures, source and calls), what else the done rule refuses, a failed test run, the turn of
   how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as
   this turn's observe measured them; what the branch's merge carries, whether it can merge, the
-  stale wiki sections and its tests are the task render's views (seon.render.ui/divergence-view,
-  merge-view, caused-view, tests-view). Before any turn (a model's, or an outside agent's context
+  stale wiki sections and its tests are the task render's views (seon.render.ui/branch-views,
+  tests-view). Before any turn (a model's, or an outside agent's context
   read) has observed the task in this process: :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
   {:malli/schema [:=> [:cat] :any]}
   []
