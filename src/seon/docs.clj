@@ -473,8 +473,16 @@
     (bm25-scores feat avg idf fs lens)))
 
 (defonce ^:private indexes
-  ;; attribute -> [the db's :aevt index it was built from, its text-index]; one slot an attribute, evicted by the next change
+  ;; attribute -> [the fingerprint of its texts, their text-index]; one slot an attribute, replaced by the next change to its texts
   (volatile! {}))
+
+(defn- fingerprint
+  "What the texts of attribute a on db are, as a number: how many, and the sum of the hashes of their entities and
+  values (a string caches its hash), so it moves when a text is added, removed or changed and not when another
+  attribute is written. One read of the attribute's datoms."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] [:tuple :int :int]]}
+  [db a]
+  (reduce (fn [[n h] d] [(inc n) (+ h (* 31 (hash (:e d))) (hash (:v d)))]) [0 0] (d/datoms db :aevt a)))
 
 (defn- build-index
   "The postings of attribute a's texts on db: {:n texts :total characters :lens {e length} :post {term {e count}}}."
@@ -483,7 +491,7 @@
   (let [post (volatile! (transient {})) lens (volatile! (transient {}))
         total (volatile! 0)]
     (doseq [{:keys [e v]} (d/datoms db :aevt a)]
-      (vswap! lens assoc! e (count v))
+      (vswap! lens assoc! e (+ (count v) (get @lens e 0)))
       (vswap! total + (count v))
       (doseq [[w c] (frequencies (terms v))]
         (vswap! post assoc! w (assoc (get @post w {}) e c))))
@@ -492,14 +500,16 @@
 
 (defn text-index
   "The postings of attribute a's texts on db, {:n :total :lens :post}: for each `terms` term, the texts holding it
-  and how many times. Derived data (AGENTS section 5): built once for a value of the attribute's index and reused
-  until the next change to it, and regenerated from db whenever it is gone. See docs/vector.md#search."
+  and how many times. Derived data (AGENTS section 5): built once for the texts as they are (their `fingerprint`;
+  a db value is read again at every deref, so its identity says nothing) and reused until one of them changes,
+  regenerated from db whenever it is gone, never relied on. A race of two readers only builds one twice.
+  See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
   [db a]
-  (let [at (:aevt db) [from ix] (get @indexes a)]
-    (if (and at (identical? at from))
+  (let [fp (fingerprint db a) [from ix] (get @indexes a)]
+    (if (= fp from)
       ix
-      (let [ix (build-index db a)] (vswap! indexes assoc a [at ix]) ix))))
+      (let [ix (build-index db a)] (vswap! indexes assoc a [fp ix]) ix))))
 
 (defn- counts-in
   "The texts of postings ix holding a query word: {e {word count}}, a word counted in every term that contains it

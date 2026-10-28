@@ -81,13 +81,13 @@
 (deftest tokens-cost-the-texts-holding-the-word
   (cost/proof {:of 'seon.docs/tokens :input 'seon.docs-cost-test/tokens-input
                :n "texts the branch holds (search-input's mix), ten of each kind holding the word"
-               :work "a scan of the index's vocabulary, then the postings of the word: each text holding it scored, each hit read and named"
-               :growth :linear
+               :work "a fingerprint of the attribute's texts (one datom read each, about 950 bytes; sorted-set leaves, so a little over linear) and a scan of the index's vocabulary, then the postings of the word: each text holding it scored, each hit read and named"
+               :growth :n-log-n
                ;; measured 2026-10-28: 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000 (the vocabulary's scan, about 190 bytes a
                ;; text); before the postings: 866 KB at 100 with a tenth of the texts holding the word, 16 KB a text of the corpus
-               :per-n {:bytes 300 :calls 0}
-               :fixed {:bytes 1700000 :calls 140}
-               :sizes [100 300 1000]}))
+               :per-n {:bytes 100 :calls 0}
+               :fixed {:bytes 1650000 :calls 100}
+               :sizes [300 600 1000]}))
 
 (defn index-input
   "text-index's arguments at size n: search-input's db and the attribute of a form's source."
@@ -105,7 +105,10 @@
     (let [db2 (d/db-with db [{:db/id "v" :var/name 'app/new} {:form/id "app/new (defn new [] 1)" :form/src "(defn new [] 1)" :form/defines ["v"]}])
           ix (docs/text-index db2 a)]
       (is (= (inc (:n (docs/text-index db a))) (:n ix)) "a changed attribute is read again: the new text is in it")
-      (is (some? (get-in ix [:post "new"])) "its terms are postings"))))
+      (is (some? (get-in ix [:post "new"])) "its terms are postings"))
+    ;; the path search reads: a connection's value, read again with nothing written between
+    (ts/test-branch! (fn [_ conn]
+                       (is (identical? (docs/text-index @conn a) (docs/text-index @conn a)) "two reads of a branch's value share one index")))))
 
 ;; See docs/vector.md#search
 (deftest a-text-index-costs-its-texts
@@ -128,8 +131,8 @@
                ;; 19.17 MB / 2,314 at 1,000, 67.68 MB / 7,714 at 4,000 (before the one bm25: 62.71 MB at 4,000)
                ;; measured 2026-10-28 with the postings (ten texts of each kind holding the word): 2.70 MB / 204 calls at 100, 2.75 MB / 204 at 300,
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
-               :per-n {:bytes 300 :calls 0}
-               :fixed {:bytes 2750000 :calls 210}
+               :per-n {:bytes 800 :calls 0}
+               :fixed {:bytes 2700000 :calls 175}
                :sizes [100 300 1000 4000]}))
 
 (defn citing-input
@@ -154,3 +157,4 @@
      :per-n {:ticks 4000 :bytes 19000 :calls 0}
      :fixed {:ticks 20000 :bytes 300000 :calls 1}
      :sizes [100 300 1000]}))
+
