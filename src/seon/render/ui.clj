@@ -989,9 +989,9 @@
   render should be quite different really from the eval data as the focus for the ui is on the
   prose\"): the prose the agent wrote beside it and its handle (result/e12), which names its value
   wherever the transcript and a printed cut name it; the model reads its content once, in its
-  transcript. Its value is drawn under it, which the browser shows when a person opens it; an
-  agent's eval posts that it was opened (:seon.eval/opened, a fact its next turn takes!), root's
-  (a ctx with no agent key) posts nothing. Its <details> carries its handle's
+  transcript. Opened (:seon.eval/opened: a reader opened it, a fact the agent takes before it draws
+  its page), its value is drawn under it. Root's evals (a ctx with no agent key) post nothing: each
+  holds its value, which the browser shows when it is opened. Its <details> carries its handle's
   anchor (eval-<id>): a handle printed anywhere links here, open or not. Its line says what came of it:
   the error's message, or its value in one line."
   {:seon.render/style "[&>details>summary]:flex [&>details>summary]:flex-wrap [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-x-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
@@ -1019,13 +1019,11 @@
                    ;; an error answered as a value (a function that returns its error) is a failure too
                    err (or ex (when (contract/error? v) v))]
                (if err
-                 [:span {:class "seon-outcome basis-full pl-4 text-red-400"} "✗ " (prose (or (:seon.error/message err) (print/line err (cell))) (cell) {:one-line? true})]
+                 [:span {:class "seon-outcome basis-full pl-4 text-error"} "✗ " (prose (or (:seon.error/message err) (print/line err (cell))) (cell) {:one-line? true})]
                  (when (contains? (:response rec) :value)
-                   [:span {:class "seon-outcome basis-full pl-4 text-green-400"} "→ "
+                   [:span {:class "seon-outcome basis-full pl-4 text-success"} "→ "
                     (prose (print/line (if-let [{sv :value} (render/summarized v)] sv v) (cell)) (cell) {:one-line? true})])))])
-      ;; drawn whether or not it was opened: a person who opens it reads it at once (the agent takes
-      ;; the opened fact at its next turn, which an idle agent never takes)
-      (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent))]]))
+      (when (or opened? (nil? k)) (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
 (defn turn-item
   "A model turn or an outside read of the run (a component over ctx): its header by its schema's
@@ -1265,7 +1263,7 @@
         (when (seq results)
           [:p {:class "flex flex-wrap gap-1 text-2xs"}
            (for [{:seon.proof/keys [status test]} (sort-by (comp str :seon.proof/test) results)]
-             [:span {:class (str "rounded px-1 " (if (= :pass status) "bg-green-900 text-green-300" "bg-red-900 text-red-300")) :title (str test)}
+             [:span {:class (str "rounded px-1 " (if (= :pass status) "bg-base-800 text-success" "bg-base-800 text-error")) :title (str test)}
               (str (if (= :pass status) "✓ " "✗ ") (name (symbol (str test))))])])))]))
 
 (defn root-ctx

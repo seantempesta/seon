@@ -391,7 +391,7 @@
         in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))))
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's task list: its agents' cards")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (is (= 1 (count (in root "#c-rows"))) "root's list: its own evaluation"))
@@ -1004,7 +1004,8 @@
         text (seon.print/text (vary-meta page assoc :seon.print/full true))
         at #(str/index-of text %)]
     (is (some? (at "Already green on main: demo/f-test")) "the page says the proof is green on main")
-    (is (< (at "Already green on main") (at (subs walked-plan 0 30))) "before the task's plan")))
+    ;; the plan's words (its `code` spans are drawn as code, so its backticks are no text of the page)
+    (is (< (at "Already green on main") (at "answer the tree")) "before the task's plan")))
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped): the task's data is a call of the
