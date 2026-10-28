@@ -103,4 +103,8 @@
  {:seon.task/name "a-running-fibers-dump-shows-its-current-frames"
   :seon.task/plan "Found 2026-10-27 (the turn-0 hang, task seon.agent/a-turn-0-prove-does-not-walk-the-checkout): seon's fiber dump (kill -INFO) of a process whose only fiber is running answers 'running fiber, no saved continuation' and names nothing, so the one process that burned 175e9 ticks could not be located in code; its native sample showed only getcwd and directory listing. A running fiber's current frames must be in the dump (Jolt's runtime: the fiber's own stack at the signal, as a parked fiber's saved continuation shows), so the dump of a spinning process names the Clojure function it is in. Belongs to Jolt (a jolt/<topic> branch, AGENTS section 1); owner jolt-compare. Proof: a process spinning in a known function (a loop in a test fixture) dumps that function under its running fiber."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.agent-test/a-dump-of-a-spinning-process-names-its-function}}]
+  :seon.task/proofs #{seon.agent-test/a-dump-of-a-spinning-process-names-its-function}}
+ {:seon.task/name "a-spawns-start-costs-the-same-on-a-bigger-program"
+  :seon.task/plan "Red on main before the 2026-10-28 batch and taken out of seon.agent-test then (the owner's rule: a red of unknown cause the batch did not make leaves its test, named here): an agent spawned after main gained 200 forms has a :state phase of 616,608 bytes against 460,304 before, over the bound 1.1x + 64 KiB. A spawn's own work must not grow with main's program (the owner, 2026-10-25). Find what the :state phase reads or builds per form (seon.agent/spawn-phases; the ctx record's pull, the reach graph or index handed at fork, the branch views), fix it at the cause, and restore the deftest from git (it is a-spawns-start-costs-the-same-on-a-bigger-program in test/seon/agent_test.clj at 139bbb75ff)."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
