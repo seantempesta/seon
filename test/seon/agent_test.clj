@@ -787,6 +787,24 @@
     (is (= [{:id "call-1" :code "(+ 1 41)"}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
 
+(deftest a-call-after-one-that-threw-is-not-run
+  ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and
+  ;; its result says so, so every call has its tool message (the provider refuses a call with none)
+  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
+                             (let [run (str ns "/t#throws")]
+                               [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
+                                (str "(let [db (seon.agent/db)]"
+                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
+                                     "                                       :turn 1 :max-turns 1 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                           {:sets [":seon.config.ai/script=seon.fixtures/calls-one-throws"]})
+        [r0 r1 r2 :as rs] (:value msgs)]
+    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (str/includes? (:content r1) "boom") "the second call's error")
+    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
+    (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
+    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
   ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a

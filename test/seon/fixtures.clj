@@ -262,6 +262,12 @@
     (str "(+ 1 " (:value seen) ")")
     "(+ 20 21)"))
 
+(defn calls-one-throws
+  "The scripted model of a reply whose second call throws (seon.agent-test): three calls, the
+  third never run (docs/prompt.md)."
+  {:malli/schema [:=> [:cat :seon.model/request] [:map [:calls [:vector :string]]]]}
+  [_] {:calls ["(def a 1)" "(throw (ex-info \"boom\" {}))" "(inc a)"]})
+
 (defn thinking-call
   "The scripted model that proves a reply's prose is recorded with its call (seon.agent-test):
   one form, and the prose beside it (the scripted provider's reply text)."

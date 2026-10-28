@@ -488,6 +488,8 @@
                    [:agent {:optional true} :string]]
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
+ ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/not-run): :after, that call's id
+ :seon.turn/not-run [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-run]] [:after :string]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
  ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one

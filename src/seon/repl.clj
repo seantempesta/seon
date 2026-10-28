@@ -498,6 +498,18 @@
                      code req))
           (finally (swap! agent/state assoc :eval outer))))))
 
+(defn not-run
+  "A model's eval call left unrun because call `after` of its reply threw, recorded as an eval
+  whose response is that error (:seon.turn/not-run), so every call of the reply has its result.
+  See docs/prompt.md."
+  {:malli/schema [:=> [:cat :string :map :string] :seon.eval/response]}
+  [code req after]
+  (let [handle (symbol "result" (str "e" (eval-n!)))
+        e (contract/error :seon.turn/not-run #'not-run (str "not run: call " after " of this reply threw before it") {:after after})
+        r (response [{:tag :err :err e}] handle)]
+    (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+    (record! (assoc r :text (print/response-text r (:seen @agent/state) render/summarized)) code req)))
+
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
   when its branch defines one."
