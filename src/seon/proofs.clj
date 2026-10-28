@@ -112,8 +112,9 @@
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
-  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit)."
-  #{"laws" "lmdb-kill" "lmdb-sem" "forks"})
+  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit), health
+  (bin/test --health, over the program store's kept trees)."
+  #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
