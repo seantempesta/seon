@@ -94,7 +94,8 @@
                ;; item (its text, tokens, scores) for at most 100 items a kind. A row is still near's
                ;; coarse datom read and its kind's membership (~1.48 KB, seon.vector/one-scan-ranks-every-kind).
                :per-n {:bytes 1480.0 :calls 0.0}
-               :fixed {:bytes 12400000.0 :calls 845.0}
+               ;; 848 calls at n=450 on 2026-10-28: bm25 shares its per-text scoring with seon.docs/tokens (one more contracted call a bm25)
+               :fixed {:bytes 12400000.0 :calls 850.0}
                :sizes [450 700 1000 2000]}))
 
 (defn ring-of

@@ -442,50 +442,109 @@
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [s] (vec (distinct (terms s))))
 
-(defn- occurrences
-  "How many times word w occurs in lower case text low."
-  {:malli/schema [:=> [:cat :string :string] :int]}
-  [low w]
-  (loop [i 0 n 0]
-    (if-let [j (str/index-of low w i)] (recur (+ j (count w)) (inc n)) n)))
+(defn- idf-of
+  "BM25's idf of a word held by df of n texts."
+  {:malli/schema [:=> [:cat :int :int] :double]}
+  [n df]
+  (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5)))))
+
+(defn- bm25-scores
+  "Each text's BM25 term, fs its word counts and lens its lengths, against the corpus' average length avg
+  and each word's idf (the parameters of `bm25`)."
+  {:malli/schema [:=> [:cat :map :double :map [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
+  [{k1 :bm25-k1 b :bm25-b} avg idf fs lens]
+  ;; over each text's own counts: a text holding no query word (an empty map) allocates nothing
+  (mapv (fn [f len] (reduce-kv (fn [acc w c] (if-let [i (when (pos? c) (idf w))]
+                                              (+ acc (* i (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg)))))))) acc))
+                               0.0 f))
+        fs lens))
 
 (defn bm25
   "Each text's BM25 score (Robertson and Zaragoza 2009; k1 and b :seon.config.render/relevance-features's
   :bm25-k1 and :bm25-b) for query words qs, fs each text's word counts and lens its length (in whatever
   unit, the same for every text); its idf counted over fs, so the texts scored are their own corpus and no
-  index is read. In fs's order. The one text ranking: search's (`tokens`) and relevance's
-  (seon.context/relevance)."
+  index is read. In fs's order. The one text ranking: relevance's (seon.context/relevance) pool, and the
+  term `tokens` scores the store's texts by from their index (`text-index`)."
   {:malli/schema [:=> [:cat [:set :string] [:sequential [:map-of :string :int]] [:sequential number?]] [:vector number?]]}
   [qs fs lens]
-  (let [{k1 :bm25-k1 b :bm25-b} (cfg/value :seon.config.render/relevance-features)
+  (let [feat (cfg/value :seon.config.render/relevance-features)
         n (count fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
-        idf (into {} (for [w qs :let [df (reduce #(if (pos? (get %2 w 0)) (inc %1) %1) 0 fs)]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
-    ;; over each text's own counts: a text holding no query word (most of them, an empty map) allocates nothing
-    (mapv (fn [f len] (reduce-kv (fn [acc w c] (if-let [i (when (pos? c) (idf w))]
-                                                 (+ acc (* i (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg)))))))) acc))
-                                 0.0 f))
-          fs lens)))
+        idf (into {} (for [w qs :let [df (reduce #(if (pos? (get %2 w 0)) (inc %1) %1) 0 fs)]] [w (idf-of n df)]))]
+    (bm25-scores feat avg idf fs lens)))
+
+(defonce ^:private indexes
+  ;; attribute -> [the fingerprint of its texts, their text-index]; one slot an attribute, replaced by the next change to its texts
+  (volatile! {}))
+
+(defn- fingerprint
+  "What the texts of attribute a on db are, as a number: how many, and the sum of the hashes of their entities and
+  values (a string caches its hash), so it moves when a text is added, removed or changed and not when another
+  attribute is written. One read of the attribute's datoms."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] [:tuple :int :int]]}
+  [db a]
+  (reduce (fn [[n h] d] [(inc n) (+ h (* 31 (hash (:e d))) (hash (:v d)))]) [0 0] (d/datoms db :aevt a)))
+
+(defn- build-index
+  "The postings of attribute a's texts on db: {:n texts :total characters :lens {e length} :post {term {e count}}}."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
+  [db a]
+  (let [post (volatile! (transient {})) lens (volatile! (transient {}))
+        total (volatile! 0)]
+    (doseq [{:keys [e v]} (d/datoms db :aevt a)]
+      (vswap! lens assoc! e (+ (count v) (get @lens e 0)))
+      (vswap! total + (count v))
+      (doseq [[w c] (frequencies (terms v))]
+        (vswap! post assoc! w (assoc (get @post w {}) e c))))
+    (let [lens (persistent! @lens)]
+      {:n (count lens) :total @total :lens lens :post (persistent! @post)})))
+
+(defn text-index
+  "The postings of attribute a's texts on db, {:n :total :lens :post}: for each `terms` term, the texts holding it
+  and how many times. Derived data (AGENTS section 5): built once for the texts as they are (their `fingerprint`;
+  a db value is read again at every deref, so its identity says nothing) and reused until one of them changes,
+  regenerated from db whenever it is gone, never relied on. A race of two readers only builds one twice.
+  See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
+  [db a]
+  (let [fp (fingerprint db a) [from ix] (get @indexes a)]
+    (if (= fp from)
+      ix
+      (let [ix (build-index db a)] (vswap! indexes assoc a [fp ix]) ix))))
+
+(defn- counts-in
+  "The texts of postings ix holding a query word: {e {word count}}, a word counted in every term that contains it
+  (a scan of the vocabulary, not of the texts)."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :any [:map-of :string :int]]]}
+  [ix ws]
+  (reduce-kv (fn [m term es]
+               (reduce (fn [m w]
+                         (if (str/includes? term w)
+                           (reduce-kv (fn [m e c] (assoc m e (assoc (get m e {}) w (+ c (get-in m [e w] 0))))) m es)
+                           m))
+                       m ws))
+             {} (:post ix)))
 
 (defn tokens
-  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: `bm25`
-  over each text's occurrences of each word of `words` (its length in characters), a hit in its name counting three
-  times, scored against every text of those kinds, z its score in standard deviations above their mean (every
-  text, those holding no word scoring 0). Only the texts with z >= z-min are answered. The line is the
-  first holding a word. Cost: one scan of each kind's text attribute (lower-casing each text once) and, per
-  hit, its names; the one text ranking of my.agent/search."
+  "The texts on db that hold the words of query s, of kinds, best first, each {:kind :name :z :line :at}: `bm25`'s
+  term over each text's count of each word of `words` (its length in characters), scored against every text of
+  those kinds, z its score in standard deviations above their mean (every text, those holding no word scoring 0). A word is
+  counted in every `terms` term that contains it. Only the texts with z >= z-min are answered. The line is the
+  first holding a word. Cost: a scan of the vocabulary of `text-index` (built once a change of the store, not a
+  query) and the postings of the words, and per hit its text and names; the one text ranking of my.agent/search.
+  See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
   [db s kinds z-min]
   (let [ws (words s)
         attrs (distinct (keep text-attrs kinds))
-        docs (for [a attrs {:keys [e v]} (d/datoms db :aevt a)
-                   :let [low (str/lower-case v)
-                         tf (reduce (fn [m w] (let [c (occurrences low w)] (if (pos? c) (assoc m w c) m))) {} ws)]]
-               {:a a :e e :v v :low low :tf tf :len (count v)})
-        n (count docs)]
+        ixs (map #(vector % (text-index db %)) attrs)
+        n (reduce + (map (comp :n second) ixs))]
     (if (or (empty? ws) (zero? n))
       []
-      (let [scores (bm25 (set ws) (mapv :tf docs) (mapv :len docs))
-            scored (for [[d sc] (map vector docs scores) :when (seq (:tf d))] (assoc d :score sc))
+      (let [docs (for [[a ix] ixs [e tf] (counts-in ix ws)] {:a a :e e :tf tf :len (get (:lens ix) e)})
+            avg (max 1.0 (/ (reduce + 0.0 (map (comp :total second) ixs)) n))
+            idf (into {} (for [w ws] [w (idf-of n (count (filter #(pos? (get (:tf %) w 0)) docs)))]))
+            feat (cfg/value :seon.config.render/relevance-features)
+            scored (map #(assoc %1 :score %2) docs (bm25-scores feat avg idf (map :tf docs) (map :len docs)))
             sum (reduce + (map :score scored))
             sumsq (reduce + (map #(* (:score %) (:score %)) scored))
             mean (/ sum n)
@@ -494,7 +553,7 @@
           []
           (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
                            h (named-hits db (:e d) (:a d) kinds (fn [t] (some #(str/includes? (str/lower-case t) %) ws)))
-                           :let [low (:low d) v (:v d)
+                           :let [v (:v (first (d/datoms db :eavt (:e d) (:a d)))) low (str/lower-case v)
                                  i (some->> ws (keep #(str/index-of low %)) seq (apply min))]]
                        (cond-> (assoc h :z z :bm25 (:score d))
                          (and i (= (count low) (count v)))
