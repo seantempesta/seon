@@ -58,7 +58,7 @@
   derived and never authored; each absent when it cites none."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
   [db decl]
-  (let [text (cited-text decl) ns (set (program/program-names db (ref/names text))) as (set (ref/addresses text))]
+  (let [doc (ref/parse nil (cited-text decl)) ns (set (program/program-names db (ref/names doc))) as (set (ref/addresses doc))]
     (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems
@@ -570,6 +570,21 @@
                 (file-refused ns-sym (str "an entry is not a :seon.task/declaration: " (print/text bad (:part print/budgets))))
                 ds)))))
 
+(defn- held-tasks
+  "What load-tx judges of the tasks on db, id -> {:seon.task/ns :seon.task/execution :seon.task/needs (ids)}: four
+  :aevt scans (~2.5 MB for 452 tasks), where `tasks` pulled every member of every task (46 MB) for these four."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.task/id :map]]}
+  [db]
+  (let [scan (fn [a] (reduce (fn [m dt] (update m (:e dt) (fnil conj []) (:v dt))) {} (d/datoms db :aevt a)))
+        ids (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/id))
+        ns-of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/ns))
+        ex-of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/execution))
+        needs (scan :seon.task/needs)]
+    (into {} (for [[e id] ids]
+               [id (cond-> {:seon.task/needs (into #{} (map ids) (needs e))}
+                     (ns-of e) (assoc :seon.task/ns (ns-of e))
+                     (ex-of e) (assoc :seon.task/execution (ex-of e)))]))))
+
 (defn load-tx
   "The transaction reconciling task files into main db. files: {owning-ns declarations or
   error}, every file read (a file not given is not judged). Answers the tx-data, or the
@@ -581,7 +596,7 @@
     (let [decls (into {} (for [ds (vals files) d ds] [(task-id (:seon.task/ns d) (:seon.task/name d)) d]))
           owners (set (keys files))
           stored (into {} (d/q '[:find ?id ?s :where [?e :seon.task/declared ?s] [?e :seon.task/id ?id]] db))
-          all (tasks db)
+          all (held-tasks db)
           new (vec (for [[id d] decls :when (not (all id))] d))
           changed (vec (for [[id d] decls :when (and (all id) (not= d (some-> (stored id) sedn/decode)))] [id d]))
           removed (vec (for [[id _] stored :when (and (not (decls id)) (owners (:seon.task/ns (all id))))] id))

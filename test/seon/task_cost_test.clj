@@ -109,3 +109,25 @@
      :per-n {:bytes 31000}
      :fixed {:calls 2 :bytes 300000}
      :sizes [10 100 1000]}))
+
+(defn loaded-of
+  "The input of size n: a main db holding n tasks loaded from their file (each with its declaration stored), and the
+  same file read again."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :symbol :any]]]}
+  [n]
+  (let [db (ts/test-db)
+        files {'demo (vec (for [i (range n)] {:seon.task/name (str "t" i) :seon.task/ns 'demo :seon.task/plan "p"
+                                              :seon.task/needs (if (zero? (mod i 5)) #{} #{(str "demo/t" (dec i))})}))}]
+    [(d/db-with db (task/load-tx db files)) files]))
+
+(deftest an-unchanged-load-reads-four-members-of-each-task
+  (cost/proof
+    {:of 'seon.task/load-tx :input 'seon.task-cost-test/loaded-of
+     :n "tasks on main, all unchanged"
+     :work (str "four :aevt scans (id, ns, execution, needs: ~4 datoms a task, one map entry each) in place of a "
+                "pull of every member of every task (`seon.task/tasks`: ~93 KB a task on main, 46 MB for 452), and "
+                "the stored declaration of each task decoded to compare it; nothing is written")
+     :growth :linear
+     :per-n {:ticks 20000.0 :bytes 180000.0 :calls 6.0}
+     :fixed {:ticks 100000.0 :bytes 200000.0 :calls 20.0}
+     :sizes [10 100 300]}))

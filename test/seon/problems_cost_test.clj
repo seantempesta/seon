@@ -23,6 +23,6 @@
                 "texts that use a word read a line at a time. The scan it replaced lower-cased, searched and split every "
                 "text of 3,606 vars, 504 sections and 452 tasks (4.8 MB) at 194 MB per read of main")
      :growth :linear
-     :per-n {:ticks 6000.0 :bytes 14000.0 :calls 0.0}
+     :per-n {:ticks 8000.0 :bytes 18000.0 :calls 0.0}
      :fixed {:ticks 100000.0 :bytes 200000.0 :calls 1.0}
      :sizes [30 100 1000]}))

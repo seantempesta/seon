@@ -332,10 +332,19 @@
   "A code span or prose word read as a based path (its first segment one of the checkout's
   top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as
   written, not ending in *), a namespace (one dotted simple symbol, resolve-only: a reference
-  only when it names a namespace, v1's rule), or nil: prose or code."
+  only when it names a namespace, v1's rule), or nil: prose or code. A span that is one plain qualified
+  symbol (`ns/name`: a letter first, the namespace letters, digits, - _ and ., the name letters, digits and
+  - _ ? ! * < > =  +) is that symbol without the reader (a read was ~13 us and 16 KB, 52 a task declaration)."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
-  [span]
-  (let [cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":"])]
+  [^String span]
+  (let [plain? (fn [] (let [n (.length span) i (.indexOf span "/")
+                            ok? (fn [from to extra]
+                                  (and (< from to) (Character/isLetter (.charAt span from))
+                                       (loop [j (inc from)]
+                                         (or (= j to) (and (or (Character/isLetterOrDigit (.charAt span j)) (<= 0 (.indexOf ^String extra (int (.charAt span j)))))
+                                                           (recur (inc j)))))))]
+                        (and (pos? i) (not= \. (.charAt span (dec i))) (ok? 0 i "-_.") (ok? (inc i) n "-_?!*<>=+"))))
+        cut (reduce (fn [m s] (if-let [i (str/index-of span s)] (min m i) m)) (count span) ["/" "#" ":"])]
     (if (contains? @roots (subs span 0 cut))
       (when-not (or (str/index-of span " ") (str/index-of span "\t"))
         (if-let [cited (line-citation span)]
@@ -346,9 +355,11 @@
       (if-not (str/index-of span "/")
         (when (namespace-name? span) {:seon.ref/name (symbol span) :seon.ref/resolve-only true})
         (when (and (not (str/index-of span " ")) (not (str/index-of span "\t")) (not (str/ends-with? span "*")))
-          (let [[x & more] (reader/read-text span 'user)]
-            (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= span (str x)))
-              {:seon.ref/name x})))))))
+          (if (plain?)
+            {:seon.ref/name (symbol span)}
+            (let [[x & more] (reader/read-text span 'user)]
+              (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= span (str x)))
+                {:seon.ref/name x}))))))))
 
 (defn- link-candidate
   "A link destination as a candidate: one with a scheme (https:, mailto:) is no reference; an
@@ -656,16 +667,16 @@
   ([db path text] (kept db (cited (:seon.ref/citations (parse path text))))))
 
 (defn names
-  "The qualified symbols text cites, at any depth, once each in first-mention order."
-  {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
+  "The qualified symbols text cites (the text, or its `parse`, read once for several questions), at any depth, once each in first-mention order."
+  {:malli/schema [:=> [:cat [:or :string :seon.ref/document]] [:vector :qualified-symbol]]}
   [text]
   (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (distinct))
-        (:seon.ref/citations (parse nil text))))
+        (:seon.ref/citations (if (string? text) (parse nil text) text))))
 
 (defn addresses
   "The wiki sections text cites (a page's path with a section's anchor), as their addresses, once
   each in first-mention order: names' twin for the sections a text cites."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  {:malli/schema [:=> [:cat [:or :string :seon.ref/document]] [:vector :string]]}
   [text]
   (into [] (comp (filter :seon.ref/anchor) (map #(str (:seon.ref/path %) "#" (:seon.ref/anchor %))) (distinct))
-        (:seon.ref/citations (parse nil text))))
+        (:seon.ref/citations (if (string? text) (parse nil text) text))))
