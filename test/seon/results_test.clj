@@ -123,3 +123,27 @@
          (is (= (get fresh 'a.c-test/cost) (:cost r)) (pr-str r))
          (is (= fresh (proofs/costs {:reports [(assoc (first (:failures r)) :var "#'a.c-test/cost" :cost (:cost r))]}))
              "the reused report (seon.agent/run-tests-forked's) answers proofs/costs as the fresh one did"))))))
+
+(defn- run-of
+  "A test run's answer of n green tests and reds red ones, each red with three failing assertions."
+  [n reds]
+  {:pass n :fail reds :error 0 :ran (+ n reds) :key "b@d"
+   :reports (vec (concat (for [i (range n)] {:type :pass :var (str "#'a.g-test/t" i)})
+                         (for [i (range reds) j (range 3)] {:type :fail :var (str "#'a.r-test/t" i) :message (str "boom " j) :expected "1" :actual "2"})))})
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-tests-answer-costs-its-reds-not-its-tests
+  ;; root, 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports)
+  (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))
+        bound (cfg/value :seon.config.proofs/answer-reds)]
+    (testing "green tests past the proofs cost nothing: n and 2n answer the same bytes but for the counts' digits"
+      (is (< (Math/abs (- (size (run-of 100 0)) (size (run-of 200 0)))) 5)))
+    (testing "the done rule reads it as it reads the whole run: the proof's pass and every red's failures"
+      (let [a (proofs/answer (run-of 50 3) '#{a.g-test/t0})]
+        (is (= '{a.g-test/t0 :pass a.r-test/t0 :fail a.r-test/t1 :fail a.r-test/t2 :fail} (proofs/results a)))
+        (is (= 3 (count (get (proofs/failures a) 'a.r-test/t1))))))
+    (testing "reds past the bound are counted, never carried"
+      (let [a (proofs/answer (run-of 10 (* 2 bound)) #{})]
+        (is (= bound (:reds-left a)))
+        (is (= bound (count (proofs/results a))))
+        (is (< (Math/abs (- (size (run-of 10 (* 2 bound))) (size (run-of 10 (* 4 bound))))) 5) "flat past the bound")))))

@@ -195,6 +195,36 @@
                        (cost-of t) (assoc-in [1 :cost] (cost-of t)))))
      :failures (failures reports)}))
 
+(defn answer
+  "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
+  and :key as they are, and of its :reports only what the done rule reads: one :pass report for each
+  of proofs that passed, every report of a died test, and the failing reports of the first
+  :seon.config.proofs/answer-reds red tests (those among proofs first), each test's first
+  :seon.config.proofs/max-assertions. The rest is counted (:reds-left, the red tests left out) and
+  is in the verdict cache under the run's digests (an agent reads one whole by
+  seon.agent/stored-results). So the answer costs its reds, never the tests run:
+  an agent's whole run was about 3 MB in one frame (root, 2026-10-28). results, failures, costs and
+  died read it as they read the whole run."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
+  [r proofs]
+  (let [reports (vec (:reports r))
+        st (results {:reports reports})
+        dead (died {:reports reports})
+        reds (vec (sort-by (juxt (comp not proofs) str) (keep (fn [[t s]] (when (not= :pass s) t)) st)))
+        bound (cfg/value :seon.config.proofs/answer-reds)
+        kept (set (take bound reds))
+        per (cfg/value :seon.config.proofs/max-assertions)
+        failing (reduce (fn [acc {:keys [type var] :as rep}]
+                          (let [t (test-symbol var)]
+                            (if (and (kept t) (#{:fail :error} type) (< (count (get acc t)) per))
+                              (update acc t (fnil conj []) rep)
+                              acc)))
+                        {} reports)]
+    (cond-> (assoc r :reports (vec (concat (for [t (sort-by str proofs) :when (= :pass (st t))] {:type :pass :var (str "#'" t)})
+                                           (filter #(dead (test-symbol (:var %))) reports)
+                                           (mapcat val (sort-by (comp str key) failing)))))
+      (> (count reds) bound) (assoc :reds-left (- (count reds) bound)))))
+
 ;; ---- what the results answer ------------------------------------------------------------
 
 (defn exercising

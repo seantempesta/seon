@@ -486,6 +486,13 @@
  ;; the rest are counted in the report, not kept. Provenance: the value seon.proofs held as a
  ;; literal (shrink: a bound is a config key). At the bound: later failures of that test go unkept.
  :seon.config.proofs/max-assertions 8
+ ;; Unit: tests. How many red tests a test run's answer carries whole (seon.proofs/answer: each with its
+ ;; first :seon.config.proofs/max-assertions failures and its cost verdict), beside the task's proofs;
+ ;; the rest are counted (:reds-left) and read from the verdict cache by the run's key. Provenance: root,
+ ;; 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports) broke "an
+ ;; eval's answer stays small"; 20 reds is a change that breaks a namespace, named whole. At the bound:
+ ;; the answer names how many it left; each left-out red is read whole at its digest, (seon.agent/stored-results #{test}).
+ :seon.config.proofs/answer-reds 20
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by

@@ -1090,10 +1090,14 @@
     ;; taken by the idle loop (on a main carrier), the loop never waits on the children: a fiber runs
     ;; them and hands the loop what to send root (::say) and then the thunk that finishes the
     ;; answer (::ran); taken inside a wait for its own answer (*waiting*), read inline
+    ;; the answer is the run as the done rule reads it, bounded by its reds (seon.proofs/answer): the
+    ;; whole run is cached by digest before it, so nothing is lost, and the frame stays small
     :tests (let [ch (when-not *waiting* (intake))
                  say (if ch #(a/>!! ch {:op ::say :msg %}) send!)
+                 proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                 answered #(if (and (map? %) (not (contract/error? %))) (proofs/answer % proofs) %)
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
-                                     (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                     proofs
                                      (or (:mode m) :judge)
                                      #(say {:op :tests-started :id (:id m) :pid %})
                                      (some-> (:names m) set)
@@ -1104,8 +1108,8 @@
                                          (let [g (a/io-thread (go say)) died (a/go-monitor g)]
                                            (a/io-thread
                                              (let [done (or (a/<!! g) (let [e (a/<!! died)] #(throw e)))]
-                                               (a/>!! ch {:op ::ran :id (:id m) :finish done})))))))]
-             (when-not (= ::running r) [{:op :tests :id (:id m) :result r :mem-mb (mem-mb)}]))
+                                               (a/>!! ch {:op ::ran :id (:id m) :finish (comp answered done)})))))))]
+             (when-not (= ::running r) [{:op :tests :id (:id m) :result (answered r) :mem-mb (mem-mb)}]))
     ::say [(:msg m)]
     ::ran [{:op :tests :id (:id m) :result ((:finish m)) :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded

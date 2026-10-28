@@ -85,6 +85,7 @@
   [:seon.config.proofs/max-assertions :seon.config.proofs/max-assertions]
   [:seon.config.proofs/results-dir :seon.config.proofs/results-dir]
   [:seon.config.proofs/results-per-test :seon.config.proofs/results-per-test]
+  [:seon.config.proofs/answer-reds :seon.config.proofs/answer-reds]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]
