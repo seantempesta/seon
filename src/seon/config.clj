@@ -358,3 +358,15 @@
   [db]
   (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
                         [k (if (dbu/multival? db k) (set v) v)]))))
+
+(defn provider-at
+  "The model provider as the config stands now: main's root entity on main (from-db: what root wrote
+  at boot and any change since), over this process's own config for a key it does not hold, and the
+  task's own settings over both (the declared :seon.config.* keys its entity holds on task-db, the
+  flattened :seon.task/config): the one resolver (resolve-in: task, model, provider, config) read at
+  the call, never a copy taken at boot. A task naming :seon.config.ai/provider or a model uses it
+  from its next turn; a change to main's config applies at the next turn with no restart."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :seon.task/id]] :seon.model/provider]}
+  [main task-db id]
+  (provider (merge config (from-db main)
+                   (when id (d/pull task-db (keys-declared) [:seon.task/id id])))))

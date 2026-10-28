@@ -14,7 +14,7 @@
   invents one."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.learn :as learn] [seon.docs :as docs] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
-            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm]))
+            [seon.render :as render] [datahike.api :as d] [seon.context :as context] [seon.program :as program] [seon.print :as print] [seon.print.emit :as emit] [seon.print.select :as select] [seon.web.html :as h] [seon.reader :as reader] [seon.cost :as cost] [seon.task :as task] [seon.ctx] [seon.problems :as problems] [seon.edn :as sedn] [datahike.index.interface] [seon.ratom :as ratom] [seon.proofs :as proofs] [seon.merge :as pm] [seon.ref :as ref]))
 
 ;;; --- small formatting helpers -------------------------------------------------
 
@@ -92,6 +92,37 @@
   (let [p (prose s budget)]
     ;; a cut holds its marker element, which highlighting (it rewrites the code's text) would remove
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
+
+(defn task-title
+  "A task's id as a person reads it: its name in words, its first letter capital (seon.print/a-long-string
+  becomes \"A long string\"); a run's id names its task before its #. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [id]
+  (let [s (str/replace (name (symbol (first (str/split id #"#")))) "-" " ")]
+    (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
+
+(defn markdown
+  "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
+  parse (seon.ref/scan): a heading at its level, a paragraph, a list (numbered when its first
+  marker is a number), a code block highlighted, a quote or a table as its lines. Each block's text
+  is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
+  what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [text]
+  (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+        (for [{:seon.ref/keys [kind from to heading heading-level]} (:seon.ref/blocks (ref/scan text))
+              :let [body (subs text from to)]]
+          (cond
+            (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
+            ;; a code block: indented, or opened by ``` or ~~~ (whose marks are no text of it)
+            (or (= :code kind) (re-find #"\A\s*(```|~~~)" body))
+            (code (str/replace body #"(?m)\A\s*(```|~~~).*\n|\n?\s*(```|~~~)\s*\z" "") (config/value :seon.config.render/value-budget))
+            (= :list kind) (let [ol? (re-find #"\A\s*\d" body)]
+                             (into [(if ol? :ol :ul) {:class (if ol? "list-decimal pl-5" "list-disc pl-5")}]
+                                   (for [item (rest (str/split (str "\n" body) #"\n(?:[-*+]|\d+[.)])\s+"))] [:li item])))
+            (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
+            (= :break kind) [:hr]
+            :else [:p body]))))
 
 (def utc-offset-ms
   "Jolt has no time zones: the local offset is :seon.config.web/utc-offset (`date +%z`)."
@@ -745,8 +776,10 @@
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
         sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))]
     [:section
-     [:h2 "task"]
-     [:p (str id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+     ;; its name as a title (the id's name, words), its namespace and state above it
+     [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
+      (str "task · " (namespace (symbol id)) (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+     [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
      ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
      ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
      ;; prose here, then each section it cites, its text as prose (ctx's :sections), and
@@ -759,16 +792,25 @@
          (list ;; a premise main may already answer comes first, so it is checked in turn 1
                (when-let [g (seq (:green-on-main data))]
                  [:p {:class "seon-prose"} (str "Already green on main: " (str/join ", " g) ". The premise may already hold: reproduce it first, and if the output is right, fail the task with that output now (my.task/fail! \"why\" evidence).")])
-               (when-let [ins (get-in data [:task :seon.task/instructions])]
-               [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})])
-             (when-let [plan (get-in data [:task :seon.task/plan])] [:p {:class "seon-prose"} (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})])
-             (seq (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
-                    (list [:h3 heading " " [:code address]]
-                          [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})])))
-             ;; the rest of its data, an empty entry left out (no proof yet is no :to-prove)
+             ;; how its kind is worked (read first, so the model reads it before the plan), folded for a person
+             (when-let [ins (get-in data [:task :seon.task/instructions])]
+               [:details [:summary "how the agent works it"]
+                [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})]])
+             ;; what the task is: its plan, as the Markdown it is written in
+             ;; drawn as Markdown when it fits its budget, else the printer's cut, which names the form for the rest
+             (when-let [plan (get-in data [:task :seon.task/plan])]
+               (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
+                 (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
+             ;; the rest folds: a person opens what they want, the model reads it all
              (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main))]
                (when (seq shown)
-                 [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown])))))]))
+                 [:details [:summary "proofs and data"]
+                  [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown]]))
+             (when (seq (:sections t))
+               [:details [:summary (str "sections it cites (" (count (:sections t)) ")")]
+                (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
+                  (list [:h3 heading " " [:code address]]
+                        [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))]))))]))
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
@@ -948,11 +990,12 @@
   render should be quite different really from the eval data as the focus for the ui is on the
   prose\"): the prose the agent wrote beside it and its handle (result/e12), which names its value
   wherever the transcript and a printed cut name it; the model reads its content once, in its
-  transcript. Opened (:seon.eval/opened: a reader opened it, a fact that reaches the branch by
-  take!), its value is drawn under it. Root's evals (a ctx with no agent key) post nothing: each
+  transcript. Opened (:seon.eval/opened: a reader opened it, a fact the agent takes before it draws
+  its page), its value is drawn under it. Root's evals (a ctx with no agent key) post nothing: each
   holds its value, which the browser shows when it is opened. Its <details> carries its handle's
-  anchor (eval-<id>): a handle printed anywhere links here, open or not."
-  {:seon.render/style "[&>details>summary]:flex [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  anchor (eval-<id>): a handle printed anywhere links here, open or not. Its line says what came of it:
+  the error's message, or its value in one line."
+  {:seon.render/style "[&>details>summary]:flex [&>details>summary]:flex-wrap [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-x-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
         rec (:seon.eval/record e)
@@ -967,9 +1010,20 @@
              ;; the mockup's collapsed line (claude_scratch/archive/design-agent-view-2026-10-24.md §5): its code's first
              ;; line, its time, its handle; the value only when opened
              ;; the one printer's one-line cut, which names what it left
-             [:code {:class "seon-form"} (prose (or (:code rec) "") (cell) {:one-line? true})]
+             [:code {:class "seon-form min-w-0 flex-1"} (prose (or (:code rec) "") (cell) {:one-line? true})]
              (when-let [ms (get-in rec [:response :ms])] [:span {:class "seon-ms"} (ms-str ms)])
-             [:code {:class "seon-handle"} (str (get-in rec [:response :handle]))]])
+             [:code {:class "seon-handle"} (str (get-in rec [:response :handle]))]
+             ;; what came of it, a line of its own: the error's message in red, else its value (its
+             ;; schema's summary when it declares one, as a prove's one line)
+             (let [{:keys [ex value]} (:response rec)
+                   v (ratom/realize value)
+                   ;; an error answered as a value (a function that returns its error) is a failure too
+                   err (or ex (when (contract/error? v) v))]
+               (if err
+                 [:span {:class "seon-outcome basis-full pl-4 text-error"} "✗ " (prose (or (:seon.error/message err) (print/line err (cell))) (cell) {:one-line? true})]
+                 (when (contains? (:response rec) :value)
+                   [:span {:class "seon-outcome basis-full pl-4 text-success"} "→ "
+                    (prose (print/line (if-let [{sv :value} (render/summarized v)] sv v) (cell)) (cell) {:one-line? true})])))])
       (when (or opened? (nil? k)) (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
 (defn turn-item
@@ -993,8 +1047,10 @@
   status, each red test's first failing assertion by the one printer, and each test whose child died."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
-  (let [failures (proofs/failures r)
-        died (into (sorted-set-by #(compare (str %1) (str %2))) (proofs/died r))]
+  (let [;; its reports only when it still holds them: an agent's select-keys of a prove keeps the schema
+        run (when (:reports r) r)
+        failures (some-> run proofs/failures)
+        died (into (sorted-set-by #(compare (str %1) (str %2))) (some-> run proofs/died))]
     [:section [:h2 "prove"]
      [:p (str (:value (render/summarized (with-meta r {:seon.render/schema :seon.test/proved}))))]
      (when (seq (:proofs r))
@@ -1180,10 +1236,43 @@
                                   [:span {:class "text-text-400 shrink-0"} (some-> (:agent ev) kname)]
                                   [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])])]))
 
+(defn agent-card
+  "An agent of root's as its board shows it (a component over root's ctx, its :agents member eid):
+  its id linking to its page, its status, then its newest run: the task in words, its model, the turns
+  it took of its cap, how it ended or why it waits, and each proof's result. See docs/render.md#the-page."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} eid]
+  (let [a (get-in c [:agents eid])
+        ;; its id, status and runs alone, so another agent's eval redraws no card
+        id (get a :seon.agent/id) status (get a :seon.agent/status)
+        on? (contains? #{:busy :running} status)
+        r (last (sort-by :seon.run/start-ms (vals (ratom/realize (get a :runs)))))
+        {:seon.run/keys [model turns max-turns outcome reason results] run-id :seon.run/id run-status :seon.run/status} r]
+    [:section
+     [:p {:class "flex items-baseline gap-2"}
+      [:span {:class (if on? "text-signal" "text-text-500")} (if on? "●" "○")]
+      [:a {:href (str "/agent/" (kname id)) :class "font-bold text-text-100"} (kname id)]
+      (when status [:span {:class "text-2xs text-text-500"} (name status)])
+      (when model [:span {:class "ml-auto text-2xs text-text-500"} model])]
+     (if-not r
+       [:p {:class "text-xs text-text-500"} "no task yet"]
+       (list
+        [:p {:class "text-sm text-text-100"} (task-title run-id)]
+        [:p {:class "text-xs text-text-300"}
+         (str (when turns (str "turn " turns (when max-turns (str " of " max-turns)) " · "))
+              (kname (or outcome run-status)))
+         (when-not (str/blank? reason) (list " · " [:span {:class "text-text-500"} (prose reason (cell) {:one-line? true})]))]
+        (when (seq results)
+          [:p {:class "flex flex-wrap gap-1 text-2xs"}
+           (for [{:seon.proof/keys [status test]} (sort-by (comp str :seon.proof/test) results)]
+             [:span {:class (str "rounded px-1 " (if (= :pass status) "bg-base-800 text-success" "bg-base-800 text-error")) :title (str test)}
+              (str (if (= :pass status) "✓ " "✗ ") (name (symbol (str test))))])])))]))
+
 (defn root-ctx
   "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
-  (c-side: root, then each agent its ctx holds, by entity id), its head (p-head), its conversation
+  (c-side: root, then each agent its ctx holds, by entity id), its head (p-head), each agent's card
+  (p-task: what it works on and how its run stands, newest first; the user, a person, has none), its conversation
   (c-rows: its evals, in the order written) and its tiles (p-tiles: root's process, then main's
   problems and runs). An
   agent's page shows the same agents list (seon.render.proc's agent page). It reads the ids of its
@@ -1193,6 +1282,8 @@
   [:div {:id "root-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] (for [eid (sort (keys (:agents c)))] [#'agent-side {} eid])]
    [:div {:id "p-head"} [#'root-head {}]]
+   ;; what each agent is doing, newest first
+   [:div {:id "p-task"} (for [eid (sort > (keys (:agents c))) :when (not= :user (get-in c [:agents eid :seon.agent/id]))] [#'agent-card {} eid])]
    [:ol {:id "c-rows"} (for [eid (sort (keys (:evals c)))] [#'eval-item {} eid])]
    [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'runs-tile {}]]])
 

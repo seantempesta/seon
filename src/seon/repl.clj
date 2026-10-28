@@ -335,13 +335,16 @@
 ;; ---- a request's response and its record: one per eval request (a tool call, a typed form) ----
 
 (defn- eval-n!
-  "The next eval's number: one more than the evals this agent's branch records, counted once a
-  process (so a handle is unique across restarts of the branch's agents), then this process's
-  count; a process holding no branch (root) counts from 0."
+  "The next eval's number: one more than the highest e<n> this agent's branch records, read once a
+  process (so a handle is unique across restarts of the branch's agents, an eval cut off before
+  its record included), then this process's count; a process holding no branch (root) counts
+  from 0. See docs/agent.md#your-turn."
   {:malli/schema [:=> [:cat] pos-int?]}
   []
   (let [from (when-not (:eval-n @agent/state)
-               (if-let [db (:db @agent/state)] (count (d/datoms db :aevt :seon.eval/id)) 0))]
+               (if-let [db (:db @agent/state)]
+                 (transduce (keep #(some->> (:v %) (re-matches #"e(\d+)") second parse-long)) max 0 (d/datoms db :aevt :seon.eval/id))
+                 0))]
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
