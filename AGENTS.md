@@ -150,6 +150,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
   - ended when their run ends.
 - **A render.** Every view, the model's context included, is a render declared on the value's schema, over the one printer.
 - **An error is data**, flowing to whoever can fix it. A defect holds its message (per key) until the code is fixed. A typed error goes to the requester, agent or task that can act on it.
+- **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it"). Every wait ends, with its value or a typed error saying why it never will (its peer died, its producer failed, its write was refused); a hang is a defect at the producer that owed the answer, never fixed by a timeout or watchdog. A failure in an eval, a test child, a fiber or a dependency comes back to the requester as an error value, never a crash of the process that asked; the agent fixes it, or messages root when it needs another process.
 
 **A mechanism is built once, and reused everywhere.**
 - Before building anything that waits, retries, admits, holds, spawns, watches a process, answers a request or reads config, find its one implementation: the wiki section where that mechanism lives states the pattern and names its one implementation and owner.
