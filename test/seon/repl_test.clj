@@ -153,10 +153,9 @@
         old @agent/state
         [r1 r2] (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch) :db @conn})
                      [(repl/eval-string "1" {}) (repl/eval-string "2" {})]
-                     (finally (reset! agent/state old)))]
+                     (finally (reset! agent/state old) (d/release conn)))]
     (is (= 'result/e5 (:handle r1)) "after e4, the highest the branch holds: never e4 again")
-    (is (= 'result/e6 (:handle r2)) "then this process's own count")
-    (d/release conn)))
+    (is (= 'result/e6 (:handle r2)) "then this process's own count")))
 
 (defn- runnable
   "The forms text tells an agent to run, in order: each single-backticked code span that is a
