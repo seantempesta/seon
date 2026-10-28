@@ -58,7 +58,7 @@
   derived and never authored; each absent when it cites none."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
   [db decl]
-  (let [doc (ref/parse nil (cited-text decl)) ns (set (program/program-names db (ref/names doc))) as (set (ref/addresses doc))]
+  (let [text (cited-text decl) ns (set (program/program-names db (ref/names text))) as (set (ref/addresses text))]
     (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
 
 (defn citation-problems

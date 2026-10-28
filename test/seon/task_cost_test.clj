@@ -128,6 +128,6 @@
                 "pull of every member of every task (`seon.task/tasks`: ~93 KB a task on main, 46 MB for 452), and "
                 "the stored declaration of each task decoded to compare it; nothing is written")
      :growth :linear
-     :per-n {:ticks 20000.0 :bytes 180000.0 :calls 6.0}
+     :per-n {:ticks 20000.0 :bytes 30000.0 :calls 6.0}
      :fixed {:ticks 100000.0 :bytes 200000.0 :calls 20.0}
      :sizes [10 100 300]}))

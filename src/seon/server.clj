@@ -26,7 +26,7 @@
   turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
   or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
   tasks spelled `:done false, :blocked-by #{}, :runs []` each). With idx, the db's reconciler index (`seon.reconcile/index`) that a caller holds already, none is built (docs/tasks.md)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :map] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.reconcile/index] :map]]}
   ([db] (task-summaries db (r/index db)))
   ([db idx]
     (into (sorted-map)
