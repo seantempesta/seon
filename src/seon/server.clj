@@ -25,10 +25,10 @@
   "Every task on main db: {id {:execution :done :blocked-by :runs [[id status outcome
   turns tokens]] :failure}}: the server's and the e2e harness's one summary. A key says something
   or is left out: :done only when done, :blocked-by and :runs only when there are some (676 held
-  tasks spelled `:done false, :blocked-by #{}, :runs []` each)."
-  {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [idx (r/index db)]
+  tasks spelled `:done false, :blocked-by #{}, :runs []` each). With idx, the db's reconciler index (`seon.reconcile/index`) that a caller holds already, none is built (docs/tasks.md)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.reconcile/index] :map]]}
+  ([db] (task-summaries db (r/index db)))
+  ([db idx]
     (into (sorted-map)
           (for [[id t] (:tasks idx)
                 :let [blocked (r/blocked-by idx id)
@@ -50,7 +50,7 @@
   [db]
   (let [idx (r/index db)
         started (fn [id] (some->> (seq (keep #(:seon.run/start-ms ((:runs idx) %)) (get-in idx [:by-task id]))) (apply max)))
-        all (task-summaries db)
+        all (task-summaries db idx)
         live? (fn [[_ s]] (or (= :running (:execution s)) (seq (:runs s))))]
     {:tasks (apply array-map (mapcat identity (sort-by (comp started key) #(compare %2 %1) (filter live? all))))
      :others (frequencies (map (comp :execution val) (remove live? all)))
