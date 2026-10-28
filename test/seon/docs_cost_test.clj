@@ -81,12 +81,12 @@
 (deftest tokens-cost-the-texts-holding-the-word
   (cost/proof {:of 'seon.docs/tokens :input 'seon.docs-cost-test/tokens-input
                :n "texts the branch holds (search-input's mix), ten of each kind holding the word"
-               :work "a fingerprint of the attribute's texts (one datom read each, about 950 bytes; sorted-set leaves, so a little over linear) and a scan of the index's vocabulary, then the postings of the word: each text holding it scored, each hit read and named"
-               :growth :n-log-n
+               :work "a scan of the index's vocabulary (the db unchanged since the index was checked: its :hash and :max-tx say so, no text is read), then the postings of the word: each text holding it scored, each hit read and named"
+               :growth :linear
                ;; measured 2026-10-28: 1.66 MB / 132 calls at 100 and 300, 1.83 MB / 132 at 1,000 (the vocabulary's scan, about 190 bytes a
                ;; text); before the postings: 866 KB at 100 with a tenth of the texts holding the word, 16 KB a text of the corpus
-               :per-n {:bytes 100 :calls 0}
-               :fixed {:bytes 1650000 :calls 100}
+               :per-n {:bytes 300 :calls 0}
+               :fixed {:bytes 1570000 :calls 100}
                :sizes [300 600 1000]}))
 
 (defn index-input
@@ -107,6 +107,8 @@
       (is (= (inc (:n (docs/text-index db a))) (:n ix)) "a changed attribute is read again: the new text is in it")
       (is (some? (get-in ix [:post "new"])) "its terms are postings"))
     ;; the path search reads: a connection's value, read again with nothing written between
+    (is (identical? (docs/text-index db a) (docs/text-index (d/db-with db [{:schema/key :app/other :schema/form "[:map]"}]) a))
+        "a write to another attribute moves the db, and the texts' fingerprint keeps the index")
     (ts/test-branch! (fn [_ conn]
                        (is (identical? (docs/text-index @conn a) (docs/text-index @conn a)) "two reads of a branch's value share one index")))))
 

@@ -473,7 +473,7 @@
     (bm25-scores feat avg idf fs lens)))
 
 (defonce ^:private indexes
-  ;; attribute -> [the fingerprint of its texts, their text-index]; one slot an attribute, replaced by the next change to its texts
+  ;; attribute -> [the db's [:hash :max-tx] it was checked at, the fingerprint of its texts, their text-index]; one slot an attribute, replaced by the next change to its texts
   (volatile! {}))
 
 (defn- fingerprint
@@ -500,16 +500,20 @@
 
 (defn text-index
   "The postings of attribute a's texts on db, {:n :total :lens :post}: for each `terms` term, the texts holding it
-  and how many times. Derived data (AGENTS section 5): built once for the texts as they are (their `fingerprint`;
-  a db value is read again at every deref, so its identity says nothing) and reused until one of them changes,
+  and how many times. Derived data (AGENTS section 5): built once for the texts as they are (the db's :hash and :max-tx say it is the same value; when it moved, their `fingerprint`: a db value
+  is read again at every deref, so its identity says nothing) and reused until one of them changes,
   regenerated from db whenever it is gone, never relied on. A race of two readers only builds one twice.
   See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword] :map]}
   [db a]
-  (let [fp (fingerprint db a) [from ix] (get @indexes a)]
-    (if (= fp from)
+  (let [at [(:hash db) (:max-tx db)] [was fp ix] (get @indexes a)]
+    (if (= at was)
       ix
-      (let [ix (build-index db a)] (vswap! indexes assoc a [fp ix]) ix))))
+      ;; the db moved (a write to any attribute): its texts are read once for their fingerprint; the index stands when they are the same
+      (let [now (fingerprint db a)
+            ix (if (= now fp) ix (build-index db a))]
+        (vswap! indexes assoc a [at now ix])
+        ix))))
 
 (defn- counts-in
   "The texts of postings ix holding a query word: {e {word count}}, a word counted in every term that contains it
