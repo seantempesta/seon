@@ -96,7 +96,7 @@
   "The write that cancels the tasks among ids that exist on db, and an error for each id that names no
   task (:seon.root/unknown-task): a cancel never makes a task, since an id upserted alone is an entity
   with no namespace, name or plan that every reader of tasks then refuses (a bare name given for
-  ns/name made two such on 2026-10-28 and stopped root's boot). Answers {:tx :unknown errors}."
+  ns/name once made two such and stopped root's boot). Answers {:tx :unknown errors}."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id]] :map]}
   [db ids]
   (let [known? #(some? (pdb/eid db :seon.task/id %))]
