@@ -44,6 +44,13 @@ fi
 unsetopt BG_NICE
 . "$ROOT/bin/env"
 export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
+# a check's fixture tests (app.*) keep their verdicts in this invocation's own cache, removed at exit:
+# in the main tree's shared one a fixture's verdict was reused by the next check run, so the run judged
+# nothing (robust's spin test, fx's test fork; docs/merging.md#verdicts-are-a-cache)
+mkdir -p "$ROOT/target/tmp"
+CHECK_RESULTS=$(mktemp -d "$ROOT/target/tmp/check-results.XXXXXX")
+export SEON_RESULTS_DIR=$CHECK_RESULTS
+trap 'rm -rf "$CHECK_RESULTS"' EXIT
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
 # step's root that found it free took it (the owner's browser then showed a throwaway check
 # root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
@@ -87,7 +94,7 @@ mkdir -p "$ROOT/target/tmp"; "$ROOT/bin/held" --reclaim "$ROOT/target/tmp"
 rm -f "$STARTER"; mkfifo "$STARTER"; exec 7<>"$STARTER"
 export SEON_STARTER_FIFO=$STARTER
 # gone with this run, however it ends but SIGKILL (which no handler sees: bin/held --reclaim removes it)
-trap 'rm -f "$STARTER"' EXIT
+trap 'rm -f "$STARTER"; rm -rf "$CHECK_RESULTS"' EXIT
 trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
 run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&- 3>&-) }
