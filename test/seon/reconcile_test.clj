@@ -152,6 +152,18 @@
           released (d/db-with ended (vec (task/execution-tx ["demo/x"] :running)))]
       (is (= [(spawn "x" 2)] (actions-for released)) "released again, its next run is a new run of the same task"))))
 
+(deftest a-cancel-never-makes-a-task
+  ;; 2026-10-28: a bare name given as a task's id (ns/name) was upserted alone, an entity with no
+  ;; namespace, name or plan, and every reader of tasks refused it at root's next boot
+  (let [db (db-of [(decl "x")])
+        {:keys [tx unknown]} (my.root/cancel-tx db ["demo/x" "x" "demo/none"])
+        after (d/db-with db tx)]
+    (is (= :cancelled (:seon.task/execution (task/task after "demo/x"))) "the task that exists is cancelled")
+    (is (= #{"x" "demo/none"} (set (map :task unknown))) "each id that names no task is answered")
+    (is (= [:seon.root/unknown-task :seon.root/unknown-task] (mapv :seon.error/type unknown)))
+    (is (nil? (pdb/eid after :seon.task/id "x")) "and no task is made for it")
+    (is (nil? (pdb/eid after :seon.task/id "demo/none")))))
+
 (deftest environment-change-restarts-clean
   (let [db (db-of [(decl "x" :model "m1")] :extra (concat (run "x" 1 :running :model "m1")
                                                           (task/env-tx "demo/x" {:model "m2"})))]

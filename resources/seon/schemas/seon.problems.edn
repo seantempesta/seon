@@ -51,6 +51,8 @@
  ;; running, or cancelled; the held ids of the same call are released
  :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
                                              [:execution [:maybe [:enum :held :running :cancelled]]]]]
+ ;; a cancel (my.root/cancel-tx) of an id that names no task: answered, never upserted as a task
+ :seon.root/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/unknown-task]] [:task :string]]]
  ;; my.root/write-back! of a run that lost no write-back (or does not exist), of a root with no source tree,
  ;; or of files main holds no text for: nothing to write
  :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]

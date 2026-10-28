@@ -92,10 +92,29 @@
     (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
       (seq not-running) (assoc :not-running not-running))))
 
+(defn cancel-tx
+  "The write that cancels the tasks among ids that exist on db, and an error for each id that names no
+  task (:seon.root/unknown-task): a cancel never makes a task, since an id upserted alone is an entity
+  with no namespace, name or plan that every reader of tasks then refuses (a bare name given for
+  ns/name made two such on 2026-10-28 and stopped root's boot). Answers {:tx :unknown errors}."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id]] :map]}
+  [db ids]
+  (let [known? #(some? (pdb/eid db :seon.task/id %))]
+    {:tx (task/execution-tx (filterv known? ids) :cancelled)
+     :unknown (vec (for [id ids :when (not (known? id))]
+                     (contract/error :seon.root/unknown-task #'my.root/cancel-tx
+                                     (str "task " id " does not exist (a task's id is ns/name): nothing to cancel")
+                                     {:task id})))}))
+
 (defn cancel!
-  "Cancel tasks ids: a live run is killed; tasks that need them stay blocked."
+  "Cancel the tasks among ids (cancel-tx): a live run is killed; tasks that need them stay blocked. An id
+  that names no task is answered :seon.root/unknown-task under :unknown and written nowhere. Answers the
+  writer's answer (or {:ok true :changed 0} when none exists) with :unknown when any."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
-  [sys ids] @(root/transact-main! sys (task/execution-tx ids :cancelled)))
+  [sys ids]
+  (let [{:keys [tx unknown]} (cancel-tx @(:conn sys) ids)]
+    (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
+      (seq unknown) (assoc :unknown unknown))))
 
 (defn write-back!
   "Write the source files of the merged runs ids (run ids) onto the merges branch again: those a
