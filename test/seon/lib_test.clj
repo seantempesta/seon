@@ -75,10 +75,33 @@
   ;; of the agent for that long. The wait parks through the io poller: a fiber queued before the
   ;; wait runs while the reader waits (the carrier is free only then), so it ran before the line
   ;; came. A poll(2) holding the carrier lets it run only after the read returns: false. The
-  ;; line comes from a thread (no fiber could write it while the carrier is held), 200 ms on, the
-  ;; end of a held carrier's wait; the verdict is which happened first, never how long it took.
-  ;; In a child forked from a main carrier, the reader on the child's own fiber
+  ;; line comes from a thread of the parent process (no fiber could write it while the carrier is
+  ;; held; a thread started in the forked child grew it to 35 GB), 200 ms on, the end of a held
+  ;; carrier's wait; the verdict is which happened first, never how long it took. In a child forked
+  ;; from a main carrier, the reader on the child's own fiber
   (is (= {:exit 0} (fork-case "line-parks")) "a fiber ran while the reader waited"))
+
+(deftest a-process-ends-with-what-it-watches-and-so-does-what-it-forks
+  ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
+  ;; ./seon problems trees outlived the bin/check a timeout killed, 12 h at 0% CPU with ppid 1. A
+  ;; process's C thread ends it when what it watches exits, and fork! arms it again in each child, so
+  ;; a child parked in a read (no Scheme of its own would ever end it) ends with the process it watches
+  (is (= :exited (:child (fork-case "ends-with-its-starter"))) "the child parked in a read ends with mid"))
+
+(deftest a-process-watching-a-gone-pid-ends-at-once
+  ;; task seon.lib/a-child-ends-with-its-starter: a pid already gone when it is watched ends the
+  ;; process at once, though its code would park forever
+  (is (= {:signal 9} (fork-case "ends-with-a-gone-pid"))))
+
+(deftest a-process-that-leads-its-group-ends-the-group
+  ;; task seon.lib/a-child-ends-with-its-starter: the leader watches anchor; anchor is killed; the
+  ;; leader ends its group, so its member, which watches only what still lives, ends with it
+  (is (= {:anchor {:signal 9} :leader {:signal 9} :member :exited} (fork-case "ends-its-group"))))
+
+(deftest a-process-forks-beside-its-watch
+  ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#physics-who-may-run-threads):
+  ;; the watcher is a C thread Chez never made, so 200 forks beside it each run their child
+  (is (= {{:exit 0} 200} (fork-case "forks-beside-the-watch"))))
 
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what

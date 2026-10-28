@@ -170,7 +170,10 @@
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
-  (when boot? (lib/c-setpgid 0 0) (dev-classpath!)
+  ;; the boot server watches root, its parent, and leads the group of every agent, clone, test child and
+  ;; standby, which watch root too (fork! arms them): root's death ends the group even where no Scheme
+  ;; runs to read the EOF (seon.lib/end-with!)
+  (when boot? (lib/c-setpgid 0 0) (lib/end-with! (lib/c-getppid) true) (dev-classpath!)
     (let [dir (get cfg/config :seon.config.agent/cwd)] (.mkdirs (java.io.File. dir)) (lib/c-chdir dir)))
   ;; it reads main's commits from the store itself, opened as an agent opens it
   ;; (seon.db/after-fork!): the parent's handles are not used across fork
