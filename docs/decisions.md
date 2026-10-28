@@ -3,6 +3,10 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in claude_scratch/archive/DECISIONS-superseded.md.
 
 ## 2026-10-28 rulings
+The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
+
+### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
+"I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: AGENTS §4.
 
 ### Derived data may be cached; it is always regenerable from the db at t (owner, 2026-10-28)
 "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
