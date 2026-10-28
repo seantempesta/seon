@@ -1446,9 +1446,7 @@
     :section (str "the help page (its section, entity " x ") as of t " t)
     :page (if t (str "what changed of the page from commit " t " to " c) (str "the page whole at commit " c))
     :eval (str "eval " x)
-    :line (str "eval " x ", sent as its one line")
-    :message (str "message " x)
-    :history (str x " earlier records the history budget left out")))
+    :message (str "message " x)))
 
 (defn- sent-parts-html
   "Parts [[ref messages]] of a sent request, each beside the record that made it, each message

@@ -291,27 +291,7 @@
       (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
-           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {}))))
-  (testing "the history budget sends the newest whole, then older ones whole, then collapsed, never starting inside a reply"
-    (let [part (fn [whole small call] {:cost [whole small] :call call})
-          ;; tokens whole and collapsed, oldest first; the third continues the second's reply
-          parts [(part 400 5 0) (part 10 2 0) (part 10 2 1) (part 10 2 0)]]
-      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30)) "all whole when they fit")
-      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35)) "an older one too large whole is collapsed, not dropped")
-      (is (= [[:whole] 3] (#'context/kept parts 0)) "the newest stays at budget 0")
-      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10)) "a cut never starts inside a reply")
-      (testing "the cuts only advance, in jumps to half the budget, so the prefix holds between them"
-        (let [many (vec (repeat 40 (part 10 2 0)))
-              ;; what each length of the history sends, as [first-sent picks]
-              at (fn [k] (let [[picks dropped] (#'context/kept (subvec many 0 k) 130)] [dropped picks]))
-              moved (vec (for [k (range 2 41) :let [[d0 p0] (at (dec k)) [d1 p1] (at k)]
-                               ;; the earlier request's parts, as this one sends them
-                               :when (not (and (= d0 d1) (= p0 (subvec p1 0 (count p0)))))] k))]
-          (is (= [(into (vec (repeat 2 :line)) (repeat 6 :whole)) 6] (#'context/kept (subvec many 0 14) 130))
-              "past the budget at 14 whole: the oldest collapse until the whole fit in half (6 of 10), then the oldest collapsed are left out until all fits in half")
-          (is (= [14 21 28 35] moved) "the cuts move at four lengths of 39, every 7th; every other request is the one before and what was added")
-          (is (every? (fn [k] (let [[_ p] (at k)] (<= (+ (* 2 (count (filter #{:line} p))) (* 10 (count (filter #{:whole} p)))) 130))) (range 1 41))
-              "and what is sent stays within the budget"))))))
+           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {})))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
@@ -697,12 +677,7 @@
                 (str "turn " n ": its read-back is the bytes it sent"))))
         (let [[_ last-turn] (peek turns)]
           (is (some #(and (vector? %) (= [:eval "e3" {:value 'result/e1}] %)) (:sent last-turn)) "e3's rows are e1's, sent whole: folded")
-          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))
-        (testing "a fold whose record the history no longer sends whole is sent unfolded"
-          (let [p {:ref [:eval "e3" {:value 'result/e1}] :whole [{:role "tool" :content "(:value result/e1)"}] :fold {:value 'result/e1}
-                   :plain [{:role "tool" :content "[{:row 0 …}]"}]}]
-            (is (= [[:eval "e3" {:value 'result/e1}] (:whole p)] (#'context/as-sent p #{"e1" "e3"})) "e1 sent whole: folded")
-            (is (= [[:eval "e3"] (:plain p)] (#'context/as-sent p #{"e3"})) "e1 collapsed or left out: the value itself")))))))
+          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request

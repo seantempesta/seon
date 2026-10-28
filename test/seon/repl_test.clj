@@ -43,6 +43,19 @@
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
+(deftest a-definition-inside-a-top-level-do-is-program
+  ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
+  ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
+  ;; spent 39 turns finding out why (docs/prompt.md)
+  (let [[r branch] (at/in-agent (fn [{:keys [ns task]}]
+                                  [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
+                                   {:op :eval :agent "root"
+                                    :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                               " (some? (datahike.api/entity b [:var/name '" ns ".core/c])))")}]))]
+    (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
+    (is (= 2 (:value r)) "the do's value is its last form's")
+    (is (true? (:value branch)) "the branch's program holds c")))
+
 (deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
   ;; agent's reply to root carries the text, never the live values (which no wire encodes)

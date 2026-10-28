@@ -132,7 +132,7 @@ There is one value printer, `seon.print`, and nothing is cut before it. A value 
 Text for the wire, storage, a digest, a file, a URL, a command line or code to evaluate is `seon.edn/encode` (EDN that reads back, whole: no print limits), and only that var prints beside the printer:
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
-- `seon.context/eval-messages`, `seon.context/request`, `seon.context/parts-of`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`, `{:history {:left-out n}}`) around a response the one printer already printed: the wire, not output.
+- `seon.context/eval-messages`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`) around a response the one printer already printed: the wire, not output.
 - `seon.context/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
@@ -160,6 +160,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
+- `seon.repl/do-body`: the text inside a top-level `(do ...)`'s own text, read again as its forms, each top level as Clojure's compiler takes them: code read, not output.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.

@@ -141,25 +141,6 @@
                :fixed {:calls 10 :bytes 1000000}
                :sizes [200 500 1000]}))
 
-(defn kept-of
-  "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third
-  continuing the one before), whole 1,000 tokens and collapsed 20, at the 32k history budget, so the
-  cuts jump as the history passes it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :map] :int]]}
-  [n] [(vec (for [i (range n)] {:cost [1000 20] :call (if (zero? (mod i 3)) 0 1)})) 32000])
-
-(deftest the-history-cut-is-one-walk-of-the-parts
-  ;; task seon.context/history-steps-hold-below-one-step: the cuts only advance, each part passed once
-  (cost/proof
-    {:of 'seon.context/kept :input 'seon.context-cost-test/kept-of
-     :n "parts of the conversation"
-     :work "each part's two costs summed once (prefix sums), then one walk holding two cuts that only advance: linear in the parts"
-     :growth :linear
-     ;; measured 2026-10-25 (n 100 -> 10,000): 231 ticks and 1.57 KB a part, one contracted call
-     :per-n {:ticks 240.0 :bytes 1600.0 :calls 0.0}
-     :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
-     :sizes [100 300 1000 10000]}))
-
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
   without its write set, as the task part draws it."

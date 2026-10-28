@@ -502,9 +502,8 @@
  :seon.turn/error [:map]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
- ;; sent with (its value or output an earlier record showed: the handle there), an eval sent collapsed
- ;; ([:line id]); the history note's count
- :seon.turn/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :line :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]] [:tuple [:= :history] :int]]]
+ ;; sent with (its value or output an earlier record showed: the handle there)
+ :seon.turn/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]]]
  ;; a model turn's eval calls, each its id, its code and the eval it ran (whose record the
  ;; conversation sends as the call's tool message)
  :seon.turn/calls [:vector [:map [:id :string] [:code :string]
