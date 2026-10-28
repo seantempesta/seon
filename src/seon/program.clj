@@ -1416,7 +1416,7 @@
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
   roots, {key [var ...]}): a key's digest is of its name, :env, :tree when it is a root (a
   check step) and what it reaches reads the tree, or when it reaches a test namespace's form that
-  reads the checkout's files (a file reader, or a var whose own form reads them, :scans: what it judges is the files themselves); any
+  calls a reader of the checkout's files (file-readers, :scans: what it judges is the files themselves); any
   other test never takes the tree: it is digested by what it reaches, a file it reads or a binary
   it runs not in its reach is the full run's to catch, bin/test --all, docs/merging.md), its
   starting forms' components' digests (its forms and their
