@@ -1281,4 +1281,9 @@
     (is (str/includes? html "app.okt/bad-test") "the red test is named")
     (is (str/includes? html "the sum") "with its first failing assertion")
     (is (str/includes? html "died: ") "the dead child is listed")
-    (is (not (str/includes? html "child died")) "and not drawn as a red's failure")))
+    (is (not (str/includes? html "child died")) "and not drawn as a red's failure")
+    ;; an agent's (select-keys (my.agent/prove) [:results ..]) keeps the schema in its metadata and drops
+    ;; :reports: every tile of a1's page threw on proofs/failures' contract (2026-10-28)
+    (let [picked (select-keys (with-meta run {:seon.render/schema :seon.test/proved}) [:pass :fail :proofs])]
+      (is (= :seon.test/proved (r/schema-of picked nil)))
+      (is (str/includes? (h/html (r/html {} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))

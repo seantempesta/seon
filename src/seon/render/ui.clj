@@ -993,8 +993,10 @@
   status, each red test's first failing assertion by the one printer, and each test whose child died."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ r]
-  (let [failures (proofs/failures r)
-        died (into (sorted-set-by #(compare (str %1) (str %2))) (proofs/died r))]
+  (let [;; its reports only when it still holds them: an agent's select-keys of a prove keeps the schema
+        run (when (:reports r) r)
+        failures (some-> run proofs/failures)
+        died (into (sorted-set-by #(compare (str %1) (str %2))) (some-> run proofs/died))]
     [:section [:h2 "prove"]
      [:p (str (:value (render/summarized (with-meta r {:seon.render/schema :seon.test/proved}))))]
      (when (seq (:proofs r))
