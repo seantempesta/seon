@@ -228,6 +228,16 @@
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" (symbol (namespace v) "no-such-var") "`.\n")]
     [(d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page})) v]))
 
+(deftest the-health-step-reads-the-task-files-relative-to-the-checkout
+  ;; test-runner/health!: the config holds :seon.config.root/tasks-dir resolved against the
+  ;; checkout, and the base's task files are read from the base's tree extracted elsewhere, so
+  ;; the step takes the directory relative to the checkout (an absolute one read no base task)
+  (let [rel (#'test-runner/tasks-dir)]
+    (is (not (str/starts-with? rel "/")) rel)
+    (is (= (str (.getCanonicalFile (java.io.File. (str (seon.config/checkout) "/" rel))))
+           (str (.getCanonicalFile (java.io.File. (str (seon.config/value :seon.config.root/tasks-dir))))))
+        "it names the configured directory under the checkout")))
+
 (deftest a-problem-the-base-had-is-not-the-branchs
   (let [[base] (cited-db)
         h (test-runner/branch-health base base nil)]

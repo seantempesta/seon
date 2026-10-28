@@ -151,7 +151,7 @@ if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
 read -r STORE KB0 BR0 <<< "$(run store)"
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed health fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
+STEPS=(seed fx config system mcp threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
