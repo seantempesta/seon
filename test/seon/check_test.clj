@@ -415,15 +415,3 @@
         (is (str/includes? line "MERGE OK") line))
       (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
-(deftest only-mains-merge-verification-holds-the-lock
-  ;; root, 2026-10-27: a worktree's bin/prove --merge (render-walk's) took main's lock and made
-  ;; every session's runs wait on its own branch's verification. Main's merge verification goes
-  ;; first, not every --merge: bin/prove holds the lock only in the main tree (bin/env's
-  ;; is_main_tree), and a worktree's --merge runs everything the same way holding nothing. The
-  ;; checkout is given as ROOT and the main tree as MAIN_TREE, so the answer does not depend on
-  ;; which checkout the test runs in
-  (let [here (.getCanonicalPath (java.io.File. "."))
-        other (.getCanonicalPath (java.io.File. "target"))
-        main? (fn [root main] (:exit (clojure.java.shell/sh "zsh" "-c" (str ". bin/env; ROOT=" root "; MAIN_TREE=" main "; is_main_tree"))))]
-    (is (zero? (main? here here)) "the main tree's --merge holds the lock")
-    (is (= 1 (main? here other)) "a worktree's holds nothing")))

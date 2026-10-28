@@ -459,9 +459,11 @@
   [qs fs lens]
   (let [{k1 :bm25-k1 b :bm25-b} (cfg/value :seon.config.render/relevance-features)
         n (count fs) avg (max 1.0 (/ (reduce + 0.0 lens) (max 1 n)))
-        idf (into {} (for [w qs :let [df (count (filter #(pos? (get % w 0)) fs))]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
-    (mapv (fn [f len] (reduce + 0.0 (for [w qs :let [c (get f w 0)] :when (pos? c)]
-                                      (* (idf w) (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg))))))))))
+        idf (into {} (for [w qs :let [df (reduce #(if (pos? (get %2 w 0)) (inc %1) %1) 0 fs)]] [w (Math/log (+ 1.0 (/ (+ (- n df) 0.5) (+ df 0.5))))]))]
+    ;; over each text's own counts: a text holding no query word (most of them, an empty map) allocates nothing
+    (mapv (fn [f len] (reduce-kv (fn [acc w c] (if-let [i (when (pos? c) (idf w))]
+                                                 (+ acc (* i (/ (* c (inc k1)) (+ c (* k1 (+ (- 1 b) (* b (/ len avg)))))))) acc))
+                                 0.0 f))
           fs lens)))
 
 (defn tokens
@@ -477,13 +479,13 @@
         attrs (distinct (keep text-attrs kinds))
         docs (for [a attrs {:keys [e v]} (d/datoms db :aevt a)
                    :let [low (str/lower-case v)
-                         tf (mapv #(occurrences low %) ws)]]
+                         tf (reduce (fn [m w] (let [c (occurrences low w)] (if (pos? c) (assoc m w c) m))) {} ws)]]
                {:a a :e e :v v :low low :tf tf :len (count v)})
         n (count docs)]
     (if (or (empty? ws) (zero? n))
       []
-      (let [scores (bm25 (set ws) (mapv #(zipmap ws (:tf %)) docs) (mapv :len docs))
-            scored (for [[d sc] (map vector docs scores) :when (some pos? (:tf d))] (assoc d :score sc))
+      (let [scores (bm25 (set ws) (mapv :tf docs) (mapv :len docs))
+            scored (for [[d sc] (map vector docs scores) :when (seq (:tf d))] (assoc d :score sc))
             sum (reduce + (map :score scored))
             sumsq (reduce + (map #(* (:score %) (:score %)) scored))
             mean (/ sum n)

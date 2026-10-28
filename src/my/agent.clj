@@ -218,9 +218,10 @@
   calls). Answers that test run ({:pass :fail :error :reports :ran :reused :ms ...}) with
   :results {test :pass|:fail|:error} and :proofs (each proof's status: the task's and the given ones,
   :deferred or :none when it has no result), printed as its verdict (prove-summary: the schema
-  :seon.test/proved); the whole run is the value under the eval's handle. What it measured is also
-  what (my.task/status) shows next, each proof's status and a red one's assertions, as a turn's
-  observation of the same run would."
+  :seon.test/proved): one line; the whole run is the value under the eval's handle, and what it found
+  is the run's part of the page. Its results are kept at each test's reach digest (the test service
+  records them), so (my.task/status) and the judge read a proof's status at its digest whichever call
+  measured it."
   {:malli/schema [:function [:=> [:cat] :map] [:=> [:cat [:set :qualified-symbol]] :map]]}
   ([] (prove #{}))
   ([proofs]
@@ -230,44 +231,27 @@
        (let [results (proofs/results test-run)
              task-proofs (some->> (:task @agent/state) (task/task (agent/db)) :seon.task/accumulated :proofs)
              deferred (set (:deferred test-run))]
-         ;; the observation my.task/status renders (seon.turn/input: the turn's observed input), updated
-         ;; by what this run measured, whichever call measured it: a proof's status, and the done rule's
-         ;; reason about a proof measured now (unknown or red) replaced by what it is now
-         (when (get-in @agent/state [:turn :observed :input])
-           (swap! agent/state update-in [:turn :observed :input]
-                  (fn [in] (-> in (update :results merge results)
-                               (assoc :reds (proofs/red-reports test-run (set (keys results))))
-                               (update :reasons (fn [rs] (-> (vec (remove #(and (#{:proof-unknown :proof-red} (:reason %)) (contains? results (:symbol %))) rs))
-                                                             (into (for [p (sort-by str task-proofs) :when (#{:fail :error} (results p))]
-                                                                     {:reason :proof-red :symbol p})))))))))
-         (do
-           (with-meta (assoc test-run :results results
-                             :proofs (into (sorted-map-by #(compare (str %1) (str %2)))
-                                           (for [p (into (set proofs) task-proofs)]
-                                             [p (or (results p) (when (deferred p) :deferred) :none)])))
-             {:seon.render/schema :seon.test/proved})))))))
+         (with-meta (assoc test-run :results results
+                           :proofs (into {}
+                                         (for [p (into (set proofs) task-proofs)]
+                                           [p (or (results p) (when (deferred p) :deferred) :none)])))
+           {:seon.render/schema :seon.test/proved}))))))
 
 (defn prove-summary
-  "A prove's run r as the printer shows it (seon.render/summarized, the schema :seon.test/proved):
-  its verdict, each proof's status, each red test with its first failing assertion, each test whose
-  child died (not counted: a death is no verdict), and what ran, was left to the judge and was
-  reused; the lists behind it (:results :selected :deferred :why :reports) are r itself, the value
-  under the eval's handle. A part of the run (a select-keys of it keeps its metadata) is that part,
-  printed as data. A run of 275 tests answered 25k chars printed whole (the blind agent's turn 6, 2026-10-27)."
-  {:malli/schema [:=> [:cat :map] :map]}
+  "A prove's run r as the eval answers it (seon.render/summarized, the schema :seon.test/proved): one
+  line, its verdict and what ran, was left to the judge (process tests), was reused and died (a death
+  is no verdict: not counted). What it found (each proof's status, the reds with their first failing
+  assertion, the deaths) is drawn on the eval, from its value (seon.render.ui/proved, the schema's
+  html render); the run whole is the value under the eval's handle. A part of the run (a select-keys
+  of it keeps its metadata) is that part, as data. See docs/agent.md#done."
+  {:malli/schema [:=> [:cat :map] :any]}
   [r]
   (if-not (:reports r)
-    ;; a part of the run (a select-keys of it keeps its metadata) is that part, as data
     (with-meta r nil)
-    (let [died (into (sorted-set-by #(compare (str %1) (str %2))) (keep #(when (:exit %) (proofs/test-symbol (:var %)))) (:reports r))
-          red (into (sorted-map-by #(compare (str %1) (str %2)))
-                    (for [[t fs] (proofs/failures r) :when (not (died t))] [t (select-keys (first fs) [:message :expected :actual])]))]
-      (cond-> (array-map :verdict (cond (seq red) :red (seq died) :died :else :green)
-                         :counts (str "ran " (:ran r 0) ", deferred " (count (:deferred r)) ", reused " (:reused r 0)))
-        (seq (:proofs r)) (assoc :proofs (:proofs r))
-        (seq red) (assoc :red red)
-        (seq died) (assoc :died (into (sorted-map-by #(compare (str %1) (str %2))) (for [t died] [t "died, not counted"])))
-        true (assoc :rest "the whole run is this value (its handle): :results :selected :deferred :why :reports")))))
+    (let [died (count (proofs/died r))
+          red (pos? (+ (:fail r 0) (:error r 0)))]
+      (str (cond red "red" (pos? died) "died" :else "green")
+           ": ran " (:ran r 0) ", deferred " (count (:deferred r)) " (to the judge), reused " (:reused r 0) ", died " died))))
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
@@ -282,9 +266,11 @@
 
 (defn grep
   "The program vars and tests whose recorded definition holds the words of s, best first: the text half of
-  (search s {:by #{:text} :kinds #{:var :test}}), one hit each ({:kind :name :e :score :by :line :at})."
+  (search s {:by #{:text} :kinds #{:var :test} :min 0.0}), one hit each ({:kind :name :e :score :by :line :at}).
+  Every text hit is shown up to :k, whatever its relevance (a grep finds the words; the page's cut is the
+  page's, and a text-only query has no meaning for relevance to weigh)."
   {:malli/schema [:=> [:cat :string] [:or [:vector :map] :map]]}
-  [s] (search s {:by #{:text} :kinds #{:var :test}}))
+  [s] (search s {:by #{:text} :kinds #{:var :test} :min 0.0}))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn

@@ -16,8 +16,8 @@
        resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
        guessed: the producer names it (opts :schema, or the value's metadata
-       :seon.render/schema), an error map's is its :seon.error/type (else :seon.error/base),
-       and a pulled entity's is the schema with a declared render holding its identity
+       :seon.render/schema), an error map's (one holding every key :seon.error/base requires)
+       is its :seon.error/type (else :seon.error/base), and a pulled entity's is the schema with a declared render holding its identity
        attribute;
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
@@ -60,7 +60,7 @@
   improves only through the one printer or such a render), and the printer's part is four lines (a
   render may answer {:value x} as well as {:text :html}, as its `call` clause already prints a value in
   place); the producer-side alternative, keeping host objects out of seon.agent/state, is a rewrite
-  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8, 2026-10-27)."
+  of its uses to save 40,000 characters on a form an agent rarely types (audit cut 8)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v]
   (when-let [sym (summary-declared (:seon.render/schema (meta v)))]
@@ -88,15 +88,20 @@
                  a (map-keys form) :when (identity-attr? a)]
              [a k])))
 
+(def ^:private error-keys
+  "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a
+  map before it draws it as an error. See docs/render.md#render-what-a-person-or-a-model-reads."
+  (vec (keep #(when (and (vector? %) (not (:optional (when (map? (second %)) (second %))))) (first %))
+             (rest (get contract/forms :seon.error/base)))))
+
 (defn schema-of
   "The named schema of v: hint (its producer's), the one its metadata names, an error map's
-  variant (its registered :seon.error/type, else :seon.error/base), or the schema its
-  identity attribute names."
+  variant (error-keys), or the schema its identity attribute names. See docs/render.md#render-what-a-person-or-a-model-reads."
   {:malli/schema [:=> [:cat :any [:maybe :qualified-keyword]] [:maybe :qualified-keyword]]}
   [v hint]
   (or hint (:seon.render/schema (meta v))
       (when (map? v)
-        (if-let [t (:seon.error/type v)]
+        (if-let [t (when (every? #(contains? v %) error-keys) (:seon.error/type v))]
           (if (contains? contract/forms t) t :seon.error/base)
           (some by-identity (keys v))))))
 

@@ -5,7 +5,10 @@
   each form stays here under its handle.
 
   The agent is single-threaded and reads and writes its socket itself (seon.sock frames,
-  the protocol of root's jolt.async.remote end), never through remote-channel pumps. That
+  the protocol of root's jolt.async.remote end), never through remote-channel pumps: one
+  fiber of its own reads root's frames onto its intake (`intake`), which the loop is the one
+  taker of, and the loop is the one sender (a test child's watcher puts its result there too,
+  so the loop answers root: run-tests-forked). That
   is physics, not style: an agent forks (its test children, clone!), and a process that
   forks must never have started Chez's parallel-collector sweeper threads, which start at
   the first collection that finds a second thread; a child of such a process hangs in its
@@ -15,7 +18,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
-            [malli.registry :as mr]))
+            [malli.registry :as mr] [clojure.core.async :as a]))
 
 ;; One state map per agent process (this process is the agent). Fields:
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :pending :tx-seq :mode :ns :home :mismatch
@@ -43,12 +46,47 @@
   {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:or [:= true] [:= :dead]]]}
   [m] (if (= :epipe (sock/send! (:fd @state) m)) :dead true))
 
+(defn- intake
+  "This process's one intake: a channel of root's messages ({:op k ...}, then :dead at EOF or
+  root's end frame), read off root's socket by one fiber of this process (sock/recv! parks it
+  on the socket's readiness), and of what this process's own fibers hand the loop (a test
+  child's result: run-tests-forked). Made when first asked on this connection (a clone's is
+  its own: its connection is new). The loop takes from it (recv-raw!, next-msg!, inbox,
+  await-op!), and nothing else reads the socket. Where there is no main carrier (Linux), there
+  are no fibers: nil, and the socket is read directly."
+  {:malli/schema [:=> [:cat] [:maybe :seon.host/chan]]}
+  []
+  (when (jolt.host/main-carrier?)
+    (let [c (:conn @state) in (:intake @state)]
+      (if (and in (identical? c (:conn in)))
+        (:ch in)
+        ;; unbuffered: the reader parks with each message until the loop takes it, so root's
+        ;; further frames wait in the socket's own buffer, as when the loop read it itself
+        (let [ch (a/chan)]
+          (a/io-thread (loop [] (let [m (sock/recv! c)]
+                                  (a/>!! ch (if (= :eof m) :dead m))
+                                  (when-not (= :eof m) (recur)))))
+          (swap! state assoc :intake {:conn c :ch ch})
+          ch)))))
+
 (defn- recv-raw!
-  "The next message from root ({:op k ...}), or :dead at EOF or root's end frame."
+  "The next message for this process: its intake's next, or root's next frame read directly
+  where there is no intake; :dead at EOF or root's end frame."
   {:malli/schema [:=> [:cat] [:or [:= :dead] :seon.wire/seon-msg]]}
   []
-  (let [m (sock/recv! (:conn @state))]
-    (if (= m :eof) :dead m)))
+  (if-let [ch (intake)]
+    (a/<!! ch)
+    (let [m (sock/recv! (:conn @state))] (if (= m :eof) :dead m))))
+
+(defn- poll!
+  "The next message already there, without waiting: :none when none is, :dead at EOF. The intake's
+  reader runs only while the loop parks, so a frame already on root's socket (or in its conn's
+  buffer) is taken by parking until the reader hands it over (sock/readable?)."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (if-let [ch (intake)]
+    (or (a/poll! ch) (if (sock/readable? (:conn @state)) (a/<!! ch) :none))
+    (let [m (sock/next-frame! (:conn @state))] (if (= m :eof) :dead m))))
 
 (declare commit!)
 
@@ -60,11 +98,8 @@
   (if-let [m (peek (:pending @state))]
     (do (swap! state update :pending pop) m)
     (if (:dirty? @state)
-      (let [m (sock/next-frame! (:conn @state))]
-        (case m
-          :none (do (commit!) (recv-raw!))
-          :eof :dead
-          m))
+      (let [m (poll!)]
+        (if (= :none m) (do (commit!) (recv-raw!)) m))
       (recv-raw!))))
 
 ;; ---- the agent's own API ------------------------------------------------------
@@ -88,14 +123,13 @@
   "The messages delivered to this agent and not yet taken ({:from :body}), left in the inbox:
   root's requests (e.g. :catch-up, \"main moved, merge main\") and other agents' sends. Words to
   its session's runs (the owner's, root's at a stage, a verdict) are entries on main, which its
-  turn takes (seon.turn/take!), never the inbox. What root sent
-  before this call is read off the socket first (without waiting); any other request read
-  waits in :pending for the loop."
+  turn takes (seon.turn/take!), never the inbox. What the intake holds now is taken
+  first (without waiting); any other request taken waits in :pending for the loop."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (loop []
-    (let [m (sock/next-frame! (:conn @state))]
-      (when-not (#{:none :eof} m)
+    (let [m (poll!)]
+      (when-not (#{:none :dead} m)
         (when-not (arrived! m) (swap! state update :pending conj m))
         (recur))))
   (:inbox @state))
@@ -185,6 +219,11 @@
   {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (when (= :dead (send! {:op :send :to (vec tos) :body body})) (lib/c-exit 0)) nil)
 
+(def ^:dynamic *waiting*
+  "True while the loop waits for an answer of its own (await-op!): a :tests request taken there is
+  read inline, as the wait already holds the loop."
+  false)
+
 (defn- await-op!
   "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
   in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, and
@@ -199,7 +238,12 @@
          (= m :dead) (lib/c-exit 0)
          (and (= op (:op m)) (= k (:k m))) m
          (arrived! m) (recur)
-         (and in-place (= in-place (:op m))) (do (doseq [r (handle! m)] (send! r)) (recur))
+         ;; a request taken in place, and what this process's own fibers hand the loop (a test
+         ;; child's lines and its finished run: a wait on the test service's answer is answered by them)
+         (or (and in-place (= in-place (:op m))) (#{::say ::ran} (:op m)))
+         ;; taken inside a wait for its own answer (prove!): the wait is the loop's already, so a :tests
+         ;; read here reads its child inline (*waiting*), never handed to a fiber
+         (do (doseq [r (binding [*waiting* true] (handle! m))] (send! r)) (recur))
          :else (do (swap! state update :pending conj m) (recur)))))))
 
 
@@ -643,6 +687,19 @@
         (assoc :digests cd :graph g :removed removed
                :process (into (program/process-tests idx) removed-process))))))
 
+(defn stored-results
+  "The result of each of tests at its reach digest on this branch now, as stored ({test result}, each
+  result as the test service recorded it, its :failures among it), for each with a result at that
+  digest (the test service's facts and the shared results directory, on this branch and on main as
+  last heard: test-plan's :reused), whichever run recorded it (a named prove, a bare one, a turn's,
+  root's judge); a test with none is left out (unknown). Cost: the test plan's walk (its digests),
+  once per call."
+  {:malli/schema [:=> [:cat [:maybe [:set :qualified-symbol]]] [:map-of :qualified-symbol :map]]}
+  [tests]
+  (if (empty? tests)
+    {}
+    (select-keys (:reused (test-plan (db) (:base @state) (set tests) (heard-main))) tests)))
+
 (declare handle!)
 
 (defn prove!
@@ -823,9 +880,10 @@
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
   :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
-  to root (what this agent waits on, which a stall names)."
-  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn] [:or :map :seon.test/fork-refused]]}
-  [plan ticks tests forked]
+  to root (what this agent waits on, which a stall names) through say, the loop's send! or what
+  hands the loop a message to send."
+  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
+  [plan ticks tests forked say]
   (let [[r w] (sock/socketpair)
         lines (atom {:streamed [] :ended #{} :fns {} :heap {}})]
     (lib/fork!
@@ -854,7 +912,7 @@
       :parent (fn [pid]
                 (lib/c-close w)
                 (forked pid)
-                (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (send! {:op :testing :test t})))
+                (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (lib/wait-status pid)]
                   (lib/c-close r)
                   (if (contract/error? read)
@@ -872,9 +930,9 @@
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
-  What ran is recorded on main by root's writer, with what each test's contracted functions cost
-  (the child streams them as each test ends): one :record frame (seon.proofs/results-tx), whoever
-  asked for the run. :ran is how many tests reported. (forked pid) runs here once the child exists.
+  Each test that ran green is stored at its digest in test-plan's :dir through root's :file
+  owner (seon.proofs/store-verdicts!, greens and reds); a write refused is named under :unstored, and that test
+  runs again. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
   Root's ruling (a): mode :turn (a turn's observation) selects the proofs and the
   tests the branch itself changed or added; mode :judge (root's judge at the run's end, and
@@ -886,13 +944,21 @@
   is named; the ones the change reaches run at the judge's merge gate, on a checkout (seon.reconcile's :gate).
   The answer names those left out (:deferred), why each was (:why, {test {:uses :through}}: the
   process var it reaches and the calls to it, seon.program/process-path), and how many the judge
-  runs (:at-judge)."
+  runs (:at-judge). Given handoff (root's :tests request taken by the idle loop, on a main
+  carrier), the loop never waits on the children: (handoff go) is called and this answers
+  :seon.agent/running; go, called on a fiber of handoff's with its own say (what hands the loop a
+  message to send: the loop is the one sender), runs the children to their end and answers the
+  thunk that finishes the answer, which the loop calls (its verdicts stored through root's :file
+  owner: only the loop takes from the intake)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe :seon.host/fn]]
+                   [:or :seon.test/result :seon.test/fork-refused [:= :seon.agent/running]]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
-  ([ticks proofs mode forked names]
+  ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
+  ([ticks proofs mode forked names handoff]
   (let [plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
         {judge :selected deferred :skipped} (run-selection plan names proofs)
         selected (if (and (= :turn mode) (not (seq names)))
@@ -915,12 +981,13 @@
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
-        res (if (empty? run)
+        run-all (fn [say]
+            (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
               ;; a child that dies loses the test it was running (its :error stays) and the rest
               ;; run in a new child: the death of one test never costs the run its other results
               (loop [todo run reports [] fns {} heap {}]
-                (let [c (test-child plan ticks todo forked)]
+                (let [c (test-child plan ticks todo forked say)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))
@@ -933,7 +1000,9 @@
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
                         (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)))
                         {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)}))))))]
+                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
+        ;; the answer, once the run is read (by the loop: it records and it sends)
+        finish (fn [res]
     ;; what ran, recorded on main by root's writer (the agent proc's :record), whoever asked for the run
     (when-not (contract/error? res)
       (let [{:keys [ran failures]} (proofs/answer-ran (assoc res :digests digests))
@@ -948,7 +1017,11 @@
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
-        (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))))
+        (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))]
+    (cond
+      ;; nothing to run, or no fiber to read them on: the answer now
+      (or (empty? run) (nil? handoff)) (finish (run-all send!))
+      :else (do (handoff (fn [say] (let [res (run-all say)] #(finish res)))) ::running)))))
 
 ;; ---- the loop ----------------------------------------------------------------------
 
@@ -1015,12 +1088,27 @@
     ;; root's judge at a run's end: the test service proves this branch (prove! :judge), so the
     ;; run is recorded on main and joins any other asker's of its key; answered as :tests is
     :judge [{:op :tests :id (:id m) :result (prove! :judge) :mem-mb (mem-mb)}]
-    :tests [{:op :tests :id (:id m) :result (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
-                                                              (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                                                              (or (:mode m) :judge)
-                                                              #(send! {:op :tests-started :id (:id m) :pid %})
-                                                              (some-> (:names m) set))
-             :mem-mb (mem-mb)}]
+    ;; taken by the idle loop (on a main carrier), the loop never waits on the children: a fiber runs
+    ;; them and hands the loop what to send root (::say) and then the thunk that finishes the
+    ;; answer (::ran); taken inside a wait for its own answer (*waiting*), read inline
+    :tests (let [ch (when-not *waiting* (intake))
+                 say (if ch #(a/>!! ch {:op ::say :msg %}) send!)
+                 r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
+                                     (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                                     (or (:mode m) :judge)
+                                     #(say {:op :tests-started :id (:id m) :pid %})
+                                     (some-> (:names m) set)
+                                     (when ch
+                                       ;; a run that throws hands the loop its throwable (go-monitor),
+                                       ;; raised where the answer is made, as an inline run raises it
+                                       (fn [go]
+                                         (let [g (a/io-thread (go say)) died (a/go-monitor g)]
+                                           (a/io-thread
+                                             (let [done (or (a/<!! g) (let [e (a/<!! died)] #(throw e)))]
+                                               (a/>!! ch {:op ::ran :id (:id m) :finish done})))))))]
+             (when-not (= ::running r) [{:op :tests :id (:id m) :result r :mem-mb (mem-mb)}]))
+    ::say [(:msg m)]
+    ::ran [{:op :tests :id (:id m) :result ((:finish m)) :mem-mb (mem-mb)}]
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-record! (:k m) r) :body r})

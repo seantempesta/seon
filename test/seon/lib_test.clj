@@ -1,6 +1,6 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
-  (:require [clojure.test :refer [deftest is]] [seon.lib :as lib]
+  (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
             [seon.test-store :as ts] [clojure.edn :as edn] [clojure.string :as str]))
 
 (deftest the-memory-probe-answers-what-the-process-holds
@@ -21,6 +21,30 @@
     (.join spin)
     (is (= :refused (first r)) (str "answered " r))
     (is (<= 2 (second r)) (str "active threads " (second r)))))
+
+(def ^:private park-in-a-read
+  ;; a raw Chez thread (no Jolt lock taken to start it) blocked in a collect-safe read of fd
+  (scm/eval-string
+    "(let ([rd (foreign-procedure __collect_safe \"read\" (int u8* size_t) ssize_t)])
+       (lambda (fd) (let ([b (make-immobile-bytevector 1)]) (fork-thread (lambda () (rd fd b 1)))) #t))"))
+
+(deftest a-fork-beside-a-thread-parked-in-a-read-forks
+  ;; a thread in a collect-safe call (a read) runs no Scheme, so a fork beside it is a fork beside a
+  ;; parked thread. Our Chez counts it in $active-threads until it is converted, and fork! read the
+  ;; count bare: it refused every time (Jolt's forkheldlocks waited for good). The thread may not be
+  ;; in its read yet at the first try, so the fork is tried again after a yield, at most 100000 times:
+  ;; refused that often in a row is red (docs/forks.md, jolt/a-thread-in-c-is-not-active). Its buffer
+  ;; is immobile: a collection may run while it reads
+  (let [[r w] (sock/socketpair)]
+    (try
+      (park-in-a-read r)
+      (let [answer (loop [n 0]
+                     (let [a (lib/fork! {:child #(lib/c-exit 0) :parent (fn [pid] [:forked pid]) :refused (fn [k] [:refused k])})]
+                       (if (and (= :refused (first a)) (< n 100000)) (do (Thread/yield) (recur (inc n))) a)))]
+        (is (= :forked (first answer)) (str "answered " answer))
+        (when (= :forked (first answer))
+          (is (= {:exit 0} (lib/wait-status (second answer))))))
+      (finally (sock/write-line! w "go") (lib/c-close r) (lib/c-close w)))))
 
 (defn- fork-case
   "Fork case k's answer (seon.check/fork-cases), in a fresh process of the built binary

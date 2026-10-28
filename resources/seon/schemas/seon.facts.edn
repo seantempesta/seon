@@ -137,7 +137,7 @@
  :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
                     [:printed {:optional true} :string] [:type {:optional true} :string]
                     ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
-                    ;; rendered from, in place of a copy (seon.repl/record-details)
+                    ;; rendered from, in place of a copy (seon.repl/record-details); a data value its schema alone
                     [:schema {:optional true} :qualified-keyword] [:basis {:optional true} [:map [:t :int] [:branch :seon.db/branch]]]]
  ;; an agent: one entity per agent per boot of its root (an id like :a3 starts again each boot),
  ;; named by its key (seon.task/agent-key: "<boot>/<id>"), a content id so root's entity on main

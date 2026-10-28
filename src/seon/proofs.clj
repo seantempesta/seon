@@ -56,6 +56,13 @@
              :when (and (#{:fail :error} type) (tests (test-symbol var)))]
          (-> (select-keys r [:type :message :expected :actual :got]) (assoc :test (test-symbol var))))))
 
+(defn died
+  "The tests of the test run whose child died before it ended (a report with an :exit): no verdict,
+  so neither green nor red."
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential :map]]]] [:set :qualified-symbol]]}
+  [test-run]
+  (into #{} (keep #(when (:exit %) (test-symbol (:var %)))) (:reports test-run)))
+
 (defn test-run-errors
   "The errors of the test run that name no test: the test run itself failed (its fork died before any
   test started, a namespace did not load), so every test reads as not run. Their messages."

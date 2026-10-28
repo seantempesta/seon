@@ -69,3 +69,19 @@ long e13_wait(int kq, int fd) {
     return ev.filter == EVFILT_PROC ? (long)ev.ident : 0;
   }
 }
+// e13_wait with a zero timeout, for a fiber that parked on kq's readiness in the io poller
+// (seon.lib/wait-fd-or-exit): it never waits, so a readiness that holds no event yet answers -3 and
+// the fiber parks again; a blocking wait there held an agent's one thread for its whole test run.
+long e13_poll(int kq, int fd) {
+  struct kevent ch, ev;
+  struct timespec now = {0, 0};
+  EV_SET(&ch, fd, EVFILT_READ, EV_ADD, 0, 0, NULL);
+  for (;;) {
+    int r = kevent(kq, &ch, 1, &ev, 1, &now);
+    if (r < 0 && errno == EINTR) continue;
+    if (r == 0) return -3;
+    if (r < 1) return -1;
+    if (ev.flags & EV_ERROR) return -1;
+    return ev.filter == EVFILT_PROC ? (long)ev.ident : 0;
+  }
+}
