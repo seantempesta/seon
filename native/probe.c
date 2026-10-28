@@ -85,3 +85,45 @@ long e13_poll(int kq, int fd) {
     return ev.filter == EVFILT_PROC ? (long)ev.ident : 0;
   }
 }
+
+// ---- a process ends with the one that must outlive it ----
+// A native thread waits (kqueue NOTE_EXIT) on the watched pid's exit, then SIGKILLs this process's group
+// when it leads one, else this process: a class C process (a runtime mutex held, no Scheme running) ends
+// too. The watched pid lives in this static, which a fork copies; the thread does not survive a fork,
+// so a forked child re-arms it (e13_end_with_again, from seon.lib/fork!). docs/failure-points.md
+// (a process outlives its starter).
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h>
+static pid_t e13_watched = 0;
+static void e13_end(void) {
+  if (getpgrp() == getpid()) kill(0, SIGKILL);
+  kill(getpid(), SIGKILL);
+}
+static void *e13_watch_main(void *arg) {
+  pid_t pid = e13_watched;
+  int kq = kqueue();
+  if (kq < 0) return NULL;
+  struct kevent ch, ev;
+  EV_SET(&ch, pid, EVFILT_PROC, EV_ADD, NOTE_EXIT, 0, NULL);
+  // ESRCH: gone before it was watched; a parent watched and already gone reparents us to launchd
+  if (kevent(kq, &ch, 1, NULL, 0, NULL) < 0) { if (errno == ESRCH) e13_end(); return NULL; }
+  if ((long)arg && getppid() != pid) e13_end();
+  for (;;) {
+    int r = kevent(kq, NULL, 0, &ev, 1, NULL);
+    if (r > 0) e13_end();
+    if (r < 0 && errno != EINTR) return NULL;
+  }
+}
+static long e13_arm(long parent) {
+  pthread_t t;
+  if (pthread_create(&t, NULL, e13_watch_main, (void *)parent) != 0) return -1;
+  pthread_detach(t);
+  return 0;
+}
+// Watch pid (parent: 1 when pid is this process's parent, so a parent already gone is seen). 0, or -1.
+long e13_end_with(int pid, int parent) { e13_watched = pid; return e13_arm(parent); }
+// In a forked child: watch again what the parent watched (no thread survives a fork). 0 when nothing is watched.
+long e13_end_with_again(void) { return e13_watched ? e13_arm(0) : 0; }
+// The pid this process ends with, or 0 (its watch thread runs while it is not 0).
+long e13_end_watched(void) { return e13_watched; }

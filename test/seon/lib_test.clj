@@ -80,6 +80,13 @@
   ;; In a child forked from a main carrier, the reader on the child's own fiber
   (is (= {:exit 0} (fork-case "line-parks")) "a fiber ran while the reader waited"))
 
+(deftest a-process-ends-with-what-it-watches-and-so-does-what-it-forks
+  ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data):
+  ;; ./seon problems trees outlived the bin/check a timeout killed, 12 h at 0% CPU with ppid 1. A
+  ;; process's C thread ends it when what it watches exits, and fork! arms it again in each child, so
+  ;; a child parked in a read (no Scheme of its own would ever end it) ends with the process it watches
+  (is (= {:mid {:signal 9} :child :exited} (fork-case "ends-with-its-starter"))))
+
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
   ;; macOS charges (Activity Monitor, jetsam). It counted a process's private and shared-now-private

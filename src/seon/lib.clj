@@ -62,6 +62,30 @@
 
 (defc kq-wait "e13_wait" [:int :int] :long {:blocking true})
 (defc kq-poll "e13_poll" [:int :int] :long)
+(defc c-getppid "getppid" [] :int)
+(defc end-with* "e13_end_with" [:int :int] :long)
+(defc end-again* "e13_end_with_again" [] :long)
+(defc end-watched "e13_end_watched" [] :long)
+
+(declare end-with!)
+
+(defn- armed
+  "end-with!'s answer: nil once the watch thread runs; the OS refusing it is :seon.lib/starter-unwatched, thrown."
+  {:malli/schema [:=> [:cat :int [:maybe :seon.lib/pid]] :nil]}
+  [r pid]
+  (when (neg? r)
+    (let [e (contract/error :seon.lib/starter-unwatched #'seon.lib/end-with! (str "the OS refused the thread that ends this process with " (or pid "its starter")) {:pid pid})]
+      (throw (ex-info (:seon.error/message e) e)))))
+
+(defn end-with!
+  "End this process when pid exits (parent? true: pid is its parent): a native thread waits on pid's
+  NOTE_EXIT and SIGKILLs this process's group if it leads one, else this process, so nothing it
+  started outlives what started it, even a process whose runtime holds a lock and runs no Scheme. What
+  it forks watches the same pid (fork! arms it again in the child). nil; a thread the OS refused
+  throws :seon.lib/starter-unwatched. docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:function [:=> [:cat :seon.lib/pid :boolean] :nil] [:=> [:cat] :nil]]}
+  ([pid parent?] (armed (end-with* pid (if parent? 1 0)) pid))
+  ([] (armed (end-again*) nil)))
 
 (defn wait-fd-or-exit
   "A wait on fd's input and child pid's exit, whichever comes first, with no clock: one kqueue
@@ -253,7 +277,7 @@
   (let [pid (fork-alone*)]
     (if (zero? pid)
       (let [status (volatile! 1) said? (volatile! false)]
-        (try (when (or (not double?) (zero? (c-fork))) (child))
+        (try (when (or (not double?) (zero? (c-fork))) (end-with!) (child))
              (vreset! status 0)
              (catch Throwable e
                (vreset! said? true)

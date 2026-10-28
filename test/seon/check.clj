@@ -577,7 +577,8 @@
   "The threads root runs, as {:roster {name-stem n} :gc-sweepers n} (stems as thread-roster
   folds them). Without a system, the process's own: main, Jolt's shutdown watcher, timer, io
   poller, all-asleep detector (started with the carriers when boot's main carrier returns) and
-  fiber carriers, and the GC sweepers fixed at boot. The timer starts at the
+  fiber carriers, the GC sweepers fixed at boot, and :native, the C thread that ends it with its
+  starter (seon.lib/end-with!). The timer starts at the
   first timeout and the io poller at the first socket wait (an agent's), so a root has both
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
@@ -586,7 +587,9 @@
   pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
   roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
-       :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)})
+       :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
+       ;; the C thread that ends this process with its starter (seon.lib/end-with!), outside Jolt's roster
+       :native (if (pos? (lib/end-watched)) 1 0)})
   ([sys]
    (let [pm (:procs @(get-in sys [:bindings :system]))
          procs (vals pm)
@@ -609,12 +612,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster, the sweepers and the declared :foreign ones."
+  counts threads beyond the roster, the sweepers and the declared :foreign and :native ones."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0) (:native decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -960,6 +963,25 @@
        :store (in-child-bounded (fn [] (let [cfg {:store {:backend :memory :id (random-uuid)}}]
                                       (d/create-database cfg)
                                       (let [c (d/connect cfg)] (d/transact c [{:db/ident :x}]) (d/release c) true))))})
+   "ends-with-its-starter"
+   ;; a process ends with the pid it watches (seon.lib/end-with!), and so does what it forks: mid
+   ;; watches itself, so its child inherits the watch of mid; the child parks in a read that never
+   ;; comes. mid is killed: its child ends with it, though nothing in its own code would
+   #(let [[r w] (sock/socketpair)
+          [hold _] (sock/socketpair)
+          park (fn [_] (sock/recv! (sock/conn hold)))
+          mid (lib/fork! {:child (fn []
+                                   (lib/end-with! (lib/c-getpid) false)
+                                   (lib/fork! {:child (fn [] (sock/write-line! w (str (lib/c-getpid))) (park nil))
+                                               :refused park :parent park}))
+                          :refused (fn [n] {:refused n}) :parent identity})
+          rd (sock/line-reader r)
+          child (parse-long (first (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))))
+          {:keys [wait close]} (lib/wait-fd-or-exit hold child)]
+      (lib/c-kill mid 9)
+      (let [st (lib/wait-status mid) ended (wait)]
+        (close)
+        {:mid st :child ended}))
    "child-throws"
    ;; a child whose code throws: unwound out of lib/fork! it would run this case's catch in the
    ;; child (exit 7); it ends at fork!, exit 1. One whose code returns exits 0
@@ -1476,7 +1498,8 @@
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
   tests and clones) must stay single-threaded, so no sweeper thread ever starts in them.
   An agent evaluates, collects, runs its tests in a fork and is cloned; then the fork
-  server, the agent and the clone each have one thread."
+  server, the agent and the clone each have one thread, beside the C thread that ends it with
+  root (seon.lib/end-with!)."
   []
   (run-check "THREADS" {:datoms 2000}
    (fn [sys]
@@ -1489,7 +1512,9 @@
           res {:fork-server (os-threads (get-in st [:fork-server :pid])) :agent (os-threads (get-in st [:agents a :pid]))
                :clone (os-threads (get-in st [:agents cl :pid]))}]
       {:report (assoc res :tests tests :clone-eval cl-eval)
-       :checks {:each-forking-process-one-thread (= 1 (:fork-server res) (:agent res) (:clone res))
+       ;; one Chez thread each, beside the C thread that ends it with root (seon.lib/end-with!): the
+       ;; collector never sees a thread Chez did not make, so it starts no sweeper for it
+       :checks {:each-forking-process-one-thread (= (+ 1 (if (pos? (lib/end-watched)) 1 0)) (:fork-server res) (:agent res) (:clone res))
                 :its-test-passed (= 1 (:pass tests)) :the-clone-evaluates (= "42" cl-eval)}}))))
 
 (defn ids

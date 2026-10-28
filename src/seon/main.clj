@@ -107,6 +107,9 @@
   ;; this namespace loads is earlier, and seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects is the proof it starts none),
   ;; nothing starts before then.
   (lib/gc-sweepers! 0)
+  ;; a process ends with what started it (a shell, bin/held, a test runner), and so does all it forks
+  ;; (seon.lib/end-with!); one started by launchd (ppid 1) is nobody's child
+  (let [pp (lib/c-getppid)] (when (> pp 1) (lib/end-with! pp true)))
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
     "ports" (ports)
