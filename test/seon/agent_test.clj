@@ -450,7 +450,10 @@
                    own)
                   ;; root imports the dirs bin/test does (:seon.config.source/dirs, schemas included), so
                   ;; root's boot shares its source tree's inputs
-                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof}})]
+                  ;; and a root of its own: the shared root's main holds the greens earlier tests
+                  ;; recorded, the proof's among them at the same digest (reused 1, ran 1: red
+                  ;; since tests-are-facts dropped it)
+                  {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
     (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are facts on main at the agent's digests")
