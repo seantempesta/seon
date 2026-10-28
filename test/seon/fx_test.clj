@@ -187,8 +187,8 @@
   ;; owner, 2026-10-28: the provider is resolved at each turn (seon.config/provider-at) and travels with the
   ;; request; root's boot provider (:ctx) answers only a request that names none
   (let [msgs [{:role "user" :content "hi"}]
-        none (fx/model {:req {:messages msgs :provider {:kind :none}} :ctx {:provider {:kind :scripted :script 'seon.fixtures/reply}}})
-        boot (fx/model {:req {:messages msgs} :ctx {:provider {:kind :none}}})]
+        none (fx/model {:req {:messages msgs :task "a/b" :turn 0 :provider {:kind :none}} :ctx {:provider {:kind :scripted :script 'seon.fixtures/reply}}})
+        boot (fx/model {:req {:messages msgs :task "a/b" :turn 0} :ctx {:provider {:kind :none}}})]
     (is (= :seon.model/no-provider (:seon.error/type none)) "the request's :none beats root's scripted boot provider")
     (is (= :seon.model/no-provider (:seon.error/type boot)) "no provider named: root's")))
 
