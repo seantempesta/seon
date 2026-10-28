@@ -685,8 +685,8 @@
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
   verdict at that digest measured it: {test {var [calls ticks self-ticks bytes self-bytes]}}."
-  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]
-                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]]]}
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]
+                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]]]}
   ([cand] (details (cfg/value :seon.config.proofs/results-dir) cand))
   ([dir cand]
   (into {} (for [[t dg] cand
