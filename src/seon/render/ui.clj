@@ -104,7 +104,7 @@
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list (numbered when its first
-  marker is a number), fenced code highlighted, a quote or a table as its lines. Each block's text
+  marker is a number), a code block highlighted, a quote or a table as its lines. Each block's text
   is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
   what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] :any]}
