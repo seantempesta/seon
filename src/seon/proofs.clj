@@ -172,7 +172,7 @@
   "Each function's cost per call over the tests of details ({test {var row}}, seon.fx/details): {var {:calls n :ticks
   :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls. A
   recursive function's inclusive ticks and bytes count its inner calls again; its self ones do not."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:vector :int]]]] [:map-of :qualified-symbol :map]]}
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
   [detail]
   (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
     (into {} (for [[v [calls ticks self-ticks bytes self-bytes]] sums :when (pos? calls)]
