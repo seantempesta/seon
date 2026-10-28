@@ -375,13 +375,14 @@
   [what all? out names]
   (if-let [bad (refused-names names)]
     (do (println (str "TEST FAILED: " bad)) 1)
-  (let [plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+  (let [t0 (profile/now-ns)
+        ;; the selection's time is the plan's: program db, reach graph, digests and the results read
+        plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u) " (the standing root restarting refuses until it listens: bin/root status)"))
         1)
-  (let [t0 (profile/now-ns)
-        dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
+  (let [dir (str "the standing root's main (port " (config/value :seon.config.proofs/results-port) ")")
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left digests steps missing inputs binary no-test process flaky]} plan
         ;; a test namespace of the tree that its program db holds no test of: nothing it holds can
