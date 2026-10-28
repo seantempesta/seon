@@ -5,27 +5,25 @@
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.context :as context] [seon.docs :as docs]
             [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
-(deftest an-eval-answers-each-forms-value-in-order
-  ;; owner, 2026-10-25 (Dogfood rulings): an eval call's response lists each form's value in
-  ;; order, as nREPL answers a value per form, under the call's one handle; result/eN holds the
-  ;; last, like *1. A form that throws ends the call with the values before it kept.
+(deftest an-eval-answers-its-value-as-clojure-does
+  ;; owner, 2026-10-28: match Clojure for the eval's output: forms run in order and the response
+  ;; is the last one's value (as load-string answers, *1 holds it), with the evaluation's facts
+  ;; as data; (do (+ 1 1) (+ 2 2)) answers 4, never each form's value. A form that throws ends it.
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
                            (repl/eval-string code {})
                            (finally (reset! agent/state old))))
         r (ev "(+ 1 2) (str \"a\" \"b\") [:x]")]
-    (is (= [3 "ab" [:x]] (:values r)) "each form's value, in order")
     (is (= [:x] (:value r)) "the last, as *1 holds it")
+    (is (not (contains? r :values)) "no list of each form's value")
     (is (= [:x] (:value @(resolve (:handle r)))) "and its handle reads it")
-    (is (str/includes? (:text r) "\"ab\"") "the model reads every value")
-    (is (= 1 (count (re-seq #"\[:x\]" (:text r)))) "the last is printed once")
-    (is (str/includes? (:line (repl/record-details nil "(+ 1 2) (str \"a\" \"b\") [:x]" r {} nil)) "\"ab\"") "a collapsed row shows every value, not the last alone")
-    (let [rec (repl/record-details nil "1 (atom 1)" {:handle 'result/e9 :values [1 (atom 1)] :value (atom 1)} {} nil)]
-      (is (and (:printed rec) (not (contains? (:response rec) :values))) "a value that is no plain data: the response as it printed, not the values"))
+    (is (contains? r :ms) "the evaluation's facts: its cost")
+    (is (= 4 (:value (ev "(do (+ 1 1) (+ 2 2))"))) "a do answers its last form's value")
+    (let [rec (repl/record-details nil "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
+      (is (:printed rec) "a value that is no plain data: the response as it printed"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
-      (is (= [3] (:values e)) "the values before the error stay")
-      (is (contains? e :ex)))
-    (is (not (contains? (ev "(+ 1 2)") :values)) "one form answers its value alone")))
+      (is (contains? e :ex) "the error stops it")
+      (is (not (contains? e :value)) "and the forms after it never ran"))))
 
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
@@ -43,11 +41,31 @@
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
-(deftest a-value-that-is-no-data-among-the-values-reaches-root-printed
-  ;; (in-ns 'x) answers a Namespace: among a call's :values it is printed for the model, and the
-  ;; agent's reply to root carries the text, never the live values (which no wire encodes)
-  (let [[ns-call next-call] (at/in-agent ["(in-ns 'user) 1" "(+ 1 1)"])]
-    (is (str/includes? (str (:text ns-call)) "#namespace") "each form's value, printed")
+(deftest a-definition-inside-a-top-level-do-is-program
+  ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
+  ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
+  ;; spent 39 turns finding out why (docs/prompt.md)
+  (let [[r nested stopped after branch]
+        (at/in-agent (fn [{:keys [ns task]}]
+                       [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
+                        (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
+                        (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
+                        (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
+                        {:op :eval :agent "root"
+                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
+    (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
+    (is (= 2 (:value r)) "the do's value is its last form's")
+    (is (= 6 (:value nested)) "a do inside a top-level do is its forms too")
+    (is (str/includes? (str (:text stopped)) "boom") "an error inside the do is the request's")
+    (is (= [true false] (:value after)) "the forms after the error never ran")
+    (is (= [true true] (:value branch)) "the branch's program holds c and d")))
+
+(deftest a-value-that-is-no-data-reaches-root-printed
+  ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
+  ;; carries the text, never the live value (which no wire encodes)
+  (let [[ns-call next-call] (at/in-agent ["(in-ns 'user)" "(+ 1 1)"])]
+    (is (str/includes? (str (:text ns-call)) "#namespace") "the value, printed")
     (is (= 2 (:value next-call)) "and the agent lives to answer the next")))
 
 (deftest a-redefinition-that-changes-a-docstring-says-so

@@ -142,16 +142,17 @@
       (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
 
-(deftest a-repair-is-shown-next-turn
-  (let [db (db-with-program)
-        t (task-f db)
-        reply "Here is f.\n```clojure\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))\n```"
-        {:keys [text repairs]} (reader/forgive reply)
-        block (context/current-state db t {:turn 1 :max-turns 4 :source text :repairs repairs})]
-    (is (seq repairs) "the reader repaired the extra close")
-    (is (= [{:near {:line 3 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}]
-           (:repaired (:your-last-reply block)))
-        "what was dropped, what replaced it, and where: its line and column, and the whole line; the prose made comments is no repair")))
+(deftest a-repair-is-told-on-its-call
+  ;; owner, 2026-10-28: the forgiving reader may complete a form or make prose a comment, and
+  ;; says exactly what it did on that call's own result (:repaired, docs/prompt.md)
+  (let [code "Here is f.\n(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)))"
+        {:keys [text repairs]} (reader/forgive code)
+        r (context/repaired text repairs)]
+    (is (some #{{:near {:line 2 :column 60 :text "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)),"} :dropped ")" :inserted ","}} r)
+        "the extra close: what was dropped, what replaced it, and where")
+    (is (some #{{:near {:line 1 :column 1 :text ";; Here is f."} :inserted ";; "}} r)
+        "and the prose made a comment, told too")
+    (is (= [] (context/repaired "(+ 1 2)" (:repairs (reader/forgive "(+ 1 2)")))) "code that reads is not repaired")))
 
 (deftest only-program-tests-judge
   ;; a deftest in a scratch namespace never merges, so it never judges the branch
@@ -280,7 +281,7 @@
   ;; scrollback. Each eval renders its own part (seon.context/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (docs/render.md, the request is a render)
-  (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :prose prose))})
+  (let [ev (fn [id call prose value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/record (cond-> {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value} :call-id (str "c-" id) :call call} prose (assoc :content prose))})
         ms (into [] (mapcat #(context/eval-messages % {})) [(ev "e1" 0 "R0" "E1") (ev "e2" 0 nil "E2") (ev "e3" 1 nil "E3")])]
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each eval its call and its response")
     (is (= {:role "assistant" :content "R0" :tool-calls [{:id "c-e1" :code "(e1)"}] :call 0} (first ms)))
@@ -291,27 +292,7 @@
       (is (= ["c-e2" "c-e3"] (mapv :tool_call_id (subvec wire 3 5))) "each call answered, in order")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
-           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {}))))
-  (testing "the history budget sends the newest whole, then older ones whole, then collapsed, never starting inside a reply"
-    (let [part (fn [whole small call] {:cost [whole small] :call call})
-          ;; tokens whole and collapsed, oldest first; the third continues the second's reply
-          parts [(part 400 5 0) (part 10 2 0) (part 10 2 1) (part 10 2 0)]]
-      (is (= [[:whole :whole :whole] 0] (#'context/kept (subvec parts 1) 30)) "all whole when they fit")
-      (is (= [[:line :whole :whole :whole] 0] (#'context/kept parts 35)) "an older one too large whole is collapsed, not dropped")
-      (is (= [[:whole] 3] (#'context/kept parts 0)) "the newest stays at budget 0")
-      (is (= [[:whole] 1] (#'context/kept (subvec parts 2) 10)) "a cut never starts inside a reply")
-      (testing "the cuts only advance, in jumps to half the budget, so the prefix holds between them"
-        (let [many (vec (repeat 40 (part 10 2 0)))
-              ;; what each length of the history sends, as [first-sent picks]
-              at (fn [k] (let [[picks dropped] (#'context/kept (subvec many 0 k) 130)] [dropped picks]))
-              moved (vec (for [k (range 2 41) :let [[d0 p0] (at (dec k)) [d1 p1] (at k)]
-                               ;; the earlier request's parts, as this one sends them
-                               :when (not (and (= d0 d1) (= p0 (subvec p1 0 (count p0)))))] k))]
-          (is (= [(into (vec (repeat 2 :line)) (repeat 6 :whole)) 6] (#'context/kept (subvec many 0 14) 130))
-              "past the budget at 14 whole: the oldest collapse until the whole fit in half (6 of 10), then the oldest collapsed are left out until all fits in half")
-          (is (= [14 21 28 35] moved) "the cuts move at four lengths of 39, every 7th; every other request is the one before and what was added")
-          (is (every? (fn [k] (let [[_ p] (at k)] (<= (+ (* 2 (count (filter #{:line} p))) (* 10 (count (filter #{:whole} p)))) 130))) (range 1 41))
-              "and what is sent stays within the budget"))))))
+           (context/eval-messages {:seon.eval/by "user" :seon.eval/record {:code "(+ 1 2)" :response {:handle 'result/e4 :value 3}}} {})))))
 
 ;; ---- context v2: a stable prefix, each var at its citation's depth, the helpers -----------
 
@@ -697,12 +678,7 @@
                 (str "turn " n ": its read-back is the bytes it sent"))))
         (let [[_ last-turn] (peek turns)]
           (is (some #(and (vector? %) (= [:eval "e3" {:value 'result/e1}] %)) (:sent last-turn)) "e3's rows are e1's, sent whole: folded")
-          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))
-        (testing "a fold whose record the history no longer sends whole is sent unfolded"
-          (let [p {:ref [:eval "e3" {:value 'result/e1}] :whole [{:role "tool" :content "(:value result/e1)"}] :fold {:value 'result/e1}
-                   :plain [{:role "tool" :content "[{:row 0 …}]"}]}]
-            (is (= [[:eval "e3" {:value 'result/e1}] (:whole p)] (#'context/as-sent p #{"e1" "e3"})) "e1 sent whole: folded")
-            (is (= [[:eval "e3"] (:plain p)] (#'context/as-sent p #{"e3"})) "e1 collapsed or left out: the value itself")))))))
+          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request
@@ -758,7 +734,7 @@
                                      (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
                                      [b messages])))
             [b0 r0] (request 0 {:seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]})
-            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :prose "I call f." :reasoning "why"})
+            _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :content "I call f." :reasoning "why"})
             [_ r1] (request 1 {})]
         (is (= ["system" "user"] (mapv :role r0)) "turn 0: the system prompt, then the page whole")
         (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))

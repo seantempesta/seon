@@ -78,8 +78,8 @@
   (seon.problems/caused, as root's judge asks it), the done rule over them, and
   the task as the branch holds it (its plan may have improved): the done rule's inputs, nothing
   else. What else a reader wants of the branch (whether it can merge, what its merge carries,
-  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/merge-view,
-  divergence-view, caused-view, tests-view), drawn when what it reads moves, never per turn."
+  what it changed under the wiki, its tests) is a render of the task's (seon.render.ui/branch-views,
+  tests-view), drawn when what it reads moves, never per turn."
   {:malli/schema [:=> [:cat :seon.task/id :seon.task/plan] :map]}
   [id plan-before]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
@@ -176,6 +176,22 @@
   (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
            :origin origin :observed (merge (dissoc observed :merge?) taken)}
     (:merge? observed) (assoc :merge? true)))
+
+(defn- call-problem
+  "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
+  result is, or nil: a call is prose and exactly one form (docs/prompt.md).
+  Code that does not read is left to the REPL, whose read error says where."
+  {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
+  [prose code]
+  (let [forms (reader/read-text code 'user)]
+    (cond
+      (str/blank? prose)
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
+      (and forms (not= 1 (count forms)))
+      (contract/error :seon.turn/invalid-call #'call-problem
+                      (str "one form per call: this code holds " (count forms) " forms; make each its own call. None was run")
+                      {:problem :forms :forms (count forms)}))))
 
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
@@ -294,17 +310,28 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            calls (vec (map-indexed (fn [i {:keys [id code prose]}]
-                                      (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
-                                            shown (not-empty (str/join "\n\n" (remove str/blank? [content prose])))]
-                                        {:id id :code code :prose shown
-                                         :response (evaluated! (:text (reader/forgive code))
-                                                                     (cond-> {:origin :model :call-id id :call i}
-                                                                       shown (assoc :prose shown)
-                                                                       content (assoc :content content)
-                                                                       (not (str/blank? prose)) (assoc :call-prose prose)
-                                                                       (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))))}))
-                                    (:tool-calls c)))
+            ;; a call that is not prose and one form, or after one that threw, is not run: its one
+            ;; result says why (seon.repl/unrun, docs/prompt.md)
+            calls (reduce (fn [acc [i {:keys [id code prose]}]]
+                            (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
+                                  ;; the forgiving reader's repairs, told on this call's own result (:repaired)
+                                  {src :text repairs :repairs} (reader/forgive code)
+                                  ;; the reply's text heads its block, on its first call; each call keeps its own prose
+                                  req (cond-> {:origin :model :call-id id :call i}
+                                        (not (str/blank? prose)) (assoc :prose prose)
+                                        content (assoc :content content)
+                                        (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
+                                        (seq repairs) (assoc :repaired (context/repaired src repairs)))
+                                  ;; a call that failed (threw, or was not prose and one form) stops the rest
+                                  failed (some #(when (:ex (:response %)) (:id %)) acc)
+                                  why (if failed
+                                        (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
+                                        (call-problem prose src))]
+                              (conj acc (if why
+                                          {:id id :code code :prose prose :not-run (some? failed)
+                                           :response (let [r (repl/unrun src req why)] (agent/commit!) r)}
+                                          {:id id :code code :prose prose :response (evaluated! src req)}))))
+                          [] (map-indexed vector (:tool-calls c)))
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
@@ -326,7 +353,7 @@
                                                             (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
                                    :seon.turn/reply (:text c) :seon.turn/forms (count calls)
-                                   :seon.turn/errors (count (filter :ex rs))
+                                   :seon.turn/errors (count (filter :ex (map :response (remove :not-run calls))))
                                    :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
                                    :seon.turn/ms (+ model-ms eval-ms)})
                             (:truncated? c) (assoc :seon.turn/truncated true)

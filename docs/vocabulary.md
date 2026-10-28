@@ -41,7 +41,7 @@ The words for the agent's REPL, in nREPL's terms, and the namespace that owns ea
 |---|---|---|
 | **request**, **response**, **session**, `eval`, `done`, `interrupt` | nREPL's message model on the agent's socket | `seon.repl` |
 | **middleware** | `(fn [handler] (fn [request] ...))` over the base handler | `seon.repl/middleware` |
-| **response** | one eval call's answer: `{:handle :values :value :out :err :ex :redefined :warnings :ms :ticks :bytes}` (`:values`: each form's value, when more than one answered), each key only when present | `seon.repl/response` |
+| **response** | one eval call's answer, data: the keys ``:seon.eval/response`` declares, each only when present; its `:value` is the one Clojure answers | `seon.repl/response` |
 | **handle** | a live value kept in the agent, named by its eval, ``result/eN`` | `seon.repl/eval-string` |
 | **value printer** | the one function that turns a value into text under a token budget, saying what a cut omitted ([render](render.md#one-printer)) | `seon.print/print-value` |
 | **render** | a view of a value declared on its schema, over the one printer; the model's context is one ([render](render.md)) | `seon.render` |

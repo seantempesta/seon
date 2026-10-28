@@ -52,6 +52,7 @@
             ;; a db value, or one as of a t (d/as-of: a turn's records read as they were sent)
             (pred :seon.host/db #(or (instance? datahike.db.DB %) (instance? datahike.db.AsOfDB %)))
             (pred :seon.host/conn #(instance? datahike.connector.Connection %))
+            (pred :seon.host/datom #(instance? datahike.datom.Datom %))
             (pred :seon.host/thread #(instance? Thread %))
             (pred :seon.host/queue #(instance? java.util.concurrent.LinkedBlockingQueue %))
             (pred :seon.host/persistent-queue #(instance? clojure.lang.PersistentQueue %))
@@ -122,7 +123,10 @@
 
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
-(clojure.core/defn- problems {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
+(clojure.core/defn problems
+  "Why v does not satisfy schema s, as an error's problems (:seon.error/problems): each refused
+  part's path and its value as it prints."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] [:vector :seon.error/problem]]} [s v]
   (vec (for [{:keys [path in schema value]} (:errors (m/explain s v))]
          {:path path :in in :expected (m/form schema)
           ;; the value as it prints, marked code (print/code): it reads as written, a symbol or

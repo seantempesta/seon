@@ -29,7 +29,7 @@
 (deftest a-turn-prints-its-new-records-flat-in-the-history
   (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
                :n "records of the run printed before (the cache)"
-               :work (str "the new record printed whole and collapsed, once, by the one printer, its fold looked up "
+               :work (str "the new record printed whole, once, by the one printer, its fold looked up "
                           "among the values the earlier records showed (a hash map by value and type); nothing of the "
                           "earlier records is printed again")
                :growth :constant
@@ -141,25 +141,6 @@
                :fixed {:calls 10 :bytes 1000000}
                :sizes [200 500 1000]}))
 
-(defn kept-of
-  "seon.context/kept's arguments: n parts of a conversation, each a reply's call (every third
-  continuing the one before), whole 1,000 tokens and collapsed 20, at the 32k history budget, so the
-  cuts jump as the history passes it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :map] :int]]}
-  [n] [(vec (for [i (range n)] {:cost [1000 20] :call (if (zero? (mod i 3)) 0 1)})) 32000])
-
-(deftest the-history-cut-is-one-walk-of-the-parts
-  ;; task seon.context/history-steps-hold-below-one-step: the cuts only advance, each part passed once
-  (cost/proof
-    {:of 'seon.context/kept :input 'seon.context-cost-test/kept-of
-     :n "parts of the conversation"
-     :work "each part's two costs summed once (prefix sums), then one walk holding two cuts that only advance: linear in the parts"
-     :growth :linear
-     ;; measured 2026-10-25 (n 100 -> 10,000): 231 ticks and 1.57 KB a part, one contracted call
-     :per-n {:ticks 240.0 :bytes 1600.0 :calls 0.0}
-     :fixed {:ticks 2000.0 :bytes 5000.0 :calls 1.0}
-     :sizes [100 300 1000 10000]}))
-
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
   without its write set, as the task part draws it."
@@ -175,3 +156,43 @@
                :growth :constant
                :fixed {:calls 18}
                :sizes [10 100 1000]}))
+
+(def ^:dynamic *conn*
+  "The branch's connection the parts-of proof reads and writes (bound by its deftest)."
+  nil)
+
+(defn turns-of
+  "The input at n: the db of a branch where agent b/p<n> took n turns on a task (its plan changing
+  each turn, one commit a turn: *conn*), and the refs a request sent, [:page a nil c1] then
+  [:page a c(i) c(i+1)], each page's c1 the next one's c0, as seon.context/request records them.
+  Every page is the same size (a plan and a run), so the cost is per page."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
+  [n]
+  (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
+    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p."
+                                             :seon.task/proofs #{'demo-test/p-test}}]))
+    (d/transact conn [{:seon.run/id (str tid "#1") :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k}}])
+    (let [commits (vec (for [i (range n)]
+                         (do (d/transact conn [{:seon.task/id tid :seon.task/plan (str "Make p, step " i ".")}])
+                             (d/commit-id @conn))))
+          a (:db/id (d/entity @conn [:seon.agent/key k]))]
+      [@conn (vec (for [[c0 c1] (map vector (cons nil commits) commits)] [:page a c0 c1]))])))
+
+;; See docs/render.md#the-branchs-views
+(deftest reading-a-request-back-draws-each-page-once
+  (binding [*conn* nil]
+    (ts/test-branch!
+      (fn [_ conn]
+        (binding [*conn* conn]
+          (cost/proof {:of 'seon.context/parts-of :input 'seon.context-cost-test/turns-of
+                       :n "page refs of the request (one turn's page each, page n's c1 the next one's c0)"
+                       :work (str "one page drawn a ref (the walk of the agent's record at that commit), the pages already drawn "
+                                  "taken from the {commit page} the refs before left, so no commit is drawn twice")
+                       :growth :linear
+                       ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
+                       ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
+                       ;; 11.0 MB / 1,195 at 2, 27.7 MB / 2,719 at 4, 61.2 MB / 5,767 at 8 (762 calls a page, not 448)
+                       :per-n {:bytes 6800000 :calls 480}
+                       :fixed {:bytes 500000 :calls 50}
+                       :sizes [1 2 4 8]}))))))
+

@@ -117,7 +117,9 @@
  ;; the scripted provider's :script names a function this process cannot load (its namespace is
  ;; on no source root, or does not define it): seon.model/scripted
  :seon.model/no-script [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/no-script]] [:script :qualified-symbol]]]
- :seon.model/failure [:or :seon.model/no-provider :seon.model/no-script :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
+ ;; a scripted model (a test fixture) that answered no :seon.model/script-reply: its problems say what is wrong
+ :seon.model/script-invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.model/script-invalid]] [:script :qualified-symbol]]]
+ :seon.model/failure [:or :seon.model/no-provider :seon.model/no-script :seon.model/script-invalid :seon.model/provider-error :seon.model/rate-limited :seon.model/transport :seon.model/reasoning-ate-reply]
 
  ;; ---- recorded errors: one entity per signature (main), counted across agents ----
  ;; who observed it: a root proc's defect, an agent's eval, an agent's death or stall, an effect's outcome

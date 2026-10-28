@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -781,11 +781,53 @@
         [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
     (is (= ["assistant" "tool" "assistant" "tool"] (mapv :role ms)) "each reply followed by its call's answer")
-    (is (= [{:id "call-0" :code "(+ 20 21)"}] (:tool-calls a0)))
-    (is (= "call-0" (:tool-call-id r0)) "the answer names its call")
+    (is (= [{:id "call-0-0" :code "(+ 20 21)" :prose "Add twenty and twenty-one."}] (:tool-calls a0)))
+    (is (= "call-0-0" (:tool-call-id r0)) "the answer names its call")
     (is (str/includes? (:content r0) "41") "the first call's answer")
-    (is (= [{:id "call-1" :code "(+ 1 41)"}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
+    (is (= [{:id "call-1-0" :code "(+ 1 41)" :prose "Add one to the value the last call showed."}] (:tool-calls a1)) "the second call was made after the first call's answer, from it")
     (is (str/includes? (:content r1) "42") "and both answers are in the conversation")))
+
+(deftest a-call-after-one-that-threw-is-not-run
+  ;; docs/prompt.md: a reply's calls run in order; a call after one that threw is not run, and
+  ;; its result says so, so every call has its tool message (the provider refuses a call with none)
+  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
+                             (let [run (str ns "/t#throws")]
+                               [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
+                                (str "(let [db (seon.agent/db)]"
+                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
+                                     "                                       :turn 1 :max-turns 1 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                     "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
+                           {:sets [":seon.config.ai/script=seon.fixtures/calls-one-throws"]})
+        [r0 r1 r2 :as rs] (:value msgs)]
+    (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
+    (is (str/includes? (:content r1) "boom") "the second call's error")
+    (is (str/includes? (:content r2) "not-run") "the third call was not run, and its result says so")
+    (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
+    (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
+
+(deftest a-call-is-prose-and-one-form
+  ;; owner, 2026-10-28: a call is prose and exactly one form; one that is not answers a typed
+  ;; error as its one result and runs nothing, and the calls after it are not run (docs/prompt.md)
+  (let [problem #'seon.turn/call-problem]
+    (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
+    (is (= :no-prose (:problem (problem " " "(+ 1 2)"))) "no prose")
+    (is (= [:forms 2] ((juxt :problem :forms) (problem "Two." "(def a 1) (inc a)"))) "two forms")
+    (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
+    (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
+  (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
+                             (let [run (str ns "/t#forms")]
+                               [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
+                                (str "(let [db (seon.agent/db)]"
+                                     " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
+                                     "                                       :turn 1 :max-turns 1 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                     "      (filter #(= \"tool\" (:role %))) (mapv :content)))")]))
+                           {:sets [":seon.config.ai/script=seon.fixtures/two-forms-in-a-call"]})
+        [r0 r1 :as rs] (:value msgs)]
+    (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
+    (is (str/includes? r0 "invalid-call") "the two-form call's result is its error")
+    (is (str/includes? r0 "holds 2 forms"))
+    (is (not (str/includes? r0 ":value")) "and nothing of it ran")
+    (is (str/includes? r1 "not-run") "the call after it is not run")))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
@@ -1054,7 +1096,8 @@
   ;; run whose proof passes on its branch ends green, and root merges its branch into main: the
   ;; agent does nothing beyond its work
   (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wg\" :seon.task/plan \"Make wg.\"})"
-                   " _ (seon.root/await-db sys \"the whole task merged\" #(= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"" % "/wg\")))"
+                   " _ (seon.root/await-db sys \"the run ended\" #(or (= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"" % "/wg\"))"
+                   "                                    (#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"" % "/wg#1\"])))))"
                    " db @(:conn sys) r (seon.task/run db \"" % "/wg#1\")]"
                    " [(:seon.task/kind (seon.task/task db \"" % "/wg\")) (:seon.run/outcome r) (:seon.run/status r) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
@@ -1122,7 +1165,7 @@
   ;; (flow-lab's hazards 1 and 2: a stop left by the parked run ended the next at once with the
   ;; message untaken; turn numbers restarted over the recorded ones)
   (let [q (fn [w] (str "[:find ?id ?st ?out ?ag ?taken ?turns :where [?e :seon.run/task ?t] [?t :seon.task/id \"" w "\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag] [?e :seon.run/taken ?taken] [?e :seon.run/turns ?turns]]"))
-        parked (fn [w n] (str "(seon.root/await-db sys #(= " n " (count (filter (fn [[_ st]] (= :parked st)) (datahike.api/q '" (q w) " %)))))"))
+        parked (fn [w n] (str "(seon.root/await-db sys \"the runs parked, or one ended\" #(let [rows (datahike.api/q '" (q w) " %)] (or (= " n " (count (filter (fn [[_ st]] (= :parked st)) rows))) (some (fn [[_ st]] (#{:held :done :closed :merged :dead} st)) rows))))"))
         names (volatile! nil)
         [_ r] (in-agent (fn [{:keys [ns] :as n}]
                           (vreset! names n)
@@ -1252,9 +1295,8 @@
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
     (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
     (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
-    ;; the prose comes in the eval call (its first argument, docs/render.md
-    ;; section 1), so the reply's own text is empty and the prose is the eval's
-    (is (= "" reply) "the reply's text: the prose came in its call")
+    ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
+    (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))
     (is (= ["check the sum before the proof"] prose) "whose record keeps the prose beside it")))
 

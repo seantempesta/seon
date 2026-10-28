@@ -322,3 +322,49 @@
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 140 :bytes 150000}
      :sizes [100 300 1000 4000]}))
+
+(def ^:dynamic *conn*
+  "The branch's connection branch-views' proof writes its base, main and branch on (bound by its deftest)."
+  nil)
+
+(defn- defn-facts
+  "Program facts for var v defined by source src, as an import records them."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] [:vector :map]]}
+  [v src]
+  (let [n (namespace v)]
+    [{:db/id (str "ns " n) :ns/name (symbol n) :ns/file (str "src/" (clojure.string/replace n "-" "_") ".clj")}
+     {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
+     {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
+
+(defn branch-of
+  "The input at n: a branch's views' arguments, [opts base main]: a base holding one function, main one
+  function later, and the branch (the base's db) with n functions of its own, each without a contract
+  (so gaps and divergence have n rows each)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
+  [n]
+  (let [conn *conn* ns (str "bn" n)
+        _ (d/transact conn (defn-facts (symbol ns "f") "(defn f [x] x)"))
+        base (d/commit-id @conn)
+        _ (d/transact conn (defn-facts (symbol ns "k") "(defn k [] 2)"))
+        main (d/commit-id @conn)
+        ours (reduce (fn [db i] (d/db-with db (defn-facts (symbol ns (str "h" i)) (str "(defn h" i " [] " i ")"))))
+                     (d/commit-as-db conn base) (range n))]
+    [{:seon.db/db ours} base main]))
+
+;; See docs/render.md#the-branchs-views
+(deftest the-branchs-views-read-its-diff-once
+  (ts/test-branch!
+    (fn [_ conn]
+      (binding [*conn* conn]
+        (cost/proof {:of 'seon.render.ui/branch-views :input 'seon.render-cost-test/branch-of
+                     :n "functions the branch defined without a contract (a base and main one function apart)"
+                     :work (str "the datoms that differ between the base and the branch read once (seon.merge/content-datoms), "
+                                "then the changes, the problems it caused, the gaps, what it carries and the merge section's "
+                                "three-way from them; main's own diff once")
+                     :growth :linear
+                     ;; measured 2026-10-28: 28.1 MB / 175 calls at 1, 37.4 MB / 742 at 10, 57.9 MB / 2,002 at 30
+                     ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls
+                     ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
+                     :per-n {:bytes 1100000 :calls 70}
+                     :fixed {:bytes 27000000 :calls 115}
+                     :sizes [1 10 30]})))))

@@ -709,17 +709,8 @@
  ;; Unit: tokens for a form echoed back (session P1).
  :seon.config.render/form-budget 600
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
- ;; breadth first so every section shows before any one deepens (session P1). The history has its
- ;; own budget below; neither is carved out of the other.
+ ;; breadth first so every section shows before any one deepens (session P1).
  :seon.config.render/context-budget 16000
- ;; Unit: tokens of earlier turns (each the model's reply and what its forms evaluated to) the
- ;; model reads before the current state, whole turns, the newest kept first; the task's first
- ;; context always stays. 0 shows only the last turn. Provenance (owner, 2026-10-21, after a live
- ;; agent re-read the same Datahike source every other turn because each context showed only
- ;; the previous turn): a REPL keeps its scrollback. 256000 (2026-10-21) resent ~300k tokens a
- ;; turn (owner: "wtf"); 32000 keeps the last several whole turns (a turn is a reply of ~1-3k
- ;; plus its evaluations up to the evals budget), so a turn sends ~20-55k with the block.
- :seon.config.render/history-budget 32000
  ;; Unit: members. The newest members of each collection a record holds (an agent's evals, runs,
  ;; turns and messages; root's agents), read newest first and stopping there, so a record costs its
  ;; window, not its history. 100: a session's evals measured on live agents run 20-80 a task

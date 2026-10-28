@@ -488,6 +488,10 @@
                    [:agent {:optional true} :string]]
  ;; (my.task/status) asked before any turn of this process observed its task: why, and what runs its proofs
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
+ ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/unrun): :after, that call's id
+ :seon.turn/not-run [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-run]] [:after :string]]]
+ ;; a model's eval call that is not prose and one form, not run (seon.turn/call-problem): :problem why, :forms how many it held
+ :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
  ;; names (my.agent/no-var); :ask the form for the registry key of that name, when there is one
@@ -500,9 +504,8 @@
  :seon.turn/error [:map]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
- ;; sent with (its value or output an earlier record showed: the handle there), an eval sent collapsed
- ;; ([:line id]); the history note's count
- :seon.turn/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :line :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]] [:tuple [:= :history] :int]]]
+ ;; sent with (its value or output an earlier record showed: the handle there)
+ :seon.turn/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]]]
  ;; a model turn's eval calls, each its id, its code and the eval it ran (whose record the
  ;; conversation sends as the call's tool message)
  :seon.turn/calls [:vector [:map [:id :string] [:code :string]
