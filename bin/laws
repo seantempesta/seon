@@ -1,8 +1,8 @@
 #!/bin/sh
-# bin/laws [KIND ...] — every law's sites: for each law, every site in src/ (the check and
+# bin/laws [KIND ...] — every law's sites (default: clocks, measures, resolution; catch by name): for each law, every site in src/ (the check and
 # e2e drivers left out, but for clocks: a harness wait is a clock too) where its mark appears, by its function (`ns/fn`), and whether the
 # law's doc names that function in backticks with the owner's reason. Prints each site;
-# exits 1 when one is not named. Kinds (default: all), each a mark over code with strings
+# exits 1 when one is not named. Kinds, each a mark over code with strings
 # and comments stripped, and the doc (and section) that sanctions it:
 #   catch       `(catch `                                         docs/failure-points.md
 #               read by Seon, not here: the :unnamed-site class over the compiler's facts
@@ -49,7 +49,9 @@ sites() { # KIND PATTERN DOC [SECTION]
   fi
   [ $kb = 0 ] || bad=1
 }
-kinds=${*:-catch clocks measures resolution}
+# catch is the health step's :unnamed-site (bin/check health), run by name only: a default run
+# here would run the whole health a second time beside the step that runs it
+kinds=${*:-clocks measures resolution}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in

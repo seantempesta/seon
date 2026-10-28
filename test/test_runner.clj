@@ -508,8 +508,8 @@
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
       (let [store (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
-            ;; the base's tasks and wiki, as git holds them, removed once read
-            dir (str root "/target/tmp/health-base-" base)
+            ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read
+            dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir)] dir))
                        (finally (sh/sh "rm" "-rf" dir)))
