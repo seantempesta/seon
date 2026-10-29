@@ -17,6 +17,7 @@
  :seon.db/ids-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/ids-unopened]] [:path :string] [:errno :int]]]
  :seon.db/store-unplaced [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/store-unplaced]] [:path :string] [:errno :int]]]
  :seon.vector/model-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/model-unopened]] [:path :string]]]
+ :seon.vector/helper-died [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/helper-died]] [:exit :int] [:stderr :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
  :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
  ;; a wait on main (seon.root/await-db) whose pred was false when the reconciler went quiet at

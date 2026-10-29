@@ -420,8 +420,10 @@
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
  ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
- ;; test starts the binary: seon.test-store/binary-sh.
- :seon.config.source/binary-vars #{seon.test-store/binary-sh}
+ ;; test starts the binary: seon.test-store/binary-sh, and seon.vector/start!, which execs
+ ;; `target/seon embed-worker` (2026-10-29: the helper tests ran a stale binary, red and green at one
+ ;; digest, until this named it).
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh seon.vector/start!}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
  ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task
@@ -896,15 +898,14 @@
  :seon.config.vector/batch-tokens 4096
  ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
  :seon.config.vector/batch-texts 64
- ;; Unit: threads. ggml's CPU pool in root's :embed worker: Metal does the encode, so 1 measured as
- ;; fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4 threads of
- ;; its own (Metal's), and loading it runs ~32 that end when it has loaded.
+ ;; Unit: threads. ggml's CPU pool in the :embed helper (seon.vector/serve!): Metal does the encode, so 1
+ ;; measured as fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4
+ ;; threads of its own (Metal's), and loading it runs ~32 that end when it has loaded; all in the
+ ;; helper's process, none in root's.
  :seon.config.vector/threads 1
- ;; Unit: threads. The open model's own threads, outside Jolt's roster (Metal's), which root
- ;; declares while its :embed worker holds the model (seon.check/declared-threads). Measured
- ;; 2026-10-23 on an M5 Max: 4 at every :seon.config.vector/threads from 1 to 18. Its load runs
- ;; ~32 more for ~4 s, which end when it has loaded (a thread count taken then reads them).
- :seon.config.vector/model-threads 4
+ ;; Unit: characters. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
+ ;; characters; the error says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
+ :seon.config.vector/stderr-chars 4096
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048

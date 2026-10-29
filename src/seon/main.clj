@@ -7,7 +7,7 @@
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
-            [seon.generation]
+            [seon.generation] [seon.vector]
             ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
             [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
@@ -113,4 +113,5 @@
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
     "ports" (ports)
+    "embed-worker" (seon.vector/serve!)
     (apply (driver! (checkout)) args)))
