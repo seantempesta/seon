@@ -292,7 +292,7 @@
 (defn source-fn
   "The source of the var sym names, or nil: clojure.repl/source-fn. The text its last definition
   in this process kept (seon.repl), else what this branch records for it, else the form at its
-  :file and :line (a library's). A namespace's name answers its ns form as this branch records
+  :file and :line (a library's, or any in a process with no branch). A namespace's name answers its ns form as this branch records
   it (its requires and aliases), then each definition, privates included, a line each in file
   order (seon.docs/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
@@ -302,11 +302,12 @@
   ;; a name that resolves to a class (java.lang.String) or to anything but a var has no recorded source
   (if-let [v (let [r (if (var? sym) sym (resolve sym))] (when (var? r) r))]
     (or (:source (meta v))
-        (docs/source-of (agent/db) (named v))
+        ;; the branch's record, where there is a branch (a process with no agent's db, a test run's, reads the file)
+        (some-> (:db @agent/state) (docs/source-of (named v)))
         (file-source v))
     (when-not (namespace sym)
       ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
-      (docs/namespace-source (agent/db) sym))))
+      (some-> (:db @agent/state) (docs/namespace-source sym)))))
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
