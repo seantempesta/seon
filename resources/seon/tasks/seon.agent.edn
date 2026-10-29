@@ -132,4 +132,7 @@ Cut 3: :seon.run/* and :seon.config.ctx/window on turns and evals deleted from t
 
 Replaces: the run entity, its pattern join and the window on an agent's own record. Deletes, at cut 3: :seon.run/run-fact and its ~280 src references."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.ctx-test/an-agents-record-holds-its-task-and-every-turn-and-eval}}]
+  :seon.task/proofs #{seon.ctx-test/an-agents-record-holds-its-task-and-every-turn-and-eval}}
+ {:seon.task/name "a-read-in-an-agent-names-the-var-it-reads"
+  :seon.task/plan "Found 2026-10-30 (md-scan #25's agent-only reds): seon.judge-test/the-score-says-what-the-first-move-did is green under bin/test and red in an agent's test child (:waste 0 where 1). In an agent clojure.repl/source is my.agent/source, whose expansion holds the read var only as (quote sym) bound in a let; seon.judge/form-facts' refs then name my.agent/source-fn, my.agent/named and seon.agent/db, but not seon.judge/score, so the judge cannot see the shown var read again. Correct: a read's facts name the var it reads in both REPLs. Either form-facts takes a read's quoted argument as the var read (the read vars' first argument), or my.agent/source expands with the var as a quoted literal the analyzer counts as quoted data, as clojure.repl/source does."
+  :seon.task/proofs #{seon.judge-test/the-score-says-what-the-first-move-did}}]
