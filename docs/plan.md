@@ -37,11 +37,15 @@ Then (c63d45dcbe, 65a5412776): Jolt emits namespace init as data (target/seon 80
 
 Then (ad9f049dc6, d7f1f1cee4, fbb83163a8): the contract check is per function (a one-function change re-checks its 6 contracts in 0.5 s, no build); a walk enters no linked directory and a test child works in its own directory (an agent spun 13 min on a symlink cycle in the agents' cwd); test roots boot from a seeded store (14.4 -> 7.1 s) and end with their runner; the wiki load allocates 217 MB, not 1.47 GB, and is skipped when unchanged (boot to listening ~4 s). `e2e calc` root ~465 MB (runs vary +-20 MB: compare several).
 
-**Open, biggest first:**
-- **Test time, structurally**: the slowest tests boot roots on stores of their own (restart tests, 60-270 s; one builds the binary three times). Next: a build of an unchanged tree reused by digest inside a test; then the merge gate proving inside a standing root by forking, as agents do.
-- The wiki load's steady cost (217 MB, ~280 bytes a byte of text: Datahike seeks per citation) and the fork server's 566-655 MB against ~300 MB.
-- The heap histogram on an OOM (Jolt c6d8d43e, Seon jolt/an-oom-carries-its-heap): re-test now that the fork-monitor fix is in.
-- A working agent's real cost (heap growth, test children): `bin/check scale` with ten agents doing work.
+**Overnight 2026-10-29, ranked from four audits** (costs mined from every test's recorded per-function spend; an idle root, fork server and one scripted turn measured; duplicate and dead code; test waste). Running: restart tests reuse an unchanged build; scripted agent tests share one root per shard (~15 fewer boots a shard); the nine tests over 2 G ticks made cheap, then test-ticks to ~2.5 G; each test's budget from its own green history and a per-eval byte budget (design for seon.repl, the context session's file). Then, biggest first:
+1. **A turn's waste in root** (one scripted turn: root 1.8 GB, agent 1.05 GB): the render proc prints root's context on every pass with no viewer (~40% of root's allocation, 41 quiet passes); health recomputed on every commit with no viewer (~157 MB); each turn reads every test's verdict file (2,258 reads, 77 MB); seon.sock/recv! 268 MB in 3 calls; graph-index 104 MB a turn; ~1.3 s CPU a fork in the fork server.
+2. **Test store setup** (~22% of all measured test work): seon.db/seed! (9.6%), install-missing! (5.5%), test-branch! growing with the store, seon.program/form-row reading entities attribute by attribute (8.2%), source analysis repeated for the same text (6.9%), seon.task/runs quadratic, seon.vector/unpack 146 KB a call.
+3. **Test waste**: an 8 s sleep in the calc fixture every e2e run; tests booting a root for a value check; repeated setup (calc-db built 8 times); scratch directories never removed; a vacuous fixed-/tmp assertion.
+4. **Second ways and dead code**: about five ways to start a process; three ways to arm a timer (two fork a thread per pending take); the clean env vector twice; git ref helpers repeated; two kill paths; unused vars and four model keys nothing reads (the context window is not enforced).
+5. **Idle**: root's main thread polls stdin 50 times a second (Jolt's stdin wait naps 20 ms): end root on a lifeline instead.
+6. The printer re-indents a multi-line string inside code (the context session's ask).
+Held: proving by forking inside a standing root (designed: worth seconds, not minutes, until a test child can hold a root of its own; a second runner beside bin/test until then).
+- A working agent's real cost: `bin/check scale` with ten agents doing work, after item 1.
 
 ## Now: one step
 
