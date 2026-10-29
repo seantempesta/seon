@@ -4,4 +4,8 @@
  ;; and stderr; recorded as a :platform error (seon.root/platform-tx), and root goes on unwatched
  :seon.watch/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.watch/died]]
                                           [:bin :string] [:roots [:vector :string]]
-                                          [:exit [:maybe :int]] [:stderr [:maybe :string]]]]}
+                                          [:exit [:maybe :int]] [:stderr [:maybe :string]]]]
+ ;; a batch's handler threw (a loader refused its input): that batch is not loaded, and the watch goes on;
+ ;; recorded as a :platform error, which the next batch that loads closes (the watch fact is written again)
+ :seon.watch/batch-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.watch/batch-failed]]
+                                                  [:records nat-int?]]]}

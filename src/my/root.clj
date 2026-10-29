@@ -224,6 +224,13 @@
   (cond-> (root/platform-tx db e ms)
     (= :seon.root/tasks (:seon.error/subject e)) (into (tasks-read-tx {:error (:seon.error/message e)}))))
 
+(def ^:private load-lock
+  "The one lock every loader of main's declared state takes around its read of main's db and the write
+  decided from it (load-tasks!, load-docs!, load-kinds!, the watcher's batches): a load writes what it
+  read against the db it read, so two interleaved would write the second's decisions against a db the
+  first had changed (docs/health.md#every-writer-root-loads-what-changed). Reentrant."
+  (Object.))
+
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
@@ -233,15 +240,16 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
-   (let [db @(:conn sys)
-         files (if dir (task-files dir) (task-files))
-         tx (task/load-tx db files)
-         outcome {:files (count files)}
-         held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
-     ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
-     ;; good read still writes nothing
-     (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
-                                   {:files (count files)} (mapcat identity (vals files)))))))
+   (locking load-lock
+     (let [db @(:conn sys)
+           files (if dir (task-files dir) (task-files))
+           tx (task/load-tx db files)
+           outcome {:files (count files)}
+           held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+       ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
+       ;; good read still writes nothing
+       (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
+                                     {:files (count files)} (mapcat identity (vals files))))))))
 
 (defn load-docs!
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
@@ -250,7 +258,8 @@
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
-   (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)) {:pages (count (docs/pages (config/checkout) dir))} nil)))
+   (locking load-lock
+     (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)) {:pages (count (docs/pages (config/checkout) dir))} nil))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
@@ -272,6 +281,7 @@
                   [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]] [:maybe [:set :string]]] [:map [:loaded :map] [:opened [:set :string]]]]]}
   ([sys ks] (load-kinds! sys ks nil))
   ([sys ks changed]
+  (locking load-lock
   (let [before @(:conn sys)
         source (get-in sys [:bindings :source])
         loaded (into {} (for [k (sort ks) :when (or (not= :source k) source)]
@@ -279,7 +289,7 @@
                                :docs (load-docs! sys)
                                :tasks (load-tasks! sys)
                                :source (root/import-source! sys source changed))]))]
-    {:loaded loaded :opened (problems/caused before @(:conn sys))})))
+    {:loaded loaded :opened (problems/caused before @(:conn sys))}))))
 
 (defn load-errors
   "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
@@ -369,9 +379,11 @@
   erased store holds none, and a file changed while root was down is read; an unchanged read
   writes nothing). The boot's load and the batches' run one at a time, so a change after ready
   is read by the boot's load, a batch's, or both, in order. Then each batch loads what it makes root load (watch-loads),
-  and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact. A
-  watcher that cannot start or dies is a :platform error on main (seon.root/platform-tx), and
-  root goes on unwatched: nothing falls back to a poll. Answers the watcher, or the error."
+  and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact (which
+  closes an earlier error). A watcher that cannot start or dies is a :platform error on main
+  (seon.root/platform-tx), and root goes on unwatched: nothing falls back to a poll. A batch whose
+  handler throws is the same kind of error (:seon.watch/batch-failed) and the watcher reads the next
+  batch. Answers the watcher, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys] :any]}
   [sys]
   (let [co (config/checkout)
@@ -384,12 +396,11 @@
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
         died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
         ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
-        ;; the load made true are shown by health. One load at a time: a load writes what it read
-        ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
+        ;; the load made true are shown by health. One load at a time (load-lock, the REPL's loads too): a load
+        ;; writes what it read against the db it read, so the boot's and a first batch's must not interleave (a stale
         ;; one written after a newer one would undo it, and its event is spent)
-        one (Object.)
         load! (fn [ks changed]
-                (locking one
+                (locking load-lock
                   (let [r (load-kinds! sys ks changed)]
                     (doseq [e (load-errors (:loaded r))]
                       @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
@@ -405,9 +416,9 @@
                             (when (seq ks)
                               ;; the problems the load made true, the last kept in the fact
                               (let [{:keys [opened]} (load! ks changed)]
-                                @(fact (cond-> (-> (held) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
+                                @(fact (cond-> (-> (held) (dissoc :error) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
                                          rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
-                        died)]
+                        died died)]
     (if (contract/error? w)
       (do (died w) (load! #{:tasks} nil) w)
       (do @(fact fresh) (load! #{:tasks} nil) w))))

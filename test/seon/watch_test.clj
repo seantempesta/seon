@@ -68,7 +68,7 @@
                                          (when (some #(str/includes? (second %) "/tags/settled") all) (deliver settled true))
                                          (when (some #(and (= :path (first %)) (str/includes? (second %) "/heads/other")) all) (deliver theirs all))
                                          (when (some #(= [:path own] %) all) (deliver ours all))))
-                        (fn [_]))]
+                        (fn [_]) (fn [_]))]
     (try
       (is (= (str refs "/heads/main") own) "the checkout's own ref, as the watcher reports paths")
       ;; FSEvents may report the setup's writes (its first commit) after the stream starts: a tag
@@ -102,7 +102,7 @@
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
         f (str dir "/x.md")
         got (promise) dead (promise)
-        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got b))) #(deliver dead %))]
+        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got b))) (fn [_]) #(deliver dead %))]
     (is (not (contract/error? w)) (pr-str w))
     (spit f "# X\n")
     (testing "a file written under a watched root arrives as its path, or as a rescan over it"
@@ -116,7 +116,7 @@
           (let [db (d/db-with (ts/test-db) (root/platform-tx (ts/test-db) e 1000))]
             (is (= [:seon.watch/died] (mapv :type (get-in (problems/report db) [:classes :platform :rows]))))))))
     (testing "a watcher stopped is not a death"
-      (let [dead2 (promise) w2 (watch/start! [dir] (fn [_]) #(deliver dead2 %))]
+      (let [dead2 (promise) w2 (watch/start! [dir] (fn [_]) (fn [_]) #(deliver dead2 %))]
         (watch/stop! w2)
         (is (not (realized? dead2)))))))
 
@@ -135,7 +135,7 @@
                   (let [dir (.getCanonicalPath (doto (io/file (str base "/" i)) (.mkdirs)))
                         f (str dir "/x.md")
                         got (promise)
-                        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got true))) (fn [_]))]
+                        w (watch/start! [dir] (fn [b] (when (some #(covers? dir f %) b) (deliver got true))) (fn [_]) (fn [_]))]
                     (spit f "# X\n")
                     (let [r @got] (watch/stop! w) r))))]
     (clojure.java.shell/sh "rm" "-rf" base)
@@ -151,7 +151,7 @@
         later (str base "/later/tasks")
         f (str later "/t.edn")
         got (promise)
-        w (watch/start! [here later] (fn [b] (when (some #(= [:path f] %) b) (deliver got b))) (fn [_]))]
+        w (watch/start! [here later] (fn [b] (when (some #(= [:path f] %) b) (deliver got b))) (fn [_]) (fn [_]))]
     (is (not (contract/error? w)) (pr-str w))
     (.mkdirs (io/file later))
     (spit f "[]")
@@ -159,16 +159,48 @@
     (watch/stop! w)
     (clojure.java.shell/sh "rm" "-rf" base)))
 
-(deftest a-throw-in-the-batch-handler-is-a-recorded-death
+(deftest a-throw-in-the-batch-handler-is-a-recorded-error-and-the-watch-goes-on
+  ;; found on the standing root 2026-10-28: one batch's handler threw (seon.task/task-value refused a task
+  ;; without :seon.task/ns) and :seon.watch/died ended the watcher for the rest of root's life
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
-        dead (promise)
-        w (watch/start! [dir] (fn [_] (throw (ex-info "the handler broke" {}))) #(deliver dead %))]
+        failed (promise) read (promise) dead (promise)
+        batches (atom 0)
+        w (watch/start! [dir]
+                        (fn [b] (when (some #(= [:path (str dir "/x.md")] %) b)
+                                  (if (= 1 (swap! batches inc))
+                                    (throw (ex-info "the handler broke" {}))
+                                    (deliver read b))))
+                        #(deliver failed %) #(deliver dead %))]
     (is (not (contract/error? w)))
-    (spit (str dir "/x.md") "# X\n")
-    (let [e @dead]
-      (is (= :seon.watch/died (:seon.error/type e)) "the thread does not end silently")
-      (is (re-find #"handler threw: the handler broke" (:seon.error/message e)))
-      (is (contract/valid? :seon.watch/died e)))))
+    (try
+      (spit (str dir "/x.md") "# X\n")
+      (let [e @failed]
+        (is (= :seon.watch/batch-failed (:seon.error/type e)) "the throw is an error value, not the thread's end")
+        (is (re-find #"handler threw: the handler broke" (:seon.error/message e)))
+        (is (contract/valid? :seon.watch/batch-failed e)))
+      (spit (str dir "/x.md") "# X\n\nChanged.\n")
+      (is (some #(= [:path (str dir "/x.md")] %) @read) "the next batch reached the handler: the watcher outlived the bad one")
+      (is (not (realized? dead)) "no death was recorded")
+      (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" (.getParent (io/file dir)))))))
+
+(deftest a-failure-that-cannot-be-recorded-does-not-end-the-watch-either
+  ;; recording a batch's failure writes to the store, which may refuse: the edge writes stderr and reads on
+  (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
+        read (promise) tried (promise) batches (atom 0)
+        w (watch/start! [dir]
+                        (fn [b] (when (some #(= [:path (str dir "/x.md")] %) b)
+                                  (if (= 1 (swap! batches inc)) (throw (ex-info "the handler broke" {})) (deliver read b))))
+                        (fn [_] (deliver tried true) (throw (ex-info "the store refused it" {})))
+                        (fn [_]))]
+    (is (not (contract/error? w)))
+    (try
+      (spit (str dir "/x.md") "# X\n")
+      ;; the change below is a batch of its own only once the first batch has failed (two writes made together
+      ;; may arrive as one batch, whose handler throws: nothing would be left to wait for)
+      @tried
+      (spit (str dir "/x.md") "# X\n\nChanged.\n")
+      (is (some #(= [:path (str dir "/x.md")] %) @read) "the next batch was read after the recording threw")
+      (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" (.getParent (io/file dir)))))))
 
 (deftest a-refused-task-file-is-a-recorded-platform-error
   (let [bad (seon.task/file-declarations 't.x "{:not a vector")
@@ -242,7 +274,7 @@
         outcome (promise)
         w (watch/start! [(.getCanonicalPath docs)]
                         (fn [_] (deliver outcome [:read (seon.docs/load-dir-tx db co "docs" {})]))
-                        #(deliver outcome [:died %]))]
+                        #(deliver outcome [:died %]) #(deliver outcome [:died %]))]
     (is (not (contract/error? w)) (pr-str w))
     ;; a watcher that never started answers as a death, so the wait below always ends
     (when (contract/error? w) (deliver outcome [:died w]))

@@ -149,3 +149,43 @@
     (is (seq ds))
     (is (every? #(= :whole (:seon.task/kind %)) ds))
     (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))
+
+(deftest loads-of-the-task-files-read-and-write-under-one-lock
+  ;; found on the standing root 2026-10-28: a fresh store's task load reported "Conflicting upsert". The boot's
+  ;; load (under the watcher's lock) and a REPL (my.root/load-tasks! sys) read main's db and wrote against it
+  ;; with nothing between them, so the second wrote what it had decided from a db the first had since
+  ;; changed (the same declarations loaded from one db twice, in order, fail: Conflicting upsert). A load
+  ;; takes the lock the other loaders take, so a second waits for the first's write: here the lock is held
+  ;; and a load started on another thread must be blocked on it, never past it
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        path (str checkout "/target/runs/load-lock-" (random-uuid))
+        runs (str path "-runs")
+        _ (.mkdirs (java.io.File. (str runs "/tasks")))
+        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
+        root (ts/start-root! {:store path :main "main" :runs runs})
+        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
+    (try
+      (is (= :blocked (ask "(let [lock @#'my.root/load-lock
+                                  state (promise)]
+                              (locking lock
+                                (let [t (Thread. ^Runnable (fn [] (my.root/load-tasks! sys)))]
+                                  (.start t)
+                                  ;; until it waits on the lock or has finished (no sleep: the state is read)
+                                  (loop [] (let [s (str (.getState t))] (if (#{\"BLOCKED\" \"TERMINATED\"} s) (deliver state s) (do (Thread/yield) (recur)))))
+                                  (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))"))
+          "a load started while the lock is held waits on it")
+      (finally (ts/stop-root! root)))))
+
+(deftest a-stale-task-load-never-creates-a-task-it-did-not-declare
+  ;; found on the standing root 2026-10-28: 199 invalid-input errors of seon.task/task-value, a task whose
+  ;; :seon.task/ns was nil. A map {:seon.task/id id ...} upserts, so a removal or revival written against a db
+  ;; that lacks the task made a task entity of only that id; the write names the entity by lookup ref
+  ;; instead, so a stale one is refused by the transaction and creates nothing
+  (let [db0 (empty-db)
+        db1 (load-text db0 file-a)
+        gone (task/load-tx db1 {'demo (task/file-declarations 'demo "[]")})]
+    (is (some #(= [:db/add [:seon.task/id "demo/parse"] :seon.task/execution :cancelled] %) (filter vector? gone)) "removing the file's tasks cancels them (as data)")
+    (let [ghosts (fn [db] (d/q '[:find [?e ...] :where [?e :seon.task/id] (not [?e :seon.task/ns])] db))]
+      (is (empty? (ghosts (d/db-with db1 gone))))
+      (is (thrown? Exception (d/db-with db0 gone)) "the same removal against a db that lacks the tasks is refused")
+      (is (empty? (ghosts db0))))))
