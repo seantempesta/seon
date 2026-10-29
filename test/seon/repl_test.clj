@@ -71,13 +71,20 @@
   ;; returned, each form's exact text from the reader's positions (seon.repl/do-parts), no regex over
   ;; the code. Each definition is program with its own text, comments and spacing as written
   (let [[_ r branch]
-        (at/in-agent (fn [{:keys [ns task]}]
+        (at/in-agent (fn [{:keys [ns task agent]}]
                        [(str "(ns " ns ".core)")
                         (str "(do ; leads f\n  (seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))\n"
                              "  ;; leads g-test\n  (clojure.test/deftest g-test (clojure.test/is (= 2 (f 1)))))")
                         {:op :eval :agent "root"
-                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test]))")}]))]
+                         ;; an agent's records are applied ahead of its commit (seon.agent/transact!), so its branch
+                         ;; shows them at its :commit event: the tap first, then the read, and again at each of
+                         ;; the agent's commits until both forms are there (seon.check/await-records's order)
+                         :code (str "(let [ev (c/events sys) a :" agent
+                                    " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test])))"
+                                    " r (loop [] (let [v (read)] (if (every? some? v) v"
+                                    " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                    " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (= 2 (count (:recorded r))) (str "both inner definitions are program: " (pr-str r)))
     (is (= ["(seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))"
             "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]
