@@ -495,7 +495,7 @@
   functions and what it recorded."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]
-  (let [cites (when db (some->> (:prose req) (ref/references db)))
+  (let [cites (if (contains? req :cites) (:cites req) (when db (some->> (:prose req) (ref/references db))))
         resp (dissoc r :text :recorded :fns :record)
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
@@ -568,8 +568,12 @@
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
      (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r render/summarized)]))
+                ;; what the call's prose cites, read after its forms ran (the parser is program the agent may
+                ;; have just changed: a defect in it is this eval's error, never the turn loop's)
+                cites (volatile! nil)
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                              (when-let [db (agent/db)] (vreset! cites (some->> (:prose req) (ref/references db))))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
@@ -585,7 +589,7 @@
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
-                               code req)
+                               code (assoc req :cites @cites))
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m)))))
           (finally (swap! agent/state assoc :eval outer))))))
@@ -599,7 +603,8 @@
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r render/summarized)) code req)))
+    ;; its prose cites nothing it ran: the parser is not asked (a defect in it is no unrun call's)
+    (record! (assoc r :text (print/response-text r render/summarized)) code (assoc req :cites nil))))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own
