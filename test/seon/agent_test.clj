@@ -626,7 +626,7 @@
   ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
   ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
   ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
-  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+  (let [[_ a b r] (in-agent ["(def held (byte-array (* 300 1048576)))"
                            "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
                            "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
         v (some-> (:value r) clojure.edn/read-string)]
@@ -1549,3 +1549,16 @@
     (is (< (:ticks unchanged) (* 0.01 (:ticks first-eval))) "main as the base: no diff, no query")
     (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
     (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))
+
+(deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
+  ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
+  ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
+  ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
+  ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
+  (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
+                           "(alter-var-root #'seon.agent/transact! (fn [f] (fn [tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f tx)))))"
+                           "(let [p (my.agent/prove)] (select-keys p [:pass :unrecorded]))"]
+                          {:dirs ["src" "test"] :proofs #{'fin-test/r}})]
+    (is (nil? (:ex r)) (pr-str r))
+    (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
+    (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
