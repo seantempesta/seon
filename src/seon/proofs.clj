@@ -8,7 +8,7 @@
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
             [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
 
 (defn test-symbol
@@ -199,6 +199,50 @@
                                  :fns (get-in answer [:fns t] [])}]
                        (cost-of t) (assoc-in [1 :cost] (cost-of t)))))
      :failures (failures reports)}))
+
+(defn- test-facts
+  "The :seon.test/* attributes a test's result sets (task seon.proofs/test-results-are-a-few-facts), given old (the entity as the branch holds it, or nil)
+  and new ({:digest :status :failure :measure {:ms :ticks :bytes}}; no :measure for a reused result, which ran
+  nothing): the digest, the status (a different status at the same digest is :flaky), the failure while not
+  green, and the sums, which a new digest resets to this run and the same digest adds to."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
+  [old {:keys [digest status failure measure]}]
+  (let [same? (= digest (:seon.test/digest old))
+        status (if (and same? measure (:seon.test/status old) (not= status (:seon.test/status old))) :flaky status)
+        sums (cond (and same? measure) (merge-with + (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
+                                                   {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)})
+                   measure {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)}
+                   same? (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]))]
+    (cond-> (assoc sums :seon.test/digest digest :seon.test/status status)
+      (and (not= :green status) (or failure (and same? (:seon.test/failure old)))) (assoc :seon.test/failure (or failure (:seon.test/failure old))))))
+
+(defn result-tx
+  "The transaction that records a test run's results on the branch that ran it (docs/merging.md#verdicts-are-a-cache,
+  task seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
+  :ticks :bytes) its digest, status, first failure (failures, {test [assertion]}) and sums; and for each of
+  reused ({test result}, a result the cache held at its digest) its digest and status, so a freshly branched
+  agent's proofs show their reused status. old is {test entity} as the branch holds each now
+  (:seon.test/* attributes; absent for a test it holds none of). Only what differs is written: [] when
+  nothing does."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map] [:vector :any]]}
+  [old ran failures reused]
+  (let [fail-text (fn [t] (some-> (first (failures t)) (select-keys [:type :message :expected :actual :got]) (print/text (:part print/budgets))))
+        news (-> (into {} (for [[t r] ran :when (:digest r)]
+                            [t {:digest (:digest r) :status (if (= :pass (status-of r)) :green :red) :failure (fail-text t)
+                                :measure (select-keys r [:ms :ticks :bytes])}]))
+                 (into (for [[t r] reused :when (and (:digest r) (not (contains? ran t)))]
+                         [t {:digest (:digest r) :status (cond (:flaky r) :flaky (green? r) :green :else :red)
+                             :failure (when-not (green? r)
+                                        (or (some-> (first (:failures r)) (select-keys [:type :message :expected :actual :got]) (print/text (:part print/budgets)))
+                                            "red at this digest, with no failure kept"))}])))]
+    (vec (mapcat (fn [[t n]]
+                   (let [o (old t) facts (test-facts o n)
+                         set-attrs (into {} (remove (fn [[k v]] (= v (k o)))) facts)
+                         gone (for [[k v] (select-keys o [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes :seon.test/failure])
+                                    :when (not (contains? facts k))]
+                                [:db/retract [:var/name t] k v])]
+                     (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))
+                 (sort-by (comp str key) news)))))
 
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred

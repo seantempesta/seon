@@ -63,6 +63,18 @@
  ;; :ctor) and its declared contract, as text
  :var/kind :keyword
  :var/contract :string
+ ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
+ ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
+ ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
+ ;; that digest, seon.proofs/verdict); the first failing assertion as the one printer prints it (present only while red);
+ ;; and running sums over the runs at this digest (a new digest resets them): mean = sum / runs, computed on read
+ :seon.test/digest [:and {:seon.db/no-history? true} :string]
+ :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky]]
+ :seon.test/failure [:and {:seon.db/no-history? true} :string]
+ :seon.test/runs [:and {:seon.db/no-history? true} :int]
+ :seon.test/ms [:and {:seon.db/no-history? true} :int]
+ :seon.test/ticks [:and {:seon.db/no-history? true} :int]
+ :seon.test/bytes [:and {:seon.db/no-history? true} :int]
  :method/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :method/multi :qualified-symbol
  :method/dispatch :string
@@ -97,7 +109,11 @@
  :seon.db/var-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:var/form :as :form] [*]}]}
                      [:var/name :var/name] [:var/ns {:optional true} :var/ns] [:var/form {:optional true} :var/form]
                      [:var/doc {:optional true} :var/doc] [:var/arity {:optional true} :var/arity]
-                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]]
+                     [:var/kind {:optional true} :var/kind] [:var/contract {:optional true} :var/contract]
+                     [:seon.test/digest {:optional true} :seon.test/digest] [:seon.test/status {:optional true} :seon.test/status]
+                     [:seon.test/failure {:optional true} :seon.test/failure] [:seon.test/runs {:optional true} :seon.test/runs]
+                     [:seon.test/ms {:optional true} :seon.test/ms] [:seon.test/ticks {:optional true} :seon.test/ticks]
+                     [:seon.test/bytes {:optional true} :seon.test/bytes]]
  :seon.db/method-fact [:map {:seon.db/attributes true}
                         [:method/key :method/key] [:method/multi :method/multi] [:method/dispatch :method/dispatch]
                         [:method/form {:optional true} :method/form]]

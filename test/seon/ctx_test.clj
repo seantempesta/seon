@@ -788,6 +788,20 @@
           "and {:db/id} under :proved, which reaches it later with the same pattern, so nothing is lost")
       (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
 
+(deftest an-agents-record-holds-its-proofs-status
+  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the status an agent's run recorded on a proof's
+  ;; var entity (seon.proofs/result-tx) is in the agent's record under the task's :proved, where the
+  ;; one layout renders it from: the pattern's wildcard reaches it
+  (let [db (seeded 3 nil)
+        db (:db-after (d/with db [{:var/name 'app.x-test/t0 :seon.test/digest "d1" :seon.test/status :red :seon.test/failure "{:type :fail}"
+                                   :seon.test/runs 1 :seon.test/ms 3 :seon.test/ticks 40 :seon.test/bytes 800}]))
+        t (get-in (ctx/build db (aid db) :b) [:tree :task])
+        v (get-in t [:proved (id db [:var/name 'app.x-test/t0])])]
+    (is (= :red (:seon.test/status v)))
+    (is (= "d1" (:seon.test/digest v)))
+    (is (= "{:type :fail}" (:seon.test/failure v)))
+    (is (= 1 (:seon.test/runs v)))))
+
 (deftest a-symbol-joins-by-name
   ;; :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a
   ;; task holds joins the var it names by a lookup ref, [:var/name sym], and a var's callers join by

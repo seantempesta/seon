@@ -519,7 +519,7 @@
   "A model turn's header (the declared html render of :seon.turn/turn-fact), above the evaluations
   it ran: which turn of how many, its tokens and the share its provider served from cache, how
   its reply stopped and its model; its reply and reasoning as prose. The turn's model call
-  (:seon.model-call/*, merged in by turn-item) holds the tokens, model, forms and basis. Nothing
+  (:seon.model-call/*, merged in with the turn) holds the tokens, model, forms and basis. Nothing
   it did not record is shown."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.turn/keys [n origin reply reasoning finish truncated] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens model errors forms basis]}]
@@ -760,7 +760,7 @@
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
-  each written proof with its source from ctx, the sections cited with their text and the similar
+  each written proof with its source and its recorded result (:status, :failure and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
   as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
   the task's own attributes in ctx change or a transaction touches what task-data read. Each var
@@ -769,7 +769,12 @@
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
   (let [{:seon.task/keys [id kind execution] :as t} (:task c)
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
-        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))]
+        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))
+        ;; each proof's last result as the branch records it (the agent's run wrote it on its var entity:
+        ;; seon.proofs/result-tx), read from ctx and nothing computed here
+        results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
+                           [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
+                                            (:seon.test/failure v) (assoc :failure (:seon.test/failure v)))]))]
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
@@ -781,7 +786,11 @@
      ;; the rest of its data by the printer (each cited var is its own component); each proof how to
      ;; run it and, written, its source (its last result is the status's)
      (let [data (cond-> (context/task-data db (task/task db id) false)
-                  (seq sources) (update :to-prove #(into (empty %) (for [[s run] %] [s (if-let [src (sources s)] {:run run :source src} run)]))))]
+                  (or (seq sources) (seq results))
+                  (update :to-prove #(into (empty %) (for [[s run] %]
+                                                       [s (if (or (sources s) (results s))
+                                                            (cond-> (merge {:run run} (results s)) (sources s) (assoc :source (sources s)))
+                                                            run)]))))]
        ;; a cut names the form that answers the whole at the agent's REPL
        (remove nil?
          (list ;; a premise main may already answer comes first, so it is checked in turn 1
@@ -1032,24 +1041,6 @@
                     (prose (print/line (if-let [{sv :value} (render/summarized v)] sv v) (cell)) (cell) {:one-line? true})])))])
       (when (or opened? (nil? k)) (render/html {:schema (render/entity-schema e :seon.eval/agent)} (dissoc e :db/id :seon.eval/agent)))]]))
 
-(defn turn-item
-  "A model turn or an outside read of the agent (a component over ctx): its header by its schema's
-  render, its basis but its turn cap left out."
-  {:seon.render/style "py-1" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _aid eid]
-  (let [t (ratom/realize (get-in c [:turns eid]))
-        ;; the model call beside the turn (its tokens, model and basis): the record holds the turn's work only
-        m (d/pull db [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/model
-                      :seon.model-call/forms :seon.model-call/errors :seon.model-call/basis] [:seon.model-call/id (:seon.turn/id t)])]
-    [:li (render/html {:schema :seon.turn/turn-fact}
-                                      (-> (merge (relevant :seon.turn/turn-fact t) (dissoc m :db/id)) (dissoc :seon.turn/run) (update :seon.model-call/basis select-keys [:max-turns])))]))
-
-(defn message-item
-  "A message to the agent (a component over ctx), by its schema's render."
-  {:seon.render/style "py-1" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
-  [{c :seon.ctx/ctx} _aid eid]
-  [:li (render/html {:schema :seon.message/fact} (dissoc (ratom/realize (get-in c [:messages eid])) :db/id :seon.message/to :seon.message/agent))])
-
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
   the eval's value): its one line (the schema's summary, my.agent/prove-summary), then each proof's
@@ -1087,63 +1078,6 @@
     (map second (sort (concat (map #(born :seon.eval/id %) (keys (:evals c))) (map #(born :seon.turn/id %) (keys (:turns c)))
                               (map #(born :seon.message/id %) (keys (:messages c))))))))
 
-(defn render-ctx
-  "The render of an agent's ctx, its layout (the declared html render of :seon.render/render-ctx,
-  which an agent overrides on its branch like any render): its ctx, read through the view, as components placed in the
-  render's three lists, each keyed by what it shows (an eid, a var, a key). The task's list (p-task):
-  the newest run's task, each var its plan cites, what is related, what its newest turn observed,
-  the run once it took a turn, then each key the agent added to its ctx. The conversation (c-rows): its evals, the run's
-  turns and its messages, in the order they were written (eids are issued in that order). The
-  tiles (p-tiles): each eval whose value has a render of its own, newest first. It reads the
-  lists' members' ids and its task's cited names, and on the db the transaction of each member's
-  identity (when it was written: some ids are content-derived, so an id is no order), which is never
-  written again, so it runs again only when a list gains or loses a member, the newest run
-  changes, or the plan cites another var."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [aid (:db/id c)
-        task (:task c)
-        evals (:evals c)
-        conv (conversation c db)
-        ev? (set (keys evals))
-        tu? (set (keys (:turns c)))]
-    [:div {:id "render-ctx"}
-     [:div {:id "p-task"}
-      (when task (list [#'task-data {} aid]
-                       ;; each var the plan cites beside its proofs (the proofs are the task's data)
-                       (let [proved (set (map :var/name (vals (:proved task))))]
-                         (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
-                       [#'related {} aid]
-                       (when (seq (:turns c)) [#'status {} aid])
-                       ;; what the turn no longer computes, drawn when what it reads moves: the merge
-                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
-                       ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
-                       (when-let [b (:seon.agent/base-commit c)]
-                         ;; a task that merges itself also shows whether it can merge now (main's commit)
-                         [#'branch-views {} b (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) (:seon.agent/main-commit c))])))
-      ;; the run once it took a turn: before that it says only its id, which the task's names
-      (when (seq (:turns c)) [#'run-head {} aid])
-      (when aid [#'own-problems {} aid])
-      (when (seq (added-keys c)) [#'ctx-keys {}])]
-     [:ol {:id "c-rows"}
-      (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'turn-item {} aid id] :else [#'message-item {} aid id]))]
-     [:aside {:id "p-tiles"}
-      (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
-        [#'eval-tile {} id])]]))
-
-(defn chat-opening
-  "The task as the chat's opening message (a component over ctx): its name in words, then its plan
-  as Markdown under its budget, the printer's cut naming the rest. See docs/render.md#the-page."
-  {:seon.render/style "max-w-[85%] self-end rounded-lg bg-base-800 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (let [t (:task c) id (ratom/realize (get t :seon.task/id)) plan (ratom/realize (get t :seon.task/plan))]
-    [:section
-     [:p {:class "text-2xs uppercase tracking-wider text-text-500"} "task"]
-     [:p {:class "font-bold"} (task-title (str id))]
-     (when plan
-       (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
-         (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))]))
-
 (defn chat-turn
   "A model turn as the chat shows it (a component over ctx), a bubble on the left: its thinking
   folded, its reply as Markdown. See docs/render.md#the-page."
@@ -1179,22 +1113,53 @@
     (when status
       [:p (str "— " (kname status) (when (pos? turns) (str " · turn " turns (when max-turns (str " of " max-turns)))) " —")])))
 
-(defn chat-ctx
-  "An agent's chat, the page a person reads (the declared html render of :seon.render/chat-ctx,
-  over the same ctx as render-ctx, whose page is the agent's debug view): the task as the opening
-  message, then the conversation in the order written (the model's replies and the messages as
-  bubbles, each eval a compact line that opens to its value), then how the run stands. See
-  docs/render.md#the-page."
+(defn render-ctx
+  "The render of an agent's ctx, the one layout the model and the person read (the declared html
+  render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
+  read through the view, as components placed in the render's three lists, each keyed by what it
+  shows (an eid, a var, a key). The task's list (p-task, the parts the model is sent: seon.context/page-lists):
+  the newest run's task, each var its plan cites, what is related, what its newest turn observed,
+  the run once it took a turn, then each key the agent added to its ctx. The conversation (c-rows, the chat a person reads): the run's turns as
+  their replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles
+  (chat-message), in the order they were written (eids are issued in that order), then how the run
+  stands (chat-end). See docs/render.md#the-page. The
+  tiles (p-tiles): each eval whose value has a render of its own, newest first. It reads the
+  lists' members' ids and its task's cited names, and on the db the transaction of each member's
+  identity (when it was written: some ids are content-derived, so an id is no order), which is never
+  written again, so it runs again only when a list gains or loses a member, the newest run
+  changes, or the plan cites another var."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [aid (:db/id c)
-        ev? (set (keys (:evals c)))
+        task (:task c)
+        evals (:evals c)
+        conv (conversation c db)
+        ev? (set (keys evals))
         tu? (set (keys (:turns c)))]
-    [:div {:id "chat-ctx"}
-     [:div {:id "p-task"} (when (:task c) [#'chat-opening {} aid])]
+    [:div {:id "render-ctx"}
+     [:div {:id "p-task"}
+      (when task (list [#'task-data {} aid]
+                       ;; each var the plan cites beside its proofs (the proofs are the task's data)
+                       (let [proved (set (map :var/name (vals (:proved task))))]
+                         (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
+                       [#'related {} aid]
+                       (when (seq (:turns c)) [#'status {} aid])
+                       ;; what the turn no longer computes, drawn when what it reads moves: the merge
+                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
+                       ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
+                       (when-let [b (:seon.agent/base-commit c)]
+                         ;; a task that merges itself also shows whether it can merge now (main's commit)
+                         [#'branch-views {} b (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) (:seon.agent/main-commit c))])))
+      ;; the run once it took a turn: before that it says only its id, which the task's names
+      (when (seq (:turns c)) [#'run-head {} aid])
+      (when aid [#'own-problems {} aid])
+      (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
-      (for [id (conversation c db)] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
-      (when aid [#'chat-end {} aid])]]))
+      (for [id conv] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
+      (when aid [#'chat-end {} aid])]
+     [:aside {:id "p-tiles"}
+      (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
+        [#'eval-tile {} id])]]))
 
 (defn agent
   "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
