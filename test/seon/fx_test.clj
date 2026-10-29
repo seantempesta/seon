@@ -91,6 +91,31 @@
            (mapv #(get-in % [:outcome :seon.error/type]) (:batch (first (get o [:fx/t :done]))))))
     (is (nil? (:handle st)) "nothing is held, so the next item opens again")))
 
+;; ---- a kind that ends its host object when its queue empties (seon.vector's :embed helper) -------
+
+(deftest an-emptied-queue-tells-the-worker-to-close
+  (let [idle? (fn [o] (some #{{:idle true}} (:to-workers o)))
+        st (fn [close?] (first (fx/owner-proc (fx/owner-proc {:kind :t :workers 1 :batch 3 :close? close? :work nil :back nil}) :in (req 1))))
+        done {:batch [{:dest (:dest (req 1)) :outcome {:value 1}}]}
+        [st2 _] (fx/owner-proc (st true) :in (req 2))]
+    (is (idle? (second (fx/owner-proc (st true) :done done))) "nothing queued, nothing in flight: the worker is told")
+    (is (not (idle? (second (fx/owner-proc (st false) :done done)))) "a kind without :close is told nothing")
+    (is (not (idle? (second (fx/owner-proc st2 :done done)))) "a request queued behind: the helper stays")
+    (is (not (idle? (second (fx/owner-proc (st true) :done {:batch [(assoc (first (:batch done)) :request (req 1 :req {:k 1 :more true}))]}))))
+        "an answered request that said more were coming: the helper stays for the next round")))
+
+(deftest a-worker-told-idle-closes-its-host-object-and-keeps-it
+  (let [closed (atom [])
+        st (fx/worker-proc {:kind :t :owner :fx/t :open (fn [_] {:id 1}) :close (fn [h] (swap! closed conj h) {:pid 7 :exit 0})
+                            :perform (fn [{:keys [batch]}] (mapv (fn [_] {:value 1}) batch))})
+        [st _] (fx/worker-proc st :work {:batch [(assoc (req 1) :in-ns 0 :taken-ns 0)]})
+        [st o] (fx/worker-proc st :work {:idle true})]
+    (is (= [{:id 1}] @closed) "close gets the host object")
+    (is (= {:pid 7 :exit 0} (:closed st)) "its facts are in the worker's state, for the ping")
+    (is (nil? o) "no outcome: nothing was asked")
+    (is (= {:id 1} (:handle st)) "the handle stays; the next item uses it")
+    (is (nil? (:closed (first (fx/worker-proc (fx/worker-proc {:kind :t :owner :fx/t :perform identity}) :work {:idle true})))) "no host object, nothing to close")))
+
 ;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []

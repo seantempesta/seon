@@ -48,7 +48,7 @@ Measured with read-only evals over a scratch root's own store, `footprint -p`, `
 
 ### Ten agents at once
 
-Ten agents working at once cost root, the fork server and about 140 MB each: `bin/check swarm 10 10` (scripted agents, a scratch store, 2026-10-29) peaked at 2,415 MB with all ten live (root 845 MB, fork server 124 MB, standby 31 MB, agents 138-144 MB each), and `bin/check scale 10` reports about 97 MB an agent. On the standing store root is about 2.0 GB once it has embedded (the model is 380-500 MB of it: [vector](vector.md#the-model)) and the fork server 670 MB, so ten light agents there are about 4.1 GB. Agents running their tests were not measured, and each may grow 1 GiB (`:seon.config.agent/heap-extra-bytes`). The target is an ordinary MacBook: root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([plan](plan.md)).
+Ten agents working at once cost root, the fork server and about 140 MB each: `bin/check swarm 10 10` (scripted agents, a scratch store, 2026-10-29) peaked at 2,415 MB with all ten live (root 845 MB, fork server 124 MB, standby 31 MB, agents 138-144 MB each), and `bin/check scale 10` reports about 97 MB an agent. On the standing store root is about 1.1 GB with the model out of it (it was 1.7 GB with the model loaded; the model now runs in a helper process, 350-550 MB, only while embedding work is queued: [vector](vector.md#the-model)) and the fork server 670 MB, so ten light agents there are about 4.1 GB. Agents running their tests were not measured, and each may grow 1 GiB (`:seon.config.agent/heap-extra-bytes`). The target is an ordinary MacBook: root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([plan](plan.md)).
 
 ## Processes
 

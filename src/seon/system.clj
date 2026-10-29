@@ -43,7 +43,7 @@
   "One effect kind's owner and workers (seon.fx/procs), its perform and open resolved."
   {:malli/schema [:=> [:cat :keyword :map :seon.host/chan] :map]}
   [kind spec back]
-  (fx/procs {kind (cond-> (update spec :perform step-fn) (:open spec) (update :open step-fn) (nil? (:rate spec)) (dissoc :rate))} back))
+  (fx/procs {kind (cond-> (update spec :perform step-fn) (:open spec) (update :open step-fn) (:close spec) (update :close step-fn) (nil? (:rate spec)) (dissoc :rate))} back))
 
 (defn build
   "The flow config of decl under bindings: {:procs :conns :parts}, :parts being each

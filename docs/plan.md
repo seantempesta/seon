@@ -58,7 +58,7 @@ The eval protocol is settled and merged (a call is prose and a form; several for
 | 16 | Stability found 2026-10-29: root's watcher dies on one bad batch (a task with a nil ns); the main carrier's test fails ~1 run in 20; a forked process touching an Apple framework aborts; Datahike's stress-test units red | each a task with its proof; the watcher records the error and keeps watching; the embedding model runs in an exec'd helper |
 
 **Beside step 1: the machine and its config** (owner, 2026-10-29: "I want this to run on an average user's MacBook"). In order, each a task with its measurement before and after:
-1. The embedding model leaves root: a Flow proc whose work wakes it, running an exec'd helper that loads the model (~0.45 s) and exits when the queue empties; a fork cannot load it (task seon.vector/the-model-is-loaded-outside-root). Root -380 to -500 MB.
+1. ~~Done (jolt/the-model-runs-in-its-own-process)~~ The embedding model leaves root: a Flow proc whose work wakes it, running an exec'd helper that loads the model (~0.45 s) and exits when the queue empties; a fork cannot load it (task seon.vector/the-model-is-loaded-outside-root). Root 1,675 -> ~1,140 MB after a backlog (-526 MB measured); `:more` kept (backlog 210 -> 70 s), the helper's start/exit kept in the worker's state, its death an error fact (owner left the call to the session, 2026-10-29).
 2. ~~Done (7577ce2536)~~ The image drops each procedure's expanded source and keeps every frame's file:line: `e2e calc` root 833 -> 609 MB, a 111 MB binary.
 3. The fork server's 670 MB on the standing store: preload only what agents read.
 4. The ~165 MB of load-time data in the image, by namespace; the node cache sized from the machine.

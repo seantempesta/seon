@@ -936,12 +936,13 @@
   ([] {:params {:kind "the effect kind" :workers "performers, its concurrency"
                 :rate "tokens per second the provider admits (nil: no bucket)"
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
+                :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+  ([args] (assoc (select-keys args [:kind :workers :batch :close?]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
@@ -955,7 +956,14 @@
        (case in
          :in (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
-         :done [(bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o)) @o]
+         :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
+                 ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
+                 ;; empty and nothing in flight is that event, told to the worker as the next item, unless an
+                 ;; answered request said more of its own were coming (:more in its :req: main's backlog, whose next
+                 ;; round is asked once this one's vectors are written)
+                 (when (and (:close? st) (zero? (:busy st)) (empty? (:queue st)) (not-any? #(get-in % [:request :req :more]) (or (:batch m) [m])))
+                   (step/out! o :to-workers {:idle true}))
+                 [st @o])
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
 (defn worker-proc
@@ -965,10 +973,14 @@
   is one outcome per request, in order. A kind with :open holds a host object (a model): the
   worker makes it on its first item, (open ctx), keeps it in its own state, and gives it to
   perform as :handle; an open that answers an error is every request's outcome, and the next
-  item opens again. The entrant boundary for a defect in the perform Var: the defect is the
+  item opens again. A kind with :close is told when its owner's queue has emptied ({:idle true}, no
+  outcome): (close handle) lets go of what the handle holds outside the process and answers its
+  facts (docs/vector.md#the-model), kept in the ping as :closed; the handle stays and a later item
+  uses it again. The entrant boundary for a defect in the perform Var: the defect is the
   outcome, as an error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"} :ins {} :outs {}
+  ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"
+                :close "the Var that lets go of what the host object holds when the owner's queue is empty (nil: none)"} :ins {} :outs {}
        ;; the effect blocks in native IO (an HTTP read, a file write). Jolt runs :io procs
        ;; on fibers bound to their carrier thread for life, and a blocking FFI call pins the
        ;; carrier, stranding every other fiber placed on it (inv2: replies 4-15 s late).
@@ -976,13 +988,16 @@
        ;; worker count already bounds the threads
        :workload :mixed
        ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
-       :ping-map-fn (fn [st] (-> (select-keys st [:n]) (assoc :open? (some? (:handle st)))))})
-  ([args] {:perform (:perform args) :open (:open args) :kind (:kind args) :ctx (:ctx args) :n 0
+       :ping-map-fn (fn [st] (-> (select-keys st [:n :closed]) (assoc :open? (some? (:handle st)))
+                                   (cond-> (:facts (:handle st)) (assoc :host @(:facts (:handle st))))))})
+  ([args] {:perform (:perform args) :open (:open args) :close (:close args) :kind (:kind args) :ctx (:ctx args) :n 0
            :owner (:owner args) ::flow/in-ports {:work (:work args)}})
   ([st _] st)
   ([st _ m]
-   (if (nil? m)
-     [st nil]
+   (cond
+     (nil? m) [st nil]
+     (:idle m) [(cond-> st (and (:close st) (:handle st)) (assoc :closed ((:close st) (:handle st)))) nil]
+     :else
      (let [ms (or (:batch m) [m])
            t0 (profile/now-ns)
            ;; the host object, kept once made even when perform then throws
@@ -1028,17 +1043,18 @@
   {:malli/schema [:=> [:cat :map :seon.host/chan] :map]}
   [kinds back]
   (reduce-kv
-    (fn [acc kind {:keys [perform open workers ctx rate batch]}]
+    (fn [acc kind {:keys [perform open close workers ctx rate batch]}]
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
                           :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
-                                  batch (assoc :batch batch))})
+                                  batch (assoc :batch batch)
+                                  close (assoc :close? true))})
             (into (for [i (range workers)]
                     [(keyword (str "fx." (name kind)) (str i))
-                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :ctx ctx :work work :owner owner}}])))))
+                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :close close :ctx ctx :work work :owner owner}}])))))
     {} kinds))
 
 (defn stall-evidence

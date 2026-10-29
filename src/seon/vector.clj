@@ -12,7 +12,7 @@
   (native/vector.c)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg]
-            [seon.step :as step] [jolt.ffi :as ffi] [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [seon.error :as err]))
+            [seon.step :as step] [seon.sock :as sock] [jolt.ffi :as ffi] [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [seon.error :as err]))
 
 ;; ---- the pyramid (native/vector.c, in libprobe: no threads, every process loads it) ------
 
@@ -320,9 +320,10 @@
   [es ts vs ns model]
   (mapv (fn [e t v n] (fact e t v n model)) es ts vs ns))
 
-;; ---- the model (native/embed.c over llama.cpp: root's :embed worker alone loads it) ------
-;; Bound here, resolved on the first call: the library is loaded by `open`, in the worker, so an
-;; agent or the fork server never maps it (ggml starts threads; docs/failure-points.md#physics).
+;; ---- the model (native/embed.c over llama.cpp: only the exec'd helper loads it) ------------
+;; Bound here, resolved on the first call: the library is loaded by `open-model`, in the helper
+;; (`seon embed-worker`), so root, an agent or the fork server never maps it (ggml and Metal start
+;; threads, and a fork cannot run Metal; docs/failure-points.md#physics-who-may-run-threads).
 
 (lib/defc c-open "seon_embed_open" [:pointer :int :int :int :int] :pointer {:blocking true})
 (lib/defc c-dims "seon_embed_dims" [:pointer] :int)
@@ -339,22 +340,22 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [path] (let [f (.getName (java.io.File. path))] (str (subs f 0 (or (str/last-index-of f ".") (count f))) "+" texts-version)))
 
-(defn open
-  "The :embed kind's host object: the model at :seon.config.vector/model, loaded in this process
-  with a context of :seon.config.vector/batch-tokens tokens and :seon.config.vector/batch-texts
-  texts and ggml's CPU pool of :seon.config.vector/threads (seon_embed_open), {:handle :model :dims}; a missing file or a model llama.cpp cannot load
-  is :seon.vector/model-unopened (its cause is in llama.cpp's log)."
-  {:malli/schema [:=> [:cat :any] :map]}
-  [_ctx]
+(defn- open-model
+  "The model at :seon.config.vector/model, loaded in this process (the helper's) with a context of
+  :seon.config.vector/batch-tokens tokens and :seon.config.vector/batch-texts texts and ggml's CPU
+  pool of :seon.config.vector/threads (seon_embed_open), {:handle :dims}; a missing file or a model
+  llama.cpp cannot load is :seon.vector/model-unopened (its cause is in llama.cpp's log)."
+  {:malli/schema [:=> [:cat] :map]}
+  []
   (let [path (cfg/value :seon.config.vector/model)]
     (if-not (.exists (java.io.File. path))
-      (contract/error :seon.vector/model-unopened #'seon.vector/open (str "no model file at " path " (bin/build embed fetches it)") {:path path})
+      (contract/error :seon.vector/model-unopened #'seon.vector/open-model (str "no model file at " path " (bin/build embed fetches it)") {:path path})
       (do (ffi/load-library (cfg/value :seon.config.vector/lib))
           (let [h (ffi/with-arena [a] (c-open (ffi/string->ptr a path) (cfg/value :seon.config.vector/batch-tokens)
                                               (cfg/value :seon.config.vector/batch-texts) (cfg/value :seon.config.vector/threads) 0))]
             (if (zero? (ffi/address h))
-              (contract/error :seon.vector/model-unopened #'seon.vector/open (str "llama.cpp could not load " path) {:path path})
-              {:handle h :model (model-id path) :dims (c-dims h)}))))))
+              (contract/error :seon.vector/model-unopened #'seon.vector/open-model (str "llama.cpp could not load " path) {:path path})
+              {:handle h :dims (c-dims h)}))))))
 
 (defn- embed-texts
   "texts embedded by the model m in one call: their unit vectors and each one's whole token count,
@@ -376,21 +377,173 @@
             {:vectors (mapv #(vec (ffi/read-array out :float dims (* 4 dims %))) (range n))
              :tokens (vec (ffi/read-array np :int32 n 0))}))))))
 
+(defn serve!
+  "The helper's whole life (`seon embed-worker`, docs/vector.md#the-model): load the model, answer
+  the first frame on stdout, {:ready {:dims n}} or {:error e} (then exit 1), then answer each
+  request frame on stdin, {:texts [...]}, with {:vectors :tokens} or {:error e}, and exit 0 at
+  stdin's end: root closing it is the one event that ends the helper. It runs no thread of its own
+  and never reads a request ahead of its answer."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [m (open-model)
+        reply! (fn [v] (let [r (sock/send-frame! 1 (sock/frame v))] (when (= :epipe r) (lib/c-exit 0))))]
+    (if (contract/error? m)
+      (do (reply! {:error m}) (lib/c-exit 1))
+      (do (reply! {:ready {:dims (:dims m)}})
+          (loop []
+            (let [r (sock/recv-stream! System/in)]
+              (when (map? r)
+                (let [e (embed-texts m (:texts r))]
+                  (reply! (if (contract/error? e) {:error e} e)))
+                (recur))))
+          (lib/c-exit 0)))))
+
+;; ---- root's side: the helper as the :embed kind's host object ---------------------------------
+;; The kind's worker (seon.fx/worker-proc) holds `open`'s handle, {:helper (volatile! helper-or-nil)
+;; :facts (volatile! the helper's pid, start and exit)}: no process yet. `embed` starts the helper
+;; when it has a batch and none runs, `close` ends it when the owner's queue is empty; a helper that
+;; dies answers its batch an error and the next batch starts another.
+
+(defn open
+  "The :embed kind's host object: a handle with no helper running yet (it starts with the first batch,
+  `embed`). Never fails."
+  {:malli/schema [:=> [:cat :any] :map]}
+  [_ctx]
+  {:helper (volatile! nil) :facts (volatile! {})
+   :err (str (cfg/checkout) "/target/tmp/embed-helper-" (random-uuid) ".err")})
+
+(defn- helper-argv
+  "The helper's command line: this checkout's binary and the config layers root was started with
+  (`--config`, `--set`), so it reads the config root does."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (into [(str (cfg/checkout) "/target/seon") "embed-worker"]
+        (comp (filter (comp #{"--config" "--set"} first)) cat)
+        (partition 2 (rest (cfg/argv)))))
+
+(defn- stderr-tail
+  "The helper's stderr, kept in the file err (a pipe would block it at 64 KB with no reader): its last
+  :seon.config.vector/stderr-chars characters, saying how many earlier ones are left out; the file is
+  removed."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [err]
+  (let [f (java.io.File. err)
+        s (if (.exists f) (slurp f) "")
+        n (count s) k (cfg/value :seon.config.vector/stderr-chars)]
+    (.delete f)
+    (if (> n k) (str "[" (- n k) " earlier characters left out] " (subs s (- n k))) s)))
+
+(defn- finished
+  "The helper h ended, however it did: its exit status and stderr, recorded in the handle's facts
+  (nothing is held any more). Its pipes closed, a helper that has not exited is killed first when
+  kill? (it ended its output without ending), else waited for. Answers the facts {:pid :exit :stderr}."
+  {:malli/schema [:=> [:cat :map :map :boolean] :map]}
+  [handle h kill?]
+  (let [p (:process h)
+        _ (when kill? (.destroyForcibly p))
+        f {:pid (:pid h) :exit (.waitFor p) :stderr (stderr-tail (:err handle))}]
+    (vreset! (:helper handle) nil)
+    (vswap! (:facts handle) assoc :exit (:exit f) :exited-ms (System/currentTimeMillis))
+    f))
+
+(defn- start!
+  "Start the helper (`seon embed-worker` in this checkout's target/) and wait for its first frame
+  (the model loaded). Answers the helper {:process :pid :in :out :dims}, or :seon.vector/model-unopened
+  (the model file missing or llama.cpp could not load it: the helper's own error) or
+  :seon.vector/helper-died (it did not start, or ended before it answered)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [handle]
+  (let [path (cfg/value :seon.config.vector/model)
+        bin (first (helper-argv))]
+    (if-not (.exists (java.io.File. ^String path))
+      (contract/error :seon.vector/model-unopened #'seon.vector/start! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
+      (let [_ (.mkdirs (java.io.File. (str (cfg/checkout) "/target/tmp")))
+            p (try (.start (doto (ProcessBuilder. ^java.util.List (helper-argv)) (.directory (java.io.File. (str (cfg/checkout) "/target")))
+                             (.redirectError (java.io.File. ^String (:err handle)))))
+                   (catch java.io.IOException e e))]
+        (if (instance? Throwable p)
+          (contract/error :seon.vector/helper-died #'seon.vector/start! (str bin " did not start: " (.getMessage ^Throwable p)) {:exit -1 :stderr ""})
+          (let [h {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)}
+                r (sock/recv-stream! (:out h))]
+            (if (and (map? r) (:ready r))
+              (do (vreset! (:helper handle) (assoc h :dims (get-in r [:ready :dims])))
+                  (vreset! (:facts handle) {:pid (:pid h) :started-ms (System/currentTimeMillis)})
+                  @(:helper handle))
+              (let [f (finished handle h true)]
+                (or (and (map? r) (:error r))
+                    (contract/error :seon.vector/helper-died #'seon.vector/start!
+                                    (str bin " ended before its model loaded (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))))))))))
+
+(defn- ask!
+  "One request frame to the helper h and its answer frame: its value, :unsent when the write failed
+  (the helper was gone before the request: it died while idle), or :eof when it ended before it
+  answered."
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [h req]
+  (if (try (doto ^java.io.OutputStream (:in h) (.write ^bytes (sock/frame req)) (.flush)) true
+           (catch Exception _ false))
+    (sock/recv-stream! (:out h))
+    :unsent))
+
 (defn embed
-  "The :embed effect, a batch kind: every request's :texts embedded in one call, each request
-  answered {:value {:model :vectors :tokens}}, its vectors and each text's whole token count in its
-  texts' order; :cost is its texts."
+  "The :embed effect, a batch kind: every request's :texts embedded in one call by the helper
+  (started if none runs), each request answered {:value {:model :vectors :tokens}}, its vectors and
+  each text's whole token count in its texts' order; :cost is its texts. A helper that dies mid-batch
+  answers every request :seon.vector/helper-died (exit status and stderr), and the next batch starts
+  another."
   {:malli/schema [:=> [:cat [:map [:batch [:vector :map]] [:handle :map]]] [:vector :map]]}
   [{:keys [batch handle]}]
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
-        r (embed-texts handle (into [] (mapcat #(get-in % [:req :texts])) batch))]
+        texts (into [] (mapcat #(get-in % [:req :texts])) batch)
+        model (model-id (cfg/value :seon.config.vector/model))
+        req {:texts texts}
+        ;; a helper that died while idle fails the write before any answer: one new helper, the request again
+        [h a] (if (empty? texts)
+                [{} nil]
+                (let [h (or @(:helper handle) (start! handle))]
+                  (if (contract/error? h)
+                    [h nil]
+                    (let [a (ask! h req)]
+                      (if (= :unsent a)
+                        (do (finished handle h true)
+                            (let [h2 (start! handle)] (if (contract/error? h2) [h2 nil] [h2 (ask! h2 req)])))
+                        [h a])))))
+        r (cond (contract/error? h) h
+                (empty? texts) {:vectors [] :tokens []}
+                (#{:eof :unsent} a) (let [f (finished handle h true)]
+                                      (contract/error :seon.vector/helper-died #'seon.vector/embed
+                                                      (str "the embedding helper ended mid-batch (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))
+                (:error a) (:error a)
+                :else a)]
     (if (contract/error? r)
       (vec (repeat (count batch) r))
-      (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model (:model handle) :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
+      (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model model :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
                                           (subvec vs n) (subvec ts n)])
                      [[] (:vectors r) (:tokens r)] ns)))))
 
+(defn close
+  "The :embed kind's :close, told when its queue has emptied: the helper's stdin closed, which ends it
+  (it exits 0 at the end of its input), and its exit recorded. Answers the helper's facts
+  {:pid :exit :stderr}, or nil when none ran. See docs/vector.md#the-model."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [handle]
+  (when-let [h @(:helper handle)]
+    (.close ^java.io.OutputStream (:in h))
+    (finished handle h false)))
+
 ;; ---- keeping main's vectors current -------------------------------------------------------
+
+(defn- release
+  "The proc's spell of asking ended (nothing due, or a write that starts no next round) while the last
+  request it sent said :more: an empty request without :more, so its answer is the event that lets the
+  :embed kind close its helper (docs/vector.md#the-model). Answers [st outs]; nothing is sent when no
+  :more is out."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (if (:more st)
+    (let [[st m] (step/ask (dissoc st :more) [:vectors :answers] [:released nil] {:op :fx :kind :embed :req {:texts []}})]
+      [st [m]])
+    [st []]))
 
 (defn- round
   "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
@@ -423,13 +576,14 @@
         st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
     (cond
       (seq due)
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
-                             {:op :fx :kind :embed :req {:texts (mapv second due)}})]
-        [(assoc st :running true) [m]])
+      (let [more? (< (count due) (count todo))
+            [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
+                             {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
+        [(assoc st :running true :more more?) [m]])
       (and (seq gone) (pos? (:texts st)))
       (let [[st m] (step/ask st [:vectors :answers] [:written 0] {:op :write :req {:op :tx :branch :db :tx-data gone}})]
         [(assoc st :running true) [m]])
-      :else [(assoc st :running false) []])))
+      :else (release (assoc st :running false)))))
 
 (defn vectors-proc
   "Keeps main's vectors current (docs/vector.md#what-is-embedded). At main's commit notice
@@ -470,7 +624,7 @@
                                         (if (seq tx)
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])
-                                          [(assoc st :running false) []]))
+                                          (release (assoc st :running false))))
                                       (let [{:keys [model vectors tokens]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
                                                              {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors tokens model) gone)}})]
@@ -479,15 +633,16 @@
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))
                                             (contract/error? r) (assoc :clean nil :seen nil))
                                        l (:latest st)]
-                                   (if (and l (>= (:t l) (:written-t st)))
-                                     (round (dissoc st :latest) l)
-                                     [st []]))
+                                   (cond (and l (>= (:t l) (:written-t st))) (round (dissoc st :latest) l)
+                                         ;; a failed write commits nothing, so no notice follows: the spell ends here
+                                         (contract/error? r) (release st)
+                                         :else [st []]))
                         ;; the failure's own commit starts no round (it would ask again and fail again,
                         ;; on an idle main): the next round reads a commit after it
                         :recorded (let [st (cond-> (assoc st :running false) (not (contract/error? r)) (assoc :written-t (inc (:t r))))
                                         l (:latest st)]
-                                    (if (and l (>= (:t l) (:written-t st)))
-                                      (round (dissoc st :latest) l)
-                                      [st []]))
+                                    (cond (and l (>= (:t l) (:written-t st))) (round (dissoc st :latest) l)
+                                          (contract/error? r) (release st)
+                                          :else [st []]))
                         [st []])))]
      [st (if (seq outs) {:to-api outs} {})])))

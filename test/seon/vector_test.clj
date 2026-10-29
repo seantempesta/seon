@@ -2,11 +2,12 @@
   "Semantic search (seon.vector): a stored vector keeps what it was made from, the pyramid ranks
   as an exact search does, `near` is one more relation in a query, a text is embedded once, and
   the proc that keeps main's vectors current asks only for what is due, and a branch embeds
-  what it writes there. The model itself runs
-  only in root (it starts threads), so these use made vectors; bin/check vectors proves the
-  pyramid's recall on the checkout's own forms, embedded by the model."
+  what it writes there. The model runs only in an exec'd helper (docs/vector.md#the-model), so
+  most of these use made vectors; the helper's own tests start the real one, and bin/check vectors
+  proves the pyramid's recall on the checkout's own forms, embedded by the model."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts]
-            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems]))
+            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems] [seon.lib :as lib]
+            [clojure.java.shell :as sh] [clojure.string :as str]))
 
 (defn- unit [v] (let [n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
 
@@ -201,6 +202,39 @@
             [_ o3] (vector/vectors-proc st :main (assoc (note written) :t 14))]
         (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts]))))))))
 
+(deftest a-more-round-followed-by-nothing-due-releases-the-helper
+  ;; a request saying :more keeps the :embed kind's helper up; where the proc stops asking, an empty request without :more
+  ;; is the event that lets it close (docs/vector.md#the-model)
+  (letfn [(more-round [conn]
+            (let [[st db1 _] (caught-up conn)
+                  db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+                  [st o] (vector/vectors-proc (assoc st :texts 1) :main (assoc (note db2) :t 12))
+                  ask (first (:to-api o))]
+              (is (true? (get-in ask [:req :req :more])) "a round that leaves texts due says more are coming")
+              [st ask db2]))]
+    (testing "nothing due at the next notice"
+      (ts/test-branch! (fn [_ conn]
+        (let [[st ask db2] (more-round conn)
+              [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+              w (first (:to-api o2))
+              db3 (with! conn db2 (get-in w [:req :req :tx-data]))
+              [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 13}})
+              due (vector/due db3 "m")
+              db4 (with! conn db3 (embedded due (vectors 5 (count due) 1 768) "m"))
+              [st o3] (vector/vectors-proc st :main (assoc (note db4) :t 14))
+              rel (first (:to-api o3))]
+          (is (= [] (get-in rel [:req :req :texts])) "an empty request")
+          (is (nil? (get-in rel [:req :req :more])) "without :more: its answer lets the helper close")
+          (is (= :embed (get-in rel [:req :kind])))
+          (is (empty? (:to-api (second (vector/vectors-proc st :answers {:tag (:tag rel) :r {:value {:vectors [] :tokens []}}})))) "and its answer asks nothing"))))
+    (testing "a failed write starts no next round"
+      (ts/test-branch! (fn [_ conn]
+        (let [[st ask _] (more-round conn)
+              [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+              w (first (:to-api o2))
+              [_ o3] (vector/vectors-proc st :answers {:tag (:tag w) :r {:seon.error/type :seon.writer/refused :seon.error/message "no"}})]
+          (is (= [[] nil] [(get-in (first (:to-api o3)) [:req :req :texts]) (get-in (first (:to-api o3)) [:req :req :more])]) "released"))))))))
+
 (deftest a-failed-embedding-waits-for-the-next-notice
   (ts/test-branch! (fn [_ conn]
   (let [db (db-due-only conn)
@@ -379,3 +413,84 @@
         (is (empty? (:to-api o2)) "and nothing more is asked"))
       (is (empty? (vector/orphaned db3)) "a full scan finds none left")
       (is (= [ve] (distinct (map second (vector/orphaned db2)))) "a full scan finds it")))))
+
+;; ---- the model in its own process (docs/vector.md#the-model) ------------------------------------
+;; These start the built binary's `embed-worker` (seon.vector/start! is a :seon.config.source/binary-vars
+;; var, so bin/test builds target/seon first) and the real model, bin/build embed.
+
+(defn- maps-model?
+  "Does process pid hold the model file open or mapped (lsof lists a mapped file)?"
+  [pid]
+  (str/includes? (:out (sh/sh "lsof" "-p" (str pid))) ".gguf"))
+
+(defn- gone? [pid] (not (zero? (lib/c-kill pid 0))))
+
+(deftest root-holds-no-model-after-an-embed
+  ;; the helper holds the model while work is queued, this process never; its end is the close, and
+  ;; the next embed starts another
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        [r] (embed ["title: none | text: (defn a [])" "title: none | text: (defn b [])"])
+        pid (:pid @(:facts handle))]
+    (testing "a batch is embedded: one unit vector of the model's dims per text"
+      (is (= 2 (count (get-in r [:value :vectors]))) (pr-str (keys r)))
+      (is (= 768 (count (first (get-in r [:value :vectors])))))
+      (is (< 0.999 (reduce + (map * (first (get-in r [:value :vectors])) (first (get-in r [:value :vectors])))) 1.001) "normalised")
+      (is (= (vector/model-id (seon.config/value :seon.config.vector/model)) (get-in r [:value :model]))))
+    (testing "the model is the helper's, never this process's"
+      (is (pos? pid))
+      (is (maps-model? pid) "the helper maps the model")
+      (is (not (maps-model? (lib/c-getpid))) "this process, root's place, does not"))
+    (testing "the queue empty, the helper is closed and gone"
+      (let [f (vector/close handle)]
+        (is (= pid (:pid f)))
+        (is (= 0 (:exit f)) "it exits 0 at the end of its input")
+        (is (gone? pid))
+        (is (nil? (vector/close handle)) "closing nothing is nothing")))
+    (testing "a search after it ended starts a new helper and answers"
+      (let [[r2] (embed ["task: search result | query: a"])
+            pid2 (:pid @(:facts handle))]
+        (is (= 1 (count (get-in r2 [:value :vectors]))) (pr-str r2))
+        (is (not= pid pid2) "another process")
+        (is (maps-model? pid2))
+        (is (not (maps-model? (lib/c-getpid))))
+        (vector/close handle)
+        (is (gone? pid2))))))
+
+(deftest a-helper-that-dies-mid-batch-answers-an-error-and-the-next-batch-works
+  ;; a scripted helper (a shell) that reads the request's first byte and exits without answering: the write
+  ;; succeeds and the answer never comes, deterministically (a real helper killed at a guessed moment
+  ;; may die before the write, which embed retries)
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        _ (.mkdirs (java.io.File. (.getParent (java.io.File. ^String (:err handle)))))
+        p (.start (doto (ProcessBuilder. ^java.util.List ["sh" "-c" "head -c 1 > /dev/null; echo oops >&2; exit 3"])
+                    (.redirectError (java.io.File. ^String (:err handle)))))
+        _ (vreset! (:helper handle) {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)})
+        embed #(vector/embed {:batch [{:req {:texts %}} {:req {:texts ["x"]}}] :handle handle})
+        rs (embed ["hello"])]
+    (is (= 2 (count rs)) "every request of the batch is answered")
+    (is (every? #(= :seon.vector/helper-died (:seon.error/type %)) rs) (pr-str (map #(select-keys % [:seon.error/type :seon.error/message]) rs)))
+    (is (every? #(contract/valid? :seon.vector/helper-died %) rs))
+    (is (integer? (:exit (first rs))) "its exit status is in the error")
+    (is (str/includes? (:stderr (first rs)) "oops") "and its stderr, read from the file it was sent to")
+    (is (nil? @(:helper handle)) "nothing is held")
+    (testing "the next batch starts a real helper"
+      (let [rs (embed ["again"])]
+        (is (every? #(= 1 (count (get-in % [:value :vectors]))) rs) (pr-str rs))
+        (is (some? (:pid @(:facts handle))))
+        (vector/close handle)))))
+
+(deftest a-helper-killed-while-idle-is-replaced-and-the-request-answered
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        _ (embed ["warm"])
+        h @(:helper handle)]
+    (lib/c-kill (:pid h) 9)
+    (.waitFor (:process h))
+    (let [[r] (embed ["again"])]
+      (is (= 1 (count (get-in r [:value :vectors]))) (pr-str (select-keys r [:seon.error/type :seon.error/message])))
+      (is (not= (:pid h) (:pid @(:facts handle))) "another helper answered it"))
+    (vector/close handle)))
