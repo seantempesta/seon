@@ -104,4 +104,11 @@
   ;; ex-data for twelve evals to find one nil key; the message names the first problem
   (let [f (contract/wrap 'x.c/blocks (contract/schema [:=> [:cat] [:map [:from :int] [:to :int]]]) (fn [] {:from 0 :to nil}))
         msg (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
-    (is (clojure.string/includes? (str msg) "at [:to]: nil, expected :int") (str "where, what it got, what was expected: " msg))))
+    (is (clojure.string/includes? (str msg) "at [:to]: nil, expected :int") (str "where, what it got, what was expected: " msg))
+    ;; md-scan #18: refused at [:seon.ref/blocks 0 :seon.ref/text-from], the block that lacked the key was never seen
+    (is (clojure.string/includes? (str msg) "in {:from 0, :to nil}") (str "and the map that holds it: " msg)))
+  (let [f (contract/wrap 'x.c/blocks (contract/schema [:=> [:cat] [:map [:blocks [:vector [:map [:kind :keyword] [:text-from :int]]]]]])
+                         (fn [] {:blocks [{:kind :para} {:kind :fence}]}))
+        msg (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
+    (is (clojure.string/includes? (str msg) "at [:blocks 0 :text-from]") msg)
+    (is (clojure.string/includes? (str msg) "in {:kind :para}") (str "a missing key: the map without it: " msg))))
