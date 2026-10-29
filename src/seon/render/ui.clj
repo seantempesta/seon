@@ -884,6 +884,23 @@
    [:summary {:class "kicker"} (str (name kind) " · " cites " · " (name depth))]
    [#'render/html {:budget (config/value :seon.config.render/value-budget)} (dissoc v :cites :kind :depth)]])
 
+(def ^:private reason-words
+  "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page."
+  {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
+   :stray-red "red test that is no proof" :contract-gap "functions without a contract" :unmerged "unmerged entries"
+   :open-problem "problems the work caused" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
+   :behind "judged before main moved"})
+
+(defn- verdict-badge
+  "A proof's verdict as one mark and its colour: green, red, deferred to root's gate, or none yet."
+  {:malli/schema [:=> [:cat :keyword] :any]}
+  [st]
+  (case st
+    :pass [:span {:class "text-success"} "✓"]
+    (:fail :error) [:span {:class "text-error"} "✗"]
+    :deferred [:span {:class "text-text-500"} "⋯"]
+    [:span {:class "text-text-500"} "○"]))
+
 (defn status-html
   "How the work stands as the page shows it (the declared html render of :seon.context/status; the
   model reads the same value by its model render): a line of the proofs green of all and whether
