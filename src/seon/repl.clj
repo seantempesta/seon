@@ -51,7 +51,7 @@
   ex-data and my.agent/pst read it as they read any exception."
   {:malli/schema [:=> [:cat :seon.host/throwable] :seon.host/throwable]}
   [e]
-  (ex-info (or (ex-message e) (str (type e))) (agent/error-map e)))
+  (ex-info (step/error-msg e) (agent/error-map e)))
 
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
