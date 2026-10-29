@@ -50,3 +50,6 @@
 	path = reference-code/llama.cpp
 	url = https://github.com/ggml-org/llama.cpp.git
 	ignore = dirty
+[submodule "reference-code/clojure-mcp"]
+	path = reference-code/clojure-mcp
+	url = https://github.com/bhauman/clojure-mcp
