@@ -1025,6 +1025,21 @@
     (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
+(deftest a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
+  ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
+  ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
+  ;; turn's draw, out of work! (outcome :no-end). Here the agent breaks Seon's own seon.context/render, which a turn
+  ;; calls after its draw: the throw is told to the agent and the loop goes on; the second in a row, with no model
+  ;; turn between, ends the work :error, and work! answers its end
+  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
+                            ["(in-ns 'seon.context) (clojure.core/defn render [& _] (throw (ex-info \"boom: Seon's own render, changed\" {})))"
+                             (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#threw")) " :max-turns 3})")])
+                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        end (:value end)]
+    (is (= :error (:outcome end)) (pr-str end))
+    (is (str/starts-with? (str (:reason end)) "two turns in a row threw") (pr-str end))
+    (is (str/includes? (str (:reason end)) "boom: Seon's own render, changed") "naming its cause")))
+
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
   ;; catches (here the agent redefines, at its REPL as an agent changes the platform, a
