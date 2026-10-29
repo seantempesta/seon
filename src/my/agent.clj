@@ -287,7 +287,7 @@
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's). A namespace's name answers its ns form as this branch records
   it (its requires and aliases), then each definition, privates included, a line each in file
-  order (seon.docs/definition-lines), which clojure.repl's does not (pipeline 1's F4: a design
+  order (seon.docs/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
   turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
@@ -299,9 +299,7 @@
         (file-source v))
     (when-not (namespace sym)
       ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
-      (let [db (agent/db)]
-        (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
-          (str head (some->> (docs/definition-lines (ref/namespace-view db sym :doc)) (str "\n"))))))))
+      (docs/namespace-source (agent/db) sym))))
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and

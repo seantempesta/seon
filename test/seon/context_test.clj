@@ -295,7 +295,15 @@
                             {:var/name 'demo.calc/add :var/form "f2" :var/doc "Adds two."}])
           text (:seon.print/code (seon.docs/cited-code db {:seon.ref/name 'demo.calc :seon.ref/depth :doc :seon.ref/line 1}))]
       (is (= ["(ns demo.calc" "  \"Adds. More.\")" ";; zz: A private helper." ";; add: Adds two."] (str/split-lines text))
-          "the namespace head, then each definition by its place in the file: its name and its doc's first sentence"))))
+          "the namespace head, then each definition by its place in the file: its name and its doc's first sentence")
+      ;; 2026-10-29: a run asked a namespace at code depth for its requires 22 times; it was answered
+      ;; a made-up (ns demo.calc) each time. Recorded, its ns form is shown as written
+      (let [db (d/db-with db [{:form/id "demo.calc" :form/defines [:ns/name 'demo.calc]
+                               :form/src "(ns demo.calc\n  \"Adds. More.\"\n  (:require [clojure.string :as str]))"}])
+            text (:seon.print/code (seon.docs/cited-code db {:seon.ref/name 'demo.calc :seon.ref/depth :code :seon.ref/line 1}))]
+        (is (= ["(ns demo.calc" "  \"Adds. More.\"" "  (:require [clojure.string :as str]))" ";; zz: A private helper." ";; add: Adds two."]
+               (str/split-lines text))
+            "its ns form as recorded, requires and all, then its definitions")))))
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each

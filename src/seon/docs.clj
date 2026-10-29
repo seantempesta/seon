@@ -676,11 +676,21 @@
   [nv]
   (when-let [b (seq (:seon.ref/below nv))] (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b))))
 
+(defn namespace-source
+  "Namespace sym as db records it: its ns form as written (its requires and aliases), then each
+  definition, privates included, a line each in file order (`definition-lines`); nil when db
+  records no ns form for it. What `(source ns)` and a namespace's citation at code depth show
+  (docs/references.md#the-delimiter-picks-the-depth)."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]]}
+  [db sym]
+  (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
+    (str head (some->> (definition-lines (ref/namespace-view db sym :doc)) (str "\n")))))
+
 (defn cited-code
   "What the page shows of citation c on db, as Clojure is written in a file (DECISIONS,
   code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
-  namespace as its ns form's head, its docstring as written, then its public names; each as code
+  namespace as its ns form as recorded (`namespace-source`), then its definitions; each as code
   (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
   its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
   its address and lead in comment lines, then the form that reads it whole (never its view's map). nil when it reaches nothing pulled."
@@ -699,9 +709,11 @@
                                      (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
                                      (when-let [d (:seon.print/prose (:doc v))] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
-      (let [nv (ref/namespace-view db nm :doc)]
-        (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
-                         (some->> (definition-lines nv) (str "\n")))))
+      ;; its ns form as recorded; a namespace only this process has loaded, its name, doc and public names
+      (print/code (or (namespace-source db nm)
+                      (let [nv (ref/namespace-view db nm :doc)]
+                        (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
+                             (some->> (definition-lines nv) (str "\n"))))))
       ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
       ;; lines), then the form that reads it whole; never its view's map
       hit

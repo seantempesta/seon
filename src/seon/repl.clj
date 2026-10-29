@@ -30,7 +30,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.ref :as ref] [seon.agent :as agent] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
             [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.context :as context] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step]
-            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
+            [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn] [hasch.core :as hasch]))
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
@@ -534,6 +534,20 @@
           (assoc r :record id))
       r)))
 
+(defn- same-as
+  "The handle of this agent's earlier eval of code by its model that answered the same value as r
+  (by the value's content hash, hasch), or nil; r's answer is kept as the latest of code's. Only a
+  value that is plain data compares (seon.db/plain?). The model's own repeat then reads that its
+  answer is already in the conversation, not the value again (a run read one namespace 22 times,
+  each answer whole). A cache of the process: a fresh process answers each value whole once."
+  {:malli/schema [:=> [:cat :string :map :map] [:maybe :qualified-symbol]]}
+  [code r req]
+  (when (and (= :model (:origin req)) (contains? r :value) (not (:ex r)) (pdb/plain? (:value r)))
+    (let [h (hasch/uuid (:value r))
+          [handle was] (get-in @agent/state [:answered code])]
+      (swap! agent/state assoc-in [:answered code] [(if (= h was) handle (:handle r)) h])
+      (when (= h was) handle))))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
@@ -564,12 +578,16 @@
             (swap! agent/state assoc-in [:results (keyword (name handle))] r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
+            ;; the model's repeat of an eval it has the answer to reads where that answer is (`same-as`); its
+            ;; handle still holds the value
+            (let [same (same-as code r req)
+                  [r text] (if same (let [r (-> r (dissoc :value) (assoc :same-as same))] [r (print/response-text r render/summarized)]) [r text])]
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                                code req)
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
-              (cond-> res m (assoc :main m))))
+              (cond-> res m (assoc :main m)))))
           (finally (swap! agent/state assoc :eval outer))))))
 
 (defn unrun
