@@ -4,7 +4,7 @@ An agent's turns are answered by one function of a provider value and a request,
 
 ## No default model
 
-A root started without `SEON_PROFILE` has no model provider: a run it releases ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
+A root started without `--profile NAME` ([config](config.md#layers)) has no model provider: a run it releases ends at its first turn on `:seon.model/no-provider`, whose message names what to set. Production must never run a test fixture as if it were a model, so nothing is chosen for you.
 
 The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 - `deepseek`: the OpenAI-compatible endpoint of `:seon.config.ai/providers` (DeepSeek), model `:seon.config.ai/model` (deepseek-flash unless `SEON_AI_MODEL` says otherwise);

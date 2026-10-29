@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
 
 (deftest the-memory-probe-answers-what-the-process-holds
   ;; lib/mp-probe reads the kernel's ledger (one task_info call): this process's own memory in MB,
@@ -51,7 +51,7 @@
   (target/seon forks k): a process forks from its main carrier, where it is the one thread,
   never from this runner's, whose runtime threads would race the fork."
   [k]
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k :dir "target")]
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k "--profile" (name (config/profile)) :dir "target")]
     (if (zero? exit) (edn/read-string (last (str/split-lines out))) {:exit exit :err err})))
 
 (deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent

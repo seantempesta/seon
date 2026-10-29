@@ -503,7 +503,7 @@
           (if ok 0 1))))))
 
 (defn -main [& args]
-  (let [[flag & more] args]
+  (let [[flag & more] (config/without-overrides args)]
     (System/exit
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part

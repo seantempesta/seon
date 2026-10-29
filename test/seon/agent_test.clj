@@ -1117,7 +1117,7 @@
 
 
 (deftest a-root-with-no-provider-ends-the-run-on-its-typed-error
-  ;; root's ruling 2026-10-22: a root with no model provider (no SEON_PROFILE) answers the
+  ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
   ;; run's record on main and my.root/problems' :error rows
   (let [q #(str "[:find (pull ?e [:seon.run/outcome :seon.run/error]) . :where [?e :seon.run/task ?t] [?t :seon.task/id \"" % "/m\"] [?e :seon.run/error]]")
