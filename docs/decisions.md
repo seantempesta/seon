@@ -5,6 +5,9 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
+### The verdict cache holds 512 MB, least recently used out first (owner, 2026-10-29)
+"least recently used automatic eviction if max capacity is reached"; the capacity: 512 MB (chosen over 256 MB; the main tree's cache held 121 MB in 27,034 files that day). One capacity for the whole cache, greens and reds alike; a verdict for a test no longer in the program goes by the same rule; nothing goes below the bound ("don't drop cache work that other agents may need"). Stated in: :seon.config.proofs/results-max-bytes, seon.proofs/the-verdict-cache-empties-itself.
+
 ### An eval call holds one or more forms (owner, 2026-10-29)
 "remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
 
