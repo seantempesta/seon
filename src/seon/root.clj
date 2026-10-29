@@ -199,6 +199,16 @@
       (contract/error :seon.agent/failed #'seon.root/failed
                       (str "tests red" (some->> (first (remove #(= :pass (:type %)) reports)) :var (str ": "))) {:agent id}))))
 
+(defn- eval-head
+  "What root's view keeps of an eval's response r: its handle (the form that reads the value, on the
+  agent), the printed head the page shows (:text: the printer's own cut), its cost and, for an error,
+  its type and message. Never a value, an :out or :err, or an error's :data: the view is a
+  reference, and the record on the agent's branch holds the rest (docs/machine.md#roots-heap)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [r]
+  (cond-> (select-keys r [:handle :text :forms :ms :ticks :bytes])
+    (:ex r) (assoc :ex (select-keys (:ex r) [:seon.error/type :seon.error/message]))))
+
 (defn- set-agent
   "Merge m into agent id's view entry, recording what went wrong in it (`failed`). A stopped
   agent stays stopped: :killed (a kill) or :ended (root stopped it because its run ended)."
@@ -209,7 +219,7 @@
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                ;; a stall ends with the process
                (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
-               (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v x n)) (or % []) (:evals-add m)))))
+               (:evals-add m) (update :evals #(let [n (cfg/value :seon.config.root/view-window)] (reduce (fn [v x] (lib/push-window v (eval-head x) n)) (or % []) (:evals-add m)))))
           e (failed id a m)]
       ;; a gone process stays gone: a late live status (a request its proc took after its end) is not news
       (cond-> (assoc-in st [:view :agents id] (if (and (gone-statuses (:status a)) (not (gone-statuses (:status a'))))

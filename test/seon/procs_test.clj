@@ -453,6 +453,25 @@
         (is (some #{[:db.fn/retractAttribute [:seon.process/id "b1/a3/77"] :seon.process/running]} (:tx-data (first (:to-writer outs))))
             "the form returned: no longer running")))))
 
+(deftest root-view-of-an-agents-evals-holds-handles-not-values
+  ;; task seon.root/an-agents-view-keeps-handles-not-values (docs/machine.md#roots-heap):
+  ;; the bytes root's view keeps of an agent's evals are the same whatever the evals returned, wrote or
+  ;; threw. Red while the entry held the response whole (its :value, :out and an error's :data grew with them)
+  (let [st0 (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        st0 (assoc st0 :stall-ms 0 :view {:agents {:a3 {:status :idle :pid 77 :branch :task-demo-f :evals []}}})
+        held (fn [n]
+               (let [big (vec (range n))
+                     r1 {:handle 'result/e1 :text "[0 1 2 ...]" :ms 0.1 :value big :out (apply str (repeat n "x"))}
+                     r2 {:handle 'result/e2 :text "boom" :ex {:seon.error/type :seon.agent/eval-error :seon.error/message "boom" :data {:v big}} :err (apply str (repeat n "y"))}
+                     [st _] (step #'root/api-proc st0 :back {:op :status :agent :a3 :set {:evals-add [r1] :status :idle}})
+                     [st _] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:evals-add [r2] :status :idle}})
+                     evals (get-in st [:view :agents :a3 :evals])]
+                 (is (= '[result/e1 result/e2] (mapv :handle evals)) "each eval's handle, in order")
+                 (is (= "boom" (get-in evals [1 :ex :seon.error/message])))
+                 (count (pr-str evals))))]
+    (is (= (held 10) (held 100000)) "bytes held do not grow with what the evals returned")))
+
 (deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
   ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
   ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
