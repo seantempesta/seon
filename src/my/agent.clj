@@ -161,8 +161,8 @@
       (if (contract/error? r) r (first (:vectors (:value r))))))))
 
 (defn search
-  "The best matches on this branch for q, a text, a var's name or a schema key, over code, wiki sections, tasks and
-  schema keys at once: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
+  "The best matches on this branch for q, a text, a var's name or a schema key, over code and wiki
+  sections, and tests, tasks and schema keys when :kinds asks for them: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
   caller filters it with plain Clojure, e.g. (filter #(= :section (:kind %)) (search \"rrf\")). :kind is
   one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :by
   the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
