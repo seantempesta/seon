@@ -383,7 +383,7 @@
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
-        _ (when (seq (filter binary run-tests)) (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))))
+        _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))
         ;; each candidate test's digest: where its verdict is read (seon.fx/test-results, the merge gate)
         _ (when tests? (write! (str out "/tests.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys digests (filter symbol? (keys cand)))})))]

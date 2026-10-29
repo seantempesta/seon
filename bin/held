@@ -97,9 +97,19 @@ if ($fifo ne "") {
     # stdin open after held closes its own (a stop that never reached the root)
     close $in_w if $in_w; close $out_r if $out_r; close $ready if $ready; close $life_r if $life_r; close $d if $d;
     open STDIN, "<", "/dev/null";
-    # a starter fifo it cannot open is a starter it cannot watch: CMD does not run unwatched
-    open(my $s, "<", $fifo) or do { kill "KILL", -$cmd; print STDERR "held: starter fifo $fifo: $!: CMD killed\n"; exit 1 };
-    1 while sysread($s, my $buf, 512);
+    # a starter fifo it cannot open is a starter it cannot watch: CMD does not run unwatched. Opened
+    # non-blocking and waited on with select, never a blocking read: on macOS a fifo's last writer
+    # closing wakes ONE blocked reader, so of the several holders watching one starter (the outer
+    # holder of `bin/root start` and the root's own, every root a test started) the rest stayed
+    # asleep for good and their roots outlived the runner (~50 found, 2026-10-29); select wakes all.
+    # No writer at all (the starter gone before this opened) reads as EOF at once: CMD is killed.
+    sysopen(my $s, $fifo, O_RDONLY | O_NONBLOCK) or do { kill "KILL", -$cmd; print STDERR "held: starter fifo $fifo: $!: CMD killed\n"; exit 1 };
+    my $sel = IO::Select->new($s);
+    while (1) {
+      $sel->can_read;
+      my $n = sysread($s, my $buf, 512);
+      last if defined $n && $n == 0;
+    }
     kill "KILL", -$cmd;
     exit 0;
   }
