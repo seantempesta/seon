@@ -50,6 +50,9 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 "Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
 
+### No artificial limits or cuts on an agent's context or evals (owner, 2026-10-29)
+"wait do not put any artificial limits or cuts on agents context or evals." An agent keeps every eval result (result/eN), and its own errors, test failures and replies carry their full data; memory work bounds only what root keeps of other processes for its life (:root-errors, its view of agents). The 16-result window and the error bounding on an agent's own errors (merged earlier that evening) are taken back (branch jolt/agent-no-cuts). Stated in: docs/errors.md, docs/agent.md.
+
 ### Agents at once: ten to twenty on a small machine, no ceiling on big iron (owner, 2026-10-29)
 "Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running), task seon.config/agents-at-once-follow-the-machine.
 

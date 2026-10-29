@@ -56,7 +56,6 @@
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
-  [:seon.config.agent/result-window :seon.config.agent/result-window]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
   [:seon.config.agent/stall-ms :seon.config.agent/stall-ms]
   ;; merges
@@ -85,10 +84,8 @@
   [:seon.config.proofs/prove-main-on-commit :seon.config.proofs/prove-main-on-commit]
   [:seon.config.proofs/stall-factor :seon.config.proofs/stall-factor]
   [:seon.config.build/jolt-compiler-options :seon.config.build/jolt-compiler-options]
-  [:seon.config.proofs/max-assertions :seon.config.proofs/max-assertions]
   [:seon.config.proofs/results-dir :seon.config.proofs/results-dir]
   [:seon.config.proofs/results-max-bytes :seon.config.proofs/results-max-bytes]
-  [:seon.config.proofs/answer-reds :seon.config.proofs/answer-reds]
   [:seon.config.proofs/program-store :seon.config.proofs/program-store]
   [:seon.config.proofs/program-store-max-bytes :seon.config.proofs/program-store-max-bytes]
   [:seon.config.proofs/seed-salt :seon.config.proofs/seed-salt]

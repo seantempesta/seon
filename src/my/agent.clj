@@ -34,23 +34,8 @@
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
             [seon.db :as pdb] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
-(defn $
-  "An earlier eval's response (its live value under :value), by handle (:e3). The newest
-  :seon.config.agent/result-window responses are live; an older one is read back from its record on
-  this branch (its value when the record holds it as data), else answered as the typed error
-  :seon.repl/result-evicted, with the printed text when the record has one: re-evaluate, or read
-  that text. Never nil. See docs/agent.md#your-turn."
-  {:malli/schema [:=> [:cat :keyword] :any]}
-  [h]
-  (or (get-in @agent/state [:results h])
-      (let [rec (when-let [db (:db @agent/state)] (:seon.eval/record (d/pull db [:seon.eval/record] [:seon.eval/id (name h)])))
-            resp (:response rec)]
-        (if (and resp (contains? resp :value))
-          resp
-          (contract/error :seon.repl/result-evicted #'$
-                          (str (name h) " is no longer held (only the newest " (cfg/value :seon.config.agent/result-window)
-                               " evals are), and its record holds no value: re-evaluate" (when (:printed rec) ", or read :printed"))
-                          (cond-> {:handle h} (:printed rec) (assoc :printed (:printed rec))))))))
+(defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
+  [h] (get-in @agent/state [:results h]))
 (defn whoami "This agent: {:id :branch :pid}." {:malli/schema [:=> [:cat] [:map [:id :seon.agent/id] [:branch :seon.db/branch] [:pid :seon.lib/pid]]]}
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
 (defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), then other agents' sends ({:from :body})." {:malli/schema [:=> [:cat] [:vector :map]]}

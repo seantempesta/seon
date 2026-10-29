@@ -217,16 +217,15 @@
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-tests-answer-costs-its-reds-not-its-tests
   ;; root, 2026-10-28: an agent's :tests answer of about 3 MB in one frame (every test's reports)
-  (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))
-        bound (cfg/value :seon.config.proofs/answer-reds)]
+  (let [size #(count (pr-str (proofs/answer % '#{a.g-test/t0})))]
     (testing "green tests past the proofs cost nothing: n and 2n answer the same bytes but for the counts' digits"
       (is (< (Math/abs (- (size (run-of 100 0)) (size (run-of 200 0)))) 5)))
     (testing "the done rule reads it as it reads the whole run: the proof's pass and every red's failures"
       (let [a (proofs/answer (run-of 50 3) '#{a.g-test/t0})]
         (is (= '{a.g-test/t0 :pass a.r-test/t0 :fail a.r-test/t1 :fail a.r-test/t2 :fail} (proofs/results a)))
         (is (= 3 (count (get (proofs/failures a) 'a.r-test/t1))))))
-    (testing "reds past the bound are counted, never carried"
-      (let [a (proofs/answer (run-of 10 (* 2 bound)) #{})]
-        (is (= bound (:reds-left a)))
-        (is (= bound (count (proofs/results a))))
-        (is (< (Math/abs (- (size (run-of 10 (* 2 bound))) (size (run-of 10 (* 4 bound))))) 5) "flat past the bound")))))
+    (testing "every red is carried whole, however many (no bound)"
+      (let [a (proofs/answer (run-of 10 50) #{})]
+        (is (= 50 (count (proofs/results a))))
+        (is (every? #(= 3 (count (get (proofs/failures a) (symbol "a.r-test" (str "t" %))))) (range 50)))
+        (is (not (contains? a :reds-left)))))))

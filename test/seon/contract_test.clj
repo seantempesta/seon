@@ -70,27 +70,31 @@
        1 2 "three")
       (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
 
-;; docs/errors.md#an-error-keeps-data: an error keeps data, never the value that made it.
-;; (AGENTS.md section 4: root's *e reached 1.08 GB).
+;; docs/errors.md#an-error-keeps-data: an error root keeps of another process keeps data, never the
+;; value that made it (AGENTS.md section 4: root's *e reached 1.08 GB); what an agent's own error
+;; or an asker gets is the error whole (owner, 2026-10-29: no cuts on an agent's context or evals).
 (deftest an-error-keeps-bytes-that-do-not-grow-with-its-value
   (let [kept-bytes
         (fn [n]
           (let [big (vec (range (quot n 8)))
                 text (apply str (repeat n "x"))
                 live (atom big)
-                ;; each keeping site: the constructor, an exception's ex-data as error-map keeps it,
-                ;; Flow's error channel value, a test's unreported ex-data
-                made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})
-                mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
-                mapped2 ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" (assoc made :extra big)))
-                flowed (:data (#'seon.root/flow-error {:clojure.core.async.flow/pid :render :clojure.core.async.flow/ex (ex-info "boom" {:v big})}))
-                kept [made mapped mapped2 flowed]]
-            (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq kept)) "no live object is kept, only its print")
-            (is (string? (:seon.print/code (:held made))) "the atom is kept as its print")
-            (is (or (= n 1000) (re-find #"\+\d+ chars" (:took made))) "a value past the budget is kept as the printer's cut, which says what it omitted")
-            (count (pr-str kept))))
+                flowed (:data (#'seon.root/flow-error {:clojure.core.async.flow/pid :render
+                                                       :clojure.core.async.flow/ex (ex-info "boom" {:v big :s text :a live})}))]
+            (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq flowed)) "no live object is kept, only its print")
+            (is (string? (:seon.print/code (:a flowed))) "the atom is kept as its print")
+            (is (or (= n 1000) (re-find #"\+\d+ chars" (:s flowed))) "a value past the budget is kept as the printer's cut, which says what it omitted")
+            (count (pr-str flowed))))
         sizes (map kept-bytes [1000 100000 10000000])]
     ;; a small value is kept whole (1 KB), anything past the budget as its bounded print: the
-    ;; bytes kept stop growing, and 10,000 times the value adds none
+    ;; bytes root keeps stop growing, and 10,000 times the value adds none
     (is (every? #(< % 8000) sizes) (str "bytes kept for 1 KB, 100 KB and 10 MB values: " (vec sizes)))
     (is (<= (last sizes) (+ 100 (second sizes))) (str "100 times more value keeps no more: " (vec sizes)))))
+
+;; docs/errors.md#an-error-keeps-data: an agent's own error is whole.
+(deftest an-agents-own-error-keeps-its-full-data
+  (let [big (vec (range 100000)) text (apply str (repeat 100000 "x")) live (atom big)
+        mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
+        made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})]
+    (is (= {:v big :s text :a live} (:data mapped)) "an eval error's ex-data is its :data, whole")
+    (is (= {:big big :took text :held live} (select-keys made [:big :took :held])) "a built error carries its members whole")))

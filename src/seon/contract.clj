@@ -253,15 +253,14 @@
               (if (ok v) v (print/code (print/text v budget)))))))
 
 (defn bounded
-  "The error map m with each member kept (`kept`): the one place an error's values are cut down
-  to what may be held, called by `error` and by seon.agent/error-map for an exception's ex-data."
+  "The error map m with each member kept (`kept`): for root, which keeps other processes' errors
+  for its life (seon.root/flow-error); what an asker or an agent gets is the error whole."
   {:malli/schema [:=> [:cat :map] :map]}
   [m] (into {} (map (fn [[k v]] [k (kept v)])) m))
 
 (defn error
   "The error map of variant `type` raised by `operation`: message plus the variant's
-  members, each kept (`bounded`: small plain data as it is, anything else as its print). Checked
-  against the variant's registered schema here, at its constructor. A raiser
+  members. Checked against the variant's registered schema here, at its constructor. A raiser
   names itself by its var, #'ns/f, the function the error is built in: the compile resolves it, so
   a rename can never leave an error naming a function that is gone (the a-map design read
   seon.render.value/show, renamed away, and searched for it); a symbol is for an operation known
@@ -276,7 +275,7 @@
                        {:seon.error/type :seon.instrument/contract-error :seon.error/operation (symbol #'seon.contract/error)
                         :seon.error/message (str "the built error does not satisfy " type)
                         :seon.error/member :malli.core/invalid-output})))
-     (bounded e))))
+     e)))
 
 (defn error?
   "Is v an error map (it carries :seon.error/type)?"

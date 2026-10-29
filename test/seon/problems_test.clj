@@ -111,7 +111,7 @@
         fs (proofs/failures run)
         cs (proofs/costs run)]
     (is (= #{'app.t/red 'app.t/f-cost} (set (keys fs))))
-    (is (= 8 (count (get fs 'app.t/red))) "at most 8 assertions per test")
+    (is (= 9 (count (get fs 'app.t/red))) "every failing assertion of a test is kept")
     (is (contract/valid? :seon.run/failures fs))
     (is (= "(= 3 0)" (:expected (first (get fs 'app.t/red)))) "printed by the one printer")
     (is (= {'app.t/f-cost {:rows [] :verdict verdict}} cs) "a cost proof's rows and verdict, as data")))

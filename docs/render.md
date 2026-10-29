@@ -160,7 +160,7 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 The places that cut a value where it is made, not in the printer, each with its reason.
 
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
-- `seon.contract/kept`: an error keeps no live value ([errors](errors.md#an-error-keeps-data)); a value past the part budget is kept as the printer's cut (`print/prose` for a string, `print/text` marked code for the rest), which says what it omitted.
+- `seon.contract/kept`: root keeps no live value of another process's error ([errors](errors.md#an-error-keeps-data)); a value past the part budget is kept as the printer's cut (`print/prose` for a string, `print/text` marked code for the rest), which says what it omitted.
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
 - A test child's reports: a child process prints an assertion's expected and actual at its pipe, a process boundary, and the reports are kept as it sent them; `seon.proofs/failures` keeps the first `:seon.config.proofs/max-assertions` of a test's whole, the facts on its var entity hold that data (`:seon.test/failures`), and the one printer prints it where it is shown (the owner, 2026-10-29: "keep everything as data until it's at a print boundary").
 
