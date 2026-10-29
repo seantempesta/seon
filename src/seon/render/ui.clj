@@ -771,12 +771,12 @@
   value): its name as a title, its namespace above it, how its kind is worked (folded), its plan as
   Markdown, the rest of its data folded, the sections it cites. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [id] :as v}]
+  [_opts {:keys [id execution] :as v}]
   (let []
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
-      (str "task · " (namespace (symbol id)))]
+      (str "task · " (namespace (symbol id)) (when execution (str " · " (kname execution))))]
      [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
      ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
      ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as

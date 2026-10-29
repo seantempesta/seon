@@ -201,13 +201,15 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
-(defn- content-attr?
-  "Whether attribute a is one a key's content reads on base or db: the program's (program/attr-namespaces) or declared
+(defn- content-attr
+  "The predicate of an attribute a key's content reads on base or db: the program's (program/attr-namespaces) or declared
   data (das-b, das-d), never :db/txInstant unless declared data, which every transaction asserts and no key's content reads (a
   transaction's entity bears no key: reading it cost a descent and two seeks a transaction, 87 of them for
-  a branch of 18 evals)."
-  [das-b das-d a]
-  (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (program/attr-namespaces (namespace a))) (das-b a) (das-d a)))))
+  a branch of 18 evals). One contracted call a merge; the predicate is asked of each attribute (1,771 of them when main
+  only embedded) with no contract of its own."
+  {:malli/schema [:=> [:cat ifn? ifn?] :seon.host/fn]}
+  [das-b das-d]
+  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (program/attr-namespaces (namespace a))) (das-b a) (das-d a))))))
 
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ
@@ -221,7 +223,8 @@
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
                          (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base) d (read db)
-        content? (fn [{:keys [a]}] (content-attr? (nth b 2) (nth d 2) a))]
+        content-attr? (content-attr (nth b 2) (nth d 2))
+        content? (fn [{:keys [a]}] (content-attr? a))]
     (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
                     [side many das] [b d]
                     k (entity-keys side many e das)]
@@ -246,12 +249,12 @@
      (into [] cat (d/datoms-diff base db :eavt []))
      (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
        (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
-             (filter #(content-attr? das-b das-d %) (set (concat (keys (:schema base)) (keys (:schema db)))))))))
+             (filter (content-attr das-b das-d) (set (concat (keys (:schema base)) (keys (:schema db)))))))))
   ([base db data-attrs diff]
    (if (= :all data-attrs)
      (vec diff)
      (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
-       (into [] (filter #(content-attr? das-b das-d (:a %))) diff)))))
+       (into [] (filter (comp (content-attr das-b das-d) :a)) diff)))))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over

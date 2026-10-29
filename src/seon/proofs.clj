@@ -172,6 +172,7 @@
 
 (defn- fn-without-gen
   "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
   [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
 
 (defn mg-registry-gaps

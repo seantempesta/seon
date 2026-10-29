@@ -377,7 +377,8 @@
                      ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls
                      ;; at 1, 80.9 MB / 1,309 at 10, 124.7 MB / 3,729 at 30 (21.8M, 28.7M, 44.3M ticks)
                      :per-n {:bytes 1100000 :calls 70}
-                     :fixed {:bytes 27000000 :calls 115}
+                     ;; +3 calls 2026-10-30: seon.merge/content-attr, one contracted call a merge-diff read, was uncontracted
+                     :fixed {:bytes 27000000 :calls 118}
                      :sizes [1 10 30]})))))
 
 (def ^:dynamic *conn*

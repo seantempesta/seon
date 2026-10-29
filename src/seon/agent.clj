@@ -293,16 +293,29 @@
   read inline, as the wait already holds the loop."
   false)
 
+(defn take-op
+  "The first message of op in queue q and q without it, or nil when q holds none: a request
+  another wait put in :pending that a wait taking op in place must take (await-op!)."
+  {:malli/schema [:=> [:cat [:sequential :map] :keyword] [:maybe [:tuple :map [:sequential :map]]]]}
+  [q op]
+  (when-let [m (first (filter #(= op (:op %)) q))]
+    [m (into clojure.lang.PersistentQueue/EMPTY (remove #(identical? m %)) q)]))
+
 (defn- await-op!
   "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
-  in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, and
-  anything else waits in :pending for the loop. The process ends when root is gone."
+  in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, one
+  another wait already put in :pending first (take-op: md-scan #21 hung with root's :tests in
+  :pending, taken during a model call's wait, while prove! waited for an answer root could give
+  only after it), and anything else waits in :pending for the loop. The process ends when root is gone."
   {:malli/schema [:function [:=> [:cat :keyword :int] :seon.wire/seon-msg]
                   [:=> [:cat :keyword :int [:maybe :keyword]] :seon.wire/seon-msg]]}
   ([op k] (await-op! op k nil))
   ([op k in-place]
    (loop []
-     (let [m (recv-raw!)]
+     (let [m (or (when-let [[m q] (and in-place (take-op (:pending @state) in-place))]
+                   (swap! state assoc :pending q)
+                   m)
+                 (recv-raw!))]
        (cond
          (= m :dead) (lib/c-exit 0)
          (and (= op (:op m)) (= k (:k m))) m

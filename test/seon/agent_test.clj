@@ -150,6 +150,20 @@
       (sh/sh "rm" "-rf" runs)
       {:agents agents :out log :left (if drained left (conj left :not-drained))})))
 
+(deftest a-wait-takes-a-request-another-wait-left-pending
+  ;; docs/failure-points.md: md-scan #21 hung: root's :tests reached the agent during a model call's wait, which put
+  ;; it in :pending; prove!'s wait then read only its socket, and root answered prove! only after :tests
+  (let [q (into clojure.lang.PersistentQueue/EMPTY [{:op :catch-up} {:op :tests :id :a1 :mode :turn} {:op :eval :k 3}])
+        [m q'] (agent/take-op q :tests)]
+    (is (= {:op :tests :id :a1 :mode :turn} m) "the pending request of the op the wait takes")
+    (is (= [{:op :catch-up} {:op :eval :k 3}] (vec q')) "and the others stay, in their order, for the loop")
+    (is (instance? clojure.lang.PersistentQueue q') "still the loop's queue")
+    (is (nil? (agent/take-op q' :tests)) "none left, none taken")
+    ;; and the wait takes it so: what await-op! calls, as the compiler's facts say (seon.source/accounts)
+    (is (contains? (into #{} (mapcat :refs) (:accounts (seon.source/accounts 'seon.agent (my.agent/source-fn 'seon.agent/await-op!))))
+                   'seon.agent/take-op)
+        "await-op! takes a pending request before it reads")))
+
 (deftest a-spawn-after-the-fork-server-is-lost-answers
   ;; task seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
   ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;

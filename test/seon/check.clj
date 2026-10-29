@@ -246,6 +246,7 @@
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
     [seon.procs-test/notice seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read (the one helper the procs and reconcile tests build their notices with)"
+    [seon.step-test/timer-threads clojure.core.async/timeout] "the timers' threads are the subject; the verdict counts threads, never time"
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
@@ -516,7 +517,7 @@
                 (and (= :seon.repl/ticks-spent (get-in (first r11) [:ex :seon.error/type]))
                      (<= 100000000 (get-in (first r11) [:ex :ticks])) (= "8" (printed (second r11))))
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= "hello from :a3\n" (:out r10)) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
+                (and (= "hello from :a3\n" (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
                 (and (= "7" (printed r7)) (= "360" (printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
