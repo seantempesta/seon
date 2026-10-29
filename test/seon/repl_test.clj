@@ -37,7 +37,11 @@
     ;; md-scan #22: an and one paren short swallowed its clause's value; the forms given show it, nested
     (let [e (ev "(let [c 1]\n  (cond\n    (and (= c 1) (or (= c 2)) [1 2]\n    :else nil)))")]
       (is (= 1 (count (get-in e [:ex :seon.error/given]))) (str "one form: the and took the rest " (pr-str (:ex e))))
-      (is (str/includes? (first (get-in e [:ex :seon.error/given])) ":else nil") "the clauses inside the and, where the reader put them"))
+      (is (str/includes? (first (get-in e [:ex :seon.error/given])) ":else") "the clauses inside the and, where the reader put them"))
+    ;; whole, however long: a cut would drop the swallowed tail
+    (let [long-test (apply str (interpose " " (repeat 60 "(= c 2)")))
+          e (ev (str "(let [c 1] (cond (and (or " long-test ") [1 2] :else nil)))"))]
+      (is (not (str/includes? (first (get-in e [:ex :seon.error/given])) "…")) (str "nothing elided: an agent's own error is whole: " (first (get-in e [:ex :seon.error/given])))))
     ;; a form past its byte budget stops with the typed error, its allocation and budget as data
     (let [old2 @agent/state
           e (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
