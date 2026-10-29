@@ -182,7 +182,7 @@
   ;; own entities, pointing at what they describe ... a model call at its turn" (seon.ctx/the-record-is-facts-about-the-work,
   ;; move 1): a turn's request bookkeeping is its model call's entity, which the agent's pull never reaches;
   ;; move 2: an agent's process (pid, memory) is its process entity, pointing at the agent.
-  ;; Move 3 (an embedding, :seon.vector/*) extends this test.
+  ;; move 3: an embedding is its own vector entity pointing at what it embeds (docs/vector.md#a-vector-is-its-own-entity).
   (let [db (:db-after (d/with (ts/test-db)
                               [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
                                {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
@@ -193,7 +193,9 @@
                                 :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0
                                 :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}
                                {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/pid 77 :seon.process/mem-mb 120.5
-                                :seon.process/forked-ms 5.0}]))
+                                :seon.process/forked-ms 5.0}
+                               {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"}
+                               {:seon.vector/of [:seon.eval/id "e1"] :seon.vector/model "m" :seon.vector/tokens 3}]))
         t (:tree (ctx/build db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
     (is (= ["I will check f0."] (map :seon.turn/reply (vals (:turns t)))) "the turn is in the record, with its reply")
@@ -202,6 +204,8 @@
         "no :seon.process/* key, no pid or memory on the agent, anywhere in the record")
     (is (= #{[77 120.5]} (d/q '[:find ?p ?m :where [?x :seon.process/agent ?a] [?a :seon.agent/key] [?x :seon.process/pid ?p] [?x :seon.process/mem-mb ?m]] db))
         "the process is reached by a query on its agent")
+    (is (contains? (set (map :seon.eval/id (vals (:evals t)))) "e1") "the eval is in the record")
+    (is (empty? (filter #(and (keyword? %) (= "seon.vector" (namespace %))) (keys-in t))) "no :seon.vector/* in the record")
     (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/turn ?t] [?t :seon.turn/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
         "the model call is reached by a query on its turn")))
 
