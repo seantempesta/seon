@@ -376,3 +376,47 @@
                      :per-n {:bytes 1100000 :calls 70}
                      :fixed {:bytes 27000000 :calls 115}
                      :sizes [1 10 30]})))))
+
+(def ^:dynamic *conn*
+  "The branch's connection the draw proof reads and writes (bound by its deftest)."
+  nil)
+
+(def ^:dynamic *sels*
+  "The lists the draw proof draws (bound by its deftest)."
+  ["#p-task"])
+
+(defn page-of
+  "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
+  holds a task and n evals (a record as the REPL writes it) with a message for every other one:
+  its ctx tree, the diff, the db, the layout and the lists to draw (*sels*)."
+  {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
+  [n]
+  (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n) run (str tid "#1")]
+    (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p." :seon.task/proofs #{'demo-test/p-test}}]))
+    (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
+    (doseq [i (range n)]
+      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+                         :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5))} :line (str i) :run run :call-id (str "c" i) :call 0 :prose (str "Step " i ".")}}])
+      (when (even? i)
+        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" run (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
+    (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
+      (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
+
+;; See docs/render.md#the-page-is-sent-as-what-changed
+(deftest drawing-one-list-costs-that-list-not-the-page
+  ;; an old turn's request is its parts, which the model reads from one list of the page (#p-task); the
+  ;; page's other lists (the conversation a person reads, the tiles) are not drawn for it
+  (binding [*conn* nil]
+    (ts/test-branch!
+      (fn [_ conn]
+        (binding [*conn* conn]
+          (cost/proof {:of 'seon.render/draw :input 'seon.render-cost-test/page-of
+                       :n "evals of the agent (and a message for every other), none of which the list draws"
+                       :work "the list's components drawn once; no eval, message or tile of the page's other lists is rendered"
+                       :growth :linear
+                       ;; measured 2026-10-29: 371 calls / 2.33 MB at 10 evals, 572 / 4.50 MB at 80 (what the layout's own render
+                       ;; reads of the evals and messages, seon.render.ui/render-ctx's conversation); drawing every list: 2,974 calls /
+                       ;; 10.2 MB at 80 (about 27 calls and 0.1 MB an eval)
+                       :per-n {:calls 3 :bytes 32000}
+                       :fixed {:calls 345 :bytes 2100000}
+                       :sizes [10 40 80]}))))))
