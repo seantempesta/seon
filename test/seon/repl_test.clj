@@ -105,10 +105,9 @@
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
-              ;; the same source a row above printed: an earlier response's output prints as the form
-              ;; that reads it again, never twice (docs/render.md)
-              ["(clojure.repl/source root-causes)" :text "(:out result/e"]
-              ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(:out result/e"]
+              ;; the same source twice: each answer prints it whole, whatever came before (docs/render.md)
+              ["(clojure.repl/source root-causes)" :text "(defn root-causes"]
+              ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(defn root-causes"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]

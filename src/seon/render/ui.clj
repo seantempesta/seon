@@ -470,7 +470,7 @@
         ;; value's :printed, a live reply's :text) is prose
         data? (and (:seon.eval/record e) (nil? (:text r)) (not (:printed rec)))
         r (cond-> r (and (:seon.eval/record e) (nil? (:text r)))
-            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec nil)) (:printed rec))))
+            (assoc :text (if data? (when (= :inline (:as opts)) (print/record-text rec)) (:printed rec))))
         by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))

@@ -235,16 +235,6 @@
     (is (str/includes? text "\"b") "the second long member shows its first part" )
     (is (> (count (re-find #"a+" text)) (count (re-find #"b+" text))) "the first member grows first")))
 
-(deftest an-earlier-value-prints-as-its-handle
-  ;; docs/render.md: a value an earlier response showed prints as the
-  ;; form that reads it again, never twice
-  (let [big (vec (range 200))
-        {:keys [text]} (seon/print-value {:handle 'result/e2 :value {:xs big :n 1}} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})]
-    (is (str/includes? text ":xs (:value result/e1)") text)
-    (is (not (str/includes? text "199")) text)
-    (is (str/includes? (:text (seon/print-value {:xs (vec (range 200))} {:handle 'result/e2 :seen {:colls {(System/identityHashCode big) [[big '(:value result/e1)]]}}})) "199")
-        "an equal value that is not the same one prints as itself: collections match by identity")))
-
 (defn- problem-rows
   "n rows shaped as main's :stale-section problem rows (my.root/problems, 2026-10-25: 177 of them)."
   [n]

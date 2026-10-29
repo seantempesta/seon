@@ -74,25 +74,27 @@
     (is (re-find #"at the model's token limit" (:cut (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true})))))
     (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))
 
-(deftest code-run-again-with-the-same-answer-says-so-on-it
-  ;; the live runs of 2026-10-25/26: an answer to code sent again printed as the form that reads
-  ;; the earlier one, `:out (:out result/e89)`, and the agent sent it again four times; the earlier
-  ;; one was sent whole each time. Sent again with the same answer, it prints whole beside that
-  ;; one's handle; a different answer is new, so it is not marked
-  (let [outs {"e1" "---- budget 16\n[:kw …]\n" "e2" "---- budget 16\n[:kw …]\n" "e3" "other\n"}
-        db (d/db-with (db-with-program) (for [[id out] outs]
+(deftest a-records-text-is-the-same-whatever-came-before
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
+  ;; function of that record alone (docs/render.md). Records with equal values, and one whose code
+  ;; repeats an earlier one's, print the same bytes after other records as each printed alone.
+  (let [rows (vec (for [i (range 200)] {:row i :name (str "row-" i)}))
+        recs {"e1" {:code "(rows)" :value rows :out "---- budget 16\n[:kw …]\n"}
+              "e2" {:code "(rows)" :value (vec rows) :out "---- budget 16\n[:kw …]\n"}
+              "e3" {:code "(other)" :value (vec rows) :out "other\n"}}
+        db (d/db-with (db-with-program) (for [[id r] recs]
                                           {:seon.eval/id id :seon.eval/by "a1"
-                                           :seon.eval/record {:code "(probe)" :call-id (str "c" id) :call 0
-                                                              :response {:handle (symbol "result" id) :value nil :out out :ms 1}}}))
+                                           :seon.eval/record {:code (:code r) :call-id (str "c" id) :call 0
+                                                              :response {:handle (symbol "result" id) :value (:value r) :out (:out r) :ms 1}}}))
         ev (fn [id] [[:eval id] (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id id]) :seon.db/eval-fact 1])
-        c (#'context/printed-run (mapv ev ["e1" "e2" "e3"]) nil)
-        text (fn [id] (:content (peek (get-in c [:parts id :whole]))))]
-    (is (= [:eval "e2" {:same-as 'result/e1}] (get-in c [:parts "e2" :ref])) "its ref names the earlier one")
-    (is (str/includes? (text "e2") ":same-as result/e1") (text "e2"))
-    (is (str/includes? (text "e2") "---- budget 16") "and its answer prints whole, never as (:out result/e1)")
-    (is (= [:eval "e3"] (get-in c [:parts "e3" :ref])) "a different answer to the same code is not marked")
-    (is (= (get-in c [:parts "e2" :whole]) (second (first (context/parts-of db [[:eval "e2" {:same-as 'result/e1}]]))))
-        "read back from its ref")))
+        after (#'context/printed-run (mapv ev ["e1" "e2" "e3"]) nil)]
+    (doseq [id ["e1" "e2" "e3"]
+            :let [alone (#'context/printed-run [(ev id)] nil)]]
+      (is (= (get-in alone [:parts id]) (get-in after [:parts id])) (str id " prints the same after other records as alone"))
+      (is (= [:eval id] (get-in after [:parts id :ref])) "and its ref names only itself"))
+    (let [text #(:content (peek (get-in after [:parts % :whole])))]
+      (is (str/includes? (text "e2") "---- budget 16") "the repeated answer prints whole")
+      (is (not (str/includes? (text "e3") "(:value result/")) "an equal value is printed, not read from an earlier handle"))))
 
 (defn- task-f [db] (task/task (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
                                                                   :seon.task/proofs #{'demo-test/f-test}}]))
@@ -636,8 +638,7 @@
 (deftest a-run-printed-once-sends-what-a-cold-read-sends
   ;; the branch review (2026-10-25, F6, F7): a request threaded through what the run's earlier
   ;; requests printed (:printed) equals one made with none, turn by turn; what each turn recorded
-  ;; it sent reads back as the same bytes; and a value folded to an earlier record's form is folded
-  ;; only while that record is sent whole
+  ;; it sent reads back as the same bytes (the fold assertions went with the fold, 2026-10-29)
   (ts/test-branch!
     (fn [_ conn]
       (wiki! conn)
@@ -676,9 +677,7 @@
           (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db (str "demo/g#1/" n))]
             (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
                 (str "turn " n ": its read-back is the bytes it sent"))))
-        (let [[_ last-turn] (peek turns)]
-          (is (some #(and (vector? %) (= [:eval "e3" {:value 'result/e1}] %)) (:sent last-turn)) "e3's rows are e1's, sent whole: folded")
-          (is (str/includes? (str (:messages last-turn)) "(:value result/e1)")))))))
+        (is (= 5 (count turns)))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request
@@ -806,10 +805,7 @@
     (is (not (contains? rec :text)) "no text made for a reader")
     (is (= rec (:seon.eval/record (d/pull stored [:seon.eval/record] [:seon.eval/id "e5"]))) "it round-trips through the store")
     (is (str/includes? (print/record-text rec) "row-0") "printed when it is shown")
-    (testing "the same whatever came before it: a value an earlier eval showed is the reader's to fold"
-      (let [seen (print/seen nil (assoc r :handle 'result/e1))]
-        (is (= rec (repl/record-details db "(rows)" r {} nil)))
-        (is (str/includes? (print/record-text rec seen) "(:value result/e1)") "folded as it is sent, not as it is stored")))
+    (is (= rec (repl/record-details db "(rows)" r {} nil)) "the same whatever came before it")
     (testing "a value that is not plain data keeps the response as it printed then, and its type"
       (doseq [v [(atom 1) (map inc (range 3)) #'clojure.core/inc]]
         (let [rec (repl/record-details db "(x)" {:handle 'result/e6 :value v} {} nil)]

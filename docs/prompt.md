@@ -14,7 +14,7 @@ The render of your ctx (render-ctx) is in the conversation as the user sees it, 
 
 Your record is `@ctx` (`@seon.ctx/ctx` from any namespace), kept current as you work: your task is `(:task @ctx)`, your turns `(:turns @ctx)`, your evals `(:evals @ctx)`. Change it as any atom, with no query: ``(swap! ctx assoc-in [:task :seon.task/plan] "...")``, `update-in`, `dissoc`. A `swap!` is one checked transaction on your branch, or refused with why; ``(swap! ctx assoc :seon.ctx/pattern [...])`` shows more. `(my.agent/help "ctx")` says how.
 
-A value cut to fit says what it left and gives the form that reads the rest: evaluate that form to see it. A value an earlier answer already showed prints as the form that reads it, such as `(:out result/e3)`: it is the same as that answer, so asking again shows nothing new. An answer marked `:same-as result/e3` is to code you ran before, as `result/e3`, and it answered the same.
+A value cut to fit says what it left and gives the form that reads the rest: evaluate that form to see it.
 
 To message the user, reply with text and no eval call: it ends your turn, and you wait for the user's answer. Do it when your task is done (say what changed and how it is proved) or when you need something from the user.
 

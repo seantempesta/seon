@@ -1218,19 +1218,6 @@
     (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
-(deftest code-sent-again-is-told-on-its-answer
-  ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
-  ;; said too little, 9 of them a value folded to an earlier record's form; no count of repeats
-  ;; ends a run. A model that sends the same call every turn runs to its cap, and from its second
-  ;; turn on each answer it reads says it is the earlier one's, whole beside that one's handle
-  (let [[end sent] (in-agent (fn [{:keys [task ns]}]
-                              [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#loop")) " :max-turns 3})")
-                               (str "(:seon.turn/sent (datahike.api/pull (seon.agent/db) [:seon.turn/sent] [:seon.turn/id " (pr-str (str ns "/t#loop/2")) "]))")])
-                             {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})]
-    (is (= [:cap 3] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))
-    (is (some #(and (= :eval (first %)) (symbol? (:same-as (get % 2)))) (:value sent))
-        (str "turn 2 sent turn 1's answer marked :same-as turn 0's: " (pr-str (:value sent))))))
-
 (deftest a-whole-tasks-work-turns-are-no-merge-turns
   ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
   ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a

@@ -797,28 +797,18 @@
   [db t observed]
   (merge (task-data db t) (turn-state db t observed)))
 
-(defn- folded
-  "Response r with each of its members fold names (:value, :out: the handle of the earlier record
-  that showed the same) as the form that reads it there, (:value result/e12)."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [r fold] (reduce (fn [r [k h]] (assoc r k (list k h))) r fold))
-
 (defn eval-messages
   "An eval's part of the conversation as
   provider-neutral messages: a model's eval (its record names the provider's call id) is its
   assistant message, the reply's prose and reasoning as returned with the eval call (:call, the
   call's place in its reply: the provider's format folds a reply's calls into one message),
-  then its tool message, the response printed now (seon.print/record-text, opts :fold: its value or
-  output an earlier record showed, as the form that reads it there, `folded`; opts :same-as: the
-  handle of an earlier eval of the same code that answered the same, shown beside the answer
-  whole); anyone else's (the user's) is one user message
+  then its tool message, the response printed now (seon.print/record-text, a function of the
+  record alone); anyone else's (the user's) is one user message
   {:by :code :response}, the response spliced as printed."
   {:malli/schema [:=> [:cat :map :any] [:vector :seon.model/message]]}
-  [{:seon.eval/keys [by record]} opts]
+  [{:seon.eval/keys [by record]} _]
   (let [{:keys [code prose content reasoning call-id call]} record
-        text (print/record-text (cond-> record
-                                  (seq (:fold opts)) (update :response folded (:fold opts))
-                                  (:same-as opts) (assoc-in [:response :same-as] (:same-as opts))))]
+        text (print/record-text record)]
     (if call-id
       ;; as the model sent it: the reply's text (its first call's :content) and the call's own prose
       [(cond-> {:role "assistant" :content (or content "")
@@ -840,40 +830,19 @@
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (if (:seon.eval/id v) [:eval (:seon.eval/id v)] [:message (:seon.message/id v)]))
 
-(defn- fold-of
-  "Which of response r's members an earlier record of the conversation showed (seen, seon.print/seen
-  over the records before it, in order; canon, their collection values by type and value): :value
-  or :out, each the earlier one's handle, {} when none. A stored value is a copy of its own, so an
-  equal earlier one stands for it (canon: by value, safe on stored data, which is finite)."
-  {:malli/schema [:=> [:cat :map [:maybe :map] :map] :map]}
-  [r seen canon]
-  (into {} (for [k [:value :out] :when (contains? r k)
-                 :let [v (get r k)
-                       form (if (string? v)
-                              (get-in seen [:strings v])
-                              (when-let [x (get canon [(type v) v])]
-                                (some (fn [[o f]] (when (identical? o x) f)) (get-in seen [:colls (System/identityHashCode x)]))))]
-                 :when form]
-             [k (second form)])))
-
 (defn printed-run
   "The run's records new since cache (items, [ref v k tx] in tx order, ref [:eval id] or [:message
   id]) printed as the conversation sends them, each once (cache, what the run's earlier requests
-  printed: content-keyed reuse by the record's id, AGENTS section 5): an eval whole (its value or
-  output an earlier record showed, as the form that reads it there: its ref [:eval id fold]); a page item ([:page a c0 c1], its
-  messages a delay: `world`) drawn only when not printed before; and an eval of code an earlier
-  eval of the run ran, with the same answer, whole beside that one's handle (its ref [:eval id
-  {:same-as handle}]: the agent asked again and is told so on the answer it reads, where a fold
-  showed it only the earlier one's form; whole whatever the history sends of that one, since it
-  shows its own answer). A record's text is a function of it and
-  the records before it, which never change, so a request prints only its new records and every
-  older message is the same bytes (the provider's cache). An item already printed is skipped.
-  Answers the cache: {:ids :parts {id part} :seen :canon :codes :tx :pages} (:pages, {commit page}: the
-  page of the newest page item, `world` takes the next read's earlier page from it; :codes, each code's last
-  eval: its handle and its answer's hash), each part {:ref :whole}, :tx the newest record's."
+  printed: content-keyed reuse by the record's id, AGENTS section 5): an eval or a message by its
+  own render, a function of that record alone; a page item ([:page a c0 c1], its messages a delay:
+  `world`) drawn only when not printed before. A record's text depends on nothing before it, so a
+  request prints only its new records and every older message is the same bytes (the provider's
+  cache). An item already printed is skipped. Answers the cache: {:ids :parts {id part} :tx :pages}
+  (:pages, {commit page}: the page of the newest page item, `world` takes the next read's earlier
+  page from it), each part {:ref :whole}, :tx the newest record's."
   {:malli/schema [:=> [:cat [:sequential :any] [:maybe :map]] :map]}
   [items cache]
-  (reduce (fn [{:keys [seen canon] :as c} [[kind id] v k tx]]
+  (reduce (fn [c [[kind id] v k tx]]
             (let [part (fn [ref whole] {:ref ref :whole whole})
                   c (cond-> (update c :ids conj id) tx (assoc :tx tx))]
               (cond
@@ -884,24 +853,8 @@
                 (= :page kind) (let [ms @v m (meta ms)]
                                  (cond-> (assoc-in c [:parts id] (part (into [:page] id) (with-meta ms nil)))
                                    (:page m) (assoc :pages {(:commit m) (:page m)})))
-                :else
-                (let [rec (:seon.eval/record v) r (:response rec)
-                      ;; the agent's eval of code an eval of the run ran before, answered the same: that one's handle
-                      answer (hash (assoc (dissoc r :handle :ms :ticks :bytes) :printed (:printed rec)))
-                      same (when-let [[h a] (get-in c [:codes (:code rec)])] (when (= a answer) h))
-                      c (cond-> c (not same) (assoc-in [:codes (:code rec)] [(:handle r) answer]))]
-                  (if same
-                    (assoc-in c [:parts id] (part [:eval id {:same-as same}] (eval-messages v {:same-as same})))
-                (let [has? (and (contains? r :value) (coll? (:value r)))
-                      ;; an equal earlier value stands for this one (seen is by identity)
-                      x (when has? (get canon [(type (:value r)) (:value r)] (:value r)))
-                      r (cond-> r has? (assoc :value x))
-                      fold (if (:printed rec) {} (fold-of r seen canon))]
-                  (-> c
-                      (assoc-in [:parts id] (part (cond-> [:eval id] (seq fold) (conj fold)) (eval-messages v {:fold fold})))
-                      (assoc :seen (if (:printed rec) seen (print/seen seen r))
-                             :canon (cond-> canon has? (assoc [(type x) x] x))))))))))
-          (or cache {:ids [] :parts {} :seen nil :canon {} :codes {}}) items))
+                :else (assoc-in c [:parts id] (part [:eval id] (eval-messages v {}))))))
+          (or cache {:ids [] :parts {}}) items))
 
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals (not a context read's: that
@@ -1006,7 +959,7 @@
   before. Answers {:messages
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
   records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
-  as of t; [:eval id] (with its fold); [:message id]; [:page a c0 c1], the page at commit c1 (c0
+  as of t; [:eval id]; [:message id]; [:page a c0 c1], the page at commit c1 (c0
   nil) or what changed since c0. Called by the turn."
   {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
   [a {:keys [db basis help help-ref printed pages]}]
@@ -1039,8 +992,7 @@
 
 (defn parts-of
   "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
-  render: the system prompt's section as of its t (system-text), an eval by eval-messages with the
-  fold its ref names (what it showed of an earlier record, as the form that reads it there), a
+  render: the system prompt's section as of its t (system-text), an eval by eval-messages, a
   message by its render, the page at a turn or what changed since the turn before ([:page a c0
   c1], `world`, re-derived from the branch at those commits, each page drawn once: a page ref's c1 is the next one's c0, taken from the draw before): what the request sent, the same bytes. No request is built
   again: the same records, rendered. See docs/render.md#the-branchs-views."
@@ -1051,7 +1003,7 @@
         step (fn [[done pages] [kind x t :as ref]]
                (let [ms (case kind
                           :section [{:role "system" :content (system-text (d/as-of db t))}]
-                          :eval (eval-messages (ev x) (cond (:same-as t) t (map? t) {:fold t} :else {}))
+                          :eval (eval-messages (ev x) {})
                           :page (world db x t (nth ref 3) pages)
                           :message (message-messages (d/pull db [:seon.message/id :seon.message/from :seon.message/body] [:seon.message/id x]) {}))
                      m (meta ms)]

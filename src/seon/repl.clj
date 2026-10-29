@@ -462,7 +462,7 @@
         data? (and (nil? basis) (or (not (contains? resp :value)) (pdb/plain? (:value resp))))]
     (cond-> (if data?
               {:code code :response resp}
-              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp nil render/summarized) :type (str (type (:value resp)))}
+              (cond-> {:code code :response (dissoc resp :value) :printed (print/response-text resp render/summarized) :type (str (type (:value resp)))}
                 basis (assoc :basis basis)))
       ;; a value that names its render schema keeps it (a basis's; data's, a prove's run): the page draws the value by it
       (:seon.render/schema (meta (:value resp))) (assoc :schema (:seon.render/schema (meta (:value resp))))
@@ -511,7 +511,7 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r (:seen @agent/state) render/summarized)]))
+     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r render/summarized)]))
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
                               (answered)
@@ -520,7 +520,6 @@
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
                                   (answered))))]
             (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-            (swap! agent/state update :seen print/seen r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
             (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -536,7 +535,7 @@
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r (:seen @agent/state) render/summarized)) code req)))
+    (record! (assoc r :text (print/response-text r render/summarized)) code req)))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

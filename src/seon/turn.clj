@@ -438,11 +438,7 @@
 
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
-  max-turns model calls. A call of code the run ran before, answered the same, is told so on
-  the answer it reads (seon.context/printed-run, :same-as): no count decides an end (the
-  repeats of the live runs followed answers that said too little, a value
-  folded to an earlier one's form or an error that named nothing to change, and each was fixed
-  at that answer).
+  max-turns model calls.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
   does again at each green."
