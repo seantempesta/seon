@@ -22,6 +22,8 @@
                    [:seon.error/member {:optional true} :seon.error/member]
                    [:seon.error/in {:optional true} :seon.error/in]
                    [:seon.error/at {:optional true} :seon.error/at]
+                   ;; a macro's syntax error: the forms its call was given, each in one line, as read (seon.repl/given)
+                   [:seon.error/given {:optional true} [:vector :string]]
                    [:seon.error/problems {:optional true} :seon.error/problems]
                    [:seon.error/subject {:optional true} :seon.error/subject]]
  ;; the instrumented wrapper's errors (Seon's variant names)

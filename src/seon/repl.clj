@@ -257,6 +257,22 @@
       (str "Syntax error " what (when sym (str " " sym)) (when line (str " at (" line (when column (str ":" column)) ")")) ". " msg)
       msg)))
 
+(defn- given
+  "For a macro's syntax error in the form an eval read (phase macroexpansion or its syntax check, at
+  Jolt's position): the forms the macro call was given, each in one line by the one printer, as the
+  reader read them, {:seon.error/given [..]}; else nil. A count or a grouping is what such an error is
+  about, and the reader's grouping is what the writer cannot see: md-scan #22 read \"cond requires an
+  even number of forms\" and bisected its clauses for twenty evals, its and one paren short (it counted
+  the literal \\) as a closer), the clause's value swallowed into the and. See
+  docs/errors.md#an-eval-errors-diagnostics."
+  {:malli/schema [:=> [:cat :map :map] [:maybe [:map [:seon.error/given [:vector :string]]]]]}
+  [em m]
+  (let [{line :jolt.error/line col :jolt.error/column phase :clojure.error/phase} em]
+    (when (and line col (#{:macro-syntax-check :macroexpansion} phase))
+      (when-let [f (some #(when (and (seq? %) (= line (:line (meta %))) (= col (:column (meta %)))) %)
+                         (tree-seq coll? seq (:repl/form m)))]
+        {:seon.error/given (mapv #(print/line % (cfg/value :seon.config.render/line-budget)) (rest f))}))))
+
 (defn- error-data
   "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
   terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
@@ -265,7 +281,7 @@
   {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
   [e m]
   (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
-        em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
+        em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m) (given em m)) em)]
     ;; its message as Clojure's REPL says it: where it failed (reading, macroexpanding, compiling) first
     (cond-> em (:seon.error/message em) (assoc :seon.error/message (clojure-message em)))))
 

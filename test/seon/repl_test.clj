@@ -32,7 +32,12 @@
       (is (str/starts-with? (str (get-in e [:ex :seon.error/message])) "Syntax error macroexpanding cond at (1:1). ")
           (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message])))
       (is (str/includes? (str (get-in e [:ex :seon.error/message])) "cond requires an even number of forms")
-          (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message]))))
+          (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message])))
+      (is (= ["true" "1" "false"] (get-in e [:ex :seon.error/given])) (str "the forms it was given, as read: " (pr-str (:ex e)))))
+    ;; md-scan #22: an and one paren short swallowed its clause's value; the forms given show it, nested
+    (let [e (ev "(let [c 1]\n  (cond\n    (and (= c 1) (or (= c 2)) [1 2]\n    :else nil)))")]
+      (is (= 1 (count (get-in e [:ex :seon.error/given]))) (str "one form: the and took the rest " (pr-str (:ex e))))
+      (is (str/includes? (first (get-in e [:ex :seon.error/given])) ":else nil") "the clauses inside the and, where the reader put them"))
     ;; a form past its byte budget stops with the typed error, its allocation and budget as data
     (let [old2 @agent/state
           e (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
