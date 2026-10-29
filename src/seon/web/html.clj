@@ -89,8 +89,12 @@
     ;; a vector headed by a function (or its var) is a call, as in Reagent: [task-row {:as :inline}
     ;; task] writes what (task-row {:as :inline} task) answers, itself expanded
     ;; (a keyword or symbol head is an element: Jolt answers fn? true for a keyword)
+    ;; one that throws is a component's render failing (docs/failure-points.md), written in its place as
+    ;; what threw, and the page around it drawn: this writes after render! has drawn, outside its boundary
     (and (vector? node) (not (keyword? (first node))) (not (symbol? (first node))) (or (fn? (first node)) (var? (first node))))
-    (write! sb (apply (first node) (rest node)))
+    (write! sb (try (apply (first node) (rest node))
+                    (catch Throwable e
+                      [:span {:class "err"} (str (if (var? (first node)) (symbol (first node)) "a render") " threw: " (or (ex-message e) (str e)))])))
     (vector? node)
     (let [[tag & more] node
           tag (name tag)

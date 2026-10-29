@@ -868,6 +868,18 @@
                        "[:section [:h2 \"agents\"]")
         "a value's text names its hiccup as the data it is")))
 
+(deftest a-schema-form-prints-as-data-and-a-call-that-throws-is-written-in-its-place
+  ;; docs/failure-points.md (a component's render): an agent registered :lab.ctx/steps, and the page printed
+  ;; its form, whose properties map {:seon.render/html lab.ui/steps} was taken for a value asking for that
+  ;; render: steps was called with it, threw while the HTML was written (after render!), and the agent died
+  (let [form '[:vector {:seon.render/html seon.render.ui/sent-request} :string]
+        html (h/html (r/html {} {:seon.schema/key :lab.ctx/steps :seon.schema/definition form}))]
+    (is (str/includes? html "seon.render.ui/sent-request") "the properties print as the data they are")
+    (is (not (str/includes? html "threw")) "and no render is called with them"))
+  (let [html (h/html [:div [:p "before"] [#'ui/sent-request {} {}] [:p "after"]])]
+    (is (str/includes? html "seon.render.ui/sent-request threw:") html)
+    (is (and (str/includes? html "before") (str/includes? html "after")) "the page around it is written")))
+
 (deftest a-cut-opens-its-path-in-the-row
   ;; the value view's step 3: a cut on the page is a button naming the form that reads its rest; the
   ;; row, given that form opened (/open), renders what it reads from the record, under the form as
