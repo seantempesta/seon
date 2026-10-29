@@ -150,6 +150,11 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-ms { font-size: 0.7rem; color: var(--color-text-500); font-variant-numeric: tabular-nums; }
 .seon-handle { font-size: 0.7rem; color: var(--color-eval); }
 .seon-turn .seon-eval { border: 0; background: transparent; }
+.seon-message, .seon-message p, .seon-message li { font-family: var(--font-prose); font-size: 0.9rem; line-height: 1.55; }
+.seon-steps > summary { list-style: none; cursor: pointer; }
+.seon-steps > summary::-webkit-details-marker { display: none; }
+.seon-steps > summary::before { content: "▸ "; }
+.seon-steps[open] > summary::before { content: "▾ "; }
 .seon-turn .seon-eval > summary { padding: 0.15rem 0.3rem; }
 .seon-turn .seon-eval[open] > summary { border-bottom: 0; }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }

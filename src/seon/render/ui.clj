@@ -886,10 +886,14 @@
         done? (and (empty? reasons) (seq proofs))
         value (fn [v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} v])]
     [:section {:class "flex flex-col gap-2"}
-     [:div {:class "flex items-baseline justify-between"}
-      [:h2 "status"]
-      [:span {:class (if done? "text-success" "text-text-300")}
-       (str green "/" (count proofs) " proofs green" (cond done? " · done" (seq refused) " · blocked" :else ""))]]
+     ;; the one line a person reads first: done, or what is left
+     [:p {:class (str "font-[var(--font-prose)] text-sm " (if done? "text-success" "text-text-100"))}
+      (cond done? "✓ Done: every check passes"
+            test-run "⚠ The tests could not run"
+            (seq refused) (str "Not done yet: " (get reason-words (:reason (first refused)) (kname (:reason (first refused))))
+                               (when (next refused) (str " and " (dec (count refused)) " more")))
+            :else (str green " of " (count proofs) " checks pass"))]
+     [:p {:class "text-2xs text-text-500"} (str green "/" (count proofs) " proofs green")]
      [:ul {:class "flex flex-col gap-1"}
       (for [{:keys [test status failures]} proofs]
         [:li {:class "flex flex-col gap-0.5"}
@@ -1046,21 +1050,22 @@
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
-            [(if err [:span {:class "shrink-0 text-error"} "✗"] [:span {:class "shrink-0 text-success"} "✓"])
+            [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if (str/blank? (:prose rec))
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:code rec) "")))]
                [:span {:class "seon-prose min-w-0 flex-1"} (:prose rec)])
              ;; how responsive it was and what it costs the context: quiet, at the line's end
              [:span {:class "ml-auto flex shrink-0 gap-2 text-2xs text-text-500"}
               (when ms [:span {:class "seon-ms"} (ms-str ms)])
-              [:span (print/tokens-text tokens)]
-              [:code {:class "seon-handle"} (str handle)]]])
+              [:span (print/tokens-text tokens)]]])
       ;; drawn once a revision, inside the closed details, so opening it shows it at once, on a live agent's
       ;; page and on one root draws from its branch (whose opened facts no process takes)
       (do
-        [:div {:class "ml-5 flex flex-col gap-1 py-1"}
-         ;; the code as the agent wrote it, whole, highlighted
-         (emit/marked-hiccup :seon.print/code (or (:code rec) ""))
+        [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
+         ;; the code as the agent wrote it, whole, highlighted; its handle, which names its value anywhere
+         [:div {:class "flex items-baseline justify-between gap-2"}
+          (emit/marked-hiccup :seon.print/code (or (:code rec) ""))
+          [:code {:class "seon-handle shrink-0"} (str handle)]]
          (if err
            [:div {:class "text-error"} "✗ " (:seon.error/message err)
             (render/html {:budget (config/value :seon.config.render/value-budget) :handle handle} (dissoc err :seon.error/message))]
@@ -1121,23 +1126,32 @@
                    [{} nil] (conversation c db)))))
 
 (defn chat-turn
-  "A model turn as the chat shows it (a component over ctx and the db), a message on the left: its
-  reply's prose as Markdown (what its evals are for), its thinking folded, then its evals, each a quiet
-  line (`eval-item`); its header says which turn it is and the tokens its request sent, the
-  provider's count on its model call (:seon.model-call/tokens: the whole context at that turn). See
-  docs/render.md#the-page."
-  {:seon.render/style "max-w-[90%] self-start rounded-lg bg-base-900 px-3 py-2 text-sm text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
+  "A model turn as the chat shows it (a component over ctx and the db), a message on the left as a
+  person reads a chat (owner, 2026-10-29: \"Does that look like a friendly chat window that my mom could
+  use?\"): its reply's prose, then its evals folded into one quiet line (how many steps, how long they
+  ran, any that failed), opened to one line each (`eval-item`); its thinking folded; a small footer
+  with its turn and the tokens its request sent, the provider's count on its model call
+  (:seon.model-call/tokens: the whole context at that turn). See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _aid eid]
   (let [t (get-in c [:turns eid])
         [reply reasoning n] (map #(ratom/realize (get t %)) [:seon.turn/reply :seon.turn/reasoning :seon.turn/n])
         evals (get (turn-evals c db) eid [])
+        recs (map #(some-> (get-in c [:evals %]) ratom/realize :seon.eval/record) evals)
+        failed (count (filter #(or (get-in % [:response :ex]) (contract/error? (ratom/realize (get-in % [:response :value])))) recs))
+        ms (reduce + 0 (keep #(get-in % [:response :ms]) recs))
         tokens (d/q '[:find ?k . :in $ ?t :where [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db eid)]
     (when (or (not (str/blank? reply)) (not (str/blank? reasoning)) (seq evals))
-      [:section {:class "flex flex-col gap-1"}
-       [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(str "agent" (when n (str " · turn " n))) (when tokens (str (print/tokens-text tokens) " sent"))]))]
+      [:section {:class "flex flex-col gap-1.5"}
        (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
-       (when-not (str/blank? reply) (markdown reply))
-       (when (seq evals) [:ol {:class "seon-turn flex flex-col"} (for [e evals] [#'eval-item {} e])])])))
+       (when-not (str/blank? reply) [:div {:class "seon-message"} (markdown reply)])
+       (when (seq evals)
+         [:details {:class "seon-steps"}
+          [:summary {:class "text-xs text-text-500"}
+           (str (count evals) (if (= 1 (count evals)) " step" " steps") " · " (ms-str ms))
+           (when (pos? failed) [:span {:class "text-error"} (str " · ⚠ " failed " failed")])]
+          [:ol {:class "seon-turn mt-1 flex flex-col"} (for [e evals] [#'eval-item {} e])]])
+       [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(when n (str "turn " n)) (when tokens (str (print/tokens-text tokens) " of context"))]))]])))
 
 (defn chat-message
   "A message to the agent as the chat shows it (a component over ctx): who sent it, its body as
