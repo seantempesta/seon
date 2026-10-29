@@ -875,23 +875,27 @@
                                                               (d/db-with b2 [[:db/retractEntity (e b2 'app.cost/v1)]]))}]
     (doseq [[label head] scenarios]
       (testing label
-        (is (= (caused-full base head) (problems/caused base head)))))
+        (is (= (caused-full base head) (problems/caused base head)))
+        (is (= (problems/caused base head)
+               (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))
+            "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read")))
     (testing "and the cases are not all empty"
       (is (seq (problems/caused base (get scenarios "a var both sections cite is deleted"))))
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
 
 (defn caused-flat-input
-  "The cost proof's input at n: [base head changes] over a program of n catch sites and n citing
+  "The cost proof's input at n: [base head changes moved] over a program of n catch sites and n citing
   sections, the head one section rewritten to cite a dead name and one more catch site: a fixed
-  change, its changes since base read as the turn and the writer hold them (seon.merge/delta-changes,
-  read once: its own cost is proved at seon.program-cost-test/a-turns-diff-reads-what-the-branch-changed)."
+  change, its changes since base and the datoms that differ read as the turn and the writer hold them
+  (seon.merge/delta-changes and the diff, read once: their cost is proved at
+  seon.program-cost-test/a-turns-diff-reads-what-the-branch-changed)."
   [n] (let [db0 (ts/test-db)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
             base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
             changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
             head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
-        [base head (seon.merge/delta-changes base head #{})]))
+        [base head (seon.merge/delta-changes base head #{}) (problems/caused-datoms base head)]))
 
 (deftest caused-follows-what-changed
   ;; the program grows (n sections citing, n catch sites); the change is fixed (one section, one
@@ -901,11 +905,12 @@
   ;; The input holds the branch's changes (ch), as a caller does: the 1.5 M ticks and 40 calls of the program diff are not caused's.
   (cost/proof {:of 'seon.problems/caused :input 'seon.problems-test/caused-flat-input
                :n "sections citing a var and catch sites in the program, one of each changed"
-               :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
-               :growth :linear
-               :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               ;; 37: :uncited-var's read of the changed vars (5 contracted calls, measured 2026-10-29 on main: 37 at n=10)
-               :fixed {:ticks 800000 :bytes 3800000 :calls 37}
+               :work "the datoms that differ (given), one entity seek per section, name, form and task they touch on each side, the rule for the candidates only; the sections, vars and catch sites the branch did not touch are not read"
+               :growth :constant
+               :per-n {}
+               ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
+               ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
+               :fixed {:ticks 160000 :bytes 1500000 :calls 60}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------

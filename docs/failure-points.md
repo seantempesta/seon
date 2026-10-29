@@ -131,8 +131,9 @@ The rules of the OS and Chez that no code may "fix" by adding a thread or a chec
     its definitions, so Jolt registers each one with `define-process-local` (locks.ss) and
     `jolt-after-fork-child!` makes every one afresh before it takes any (Jolt's
     `test/chez/fork-held-locks-test.clj`: a parent thread holding every one while the main thread
-    forks; the child hung until its alarm before; 115 locks). A lock inside an object (a channel's, a
-    monitor's, a promise's) belongs to the object, and those are why the rule stands.
+    forks; the child hung until its alarm before; 115 locks). An object's monitor is made afresh the same way
+    (`monitor-reset-after-fork!`, Jolt's `test/chez/fork-held-monitors-test.clj`); a lock inside any other object (a
+    channel's, a promise's, a ReentrantLock's) belongs to the object, and those are why the rule stands.
   - **Chez's parallel-collector sweeper threads.** Chez starts them at the first collection that
     finds another thread, and keeps them; a child forked from such a process hangs in its first
     multi-threaded collection (sampled in `S_gc_par_entry` -> `run_sweeper`). This one is fixed

@@ -16,7 +16,9 @@
  ;; the names its own text cites as references (seon.ref/kept: a prose word only when it named
  ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
  ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
- :seon.section/names [:set :qualified-symbol]
+ ;; indexed (AVET): the sections that cite a name are sought by it, when a var or task of that name appears or
+ ;; vanishes (seon.problems/caused-split, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
+ :seon.section/names [:set {:seon.db/index true} :qualified-symbol]
  ;; the addresses its own text links to (a link or a cited path#anchor) that reached no section
  ;; at load: the load goes on without them, and a target that is still no stored section is a
  ;; dead citation (seon.problems, class :dead-citation)

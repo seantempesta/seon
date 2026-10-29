@@ -156,10 +156,31 @@
        ;; datoms a node), which three sizes cannot fit as a log: it is bounded, a program scan (1 MB
        ;; per 1,000 forms) would not be. A branch that wrote besides the program (evals, turns,
        ;; messages) and main's embeddings since the fork are never read: the ranges skip them. What it
-       ;; replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
+       ;; 2026-10-29 (task branch-diff-cost): 1.28M ticks / 4.78 MB / 57 calls at 100 against 1.30M / 4.88 MB / 59 before
+       ;; :db/txInstant stopped being a content attribute (this store's branch has one transaction; a branch of 18 evals
+       ;; has 87, ~0.4M ticks more: docs/cost.md#a-diff-per-attribute-costs-a-descent-each). What it replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
        ;; diff reads went from ~2.5-3.3 MB to one of these
        :per-n {}
        :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 59}
+       :sizes divergence-sizes})
+    (finally (release-stores!))))
+
+(defn on-disk-content-of
+  "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head no data
+  attributes, the whole :eavt diff between them], read here, before the measured call."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword] [:sequential :seon.host/datom]]]}
+  [n] (let [[base head] (on-disk-diverged-of n)] [base head #{} (apply concat (d/datoms-diff base head :eavt []))]))
+
+(deftest content-datoms-given-a-diff-are-a-filter
+  ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: given the diff a caller read, no descent is made
+  (try
+    (cost/proof
+      {:of 'seon.merge/content-datoms :input 'seon.program-cost-test/on-disk-content-of
+       :n "forms main and the branch hold (the branch redefines one)"
+       :work "one filter over the datoms that differ, by attribute; no datoms-diff, so no descent from the roots"
+       :growth :constant
+       :per-n {}
+       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 3}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 

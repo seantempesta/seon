@@ -1361,6 +1361,19 @@
     (is (str/includes? h "<hr") "a break")
     (is (str/includes? h "tail") "nothing after the fence is lost")))
 
+(deftest markdown-draws-fenced-code-and-a-numbered-list-from-the-scan
+  ;; docs/render.md#prose-and-the-one-string-cutter: a fenced block's content and a list's items are the scan's
+  ;; offsets, so no regex reads the text again
+  (let [fenced (ui/markdown "~~~clojure\n(+ 1 2)\n  (inc 3)\n~~~")
+        open (ui/markdown "```\nnever closed")
+        nums (ui/markdown "1. first\n   - nested\n2. second")]
+    (is (= ["(+ 1 2)\n  (inc 3)"] (->> (tree-seq coll? seq fenced) (filter string?) (filter #(str/includes? % "(inc 3)"))))
+        "a fenced block draws its content once, with no marks")
+    (is (not (str/includes? (h/html fenced) "~~~")))
+    (is (str/includes? (h/html open) "never closed") "an unclosed block draws what it holds")
+    (is (= [:ol {:class "list-decimal pl-5"} [:li "first\n   - nested"] [:li "second"]] (last nums))
+        "a numbered list is an ol of its items, a nested line inside its parent item")))
+
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's or a run's id as its title
   (is (= "A long string" (ui/task-title "seon.print/a-long-string")))

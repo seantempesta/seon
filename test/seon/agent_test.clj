@@ -1550,6 +1550,23 @@
     (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
     (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))
 
+(deftest a-shell-child-costs-what-it-reads
+  ;; the reproduction, 2026-10-29: in a forked agent, clojure.java.shell/sh of a ~3 s command (its two output pipes
+  ;; read by two futures) spun after the child exited, ~470,000 passes a second and ~1.5 GB of garbage in 3.5 s, then ran
+  ;; the agent out of memory or hung it (in 3 of 6 runs). The readers' wait to enter the io poller's monitor made
+  ;; the main carrier's wake, itself an entry of that monitor, again and again from inside its own wait; a wait to
+  ;; enter a monitor no longer tells the loop it fell asleep (Jolt's locks.ss jolt-asleep-silent). The work done is bytes
+  ;; allocated, never time. docs/forks.md (Jolt: a thread waiting to enter a monitor)
+  (let [bytes "(jolt.scheme/eval-string \"(lambda () (sstats-bytes (statistics)))\")"
+        code (str "(let [bytes " bytes " b0 (bytes) rs (vec (repeatedly 4 #(clojure.java.shell/sh \"sleep\" \"1\")))] "
+                  "{:exits (mapv :exit rs) :mb (quot (- (bytes) b0) 1048576)})")
+        rs (in-agent [code "(+ 1 2)"])]
+    (is (every? #(nil? (:ex %)) rs) (pr-str (mapv #(select-keys % [:ex]) rs)))
+    (is (= [0 0 0 0] (:exits (:value (first rs)))) (pr-str (first rs)))
+    ;; four children of 1 s: ~4 MB with the fix, ~1,500 MB (the agent's heap ceiling) without it
+    (is (< (:mb (:value (first rs))) 64) (pr-str (first rs)))
+    (is (= 3 (:value (second rs))) "the agent lives")))
+
 (deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
   ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
   ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
