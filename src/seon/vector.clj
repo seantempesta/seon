@@ -106,19 +106,25 @@
   ([db q es fd] (fine-scores db q (mapv #(:e (first (d/datoms db :avet :seon.vector/of %))) es) fd)))
 
 (defn- coarse-rows
-  "The coarse rows of db, [[e ve coarse] ...]: each vector entity's coarse bytes with the entity it
-  embeds (e: one keep? accepts and self is not), joined from the two scans of :seon.vector/of and
-  :seon.vector/coarse, both in vector-entity order, in one pass (a vector left on another entity has no
-  :seon.vector/of, and is no row)."
-  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int]] [:vector :any]]}
+  "The coarse rows of db that embed an entity keep? accepts and self is not: [rows es], rows the coarse
+  datoms (their :e the vector entity, their :v the bytes) and es the entities they embed, in step. A merge
+  join of the scans of :seon.vector/of and :seon.vector/coarse, both in vector-entity order: advance the
+  smaller, emit when equal, building nothing per row but the datoms the scans read (a vector left on
+  another entity has no :seon.vector/of, and is no row)."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int]] [:tuple :any :any]]}
   [db keep? self]
-  (loop [os (seq (d/datoms db :aevt :seon.vector/of)) cs (seq (d/datoms db :aevt :seon.vector/coarse)) out (transient [])]
-    (if (and os cs)
-      (let [o (first os) c (first cs) oe (:e o) ce (:e c)]
-        (cond (< oe ce) (recur (next os) cs out)
-              (< ce oe) (recur os (next cs) out)
-              :else (recur (next os) (next cs) (if (and (keep? (:v o)) (not= self (:v o))) (conj! out [(:v o) oe (:v c)]) out))))
-      (persistent! out))))
+  (let [cv (vec (d/datoms db :aevt :seon.vector/coarse)) n (count cv) j (volatile! 0) rows (volatile! (transient [])) es (volatile! (transient []))]
+    (reduce (fn [_ o]
+              (let [oe (:e o)]
+                (loop [i @j]
+                  (cond (>= i n) (vreset! j i)
+                        (< (:e (nth cv i)) oe) (recur (inc i))
+                        :else (do (vreset! j i)
+                                  (when (and (= oe (:e (nth cv i))) (keep? (:v o)) (not= self (:v o)))
+                                    (vswap! rows conj! (nth cv i)) (vswap! es conj! (:v o)))))))
+              nil)
+            nil (d/datoms db :aevt :seon.vector/of))
+    [(persistent! @rows) (persistent! @es)]))
 
 (defn near
   "The k entities of db nearest q, [[e score] ...] best first, score the cosine: a Datalog
@@ -138,24 +144,24 @@
    (let [self (when (int? q) q)
          qv (if self (vector-of db self) q)
          keep? (if of (into #{} (map :e) (d/datoms db :aevt of)) any?)
-         rows (coarse-rows db keep? self)]
+         [rows rowe] (coarse-rows db keep? self)]
     (if (or (empty? rows) (empty? qv) (zero? k))
        []
-       (let [n (count rows) w (count (peek (first rows))) cd (- w 4) dims (count qv)
-             stored-dims (quot (count (stored db (nth (first rows) 1) :seon.vector/f16)) 2)
+       (let [n (count rows) w (count (:v (first rows))) cd (- w 4) dims (count qv)
+             stored-dims (quot (count (stored db (:e (first rows)) :seon.vector/f16)) 2)
              _ (when (not= dims stored-dims)
                  (throw (ex-info (str "seon.vector/near: a query of " dims " dims over vectors of " stored-dims) {:dims dims :stored stored-dims})))
              sl (min n (max k (or shortlist (cfg/value :seon.config.vector/shortlist))))
              fd (min dims (or fine-dims (cfg/value :seon.config.vector/fine-dims)))]
          (ffi/with-arena [a]
            (let [cp (ffi/alloc a (* n w)) qp (ffi/alloc a w) ip (ffi/alloc a (* 8 sl)) sp (ffi/alloc a (* 4 sl))]
-             (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (peek (nth rows i))))
+             (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (:v (nth rows i))))
              (ffi/write-bytes qp (:seon.vector/coarse (pack-dims qv cd)))
              (let [m (c-coarse cp n cd qp sl ip sp)
-                   hit (mapv #(nth rows %) (ffi/read-array ip :int64 m 0))
-                   es (mapv first hit)]
+                   hit (vec (ffi/read-array ip :int64 m 0))
+                   es (mapv rowe hit)]
                ;; best first; the entity id breaks a tie, so one db answers one order
-               (->> (map (fn [e s] [(- s) e]) es (fine-scores db qv (mapv second hit) fd))
+               (->> (map (fn [e s] [(- s) e]) es (fine-scores db qv (mapv #(:e (nth rows %)) hit) fd))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
 (defmacro fused

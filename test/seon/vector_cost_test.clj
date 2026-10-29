@@ -40,11 +40,10 @@
      ;; reranked) 0.33M / 1.6 MB at 100, ~2,900 ticks and 14 KB a reranked row, so the 400 reranked
      ;; rows are most of the fixed part (set below it: a fixed part near the smallest size's whole
      ;; cost reads as steeper growth)
-     ;; 2026-10-29 (a-vector-is-its-own-entity): each coarse row is joined to the entity it embeds by a second scan, of
-     ;; :seon.vector/of (the vectors are their own entities): 0.88M ticks / 3.49 MB at 250, 1.41M / 5.72 MB at 500,
-     ;; 1.66M / 6.83 MB at 1,000 (from 0.78M / 3.04 MB, 1.23M / 4.85 MB, 1.31M / 5.16 MB)
-     :per-n {:ticks 300.0 :bytes 1000.0}
-     :fixed {:ticks 1200000.0 :bytes 5200000.0}
+     ;; 2026-10-29 (a-vector-is-its-own-entity): the join of each coarse row to the entity it embeds is a merge
+     ;; join with the scan of :seon.vector/of, one datom read more a row: 5.22 MB at 1,000 (from 5.16), inside these
+     :per-n {:ticks 200.0 :bytes 700.0}
+     :fixed {:ticks 1050000.0 :bytes 5200000.0}
      :sizes [250 500 1000 2000]}))
 
 (defn due-of

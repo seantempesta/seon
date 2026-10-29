@@ -93,11 +93,11 @@
                ;; item (its text, tokens, scores) for at most 100 items a kind. A row is still near's
                ;; coarse datom read and its kind's membership (~1.48 KB, seon.vector/one-scan-ranks-every-kind).
                ;; 848 calls at n=450 on 2026-10-28: bm25 shares its per-text scoring with seon.docs/tokens (one more contracted call a bm25)
-               ;; 2026-10-29 (a-vector-is-its-own-entity, docs/vector.md#a-vector-is-its-own-entity): near joins each coarse
-               ;; row to the entity it embeds (a second scan, of :seon.vector/of: ~1.7 KB a row a near, and related makes
-               ;; several), and a pool item's vector is found through :seon.vector/of (a seek more an item). Measured
-               ;; 15.78 MB at 450, 17.81 MB at 700, 20.23 MB at 1,000, 857 calls (from 12.0, 12.4, 12.8 MB and 848): ~8.1 KB a row
-               :per-n {:bytes 8200.0 :calls 0.0}
+               ;; 2026-10-29 (a-vector-is-its-own-entity, docs/vector.md#a-vector-is-its-own-entity): each near reads one
+               ;; datom more a row (the scan of :seon.vector/of it merge-joins with the coarse rows, ~0.47 KB; related makes
+               ;; three searches) and a pool item's vector is a seek more: 13.07 MB at 450, 13.62 MB at 700, 14.22 MB at
+               ;; 1,000, 857 calls (from 12.0, 12.4, 12.8 MB and 848)
+               :per-n {:bytes 2500.0 :calls 0.0}
                :fixed {:bytes 12200000.0 :calls 860.0}
                :sizes [450 700 1000 2000]}))
 
