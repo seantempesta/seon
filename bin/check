@@ -189,21 +189,24 @@ u-mg-check() {
   echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
   want mg-check || return 0
   # in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
-  # each shard's exit status counts
-  local K=$JOBS CP=() ok=1 i st
-  # each contract's seed is derived from the step's reach digest (bin/prove's plan), or, in a run
-  # that stores no result, from the binary's tree (seon.check/mg-check)
-  local base
+  # each shard's exit status counts. A selected run (bin/prove's) checks the contracts its plan
+  # named, SEL/mg-fns ("<fn> <digest>" a line each: each contract is a key of its own, keyed by its
+  # function's reach), each from the seed its digest gives; the shards are no more than the contracts.
+  # Every function that holds prints MG-OK <fn>, which is its green (check-mg/<fn>, stored by
+  # bin/test --store-steps at its digest). A run with no plan checks every contract, from the binary's tree.
+  local K=$JOBS CP=() ok=1 i st base= FILE= N
   if [[ -n $SEL ]]; then
-    base=$(sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn")
-    [[ -n $base ]] || { failed "mg-check (no digest for it in $SEL/steps.edn)"; echo "FAILED mg-check (no digest in steps.edn)"; return 0 }
+    FILE=$SEL/mg-fns; N=$(wc -l < "$FILE" 2>/dev/null | tr -d ' ')
+    (( ${N:-0} > 0 )) || { failed "mg-check (no contracts in $FILE)"; echo "FAILED mg-check (no contracts in $FILE)"; return 0 }
+    (( N < K )) && K=$N
   else base=$(cat "$ROOT/target/seon.tree"); fi
   # its K shards take K of the run's JOBS tokens: one is the unit's own, the others are waited for
   for i in $(seq 2 $K); do read -u 3 tok; done
-  for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $base > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
+  for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K "${base:-none}" $FILE > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
   for i in $(seq 0 $((K-1))); do
     wait ${CP[$((i+1))]}; st=$?
     grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
+    sed -n 's/^MG-OK /check-mg\//p' "$OUT/mg-check-$i.log" >> "$OUT/green"
     (( st == 0 )) || { ok=0; failed "mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"; echo "FAILED mg-check-$i (exit $st, expected 0)"; }
   done
   for i in $(seq 2 $K); do print -u 3 x; done

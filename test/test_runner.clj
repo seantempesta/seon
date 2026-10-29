@@ -378,6 +378,10 @@
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
+        ;; the generative check's keys (one per function) are run by one step, mg-check, in one run of the
+        ;; binary: bin/check reads the selected functions and their digests from out/mg-fns
+        {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
+        mg-run (vec mg-run) run-steps (cond-> (vec run-steps) (seq mg-run) (conj "mg-check"))
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
@@ -401,13 +405,15 @@
                   (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))
       (run! println flaky))
-    (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count steps) " check steps), "
+    (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count (remove proofs/mg-key? (keys steps))) " check steps, " (count (filter proofs/mg-key? (keys steps))) " contracts), "
                   (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count flaky) " flaky, " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
-                  " shards, " (count run-steps) " steps to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
+                  " shards, " (count run-steps) " steps and " (count mg-run) " contracts to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
+      (write! (str out "/mg-fns") (apply str (for [k mg-run] (str (proofs/mg-fn k) " " (steps k) "\n"))))
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
-      (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
-      (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)))
+      (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps (concat run-steps mg-run))}))
+      (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
+                                     (when (seq mg-run) (str "(mg-check: " (count mg-run) " of " (count (filter proofs/mg-key? (keys steps))) " contracts)"))))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
     (if (or (seq missing) no-test)

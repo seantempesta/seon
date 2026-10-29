@@ -99,8 +99,10 @@
   dead, which no function's reach shows, and the same tree against another base is another answer.
   forks (bin/forks: the forks' own suites on Jolt) and the lmdb steps run no function: their key
   is :pins, :env and every submodule's pin (the :seon.pin classes of seon.fx/inputs' :config), so
-  a pin bump selects them and a change to Seon's .clj program does not."
-  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  a pin bump selects them and a change to Seon's .clj program does not. mg-check (:mg) has no key of
+  its own: it is a step made of keys, one per pure contracted function (mg-roots), each digested by
+  that function's reach and carrying its own verdict (docs/checks.md#the-generative-check-is-per-function)."
+  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -110,6 +112,49 @@
     "ids" [seon.check/ids] "vectors" [seon.check/vectors] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
     "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
     "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
+
+(def pure-nss
+  "The namespaces whose contracted functions are pure functions of plain data: mg/check
+  calls them with generated arguments. Every other function touches a host object (a
+  socket, a process, the store) and is never called with random arguments: a generated pid
+  handed to kill(2) is a real signal. See docs/checks.md#the-generative-check-is-per-function."
+  '#{seon.merge seon.reconcile seon.template seon.task seon.step seon.ref})
+
+(def pure-fns
+  "Pure functions in namespaces that are otherwise host code (seon.lib binds libc: never
+  generate its arguments; seon.proofs runs tests and reads and writes results). See
+  docs/checks.md#the-generative-check-is-per-function."
+  '#{seon.lib/percentile seon.lib/r2 seon.lib/summ seon.lib/push-window seon.lib/p50
+     seon.cost/work seon.cost/exponent seon.cost/per-unit seon.cost/expected seon.cost/judge seon.profile/top
+     ;; seon.proofs runs tests (run-tests!): its pure part (the verdict cache is seon.fx's)
+     seon.proofs/test-symbol seon.proofs/red? seon.proofs/results seon.proofs/red-reports seon.proofs/test-run-errors
+     seon.proofs/failures seon.proofs/costs seon.proofs/green? seon.proofs/per-call
+     seon.proofs/plan})
+
+(defn mg-key?
+  "Is k a key of the generative check, \"mg/<qualified-fn>\" (mg-roots)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [k] (boolean (and (string? k) (str/starts-with? k "mg/"))))
+
+(defn mg-roots
+  "The generative check's keys on a reach graph g (seon.program/reach-graph), as graph-index's roots:
+  {\"mg/<fn>\" [fn]} for each contracted var that is pure (pure-nss, pure-fns) and whose contract is
+  not a proc's step-fn (a proc is tested as a plain function on its own states, seon.procs-test).
+  A key's digest is its function's reach (its form, what it calls, the schemas its contract names)
+  as a test's is, so a change re-checks only the contracts it reaches. Cost: one pass over the
+  graph's contracted vars. See docs/checks.md#the-generative-check-is-per-function."
+  {:malli/schema [:=> [:cat [:map [:contract :map]]] [:map-of :string [:vector :qualified-symbol]]]}
+  [g]
+  (into (sorted-map)
+        (for [[v sids] (:contract g)
+              :when (and (or (pure-nss (symbol (namespace v))) (pure-fns v))
+                         (not= ["schema :seon.step/step-fn"] (vec sids)))]
+          [(str "mg/" v) [v]])))
+
+(defn mg-fn
+  "The qualified symbol an mg key names (\"mg/seon.merge/f\" -> seon.merge/f)."
+  {:malli/schema [:=> [:cat :string] :qualified-symbol]}
+  [k] (symbol (subs k 3)))
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
@@ -121,7 +166,7 @@
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
   does but binary-free's, so a run of only those builds nothing and seeds nothing."
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
+  [step] (boolean (or (mg-key? step) (and (contains? check-steps step) (not (binary-free step))))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -139,7 +184,7 @@
                   (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))]))
                   (into {} (for [[k v] check-steps :when (= :pins v)] [k (error/digest (str k "\n" env "\n" pins))]))
                   (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (error/digest (str k "\n" tree "\n" base))]))))]
-    {:digests ds :missing (vec (sort (remove ds (keys check-steps))))}))
+    {:digests ds :missing (vec (sort (remove #(or (ds %) (= :mg (check-steps %))) (keys check-steps))))}))
 
 (defn green? "Is result r green: no failing or erroring assertion?" {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
   [r] (and (some? r) (not (red? r))))
@@ -342,8 +387,11 @@
   [{:keys [graph inputs digests process binary no-test]} what all? names base results-at]
   (let [tests? (not= what "checks") checks? (not= what "tests")
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
-        step-idx (when checks? (program/graph-index graph inputs (into {} (filter (comp vector? val)) check-steps)))
+        ;; each pure contracted function is a key of its own (mg-roots), indexed beside the steps
+        mg (when checks? (mg-roots graph))
+        step-idx (when checks? (program/graph-index graph inputs (merge mg (into {} (filter (comp vector? val)) check-steps))))
         {steps :digests missing :missing} (when checks? (step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
+        steps (merge steps (update-vals (select-keys step-idx (keys mg)) :digest))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)
