@@ -386,7 +386,8 @@
   (let [fs (filterv :tag answers)
         lst (peek fs)
         ;; the top-level forms that ran, each its answers (a do's forms are one form's)
-        tops (partition-by :top fs)
+        ;; a read error is no form that ran: it answers :ex, never a member of :forms
+        tops (partition-by :top (filter :top fs))
         joined (fn [k] (not-empty (apply str (keep k fs))))
         sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
         is (into [] (mapcat :instrumented) fs)

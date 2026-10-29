@@ -25,7 +25,10 @@
       (is (:printed rec) "a value that is no plain data: the response as it printed"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
-      (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))))
+      (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
+    (let [e (ev "(+ 1 1) (+ 2 2) (oops")]
+      (is (contains? e :ex) "a read error stops it")
+      (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
 
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
