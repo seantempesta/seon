@@ -254,6 +254,22 @@ are approximate and nothing reads them as proof. A measurement nested inside ano
 cost proof run inside an eval form) restarts the epoch, so the outer form records only the
 calls after it.
 
+## A directory walk enters no linked directory
+
+`file-seq` follows a symbolic link to a directory, so a link back to an ancestor is a walk with no end
+(measured 2026-10-29: an agent held 99.9% CPU for 13 minutes in `getcwd`/`stat` after its `:tests`, counting
+a verdict cache that lay in a tree whose `target/runs/root-test-wiki-*/target` linked to the `target/` above
+it, 63,886 files of leftover test output). The walk of a tree is `seon.fx/files-under`: every regular file
+under a directory, each once, a linked directory not entered and a link to a file a file, so its work is the
+entries the tree holds (`seon.fx-test/a-walk-of-a-tree-with-a-link-cycle-counts-each-file-once`). `read-source`
+and the verdict cache's count (`evict!`) use it; a new walk of a tree that may hold links uses it too.
+
+The leftover came from tests writing relative to the working directory, which in an agent is the one
+directory every agent shares (`:seon.config.agent/cwd`). A test child now works in a directory of its own
+(`seon.fx/run-dir`, named by its pid), removed by its agent when the child has ended
+(`seon.fx/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
+the wiki fixture of `seon.root-test` links the checkout's `target/` entries but `runs/`, not `target/`.
+
 ## LMDB robust locks
 
 On macOS, LMDB locks with POSIX semaphores unless built with ``MDB_USE_ROBUST`` (LMDB's `reference-code/lmdb/libraries/liblmdb/mdb.c`).
