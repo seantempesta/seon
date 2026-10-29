@@ -3,7 +3,7 @@
 ;; entity per signature on main, R4's seon.error), the problem members of a run's end,
 ;; and the shape of the one read, seon.problems/report.
 {;; ---- variants of the one error map (each [:and :seon.error/base ...]) ----
- ;; an agent's test results not recorded as facts on its branch: its schema lacks them (seon.agent/record-results!); the run answers it under :unrecorded
+ ;; an agent's test results not recorded as facts on its branch: its schema lacks them, or the branch refused the write (seon.agent/record-results!); the run answers it under :unrecorded
  :seon.agent/unrecorded [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unrecorded]]]]
  :seon.agent/eval-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/eval-error]]
                                                 [:class :string] [:data {:optional true} :map] [:phase {:optional true} :keyword]
