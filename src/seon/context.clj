@@ -878,9 +878,10 @@
                (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?m :seon.message/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))]
                  [tx (d/pull db [:seon.message/id :seon.message/from :seon.message/body] e) :seon.message/fact])
                (for [[t tx] (d/q '[:find ?t ?tx :in $ ?a ?since :where [?t :seon.turn/agent ?a] [?t :seon.turn/reply _ ?tx] [(>= ?tx ?since)]] db a (or since 0))
-                     :let [v (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning :seon.turn/calls] t)]
-                     :when (and (empty? (:seon.turn/calls v)) (not (str/blank? (:seon.turn/reply v))))]
-                 [tx (dissoc v :seon.turn/calls) :seon.turn/fact]))
+                     :let [v (d/pull db [:seon.turn/id :seon.turn/reply :seon.turn/reasoning :seon.turn/calls :seon.turn/truncated] t)]
+                     ;; a reply cut at the token limit is no message, as the turn loop reads it (seon.turn/act!)
+                     :when (and (empty? (:seon.turn/calls v)) (not (:seon.turn/truncated v)) (not (str/blank? (:seon.turn/reply v))))]
+                 [tx (dissoc v :seon.turn/calls :seon.turn/truncated) :seon.turn/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v (:seon.turn/id v)))]))
        vec)))
 

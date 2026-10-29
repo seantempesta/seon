@@ -1402,3 +1402,14 @@
         (is (true? (nth (second (:sent r2)) 3)))
         (is (= [:eval "e2"] (nth (:sent r2) 2)))
         (is (not-any? #(str/includes? (str (:content %)) "e1") (rest (:messages r2))) "the trimmed record is gone")))))
+
+(deftest a-cut-reply-is-no-message-in-the-history
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons R1 (review): a turn's prose reply with
+  ;; no call is its assistant message, but one cut at the token limit is no message, as the turn loop
+  ;; reads it (seon.turn/act!), so the history and the stop rule agree
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b/a1" :seon.agent/id :a1}
+                                    {:seon.turn/id "b/a1/1" :seon.turn/agent [:seon.agent/key "b/a1"] :seon.turn/n 1 :seon.turn/reply "Done: f0 is green."}
+                                    {:seon.turn/id "b/a1/2" :seon.turn/agent [:seon.agent/key "b/a1"] :seon.turn/n 2 :seon.turn/reply "(defn f0 [x] (let [y"
+                                     :seon.turn/truncated true}])
+        a (:db/id (d/entity db [:seon.agent/key "b/a1"]))]
+    (is (= ["Done: f0 is green."] (keep (comp :seon.turn/reply second) (context/records db a))) "the whole reply is a record, the cut one is not")))
