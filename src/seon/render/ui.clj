@@ -1185,7 +1185,8 @@
   {:malli/schema [:=> [:cat :map :seon.host/db] [:map-of :int [:vector :int]]]}
   [c db]
   (let [tu? (set (keys (:turns c)))
-        model? (fn [id] (some-> (get-in c [:evals id]) ratom/realize :seon.eval/record :call-id))]
+        ;; the record's one key, read by its path (a realize reads the whole eval, its opened flag too: the layout would run again for an eval opened)
+        model? (fn [id] (get-in c [:evals id :seon.eval/record :call-id]))]
     (first (reduce (fn [[m cur] id]
                      (cond (tu? id) [(assoc m id []) id]
                            (and cur (model? id)) [(update m cur conj id) cur]
@@ -1299,8 +1300,9 @@
         in-turn (into #{} cat (vals (turn-evals c db)))
         ;; the agent's own loop (its eval with no model call that names a run: seon.turn/work!) is the chat's
         ;; start and end cards, not a row
-        loop? (fn [id] (let [e (some-> (get-in c [:evals id]) ratom/realize)]
-                         (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (:run (:seon.eval/record e)) (not (:call-id (:seon.eval/record e))))))]
+        ;; read by its paths, never realized whole: the layout reads no eval's opened flag
+        loop? (fn [id] (let [e (get-in c [:evals id])]
+                         (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (get-in e [:seon.eval/record :run]) (not (get-in e [:seon.eval/record :call-id])))))]
     [:div {:id "render-ctx"}
      [:div {:id "p-task"}
       (when task (list [#'task-data {} aid]
