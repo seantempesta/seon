@@ -32,5 +32,7 @@
   ;; docs/clocks.md#time-decides-the-owners-exceptions (measured 2026-10-29: 21 threads at 25 and at
   ;; 1000 pending, both forms)
   (let [[[g25 g1000] [t25 t1000]] (timer-threads)]
-    (is (= g25 g1000) (str "975 more pending timers added " (- g1000 g25) " threads"))
-    (is (= t25 t1000) "the callback form, measured with it: Jolt's pin forks no thread per pending take")))
+    ;; a thread per pending take would add ~975; a lazily started runtime thread (the asleep detector)
+    ;; may add one whenever it starts, so the claim is that threads do not grow with the timers
+    (is (< (- g1000 g25) 3) (str "975 more pending timers added " (- g1000 g25) " threads"))
+    (is (< (- t1000 t25) 3) "the callback form, measured with it: Jolt's pin forks no thread per pending take")))
