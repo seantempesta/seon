@@ -700,8 +700,8 @@
             html (p/view-html st' [:debug :a1])]
         (is (= ["d-" "d-"] (mapv #(subs (:id %) 0 2) units)) "one row a model turn")
         (is (= [1 0] (mapv #(get-in % [:input :turn]) units)) "newest first")
-        (is (= [:eval :page] (mapv ffirst (get-in units [0 :input :added]))) "turn 1 adds its call's eval and what changed of its page")
-        (is (= {:turn 0 :parts 2} (get-in units [0 :input :same])) "and sends the help page and turn 0's page as turn 0 did")
+        (is (= [:eval :parts] (mapv ffirst (get-in units [0 :input :added]))) "turn 1 adds its call's eval and what changed of its parts")
+        (is (= {:turn 0 :parts 2} (get-in units [0 :input :same])) "and sends the help page and turn 0's parts as turn 0 did")
         (is (nil? (get-in units [0 :input :whole])) "its whole request is not read back until it is opened")
         (is (= r1 (messages (get-in opened [0 :input :whole]))) "opened: turn 1's messages as it sent them")
         (is (= r0 (messages (get-in opened [1 :input :whole]))))
@@ -719,7 +719,7 @@
                 [st'' _] (#'p/pass-view (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) [:debug :a1])
                 html (p/view-html st'' [:debug :a1])]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "the page whole") "beside what it sent")))))))
+            (is (str/includes? html "the page's parts whole") "beside what it sent")))))))
 
 (deftest a-new-turn-is-one-new-row
   ;; a turn is written once: a pass after a new turn renders only its row
@@ -864,7 +864,7 @@
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
   ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:page 12 nil #uuid "00000000-0000-0000-0000-000000000001"] [:page 12 #uuid "00000000-0000-0000-0000-000000000001" #uuid "00000000-0000-0000-0000-000000000002"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
+  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["status-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["status-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-view-that-throws-answers-its-page-with-the-error
@@ -1011,7 +1011,7 @@
   (let [[_ branch _] (paged-dbs)
         plan (str "Make `demo/f` return its argument doubled. " (str/join " " (repeat 60 "Every word of this plan is what the task is.")))
         db (d/db-with branch [{:seon.task/id "demo/f" :seon.task/plan plan}])
-        page (seon.context/page db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
+        page (seon.context/drawn-parts db (seon.ctx/build db (seon.db/eid db :seon.agent/key (seon.task/agent-key "b1" :a3)) :task-demo-f))
         text (seon.print/text (vary-meta page assoc :seon.print/full true))]
     (is (< (:part seon.print/budgets) (seon.print.select/estimate plan)) "a plan over a part's budget")
     (is (str/includes? text (subs plan (- (count plan) 60))) "the plan's end is on the page")))
@@ -1381,3 +1381,13 @@
                        ["main/task-x" [:chat :main/task-x]] ["main/task-x/debug" :main/task-x] ["root" :root] ["root/debug" [:debug :root]]]]
     (is (= view (#'seon.web/view-of path)) path)
     (is (= path (java.net.URLDecoder/decode (ui/view-param view) "UTF-8")) path)))
+
+(deftest an-agents-head-names-a-pid-only-while-its-process-runs
+  ;; the browser check of 2026-10-29: a page showed an ended process's pid beside "idle"; the head names
+  ;; the current process's pid (seon.task/newest-process) only while that process has not ended
+  (let [head (fn [ps] (pr-str (ui/agent {} {:seon.agent/id :a1 :seon.agent/status :idle :processes ps})))]
+    (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0}}) "pid 7") "a running process's pid")
+    (is (not (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}}) "pid 7")) "an ended one's is not shown")
+    (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}
+                              2 {:seon.process/pid 9 :seon.process/forked-ms 3.0}}) "pid 9") "the newest process's")
+    (is (str/includes? (head [{:seon.process/pid 9 :seon.process/forked-ms 3.0}]) "pid 9") "root's own pull holds them as a vector")))

@@ -298,6 +298,18 @@
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] (calls "Wait for a message." "(my.turn/wait)"))
 
+(defn prose-reply
+  "The scripted model of a session that answers in prose (seon.agent-test): its first reply is text
+  with no call (the agent winding down); a request that holds that reply as its assistant message
+  is answered by a call that says so, one that lost it by a call that says that."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [{:keys [messages]}]
+  (if (some #(and (= "assistant" (:role %)) (= "Nothing to run; I wait for you." (:content %))) messages)
+    (calls "Saw my own reply." "(my.turn/wait)")
+    (if (some #(= "assistant" (:role %)) messages)
+      (calls "Lost my own reply." "(my.turn/wait)")
+      {:text "Nothing to run; I wait for you."})))
+
 (defn fail-call
   "The scripted model of a run that refutes its premise (seon.agent-test): every turn fails the
   task (my.task/fail!), the agent's own verdict."

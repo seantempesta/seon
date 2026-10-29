@@ -553,8 +553,12 @@
                    [:agent {:optional true} :string]]
  ;; what a model turn's request sent, the records it rendered in order (seon.context/request, parts-of):
  ;; the system prompt's section and the task, each as of a t; an eval or message by id, an eval with the fold it was
- ;; sent with (its value or output an earlier record showed: the handle there)
- :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]]]
+ ;; sent with (its value or output an earlier record showed: the handle there); a turn's prose reply with no call by its id
+ :seon.model-call/sent [:vector [:or [:tuple [:enum :section :task] :int :int] [:tuple [:enum :eval :message :turn] :string] [:tuple [:= :eval] :string [:map-of :keyword :symbol]]
+                                      ;; the page's parts a request sent: the agent, the commit they are drawn at on replay, whole?, their ids, the model call that sent them
+                                      [:tuple [:= :parts] :int :uuid :boolean [:vector :string] :string]
+                                      ;; the content hash of every part the model has after the request: what the next compares
+                                      [:tuple [:= :hashes] [:map-of :string :uuid]]]]
  ;; where the turn's time went, as the agent saw it: the proof run, the context render, the
  ;; model round trip, the reply's evaluations, the turn's record (ms)
  :seon.model-call/split [:map [:tests-ms {:optional true} :int] [:context-ms :int]

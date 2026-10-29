@@ -695,8 +695,9 @@
                       {:seon.model-call/turn [:seon.turn/n :seon.turn/origin :seon.turn/error {:seon.turn/run [:seon.run/id]}]}] eid)
         t (:seon.model-call/turn m)
         n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
-        refs (:seon.model-call/sent m)
-        prev (when (pos? n) (:seon.model-call/sent (d/pull db [:seon.model-call/sent] [:seon.model-call/id (str r "/" (dec n))])))
+        ;; the hashes a request records for the next are no part of it
+        refs (remove #(= :hashes (first %)) (:seon.model-call/sent m))
+        prev (when (pos? n) (remove #(= :hashes (first %)) (:seon.model-call/sent (d/pull db [:seon.model-call/sent] [:seon.model-call/id (str r "/" (dec n))]))))
         added (filterv (complement (set prev)) refs)
         ;; its whole request read back from the records its refs name, once: the row is a component,
         ;; drawn when its turn is first shown and cached after (a finished turn never changes)
@@ -1203,7 +1204,10 @@
   [opts v]
   ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
   (let [{:seon.agent/keys [id status branch description]} v
-        pid (:seon.process/pid (task/newest-process (:processes v)))]
+        ;; its current process's pid while it runs: an ended process's pid names nothing live
+        ;; a ctx join holds its members by id (a map); root's own pull, a vector
+        proc (task/newest-process (let [ps (:processes v)] (if (map? ps) (vals ps) ps)))
+        pid (when-not (:seon.process/ended-ms proc) (:seon.process/pid proc))]
     [:div {:class "flex flex-col gap-1"}
      [:h1 {:class "text-base font-bold text-signal"} (kname id)]
      [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
@@ -1436,15 +1440,16 @@
    [:pre {:class "whitespace-pre-wrap break-words text-text-100"} text]])
 
 (defn- source
-  "What made part ref of a sent request, as a line: the help page as of a t, the page at a turn
+  "What made part ref of a sent request, as a line: the help page as of a t, the page's parts at a turn
   (whole, or what changed since the turn before), an eval, a message: every ref kind
   seon.context/request names (:seon.model-call/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
-  [[kind x t c]]
+  [[kind x t c :as ref]]
   (case kind
     :section (str "the help page (its section, entity " x ") as of t " t)
-    :page (if t (str "what changed of the page from commit " t " to " c) (str "the page whole at commit " c))
+    :parts (str (if c "the page's parts whole" "the page's parts that changed") " at commit " t ": " (str/join ", " (nth ref 4)))
     :eval (str "eval " x)
+    :turn (str "the reply of turn " x)
     :message (str "message " x)))
 
 (defn- sent-parts-html
