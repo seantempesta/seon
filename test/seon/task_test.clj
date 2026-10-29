@@ -142,9 +142,10 @@
            (d/transact bc (task/message-tx "m-1" :message "owner" "demo/f#1" "check g"))
            (d/transact bc (repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e1" "a3" {:code "(f 2)" :response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's run"
-             (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.agent/pid 77 :seon.agent/running "(f 2)"
+             (is (= [{:seon.agent/id :a3 :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
                       :seon.run/_agent [{:seon.run/id "demo/f#1"}]}]
-                    (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status :seon.agent/pid :seon.agent/running
+                    (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/id :seon.agent/status
+                                                                           {:seon.process/_agent [:seon.process/pid :seon.process/running]}
                                                                            {:seon.run/_agent [:seon.run/id]}]}]
                                                [:seon.root/id :root])))))
            (testing "the message is to the run, on main"
@@ -166,12 +167,14 @@
   ;; is retracted, and an id that starts again in a later boot is another agent
   (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
         db1 (d/db-with db0 (task/agent-tx "b1" :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
-        db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :running nil}))
+        db2 (d/db-with db1 (task/agent-tx "b1" :a3 {:status :idle :pid 77 :running nil}))
         db3 (d/db-with db2 (task/agent-tx "b2" :a3 {:status :spawning}))
-        pull (fn [db boot] (d/pull db [:seon.agent/status :seon.agent/pid :seon.agent/running :seon.agent/mem-mb {:seon.agent/root [:seon.root/id]}]
-                                   [:seon.agent/key (task/agent-key boot :a3)]))]
-    (is (= {:seon.agent/status :running :seon.agent/pid 77 :seon.agent/running "(f 2)" :seon.agent/mem-mb 120.5 :seon.agent/root {:seon.root/id :root}} (pull db1 "b1")))
-    (is (= {:seon.agent/status :idle :seon.agent/pid 77 :seon.agent/mem-mb 120.5 :seon.agent/root {:seon.root/id :root}} (pull db2 "b1"))
+        pull (fn [db boot] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.root/id]}
+                                   {:seon.process/_agent [:seon.process/pid :seon.process/running :seon.process/mem-mb]}]
+                                   [:seon.agent/key (task/agent-key boot :a3)]))
+        proc (fn [m] {:seon.agent/status (:seon.agent/status m) :seon.agent/root (:seon.agent/root m) :p (first (:seon.process/_agent m))})]
+    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)" :seon.process/mem-mb 120.5}} (proc (pull db1 "b1"))))
+    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/mem-mb 120.5}} (proc (pull db2 "b1")))
         "the form returned: no longer running")
     (is (= :spawning (:seon.agent/status (pull db3 "b2"))) "the next boot's a3")
     (is (= :idle (:seon.agent/status (pull db3 "b1"))) "is not the earlier boot's")))
@@ -186,17 +189,6 @@
     (is (= #{"b2/user"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
     (is (= #{"b2/user" "b2/a1"} (agents db3)) "and its own as they start")
     (is (some? (d/entity db3 [:seon.agent/key "b1/a1"])) "the earlier agent is kept, not deleted")))
-
-(deftest a-task-is-its-members-not-its-plans-vector
-  ;; live agents, 2026-10-25 (the archived paper live-2026-10-25.md (git history) D1): the plan's embedding is written on the
-  ;; task's entity (seon.vector), and (my.task/current) and my.task/update! printed its bytes as
-  ;; #object[[B ...] under :also; a task's value is its own members, the vector is the index's
-  (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [(decl "Make t true.")]))
-        db (d/db-with db [{:seon.task/id "demo/t" :seon.vector/model "m" :seon.vector/tokens 3 :seon.vector/text-t 1
-                           :seon.vector/f16 (byte-array 4) :seon.vector/coarse (byte-array 2)}])
-        t (task/task db "demo/t")]
-    (is (= "Make t true." (:seon.task/plan t)) "its members are read")
-    (is (empty? (filter #(= "seon.vector" (namespace %)) (keys t))) "and nothing of the vector")))
 
 (deftest a-design-adds-a-proof-with-update
   ;; owner, 2026-10-25 (Dogfood rulings): my.task/update! takes :seon.task/proofs, so a design

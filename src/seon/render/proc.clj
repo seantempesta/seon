@@ -197,7 +197,7 @@
 
 (defn- debug-value
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
-  (:seon.turn/sent) on its branch as this proc last read it, newest first, only the rows its tab
+  (:seon.model-call/sent) on its branch as this proc last read it, newest first, only the rows its tab
   scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
   into view). Each row is a unit drawn by seon.render.ui/sent-request when its input (its turn,
   whether its tab has it open) changes: it reads its turn and the one before it, shows what its
@@ -219,8 +219,8 @@
   (let [bdb (get-in st [:branches view :db])]
     (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
-          ;; newest first: entity ids are issued in the order turns were written
-          ts (->> (d/q '[:find [?e ...] :where [?e :seon.turn/sent _]] bdb) sort reverse vec)
+          ;; newest first: entity ids are issued in the order model calls were written
+          ts (->> (d/q '[:find [?e ...] :where [?e :seon.model-call/sent _]] bdb) sort reverse vec)
           on (take shown ts)
           vp (ui/view-param view)]
       (ui/debug (second view)
@@ -292,7 +292,7 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units))
-        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/pid :seon.agent/description] eid)
+        head (d/pull db [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)

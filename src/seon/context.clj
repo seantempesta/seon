@@ -826,7 +826,7 @@
   [{:role "user" :content (print/text {:from from :body body} (:context print/budgets))}])
 
 (defn- ref-of
-  "The ref a conversation's record is sent as (:seon.turn/sent): an eval's or a message's id."
+  "The ref a conversation's record is sent as (:seon.model-call/sent): an eval's or a message's id."
   {:malli/schema [:=> [:cat :map] [:tuple :keyword :string]]}
   [v] (if (:seon.eval/id v) [:eval (:seon.eval/id v)] [:message (:seon.message/id v)]))
 
@@ -940,7 +940,7 @@
   (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a ?o :where [?t :seon.turn/agent ?a] [?t :seon.turn/origin ?o ?tx]] db a origin))
         newest (second (last ts))]
     (vec (keep (fn [[tx t]]
-                 (if-let [c (some (fn [ref] (when (= :page (first ref)) (nth ref 3))) (rseq (vec (:seon.turn/sent (d/pull db [:seon.turn/sent] t)))))]
+                 (if-let [c (some (fn [ref] (when (= :page (first ref)) (nth ref 3))) (rseq (vec (:seon.model-call/sent (first (:seon.model-call/_turn (d/pull db [{:seon.model-call/_turn [:seon.model-call/sent]}] t)))))))]
                    [tx c]
                    (when (= t newest) [tx (d/commit-id db)])))
                ts))))
@@ -958,7 +958,7 @@
   system prompt and the page, whole at its first read and after it what changed since the read
   before. Answers {:messages
   :sent}: provider-neutral messages (seon.model/wire-messages makes the wire shape) and the
-  records they render, in order (:seon.turn/sent): [:section eid t], the system prompt's section
+  records they render, in order (:seon.model-call/sent): [:section eid t], the system prompt's section
   as of t; [:eval id]; [:message id]; [:page a c0 c1], the page at commit c1 (c0
   nil) or what changed since c0. Called by the turn."
   {:malli/schema [:=> [:cat :map :map] [:map [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]}
@@ -991,7 +991,7 @@
 (declare render)
 
 (defn parts-of
-  "Refs (as :seon.turn/sent names records) each beside its messages, each record by its own
+  "Refs (as :seon.model-call/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), an eval by eval-messages, a
   message by its render, the page at a turn or what changed since the turn before ([:page a c0
   c1], `world`, re-derived from the branch at those commits, each page drawn once: a page ref's c1 is the next one's c0, taken from the draw before): what the request sent, the same bytes. No request is built
@@ -1042,15 +1042,15 @@
     (= :model origin) (assoc :turn turn :max-turns max-turns)))
 
 (defn render
-  "What a turn's reader got, from its basis b (seon.turn records it, :seon.turn/basis) on db,
+  "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis) on db,
   the commit b names: its task's current state (the task's data and the turn's state from what b
   observed: the block the turn's waste reads, what the page shows), and the messages, the agent's
   request (`request`), b's :agent's. The one maker of a context: the model's request is this, and so is every
   later reading of it. opts :printed, what the run's earlier requests printed (the cache
   `printed-run` answers): only what is new is printed; :pages, {commit page} of the read
   before (its answer's :printed :pages), which the next read's diff takes its earlier page from. {:block :messages :sent :printed}."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.turn/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
-                  [:=> [:cat :seon.host/db :seon.turn/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]
+                  [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:block :map] [:messages [:vector :seon.model/message]] [:sent [:vector :any]] [:printed :map]]]]}
   ([db basis] (render db basis {}))
   ([db {:keys [task agent] :as basis} {:keys [printed pages]}]
   (let [block (current-state db (task/task db task) (turn-input db basis nil))

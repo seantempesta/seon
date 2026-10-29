@@ -103,7 +103,7 @@
       "unreported is absent, never 0"))
 
 (deftest a-turn-records-what-the-provider-reported
-  (is (= {:seon.turn/tokens 123 :seon.turn/cache-hit-tokens 64 :seon.turn/cache-miss-tokens 56}
+  (is (= {:seon.model-call/tokens 123 :seon.model-call/cache-hit-tokens 64 :seon.model-call/cache-miss-tokens 56}
          (turn/usage (usage-of {:prompt_tokens 120 :completion_tokens 3 :prompt_cache_hit_tokens 64 :prompt_cache_miss_tokens 56}))))
   (is (= {} (turn/usage (usage-of {}))) "a reply without usage records no count"))
 
@@ -124,8 +124,8 @@
       (is (< (model/cost "deepseek-flash" u) (model/cost "deepseek-v4-pro" u)) "the pro model's rates are higher")))
   (testing "unknown is nil, never 0: no cache split (the scripted fixture's estimate), or no prices"
     (is (nil? (model/cost "deepseek-flash" (turn/usage {:prompt-tokens 100 :completion-tokens 5}))))
-    (is (nil? (model/cost "no-such-model" {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))
-    (is (nil? (model/cost nil {:seon.turn/tokens 10 :seon.turn/cache-hit-tokens 1 :seon.turn/cache-miss-tokens 1})))))
+    (is (nil? (model/cost "no-such-model" {:seon.model-call/tokens 10 :seon.model-call/cache-hit-tokens 1 :seon.model-call/cache-miss-tokens 1})))
+    (is (nil? (model/cost nil {:seon.model-call/tokens 10 :seon.model-call/cache-hit-tokens 1 :seon.model-call/cache-miss-tokens 1})))))
 
 (deftest a-thinking-reply-sends-its-reasoning-back
   ;; DeepSeek's thinking mode with tools (api-docs.deepseek.com/guides/thinking_mode, read

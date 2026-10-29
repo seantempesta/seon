@@ -518,10 +518,11 @@
 (defn turn
   "A model turn's header (the declared html render of :seon.turn/turn-fact), above the evaluations
   it ran: which turn of how many, its tokens and the share its provider served from cache, how
-  its reply stopped and its model; its reply and reasoning as prose. Nothing it did not record is
-  shown."
+  its reply stopped and its model; its reply and reasoning as prose. The turn's model call
+  (:seon.model-call/*, merged in by turn-item) holds the tokens, model, forms and basis. Nothing
+  it did not record is shown."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:seon.turn/keys [n origin reply reasoning tokens cache-hit-tokens cache-miss-tokens finish model errors forms truncated basis]}]
+  [opts {:seon.turn/keys [n origin reply reasoning finish truncated] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens model errors forms basis]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         head (str (if (= :outside origin) (str "context read " n) (str "turn " (inc n) (when-let [m (:max-turns basis)] (str " of " m)))))]
     (if (= :inline (:as opts))
@@ -684,22 +685,24 @@
 (declare sent-request)
 
 (defn debug-input
-  "Turn eid on db as the debug page shows it, as data (sent-request's input): what it added to the
+  "Model call eid on db (a turn's :seon.model-call/*) as the debug page shows its turn, as data (sent-request's input): what it added to the
   request (the refs the turn before it in its run did not send, read back by
   seon.context/parts-of), what it shares with that turn, its whole request when open?, its usage
   or error; view, its page's feed param."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :boolean :string] :map]}
   [db eid open? view]
-  (let [t (d/pull db [:seon.turn/n :seon.turn/sent :seon.turn/basis :seon.turn/origin :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error
-                      {:seon.turn/run [:seon.run/id]}] eid)
+  (let [m (d/pull db [:seon.model-call/sent :seon.model-call/basis :seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens
+                      {:seon.model-call/turn [:seon.turn/n :seon.turn/origin :seon.turn/error {:seon.turn/run [:seon.run/id]}]}] eid)
+        t (:seon.model-call/turn m)
         n (:seon.turn/n t) r (get-in t [:seon.turn/run :seon.run/id])
-        refs (:seon.turn/sent t)
-        prev (when (pos? n) (:seon.turn/sent (d/pull db [:seon.turn/sent] [:seon.turn/id (str r "/" (dec n))])))
+        refs (:seon.model-call/sent m)
+        prev (when (pos? n) (:seon.model-call/sent (d/pull db [:seon.model-call/sent] [:seon.model-call/id (str r "/" (dec n))])))
         added (filterv (complement (set prev)) refs)
         ;; its whole request read back from the records its refs name, once: the row is a component,
         ;; drawn when its turn is first shown and cached after (a finished turn never changes)
         whole (context/parts-of db refs)]
-    (cond-> (merge (select-keys t [:seon.turn/origin :seon.turn/tokens :seon.turn/cache-hit-tokens :seon.turn/cache-miss-tokens :seon.turn/error])
+    (cond-> (merge (select-keys t [:seon.turn/origin :seon.turn/error])
+                   (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
                    {:turn n :run r :view view :refs (count refs)
                     :added (filterv (comp (set added) first) whole)
                     ;; where its tokens went, sized from those parts
@@ -856,7 +859,7 @@
         task (:seon.task/id (:task c))]
     (when turn
       ;; the turns as ctx's pull holds them ([*]): their basis, and the last model turn's calls
-      (let [b (ratom/realize (:seon.turn/basis turn))
+      (let [b (:seon.model-call/basis (d/pull db [:seon.model-call/basis] [:seon.model-call/id (ratom/realize (:seon.turn/id turn))]))
             l (some-> lst ratom/realize (select-keys [:seon.turn/truncated :seon.turn/calls]))]
         [:section [:h2 "status"]
          [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
@@ -1031,11 +1034,14 @@
 (defn turn-item
   "A model turn or an outside read of the agent (a component over ctx): its header by its schema's
   render, its basis but its turn cap left out."
-  {:seon.render/style "py-1" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int :int] :any]}
-  [{c :seon.ctx/ctx} _aid eid]
-  (let [t (ratom/realize (get-in c [:turns eid]))]
+  {:seon.render/style "py-1" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _aid eid]
+  (let [t (ratom/realize (get-in c [:turns eid]))
+        ;; the model call beside the turn (its tokens, model and basis): the record holds the turn's work only
+        m (d/pull db [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/model
+                      :seon.model-call/forms :seon.model-call/errors :seon.model-call/basis] [:seon.model-call/id (:seon.turn/id t)])]
     [:li (render/html {:schema :seon.turn/turn-fact}
-                                      (-> (relevant :seon.turn/turn-fact t) (dissoc :seon.turn/run) (update :seon.turn/basis select-keys [:max-turns])))]))
+                                      (-> (merge (relevant :seon.turn/turn-fact t) (dissoc m :db/id)) (dissoc :seon.turn/run) (update :seon.model-call/basis select-keys [:max-turns])))]))
 
 (defn message-item
   "A message to the agent (a component over ctx), by its schema's render."
@@ -1195,8 +1201,9 @@
   parts-page)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts v]
-  ;; what it evaluates now (:seon.agent/running) is its conversation's newest part
-  (let [{:seon.agent/keys [id status branch pid description]} v]
+  ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
+  (let [{:seon.agent/keys [id status branch description]} v
+        pid (:seon.process/pid (task/newest-process (:processes v)))]
     [:div {:class "flex flex-col gap-1"}
      [:h1 {:class "text-base font-bold text-signal"} (kname id)]
      [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
@@ -1431,7 +1438,7 @@
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, the page at a turn
   (whole, or what changed since the turn before), an eval, a message: every ref kind
-  seon.context/request names (:seon.turn/sent)."
+  seon.context/request names (:seon.model-call/sent)."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t c]]
   (case kind
@@ -1473,10 +1480,10 @@
   only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
   tokens went (:split, seon.context/sent-split of its parts: system, conversation, page). input {:turn
   :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split}, the turn's origin
-  (:seon.turn/origin: an :outside read calls no model) and its usage (:seon.turn/tokens, cache-hit and
+  (:seon.turn/origin: an :outside read calls no model) and its usage (:seon.model-call/tokens, cache-hit and
   cache-miss tokens) or its call's error (:seon.turn/error)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [origin tokens cache-hit-tokens cache-miss-tokens error]}]
+  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         unit (:unit opts)]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}

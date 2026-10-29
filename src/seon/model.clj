@@ -282,11 +282,11 @@
   rate, its cached ones at the cached rate, the rest of its tokens (the completion) at the
   output rate. nil when unknown: a model with no prices in config, or a usage that does not
   split its prompt into cache hits and misses (the price depends on it)."
-  {:malli/schema [:=> [:cat [:maybe :string] [:map [:seon.turn/tokens {:optional true} :int]
-                                              [:seon.turn/cache-hit-tokens {:optional true} :int]
-                                              [:seon.turn/cache-miss-tokens {:optional true} :int]]]
+  {:malli/schema [:=> [:cat [:maybe :string] [:map [:seon.model-call/tokens {:optional true} :int]
+                                              [:seon.model-call/cache-hit-tokens {:optional true} :int]
+                                              [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
                   [:maybe number?]]}
-  [model {:seon.turn/keys [tokens cache-hit-tokens cache-miss-tokens]}]
+  [model {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
   (let [m (get (config/value :seon.config.ai/models) model)]
     (when (and m tokens cache-hit-tokens cache-miss-tokens)
       (/ (+ (* cache-miss-tokens (:seon.ai.model/input-usd-per-mtok m))

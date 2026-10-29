@@ -67,8 +67,8 @@
                             [:same {:optional true} [:map [:turn :int] [:parts :int]]]
                             [:split {:optional true} [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
-                            [:seon.turn/tokens {:optional true} :int] [:seon.turn/cache-hit-tokens {:optional true} :int]
-                            [:seon.turn/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
+                            [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
+                            [:seon.model-call/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
  ;; an agent's page: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
  :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; an agent's chat, the page a person reads (seon.render.ui/chat-ctx), over the same ctx

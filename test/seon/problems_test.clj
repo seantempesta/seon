@@ -222,9 +222,9 @@
                  :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
                                         {:agent :a1 :quiet-ms 4000 :last-op waits})}
         facts (fn [o] (into [] cat (writes o)))
-        retracts? (fn [o] (some #(and (vector? %) (= :seon.agent/stall (last %))) (facts o)))
+        retracts? (fn [o] (some #(and (vector? %) (= :seon.process/stall (last %))) (facts o)))
         [st o1] (step (api view) :back stalled)]
-    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.agent/stall %)) (facts o1)) "recorded on the agent, with what it waits on")
+    (is (some #(= {:quiet-ms 4000 :last-op waits} (:seon.process/stall %)) (facts o1)) "recorded on the agent, with what it waits on")
     (is (retracts? (second (step st :back {:op :spoke :agent :a1}))) "retracted when it speaks")
     (is (retracts? (second (step st :back {:op :status :agent :a1 :set {:status :dead}}))) "and when it ends")))
 
@@ -275,16 +275,21 @@
     (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
 
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
-  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1 :seon.agent/pid 77
-                                     :seon.agent/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
+  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1}
+                                    {:seon.process/id "b1/a1/77" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
+                                     :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
                                     {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
         rows (get-in (problems/health db) [:classes :stalled :rows])]
     (is (= [[:a1 77 "#'app.t/hangs"]] (mapv (juxt :agent (comp :pid :evidence) (comp :form :waits-on :evidence)) rows)) "one row, the stalled agent's")
     (is (re-find #"a1 sent nothing for 4000 ms.*tests #'app.t/hangs" (:message (first rows))) "saying what it waits on")
-    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.agent/key "b1/a1"] :seon.agent/stall]])) [:classes :stalled :rows]))
+    (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.process/id "b1/a1/77"] :seon.process/stall]])) [:classes :stalled :rows]))
         "closed once the fact is retracted")
     (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
-        "and by a new boot: an earlier boot's stall ended with its process")))
+        "and by a new boot: an earlier boot's stall ended with its process")
+    ;; a stall left on an earlier process of the agent is no row: only its current process's counts
+    (is (empty? (get-in (problems/health (d/db-with db [{:seon.process/id "b1/a1/78" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 78 :seon.process/forked-ms 20.0}]))
+                        [:classes :stalled :rows]))
+        "a respawned agent's old process's stall is no row")))
 
 (defn- gone-ended? [r] (= :seon.root/ended (:seon.error/type r)))
 
@@ -336,9 +341,10 @@
   ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path C
   (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
     (let [db (d/db-with (ts/test-db) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/id :a1 :seon.agent/root "r"
-                                                            :seon.agent/status :busy :seon.agent/running "(work!)"}])
+                                                            :seon.agent/status :busy}
+                                                            {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
-      (is (= [:dead nil] ((juxt :seon.agent/status :seon.agent/running) (d/entity db [:seon.agent/key "b0/a1"])))))))
+      (is (= [:dead nil] [(:seon.agent/status (d/entity db [:seon.agent/key "b0/a1"])) (:seon.process/running (d/entity db [:seon.process/id "b0/a1/5"]))])))))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
