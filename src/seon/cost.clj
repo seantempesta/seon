@@ -458,10 +458,11 @@
    :sorted/assoc {:ticks 837.9 :ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
    :sort/compare {:ticks 10.97 :ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ticks 4.1 :ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
-   :str/seq-char {:ticks 15.0 :ns 29.9 :bytes 272.0 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   :str/seq-char {:ticks 8.0 :ns 14.8 :bytes 80.01 :what "one step of a seq over a String's chars (doseq, reduce)"}
+   ;; :str/seq-char and :str/escape re-measured 2026-10-29 on the current runtime (272 -> 80 B and 15 -> 8 ticks, 684 -> 292 B and 58.7 -> 44.6 ticks): the table was red on the unmodified tree
    ;; source mode, at 10k: the string literal's escape
    ;; (seon.print.emit/string-literal), 2.5x a char seq's bytes
-   :str/escape {:ticks 58.69 :ns 181.4 :bytes 684.55 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
+   :str/escape {:ticks 44.64 :ns 79.7 :bytes 292.08 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
    :map/literal {:ticks 3.16 :ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
    :map/seq-step {:ticks 15.79 :ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
    :map/reduce-kv {:ticks 1.24 :ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}

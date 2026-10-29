@@ -367,8 +367,10 @@
   ;; priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact): measured,
   ;; not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load
   ;; was no function of the digest)
+  ;; the two pull rows at 1k: a pull's bytes and ticks are the same at 1k and 10k (10,377 B and 2,847 ticks a
+  ;; further attribute at both, cost.clj's table), and each pull is 5-8k ticks, so they were 4 G of the test's 5 G
   (doseq [[k {:keys [ticks bytes]}] cost/units
-          :let [m (measure-unit k 10000) row (assoc m :what (:what (unit-benches k)))]]
+          :let [m (measure-unit k (if (#{:db/pull :db/pull-attr} k) 1000 10000)) row (assoc m :what (:what (unit-benches k)))]]
     (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
     (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
 
