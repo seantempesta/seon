@@ -626,7 +626,7 @@
   ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
   ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
   ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
-  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+  (let [[_ a b r] (in-agent ["(def held (byte-array (* 300 1048576)))"
                            "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
                            "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
         v (some-> (:value r) clojure.edn/read-string)]
@@ -961,6 +961,46 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agent-keeps-no-db-older-than-its-branchs-current
+  ;; docs/machine.md#roots-heap, a kept db value is a reference: after a run of its own commits, a
+  ;; read of what they changed, its test plan's graph and a merge of main, the agent's state holds
+  ;; its branch's current db and nothing older but the two main points it is judged by (:base, the
+  ;; merge base, and :main, as last heard: seon.turn, seon.render.ui and my.branch read them as
+  ;; dbs, so they stay values until those readers take a commit: reported with this change). A
+  ;; graph, a diff and the last transaction are keyed by a point or let go (seon.db/point). In this
+  ;; process, on a branch of the test store, with a socketpair standing for root.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-refs)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state
+           note (fn [i] (agent/transact! [{:note/text (str "n" i)}]))
+           stale #(for [[path t] (ts/stale-dbs (apply dissoc @agent/state %) (:max-tx (agent/db)))] [path t])]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
+         (let [[_ in] (agent/test-inputs (agent/db))]
+           (doseq [i (range 4)]
+             (note i)
+             (agent/branch-changes (:base @agent/state) (agent/db))
+             (agent/branch-graph (agent/db) (:base @agent/state) in))
+           (is (= [] (stale [:base :main])) "after commits of its own")
+           ;; main redefines app.m0/f1: a program change, which a merge of main brings in
+           (let [[v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+             (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]]))
+           (agent/heard-main)
+           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+           (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
+           (note 5)
+           (agent/branch-changes (:base @agent/state) (agent/db))
+           (agent/branch-graph (agent/db) (:base @agent/state) in)
+           (is (= [] (stale [:base :main])) "and after more of its own"))
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried
@@ -1509,3 +1549,16 @@
     (is (< (:ticks unchanged) (* 0.01 (:ticks first-eval))) "main as the base: no diff, no query")
     (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
     (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))
+
+(deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
+  ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
+  ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
+  ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
+  ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
+  (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
+                           "(alter-var-root #'seon.agent/transact! (fn [f] (fn [tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f tx)))))"
+                           "(let [p (my.agent/prove)] (select-keys p [:pass :unrecorded]))"]
+                          {:dirs ["src" "test"] :proofs #{'fin-test/r}})]
+    (is (nil? (:ex r)) (pr-str r))
+    (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
+    (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))

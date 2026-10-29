@@ -779,22 +779,57 @@
         (testing "main's reconciler index is held for the db it is of, and a fork observes it forward to main now"
           (let [m3 (stored (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "forked" :seon.task/plan "Make forked true."}])))
                 [st3 _] (step #'server/server-step st :cmd m3)
-                held (:index (server/index-at-fork st3))]
-            (let [s0 (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})] (is (identical? (:db s0) (get-in s0 [:index :db])) "made for the db it holds"))
+                held (server/index-at-fork st3)]
+            (let [s0 (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})] (is (= (d/commit-id (:db s0)) (get-in s0 [:index :commit])) "made for the commit it holds, never the db"))
             (is (not (contains? (get-in st3 [:index :index :tasks]) "demo/forked")) "a commit leaves it: a fork brings it forward")
-            (is (= (:db st3) (:db held)))
-            (is (contains? (get-in held [:index :tasks]) "demo/forked"))
-            (is (= (reconcile/index (:db st3)) (:index held)) "the index listed at that db")
+            (is (= (d/commit-id (:db st3)) (get-in held [:index :commit])))
+            (is (contains? (get-in held [:index :index :tasks]) "demo/forked"))
+            (is (= (reconcile/index (:db st3)) (get-in held [:index :index])) "the index listed at that db")
+            (is (= (:db st3) (:db (server/index-for-agent held))) "and an agent is handed main's db it is of")
             (testing "and an agent observes its branch from it, read through its own connection"
               (let [ab (pdb/on-main (:branch cfg) :held-index)
                     _ (d/branch! conn (:branch cfg) ab)
                     bc (d/connect (assoc cfg :branch ab))]
                 (try
                   (d/transact bc (seon.task/create-tx @bc [{:seon.task/ns 'demo :seon.task/name "branched" :seon.task/plan "Make branched true."}]))
-                  (let [observed (reconcile/index (:index held) (:db held) @bc)]
+                  (let [{idx :index db :db} (server/index-for-agent held) observed (reconcile/index idx db @bc)]
                     (is (contains? (:tasks observed) "demo/branched"))
                     (is (= (reconcile/index @bc) observed) "the branch's index listed"))
                   (finally (d/release bc)))))))))))))
+
+(deftest no-proc-keeps-a-db-older-than-its-branchs-current
+  ;; docs/machine.md#roots-heap, a kept db value is a reference (owner, 2026-10-28: "I don't want us
+  ;; carrying around large values for no reason"; 2026-10-29): after a run of main commits, each
+  ;; proc that holds a db holds main's current one, and its older points as {:commit :t}. A proc's
+  ;; state is walked as data (seon.test-store/stale-dbs); the failure names the proc and the path.
+  ;; The agent's state is the same walk (seon.agent-test/an-agent-keeps-no-db-older-than-its-branchs-current).
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [n 6
+           commit! (fn [i] (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan (str "Make t" i " true.")}])))
+           ;; each proc is judged against main as it stood when its own run of commits ended
+           stale (fn [proc st] (for [[path t] (ts/stale-dbs st (:max-tx @conn))] [proc path t]))
+           _ (d/transact conn [{:seon.root/id :root :seon.root/boot "b" :seon.config.agent/max-running 4}])
+           ;; the fork server: every commit is a :tx, and a fork or a standby is the only thing that brings its index to main
+           fs (reduce (fn [st i]
+                        (let [rep (commit! i)
+                              [st _] (step #'server/server-step st :cmd {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
+                          st))
+                      (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil}) (range n))
+           fs-stale (stale :fork-server fs)
+           ;; the reconciler: a notice per commit
+           rc (reduce (fn [st i]
+                        (let [prev (:max-tx @conn) _ (commit! (+ n i))
+                              [st _] (step #'reconcile/reconciler-proc st :main (notice conn prev []))]
+                          st))
+                      (#'reconcile/reconciler-proc {:boot "b" :conn conn :provider {:kind :scripted :script 'seon.fixtures/reply}}) (range n))
+           rc-stale (stale :reconciler rc)
+           ;; the render proc's main: each commit's db, advanced by what moved
+           rp (reduce (fn [st i] (let [_ (commit! (+ n n i))] (#'seon.render.proc/advance-main st (d/commit-as-db conn (d/commit-id @conn)))))
+                      {} (range n))]
+       (is (= [] fs-stale) "main's index is kept as a commit, not the db it was listed at")
+       (is (= [] rc-stale))
+       (is (= [] (stale :render rp)))))))
 
 (defn -main [& _]
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
