@@ -163,7 +163,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
 - `seon.server/verdict-line`: the form in its `:handle` (`(seon.server/verdict @(:conn sys) run task)`, the run and task ids as `pr-str` writes them): code to evaluate that reads the whole verdict, not output; the line beside it is the one printer's.
 
-An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. A check's console lines are the printer's whole text (`seon.main/shown`).
+An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. What an eval prints to `*out*` and `*err*` is its `:out` and `:err` marked verbatim (`seon.print/code`, made in `seon.repl/eval-code`), as a REPL shows them, never a string literal: printed as one, a definition's `\(` read `\\(`, and md-scan #20 copied the escapes back as code and spent twenty turns on `case` constants that read wrong. A check's console lines are the printer's whole text (`seon.main/shown`).
 
 ### Cut where a value is made
 

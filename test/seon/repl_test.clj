@@ -603,7 +603,12 @@
   (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
     (is (= [nil 3 "x"] (:value r)) (pr-str r))
     (is (= 3 (:forms r)))
-    (is (= "a\n" (:out r)))
+    (is (= {:seon.print/code "a\n"} (:out r)) "what it printed, verbatim: never a string literal")
+    ;; md-scan #20: (println (source-fn 'seon.ref/scan)) answered :out as a string literal, \( shown \\(, and the
+    ;; agent copied the escapes back as code
+    (let [r (repl/eval-string "(println \"(case c \\\\( 1)\")" {"ns" "user" :origin :outside})]
+      (is (str/includes? (seon.print/response-text (dissoc r :text)) "(case c \\( 1)") (seon.print/response-text (dissoc r :text)))
+      (is (not (str/includes? (seon.print/response-text (dissoc r :text)) "\\\\(")) (str "one backslash, as printed: " (seon.print/response-text (dissoc r :text)))))
     (is (not-any? #(contains? r %) [:ex :err]) "keys only when present")
     (is (= [nil 3 "x"] (:value @(find-var (:handle r)))) "the handle holds the response")
     (is (str/starts-with? (:text r) (str "{:handle " (:handle r))) "printed under its handle"))
