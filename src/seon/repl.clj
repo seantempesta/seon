@@ -588,10 +588,10 @@
   [] (let [w (framed)] (apply array-map (mapcat identity (render/placed-hiccup w ["#p-task" "#c-rows" "#p-tiles"])))))
 
 (defn page-hiccup
-  "This agent's page as its model reads it now, from its live walk (seon.context/page-lists): each
-  component run again only where what it read changed, so a turn's page costs what changed (a cold
-  draw, seon.context/page, costs every component). [db page]: the db it framed at, which the request is
-  made on, and {element-id hiccup}, in order."
+  "This agent's parts as its model reads them now, from its live walk (seon.context/page-lists): each
+  component run again only where what it read changed, so a turn's parts cost what changed (a cold
+  draw, seon.context/drawn-parts, costs every component). [db parts]: the db it framed at, which the request is
+  made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
   [] (let [w (framed)] [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
