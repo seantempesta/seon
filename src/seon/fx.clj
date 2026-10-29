@@ -147,6 +147,42 @@
          :ahead (parse-long (git! {} base ["rev-list" "--count" (str main "..HEAD")] nil))
          :behind (parse-long (git! {} base ["rev-list" "--count" (str "HEAD.." main)] nil))}))))
 
+(defn files-under
+  "Every regular file under dir (the directory the caller names, followed if it is itself a link),
+  each once, depth first in name order: a directory reached through a symbolic link is not entered,
+  so a link back to an ancestor (a cycle) or out of the tree adds nothing and the walk's work is
+  the entries the tree holds. A link to a file is a file. Never `file-seq`, which follows links
+  (a checkout's target/ holding a link to itself hung an agent for 13 minutes: docs/failure-points.md,
+  a directory walk). Answers a vector of java.io.File: dir's one file when it is a file, none when it is neither."
+  {:malli/schema [:=> [:cat :string] [:vector :any]]}
+  [dir]
+  (let [root (java.io.File. ^String dir)]
+    (if (.isDirectory root)
+      (loop [todo [root] out []]
+        (if (empty? todo)
+          out
+          (let [^java.io.File d (peek todo)
+                kids (sort-by #(.getName ^java.io.File %) (or (.listFiles d) []))
+                subdirs (filterv #(and (.isDirectory ^java.io.File %) (not (java.nio.file.Files/isSymbolicLink (.toPath ^java.io.File %)))) kids)
+                files (filterv #(.isFile ^java.io.File %) kids)]
+            (recur (into (pop todo) (rseq subdirs)) (into out files)))))
+      (if (.isFile root) [root] []))))
+
+(defn run-dir
+  "The directory of one test child's own, named by its pid: under the agents' working directory
+  (:seon.config.agent/cwd), where the child works so that whatever a test writes relative to its
+  working directory (`target/...`, the temporary files of a fixture) is the run's, removed with
+  it (remove-tree!) and never left in the directory every agent shares. Answers the path; it is
+  made by the child (made-run-dir!). See docs/failure-points.md, a directory walk."
+  {:malli/schema [:=> [:cat :int] :string]}
+  [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
+
+(defn remove-tree!
+  "Remove the directory dir and all it holds (`rm -rf`: a symbolic link is removed, never entered).
+  Answers nil; a directory that is not there is already removed."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [dir] (sh/sh "rm" "-rf" dir) nil)
+
 (defn read-source
   "The text of every .clj and .edn file under root's dirs (relative paths, e.g.
   src/seon/fx.clj, resources/seon/schemas/seon.facts.edn), sorted by path, the commit root's
@@ -181,9 +217,9 @@
                                 [p (when (.isFile f) (slurp f))]))
                         (into (sorted-map)
                               (for [d dirs
-                                    f (file-seq (java.io.File. (str base "/" d)))
+                                    f (files-under (str base "/" d))
                                     :let [p (.getCanonicalPath ^java.io.File f)]
-                                    :when (and (.isFile ^java.io.File f) (source? p))]
+                                    :when (source? p)]
                                 [(subs p (inc (count base))) (slurp f)])))}
         head (assoc :commit head
                     :tree (or (:tree inputs) (tree-id base))
@@ -639,7 +675,7 @@
   alone (a staged file or the .size ledger is not a verdict)."
   {:malli/schema [:=> [:cat :string] [:vector :any]]}
   [dir]
-  (vec (for [^java.io.File f (file-seq (java.io.File. ^String dir)) :when (and (.isFile f) (str/ends-with? (.getName f) ".edn"))]
+  (vec (for [^java.io.File f (files-under dir) :when (str/ends-with? (.getName f) ".edn")]
          [f (.length f) (.lastModified f)])))
 
 (defn- evict!
@@ -702,13 +738,13 @@
     (if (contract/error? done) done (select-keys done [:recorded])))))
 
 (defn typical-ms
-  "{test ms} of tests: the median of the ms their cached verdicts measured, whatever the digest: what
+  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their cached verdicts measured, whatever the digest: what
   orders a run's deal of tests into shards, never what a test proves. The median, not the largest: one
   run under load or a hang (a 17 s test once measured 625 s) must not weigh a test as that run did, which
   made one shard of a merge's run end at 62 s beside three at 640-746 (docs/merging.md#a-merge-runs-what-the-change-reaches).
   A test with none is left out; an unreadable file is passed over (an order, never a verdict)."
-  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]
-                  [:=> [:cat :string [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]]}
+  {:malli/schema [:function [:=> [:cat [:sequential [:or :qualified-symbol :string]]] [:map-of [:or :qualified-symbol :string] :int]]
+                  [:=> [:cat :string [:sequential [:or :qualified-symbol :string]]] [:map-of [:or :qualified-symbol :string] :int]]]}
   ([tests] (typical-ms (cfg/value :seon.config.proofs/results-dir) tests))
   ([dir tests]
   (into {} (for [t (distinct tests)

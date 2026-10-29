@@ -194,11 +194,12 @@
   ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
   ;; Asserted through the root's own reads, with no watcher event and no write to the checkout
   (let [checkout (.getCanonicalPath (java.io.File. "."))
-        path (str checkout "/target/runs/root-test-own-tasks-" (random-uuid))
-        runs (str path "-main-runs")
+        path (test-store)
+        main (str "root-test-own-tasks-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
         _ (.mkdirs (java.io.File. (str runs "/tasks")))
         _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-        root (ts/start-root! {:store path :main "main" :runs runs})
+        root (ts/start-root! {:store path :main main :runs runs})
         ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
     (try
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
@@ -222,7 +223,7 @@
       (is (= [{:files 1} {:ok true :changed 0 :files 1}]
              (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))
           "the boot read's outcome, and a read that finds it so writes nothing")
-      (finally (ts/stop-root! root) (clojure.java.shell/sh "rm" "-rf" path runs (str path "-agents"))))))
+      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki (seon.root/wiki-tx) in its boot fact's commit; one link to no
@@ -232,19 +233,25 @@
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
-        path (str tmp "-store")
+        path (test-store)
+        main (str "root-test-wiki-" (random-uuid))
         _ (.mkdirs (java.io.File. (str tmp "/docs")))
-        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git"} n))]
+        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git" "target"} n))]
             (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
+        ;; target/ is this fixture's own directory of links to the checkout's target/ entries but runs/ (where
+        ;; this fixture lives): a link to the whole of target/ is a cycle (docs/failure-points.md, a directory walk)
+        _ (.mkdirs (java.io.File. (str tmp "/target")))
+        _ (doseq [f (.listFiles (java.io.File. checkout "target")) :when (not= "runs" (.getName f))]
+            (sh/sh "ln" "-s" (.getPath f) (str tmp "/target/" (.getName f))))
         _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
         _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
-        out (root-answers path "main" [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
+        out (root-answers path main [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]
                           {:env {"SEON_RUN_CHECKOUT" tmp}})
         printed (ts/value-of (:response (try (edn/read-string {:default tagged-literal} (first (str/split-lines out))) (catch Exception _ nil))))]
     (try
       (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
       (is (true? printed) "and the dead link is an open problem")
-      (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
+      (finally (ts/drop-main! path main) (sh/sh "rm" "-rf" tmp (str path "-in") (str path ".log"))))))
 
 (deftest every-end-of-a-root-is-a-fact
   ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause

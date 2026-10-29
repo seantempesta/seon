@@ -259,7 +259,11 @@
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
    (locking load-lock
-     (write-declared! sys (docs/load-dir-tx @(:conn sys) (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)) {:pages (count (docs/pages (config/checkout) dir))} nil))))
+     ;; the boot's digest of the wiki no longer says what main holds: dropped, so the next boot loads
+     (let [db @(:conn sys)]
+       (write-declared! sys (into (when-let [e (pdb/eid db :seon.root/id :root)] [[:db.fn/retractAttribute e :seon.root/wiki]])
+                                  (docs/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
+                        {:pages (count (docs/pages (config/checkout) dir))} nil)))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
