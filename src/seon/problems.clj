@@ -116,14 +116,14 @@
          :answered-by (get-in ans [:signature s] []) :at-ms nil))
 
 (defn stalled-agents
-  "Each agent root observes stalled now (its :seon.agent/stall: a request in flight and no frame
+  "Each agent root observes stalled now (its process's :seon.process/stall: a request in flight and no frame
   past the stall bound, seon.agent-proc), as a :stalled row naming what it waits on: open while
   the fact holds, closed by its next frame or its end, which retract it. Cost: the agents
   holding the fact (one AEVT range)."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (vec (for [{e :e st :v} (d/datoms db :aevt :seon.agent/stall)
-             :let [{id :seon.agent/id pid :seon.agent/pid} (d/pull db [:seon.agent/id :seon.agent/pid] e)
+  (vec (for [{e :e st :v} (d/datoms db :aevt :seon.process/stall)
+             :let [{pid :seon.process/pid {id :seon.agent/id} :seon.process/agent} (d/pull db [:seon.process/pid {:seon.process/agent [:seon.agent/id]}] e)
                    {:keys [kind form]} (:last-op st)
                    s (str "stalled " (some-> id name))]]
          (derived-row ans s 'seon.agent-proc

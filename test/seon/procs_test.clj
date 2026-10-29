@@ -445,12 +445,12 @@
         [st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :busy :running {:form "(f 2)" :since-ms 5}}})
         w (first (:to-writer outs))]
     (is (= {:op :tx :branch :db :dest {:agent-facts [:a3]}} (dissoc w :tx-data)))
-    (is (= [:busy "(f 2)" 77] ((juxt :seon.agent/status :seon.agent/running :seon.agent/pid) (first (:tx-data w)))))
+    (is (= [:busy "(f 2)" 77] (let [p (first (filter :seon.process/id (:tx-data w)))] [(:seon.agent/status (first (:tx-data w))) (:seon.process/running p) (:seon.process/pid p)])))
     (is (= "b1/a3" (:seon.agent/key (first (:tx-data w)))) "its key in root's boot")
     (let [[st outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:t 42}})]
       (is (empty? (:to-writer outs)) "nothing it records changed: nothing written")
       (let [[_ outs] (step #'root/api-proc st :back {:op :status :agent :a3 :set {:status :idle :running nil}})]
-        (is (some #{[:db.fn/retractAttribute [:seon.agent/key "b1/a3"] :seon.agent/running]} (:tx-data (first (:to-writer outs))))
+        (is (some #{[:db.fn/retractAttribute [:seon.process/id "b1/a3/77"] :seon.process/running]} (:tx-data (first (:to-writer outs))))
             "the form returned: no longer running")))))
 
 (deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent

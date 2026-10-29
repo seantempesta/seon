@@ -1201,8 +1201,9 @@
   parts-page)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts v]
-  ;; what it evaluates now (:seon.agent/running) is its conversation's newest part
-  (let [{:seon.agent/keys [id status branch pid description]} v]
+  ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
+  (let [{:seon.agent/keys [id status branch description]} v
+        pid (:seon.process/pid (task/newest-process (:processes v)))]
     [:div {:class "flex flex-col gap-1"}
      [:h1 {:class "text-base font-bold text-signal"} (kname id)]
      [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]

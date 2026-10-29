@@ -180,8 +180,9 @@
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
   ;; own entities, pointing at what they describe ... a model call at its turn" (seon.ctx/the-record-is-facts-about-the-work,
-  ;; move 1): a turn's request bookkeeping is its model call's entity, which the agent's pull never reaches.
-  ;; Moves 2 (a process's telemetry, :seon.process/*) and 3 (an embedding, :seon.vector/*) extend this test.
+  ;; move 1): a turn's request bookkeeping is its model call's entity, which the agent's pull never reaches;
+  ;; move 2: an agent's process (pid, memory) is its process entity, pointing at the agent.
+  ;; Move 3 (an embedding, :seon.vector/*) extends this test.
   (let [db (:db-after (d/with (ts/test-db)
                               [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
                                {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
@@ -190,11 +191,17 @@
                                {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/turn [:seon.turn/id "lab/ctx#1/0"]
                                 :seon.model-call/tokens 1200 :seon.model-call/cache-hit-tokens 1000 :seon.model-call/cache-miss-tokens 100
                                 :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0
-                                :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}]))
+                                :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}
+                               {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/pid 77 :seon.process/mem-mb 120.5
+                                :seon.process/forked-ms 5.0}]))
         t (:tree (ctx/build db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
     (is (= ["I will check f0."] (map :seon.turn/reply (vals (:turns t)))) "the turn is in the record, with its reply")
     (is (empty? (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))) "no :seon.model-call/* key anywhere in the record")
+    (is (empty? (filter #(and (keyword? %) (or (= "seon.process" (namespace %)) (#{:seon.agent/pid :seon.agent/mem-mb} %))) (keys-in t)))
+        "no :seon.process/* key, no pid or memory on the agent, anywhere in the record")
+    (is (= #{[77 120.5]} (d/q '[:find ?p ?m :where [?x :seon.process/agent ?a] [?a :seon.agent/key] [?x :seon.process/pid ?p] [?x :seon.process/mem-mb ?m]] db))
+        "the process is reached by a query on its agent")
     (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/turn ?t] [?t :seon.turn/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
         "the model call is reached by a query on its turn")))
 
@@ -454,17 +461,17 @@
         db (-> (ts/test-db)
                (w :main {} [{:seon.agent/key k :seon.agent/id :a1}])
                (w :main/a1 {:seon.tx/eval "e5"} [{:db/id [:seon.agent/key k] :seon.agent/description "Works the screen."}])
-               (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/pid 3}]))
+               (w :main/a1 {:seon.tx/merged :main} [{:db/id [:seon.agent/key k] :seon.agent/max-turns 3}]))
         e (:db/id (d/entity db [:seon.agent/key k]))
         by (fn [a] (dissoc (ctx/made-by db e a) :t))]
     (is (= {:seon.tx/branch :main/a1 :seon.tx/eval "e5"} (by :seon.agent/description)) "written by an eval: that eval, on the agent's branch")
     (is (= {:seon.tx/branch :main} (by :seon.agent/id)) "forked holding it: main's, by no eval")
-    (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/pid)) "caught up: merged from main")
+    (is (= {:seon.tx/branch :main/a1 :seon.tx/merged :main} (by :seon.agent/max-turns)) "caught up: merged from main")
     (is (nil? (ctx/made-by db e :seon.eval/by)) "an attribute it does not have: nobody made it")
     (let [h (render/html {:db db} (with-meta (:tree (ctx/build db (aid db) :main/a1)) {:seon.render/schema :seon.ctx/ctx}))
           rows (into {} (for [x (tree-seq coll? seq h) :when (and (vector? x) (= :tr (first x)))] [(last (nth x 2)) (last (nth x 4))]))]
-      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/pid" "merged from :main"}
-             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/pid"]))
+      (is (= {":seon.agent/description" "e5" ":seon.agent/id" "from :main" ":seon.agent/max-turns" "merged from :main"}
+             (select-keys rows [":seon.agent/description" ":seon.agent/id" ":seon.agent/max-turns"]))
           "the page names who made each key"))))
 
 (defn- replay

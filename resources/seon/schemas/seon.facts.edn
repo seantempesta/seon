@@ -153,16 +153,7 @@
  ;; :max-turns bounds the loop)
  :seon.agent/task :seon.db/ref
  :seon.agent/max-turns :int
- :seon.agent/pid :int
- :seon.agent/mem-mb :double
- :seon.agent/running :string
  :seon.agent/description [:string {:seon.render/prose true}]
- :seon.agent/forked-ms :double
- :seon.agent/ended-ms :int
- ;; root observed it stalled (seon.agent-proc's stall check: a request in flight, no frame past the bound), with
- ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
- ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
- :seon.agent/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
  :seon.ctx/pattern [:vector :any]
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
@@ -180,14 +171,11 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/stall :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
-                       [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
-                       [:seon.agent/mem-mb {:optional true} :seon.agent/mem-mb] [:seon.agent/running {:optional true} :seon.agent/running]
+                       [:seon.agent/status {:optional true} :seon.agent/status]
                        [:seon.agent/description {:optional true} :seon.agent/description]
-                       [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
-                       [:seon.agent/stall {:optional true} :seon.agent/stall]
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
                        [:seon.agent/included {:optional true} :seon.agent/included]
@@ -399,7 +387,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.process/_agent :as :processes] [*]} {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
@@ -513,6 +501,29 @@
                           [:seon.turn/origin {:optional true} :seon.turn/origin] [:seon.turn/calls {:optional true} :seon.turn/calls] [:seon.turn/error {:optional true} :seon.turn/error]
                           [:seon.turn/finish {:optional true} :seon.turn/finish]
                           [:seon.turn/reasoning {:optional true} :seon.turn/reasoning]]
+ ;; ---- a process: one spawn of an agent, its telemetry on its own entity pointing at the agent
+ ;; (seon.ctx/the-record-is-facts-about-the-work, move 2), so the agent's pull holds its work and no more; an agent's
+ ;; current process is its newest (seon.task/current-process); root's agents card joins them
+ ;; (docs/ctx.md#the-record-is-the-agents-work) ----
+ ;; the agent's key and the process's pid (seon.task/agent-tx)
+ :seon.process/id [:and {:seon.db/identity true} :string]
+ :seon.process/agent [:and {:seon.db/index true} :seon.db/ref]
+ :seon.process/pid :int
+ :seon.process/mem-mb :double
+ ;; the form it evaluates now; retracted when it returns
+ :seon.process/running :string
+ :seon.process/forked-ms :double
+ :seon.process/ended-ms :int
+ ;; root observed it stalled (seon.agent-proc's stall check: a request in flight, no frame past the bound), with
+ ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
+ ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
+ :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
+ :seon.process/process-fact [:map {:seon.db/attributes true}
+                          [:seon.process/id :seon.process/id] [:seon.process/agent :seon.process/agent]
+                          [:seon.process/pid {:optional true} :seon.process/pid] [:seon.process/mem-mb {:optional true} :seon.process/mem-mb]
+                          [:seon.process/running {:optional true} :seon.process/running]
+                          [:seon.process/forked-ms {:optional true} :seon.process/forked-ms] [:seon.process/ended-ms {:optional true} :seon.process/ended-ms]
+                          [:seon.process/stall {:optional true} :seon.process/stall]]
  ;; ---- a model call: the bookkeeping of one request to the model, on its own entity pointing at its turn
  ;; (seon.ctx/the-record-is-facts-about-the-work, move 1), so the agent's pull holds the turn's work and no more;
  ;; the debug page and the turn's header read it (docs/ctx.md#the-record-is-the-agents-work) ----

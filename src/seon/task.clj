@@ -138,16 +138,17 @@
   root retracted (their processes ended with that boot; history keeps that root started them), so
   root's agents are this boot's (root's walk, :seon.agent/_root); one still shown live (:busy,
   :idle, :spawning: a root that crashed or was stopped wrote no end) is :dead, its running form
-  retracted; and a stall one showed is over, its :seon.agent/stall retracted with its process (an
+  retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
              agents (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db)]
          (-> (vec (for [[a r] agents] [:db/retract a :seon.agent/root r]))
              (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
-                                       [[:db/add a :seon.agent/status :dead] [:db.fn/retractAttribute a :seon.agent/running]])))
+                                       [[:db/add a :seon.agent/status :dead]])))
                    agents)
-             (into (for [{a :e} (d/datoms db :aevt :seon.agent/stall)] [:db.fn/retractAttribute a :seon.agent/stall])))))
+             (into (for [{p :e} (d/datoms db :aevt :seon.process/running)] [:db.fn/retractAttribute p :seon.process/running]))
+             (into (for [{p :e} (d/datoms db :aevt :seon.process/stall)] [:db.fn/retractAttribute p :seon.process/stall])))))
 
 (defn run-id
   "Task id's nth run's id: runs are numbered from 1, in the order they start."
@@ -179,10 +180,26 @@
       id)))
 
 (def ^:private agent-attrs
-  "Each member of root's view of an agent and the attribute recording it (agent-tx)."
-  {:status :seon.agent/status :pid :seon.agent/pid :mem-mb :seon.agent/mem-mb :running :seon.agent/running
-   :task :seon.agent/description :branch :seon.agent/branch :forked-ms :seon.agent/forked-ms :ended-ms :seon.agent/ended-ms
-   :stalled :seon.agent/stall})
+  "Each member of root's view of an agent and the attribute recording it on the agent (agent-tx)."
+  {:status :seon.agent/status :task :seon.agent/description :branch :seon.agent/branch})
+
+(def ^:private process-attrs
+  "Each member of root's view of an agent's process and the attribute recording it on the process
+  entity (agent-tx)."
+  {:pid :seon.process/pid :mem-mb :seon.process/mem-mb :running :seon.process/running
+   :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms :stalled :seon.process/stall})
+
+(defn newest-process
+  "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse), by when
+  it forked, or nil: the agent's current process, whose telemetry the agent's record no longer
+  holds (docs/ctx.md#the-record-is-the-agents-work). An agent has one process per spawn."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
+  [ps] (when (seq ps) (apply max-key #(:seon.process/forked-ms % 0) ps)))
+
+(defn current-process
+  "Agent entity a's current process (newest-process of its :seon.process/_agent), or nil."
+  {:malli/schema [:=> [:cat :any] [:maybe :any]]}
+  [a] (newest-process (seq (:seon.process/_agent a))))
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
@@ -210,9 +227,10 @@
     (some-> newest :seon.run/agent :seon.agent/key)))
 
 (defn agent-tx
-  "What root observes of agent id in its boot, as facts on the agent's entity: the root that
-  started it, and each member m holds of root's view (status, pid, memory, the form running,
-  its task's id or description, branch, when it forked and ended, a stall it shows); a member m holds as nil is
+  "What root observes of agent id in its boot, as facts: on the agent's entity the root that
+  started it and its status, task's id or description and branch; on its process's entity
+  (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
+  forked and ended and a stall it shows; each member m holds of root's view. A member m holds as nil is
   no longer true, and retracted (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
@@ -222,11 +240,18 @@
   ([boot id m] (agent-tx boot id m nil))
   ([boot id m key]
   (let [k (or key (agent-key boot id))
-        v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))]
-    (into [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
-                 (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
-          (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
-            [:db.fn/retractAttribute [:seon.agent/key k] a])))))
+        v (fn [member x] (case member :running (:form x) (:mem-mb :forked-ms) (double x) x))
+        pk (some->> (:pid m) (str k "/"))]
+    (-> [(into {:seon.agent/key k :seon.agent/id id :seon.agent/root [:seon.root/id :root]}
+               (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
+        (into (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
+                [:db.fn/retractAttribute [:seon.agent/key k] a]))
+        ;; one process entity per spawn, keyed by the agent's key and its pid; none before the fork gives a pid
+        (into (when pk
+                (cons (into {:seon.process/id pk :seon.process/agent [:seon.agent/key k]}
+                            (for [[member a] process-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))
+                      (for [[member a] process-attrs :when (and (contains? m member) (nil? (get m member)))]
+                        [:db.fn/retractAttribute [:seon.process/id pk] a]))))))))
 
 (defn boot-tx
   "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
