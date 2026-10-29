@@ -106,14 +106,14 @@ Root's merges of worktree branches are git merges, batched by hand as above. Seo
 
 ## Main moved is said at every eval
 
-Every eval answer an agent gets carries one line saying how main differs from its branch, or none when main's head is still its merge base (owner, 2026-10-28: "there are never any surprises"). ```seon.agent/main-line``` makes it from the merge base, the branch and main as the agent last heard it:
+Every `seon_eval` answer an outside agent gets carries one line saying how main differs from its branch, or none when main's head is still its merge base (owner, 2026-10-28: "there are never any surprises"). ```seon.agent/main-line``` makes it from the merge base, the branch and main as the agent last heard it:
 - how many names main changed since the base (```seon.merge/readiness```, the three-way a merge of main runs, so it costs what changed on each side);
 - those of them the branch changed too;
 - those its changed functions call;
 - those a merge of main would conflict on;
 - and the form that merges main, `(my.branch/merge-main!)`.
 
-Each list is cut by the one printer. ```seon.repl/eval-string``` puts it on the answer as `:main`, live, never recorded: it is a function of the db at t. The agent merges main when it chooses; at `seon_done` the done answer (```seon.server/verdict-line```: one line, each red with its first failure, and the form that reads the whole verdict) names the same difference, so nothing in it is new. Proofs: `seon.agent-test/main-moved-is-said-at-every-eval`, `seon.server-test/the-done-answer-is-a-line-and-a-handle`.
+Each list is cut by the one printer. ```seon.repl/eval-string``` puts it on the answer as `:main`, live, never recorded: it is a function of the db at t. Its cost is one `seon.merge/readiness` and one `d/q` over the branch's changed vars on each answer once main has moved (none while main's head is the base: ```seon.agent/main-difference``` compares commit ids first). Measured with `seon.cost/measure` on a four-var program with two names moved on main (2026-10-29, steady state): 13.9 M ticks, 38.8 MB allocated and 304 contracted calls per call (13.0 M ticks, 36.2 MB and 150 calls when main equals the base, which `main-difference` never calls); they grow with the names each side changed, not with the program, and no cost proof states it yet. It reaches the outside agent's `seon_eval` answer (```seon.server/op-answer``` `:eval` passes `:main` on); an in-process model agent's turn reads the recorded eval, which does not hold `:main`, so it is not told on each eval. The agent merges main when it chooses; at `seon_done` the done answer (```seon.server/verdict-line```: one line, each red with its first failure, and the form that reads the whole verdict) names the same difference, so nothing in it is new. Proofs: `seon.agent-test/main-moved-is-said-at-every-eval`, `seon.server-test/the-done-answer-is-a-line-and-a-handle`.
 
 ## Verdicts are a cache
 

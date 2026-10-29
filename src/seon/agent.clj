@@ -154,7 +154,8 @@
   nothing of the program since base: how many names main changed (seon.merge/readiness, the
   three-way a merge of main runs), those of them b changed too, those b's changed functions call,
   and those a merge of main would conflict on, each list cut by the one printer; and the form that
-  merges main (docs/merging.md#main-moved-is-said-at-every-eval)."
+  merges main (docs/merging.md#main-moved-is-said-at-every-eval). Cost, per call (it runs seon.merge/readiness
+  and a d/q over b's changed vars): see the section's measured numbers."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:maybe :string]]}
   [base b main]
   (let [{:keys [main-moved conflicts]} (pm/readiness base b main)
@@ -172,7 +173,7 @@
 
 (defn main-difference
   "main-line for this agent now: its merge base, its branch and main as last heard (heard-main),
-  which every eval's answer carries (seon.repl/eval-string); nil with no base, or when main's head
+  which an outside agent's seon_eval answers carry (seon.repl/eval-string, seon.server op-answer :eval; a model agent's turn reads the recorded eval, which holds no :main); nil with no base, or when main's head
   is still the base. Computed at t, never stored."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []

@@ -517,7 +517,7 @@
             (swap! agent/state update :seen print/seen r)
             ;; the handle a printed cut reads through, as the REPL's *1 is read
             (intern (create-ns 'result) (symbol (name handle)) r)
-            ;; how main differs from the branch, said with every answer and never recorded
+            ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
                                code req)
