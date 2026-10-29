@@ -9,7 +9,7 @@
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
   Seon's names (`:seon.print/*`, `:seon.render.data/*`); a cut is read as its text.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str] [seon.config :as config]))
 
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
@@ -79,13 +79,22 @@
         (seq? form) (str "(" (str/join " " (map form-text form)) ")")
         :else (literal form)))
 
+(def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
+
+(defn chars-tokens
+  "Estimated tokens of n characters: the one sizer's rule (seon.print.select/estimate is it over a
+  text's length), what every count a reader sees is in (owner, 2026-10-29: \"only report tokens
+  (estimates are fine) not characters\")."
+  {:malli/schema [:=> [:cat nat-int?] :int]}
+  [n] (long (Math/floor (/ n chars-per-token))))
+
 (defn cut-words
   "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
-  `…+N chars` and, when lines begin in what it omitted, `in M more lines`, then the form that
-  reads the rest when there is one."
+  `…+~N tokens` of what it omitted (omitted, its characters, sized by `chars-tokens`, at least one)
+  and, when lines begin in it, `in M more lines`, then the form that reads the rest when there is one."
   {:malli/schema [:=> [:cat nat-int? nat-int? :any] :string]}
   [omitted lines continuation]
-  (str "…+" omitted " chars" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
+  (str "…+~" (max 1 (chars-tokens omitted)) " tokens" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
        (when continuation (str " " (form-text continuation)))))
 
 (defn elided-text

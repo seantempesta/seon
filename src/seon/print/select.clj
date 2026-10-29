@@ -15,10 +15,10 @@
 (def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
 
 (defn chars-tokens
-  "Estimated tokens of n characters: the one sizer's rule (`estimate` is it over a text's length)."
+  "Estimated tokens of n characters: the one sizer's rule (`estimate` is it over a text's length),
+  seon.print.emit/chars-tokens."
   {:malli/schema [:=> [:cat nat-int?] :int]}
-  [n]
-  (long (Math/floor (/ n chars-per-token))))
+  [n] (emit/chars-tokens n))
 
 (defn estimate
   "Estimated tokens of `text`."
