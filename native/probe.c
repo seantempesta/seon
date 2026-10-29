@@ -29,13 +29,17 @@ long e13_nthreads(void) {
   vm_deallocate(mach_task_self(), (vm_address_t)th, n * sizeof(thread_act_t));
   return n;
 }
-// System-wide page counters: free, pageable internal, compressor.
+// The machine's memory as host_statistics64 counts it, in bytes: free pages, inactive pages (clean
+// or reclaimable without a write) and the compressor's pages. Free plus inactive is what a process
+// can take without the system paging: the drop in it is what ten agents cost, where a sum of their
+// footprints charges every inherited page they only read (docs/cost.md#how-we-measure). 0, or -1.
 long e13_sysmem(long *out3) {
-  unsigned int v; size_t l = sizeof v;
-  if (sysctlbyname("vm.page_free_count", &v, &l, NULL, 0)) return -1; out3[0] = v; l = sizeof v;
-  if (sysctlbyname("vm.page_pageable_internal_count", &v, &l, NULL, 0)) return -1; out3[1] = v; l = sizeof v;
-  { unsigned long long w; size_t lw = sizeof w;
-    if (sysctlbyname("vm.compressor_bytes_used", &w, &lw, NULL, 0)) out3[2] = -1; else out3[2] = (long)w; }
+  vm_statistics64_data_t vs; mach_msg_type_number_t cnt = HOST_VM_INFO64_COUNT; vm_size_t ps;
+  if (host_page_size(mach_host_self(), &ps) != KERN_SUCCESS) return -1;
+  if (host_statistics64(mach_host_self(), HOST_VM_INFO64, (host_info64_t)&vs, &cnt) != KERN_SUCCESS) return -1;
+  out3[0] = (long)vs.free_count * (long)ps;
+  out3[1] = (long)vs.inactive_count * (long)ps;
+  out3[2] = (long)vs.compressor_page_count * (long)ps;
   return 0;
 }
 // The fork server's one wait (seon.fork-server/main): its socket readable, or a child it
