@@ -329,17 +329,24 @@
                              " m (fn [] (let [v (volatile! nil)]"
                              "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
+                             "            :main (let [db (first (seon.repl/page-hiccup))] (:seon.agent/main-commit (datahike.api/entity db (seon.db/eid db :seon.agent/key (:key @seon.agent/state)))))"
                              "            :pages (some (fn [f] (when (= 'seon.context/drawn-parts (:var f)) (:calls f))) (seon.profile/touched))}))]"
-                             "  {:reads (vec (repeatedly 5 m))"
+                             "  {:reads (vec (repeatedly 9 m))"
                              "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
                              "                    cold (seon.context/drawn-parts db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
-    (is (= 5 (count (:reads (:value reads)))))
+    (is (= 9 (count (:reads (:value reads)))))
     (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's at the commit it framed at; differing: " (pr-str (:live=cold (:value reads)))))
     (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
-    (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) (partition 2 1 later)) (str "and costs what the one before it did: " (pr-str (map :ticks later))))
-    (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) (partition 2 1 later)) (str "in bytes too: " (pr-str (map :bytes later))))))
+    ;; a read costs what changed (the render's views, docs/render.md): main's commit moving between two reads
+    ;; (a merge of an earlier test's task landing in this root) redraws the branch views, which the task's render
+    ;; keys by it (seon.render.ui/ctx-body), so only reads beside the same main are compared; measured 2026-10-29:
+    ;; every read after a move cost 15.5M ticks against 9.2M, a shard run's reads moved main in 8 of 13
+    (let [same (filter (fn [[a b]] (= (:main a) (:main b))) (partition 2 1 later))]
+      (is (seq same) (str "some later reads follow one that saw the same main: " (pr-str (map :main later))))
+      (is (every? (fn [[a b]] (<= (:ticks b) (* 1.05 (:ticks a)))) same) (str "and costs what the one before it did: " (pr-str (map (juxt :ticks :main) later))))
+      (is (every? (fn [[a b]] (<= (:bytes b) (* 1.05 (:bytes a)))) same) (str "in bytes too: " (pr-str (map (juxt :bytes :main) later)))))))
 
 (deftest a-named-prove-counts-for-status-and-the-judge-and-answers-one-line
   ;; the blind agent (root, 2026-10-27): a prove naming its proofs (171 green) left both proofs
