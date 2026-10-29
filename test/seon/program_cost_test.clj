@@ -180,7 +180,8 @@
        :work "one filter over the datoms that differ, by attribute; no datoms-diff, so no descent from the roots"
        :growth :constant
        :per-n {}
-       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 3}
+       ;; 4 calls since 2026-10-30: seon.merge/content-attr builds the filter's predicate, one contracted call
+       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 4}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 

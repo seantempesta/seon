@@ -168,5 +168,7 @@
      ;; :eavt diff instead read every embedded datom (the five seon.vector attributes of each form):
      ;; 0.67 MB at 10, 6.3 MB at 100, 63 MB at 1,000, and on a root of 4,363 embedded forms 313M ticks
      ;; and 640 MB for no key. Before that again: 536 calls, 11 MB at n = 10
-     :fixed {:bytes 4000000 :calls 25}
+     ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
+     ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
+     :fixed {:bytes 4000000 :calls 27}
      :sizes [10 100 1000]}))
