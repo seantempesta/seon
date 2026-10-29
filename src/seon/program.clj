@@ -1001,6 +1001,27 @@
                                            (concat changed (dependents db changed) (schema-dependents db schema-keys)))))
                             tests?)))
 
+(defn rearm!
+  "Arm again, in this process, every var whose contract reaches schema keys (they, or a schema
+  naming one, on and on: schema-dependents' closure), compiled against db's schemas
+  (seon.contract/rearm!): what a registration in a running agent owes the code it holds, whose
+  contracts were compiled before it (my.schema/register!; md-scan #7, #8 and #11 met their own
+  registered :seon.ref/block in Seon's seon.ref/sections, still checking the old one). A load of
+  db's program re-arms the same by evaluating the forms again (load!). Answers the errors."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
+  [db keys]
+  ;; the keys reached: keys, and every schema naming one, on and on (schema-dependents' closure)
+  (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
+                       {} (merge contract/forms (schema-changes db)))
+        reached (into (set keys) (closure keys naming))]
+    (binding [mr/*registry* (schema-registry (schema-changes db))]
+      (vec (for [n (all-ns) v (vals (ns-interns n))
+                 :let [c (contract/contract v)]
+                 :when (and c (some reached (names c)))
+                 :let [r (contract/rearm! v)]
+                 :when (contract/error? r)]
+             r)))))
+
 (defn load-all!
   "Load db's program where this binary runs: every live form it does not hold, with what
   they reach (load!). With {:tests? false} (root's) the test namespaces' forms are left

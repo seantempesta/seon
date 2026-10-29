@@ -116,3 +116,15 @@
     (is (= :unreadable (:seon.schema/refused-because r)))
     (is (str/includes? (:seon.error/message r) "at [1 1]") "where the value that is no EDN is")
     (is (str/includes? (:seon.error/message r) "quote the form") "and how to write it as data")))
+
+(deftest a-registration-re-arms-the-contracts-its-process-holds
+  ;; md-scan #7, #8 and #11, 2026-10-29: an agent registered :seon.ref/block with its new list keys,
+  ;; and seon.ref/sections, defined before, still checked the old form; a registration compiles the
+  ;; contracts that reach its key again (seon.program/rearm!), as a load of the branch would
+  (let [[printed _] (evals (main-db)
+                           (str "(:seon.schema/key (my.schema/register! :x.rearm/state [:enum :a]))\n"
+                                "(ns x.rearm)\n"
+                                "(defn held {:malli/schema [:=> [:cat :x.rearm/state] :keyword]} [s] s)\n"
+                                "(:seon.schema/key (my.schema/register! :x.rearm/state [:enum :a :b]))\n"
+                                "(held :b)\n"))]
+    (is (= ":b" (last printed)) (str "the function defined before the registration checks the new form: " (pr-str printed)))))

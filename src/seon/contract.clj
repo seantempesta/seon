@@ -315,7 +315,29 @@
         (if (instance? Throwable s)
           (error :seon.contract/invalid #'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
                  {:seon.contract/var (symbol v)})
-          (let [w (wrap (symbol v) s @v)]
+          (let [raw @v w (wrap (symbol v) s raw)]
+            (alter-var-root v (constantly w))
+            ;; the root it wraps kept beside its wrapper, so a changed schema re-arms it (`rearm!`)
+            (alter-meta! v assoc ::wrapper w ::raw raw)
+            :armed))))))
+
+(defn rearm!
+  "Arm var v again by its contract, compiled now (under the registry in force: a branch's changed
+  schemas, seon.program/rearm!), over the root its arm wrapped: what a schema registered since it
+  was armed owes it. Answers :armed, :uncontracted, :unarmed (no arm to redo), or the
+  :seon.contract/invalid error map."
+  {:malli/schema [:=> [:cat :seon.host/var] [:or [:enum :armed :uncontracted :unarmed] :seon.contract/invalid]]}
+  [v]
+  (let [c (contract v) raw (::raw (meta v))]
+    (cond
+      (nil? c) :uncontracted
+      (not (and on? raw (armed? v))) :unarmed
+      :else
+      (let [s (try (schema c) (catch Throwable e e))]
+        (if (instance? Throwable s)
+          (error :seon.contract/invalid #'seon.contract/rearm! (str (symbol v) ": its contract does not compile: " (ex-message s))
+                 {:seon.contract/var (symbol v)})
+          (let [w (wrap (symbol v) s raw)]
             (alter-var-root v (constantly w))
             (alter-meta! v assoc ::wrapper w)
             :armed))))))

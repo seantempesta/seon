@@ -83,7 +83,7 @@
                                                        :clojure.core.async.flow/ex (ex-info "boom" {:v big :s text :a live})}))]
             (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq flowed)) "no live object is kept, only its print")
             (is (string? (:seon.print/code (:a flowed))) "the atom is kept as its print")
-            (is (or (= n 1000) (re-find #"\+\d+ chars" (:s flowed))) "a value past the budget is kept as the printer's cut, which says what it omitted")
+            (is (or (= n 1000) (re-find #"\+~[\d,]+ tokens" (:s flowed))) "a value past the budget is kept as the printer's cut, which says in tokens what it omitted")
             (count (pr-str flowed))))
         sizes (map kept-bytes [1000 100000 10000000])]
     ;; a small value is kept whole (1 KB), anything past the budget as its bounded print: the

@@ -119,4 +119,8 @@
         r (registration (agent/db) k v (or (= "user" (namespace k)) (boolean (and n (program/scratch-ns? n)))))]
     (if (contract/error? r)
       r
-      (do (agent/transact! (:tx r)) (:registration r)))))
+      (do (agent/transact! (:tx r))
+          ;; the code this process holds whose contracts reach k, compiled again against it (program/rearm!): a
+          ;; registration is in effect for the program as it is when the branch's program loads
+          (let [errors (program/rearm! (agent/db) #{k})]
+            (cond-> (:registration r) (seq errors) (assoc :seon.schema/rearm-errors errors)))))))
