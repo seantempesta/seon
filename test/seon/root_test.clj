@@ -3,7 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config]))
 
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
@@ -19,7 +19,7 @@
   ;; On a main of its own on the test store, deleted at the end.
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                                      "./seon" "threads-declared" "3" :dir "target")
+                                      "./seon" "threads-declared" "3" "--profile" (name (config/profile)) :dir "target")
         _ (ts/drop-main! (test-store) main)
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
@@ -34,7 +34,7 @@
   ;; instead, and nothing is forked
   (let [main (str "root-test-" (random-uuid))
         {:keys [exit out err]} (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
-                                      "./seon" "boot-twice" :dir "target")
+                                      "./seon" "boot-twice" "--profile" (name (config/profile)) :dir "target")
         _ (ts/drop-main! (test-store) main)
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
@@ -45,7 +45,7 @@
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
   ;; pool not fixed first ends at 6 (measured) and root-threads-are-what-root-declares reads whatever
   ;; its boot happened to start. seon.main/-main fixes the pool at 0 before anything runs: 0 sweepers.
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" :dir "target")
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "sweepers-held" "--profile" (name (config/profile)) :dir "target")
         res (edn/read-string (last (str/split-lines out)))]
     (is (= 0 exit) (str out err))
     (is (<= 30 (:collections res)) "the workers collect on until joined: at least the 30 waited for")
