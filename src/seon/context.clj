@@ -38,7 +38,7 @@
 (defn failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
   and what it evaluated to, (= 9 (square 3)) got (= 9 6), never the assertion twice; the
-  message only when it says something."
+  message only when it says something. See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :map] :map]}
   [r]
   (let [code #(cond-> % (string? %) print/code)]
@@ -782,7 +782,7 @@
   one built cold), called only when a test outside the task's proofs is red (whether it is a
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
   70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
-  tests: none while every proof has a verdict)."
+  tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
   [db a {:keys [index deferred main]}]
   (let [ag (d/entity db a)
@@ -790,7 +790,12 @@
         t (when tid (task/task db tid))
         {:keys [proofs plan]} (:seon.task/accumulated t)
         kind (:seon.task/kind t :work)
-        vs (verdicts db)
+        ;; a test run that failed as a whole: present on its process only while it is so (the
+        ;; process's other facts, written on every eval, are not read)
+        test-error (d/q '[:find ?err . :in $ ?a :where [?p :seon.process/test-error ?err] [?p :seon.process/agent ?a]] db a)
+        ;; while it is so no verdict counts: what the branch holds is from before the change that the run
+        ;; failed to judge (every proof :not-run, as the run's own results were none)
+        vs (if test-error {} (verdicts db))
         ;; a deferred proof is neither red nor unknown (seon.reconcile/done-explain)
         deferred (into (set deferred) (keep (fn [[t {st :status}]] (when (= :deferred st) t))) vs)
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
@@ -804,9 +809,6 @@
         unmerged (pm/unmerged db)
         ;; its run by the agent, never through its turns: a turn's record moves nothing this reads
         run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db a) seq (apply max) (d/entity db))
-        ;; a test run that failed as a whole: present on its process only while it is so (the
-        ;; process's other facts, written on every eval, are not read)
-        test-error (d/q '[:find ?err . :in $ ?a :where [?p :seon.process/test-error ?err] [?p :seon.process/agent ?a]] db a)
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)

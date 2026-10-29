@@ -87,9 +87,11 @@
 (defn- status-now
   "How the work stands now, from the agent's walk framed once (seon.repl/page-parts): the status
   part's data (seon.context/status), which the page and the model read too, so a turn computes it
-  once."
-  {:malli/schema [:=> [:cat] :map]}
-  [] (or (get (nth (repl/page-parts) 2) :seon.context/status) {}))
+  once. A walk that drew no status (its render threw, or the layout placed none) is the typed
+  :seon.turn/no-status, never an empty status: no reason is not done (AGENTS 9, unknown is not {})."
+  {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
+  [] (or (get (nth (repl/page-parts) 2) :seon.context/status)
+         (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
 
 (defn- end!
   "The run's end: the live runtime staged onto the branch, the end written there (with
@@ -392,8 +394,9 @@
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task run)
         _ (observe task)
-        [outcome reason] (hand-back-end stop (:reasons (status-now)))]
-    (end! {:run run} outcome reason nil)))
+        s (status-now)
+        [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (hand-back-end stop (:reasons s)))]
+    (end! {:run run} outcome reason (when (contract/error? s) s))))
 
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
@@ -422,8 +425,10 @@
             s (status-now)
             reasons (:reasons s)
             stop (get-in @agent/state [:turn :stop])
-            hairy (when merge? (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
+            hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
+          ;; no status is no done rule: the run ends on that error, never green
+          (contract/error? s) (end! st :error (:seon.error/message s) s)
           ;; git's CI after the merge: green on the combined program; merge main again until
           ;; it brings nothing new
           (and (empty? reasons) merge?)

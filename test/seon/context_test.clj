@@ -777,7 +777,7 @@
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
         (is (re-find #"status-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
-        (is (not-any? #(re-find % (:content (peek r1))) [#"related-\d+" #"run-head-\d+"]) "what a verdict does not move is not told again")
+        (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) ":fail") "the proof's new verdict")
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")

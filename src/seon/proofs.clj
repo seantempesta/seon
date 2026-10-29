@@ -217,7 +217,7 @@
       (and (not= :green status) (seq fs)) (assoc :seon.test/failures fs))))
 
 (def ^:private test-attrs
-  "The :seon.test/* attributes a test's var entity holds (seon.proofs/result-tx)."
+  "The :seon.test/* attributes a test's var entity holds (seon.proofs/result-tx). See docs/merging.md#verdicts-are-a-cache."
   [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
 
 (defn result-tx

@@ -903,7 +903,8 @@
                   (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
                                                 :seon.run/branch (:seon.agent/branch c)}))
      ;; the run's schema render draws its declared keys only: the turns taken and a cut reply are lines of their own
-     [:p (str n (if (= 1 n) " turn" " turns") (when cap (str " of " cap)))]
+     ;; this turn's number (its record is written before its page is drawn), of the cap, as chat-end says it
+     [:p (str "turn " n (when cap (str " of " cap)))]
      ;; its last reply cut at the model's token limit: what followed it was lost
      (when (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
        [:p {:class "err"} "your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))

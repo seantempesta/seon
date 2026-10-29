@@ -681,7 +681,7 @@
   "The reconciler's index of db (seon.reconcile/index), advanced from the one this process held for
   the db it last asked about by what differs, at first from main's as the fork server handed it
   (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.context/status
-  asks for main's claims. It keeps the commit it is of, never the db."
+  asks for main's claims. It keeps the commit it is of, never the db. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [{from :db c :commit idx :index} (:index @state)
@@ -1012,12 +1012,14 @@
   facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
   cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
   entity for, deferred (the process tests the run left to root's gate) as :deferred at their digest,
-  and the facts of each other test whose digest moved (digests, the run's plan) retracted.
+  removed ({test status}, main's tests the branch removed, judged each run from main's definition) as
+  this run's verdict on their name, and the facts of each other test whose digest moved (digests, the
+  run's plan) retracted. See docs/merging.md#verdicts-are-a-cache.
   Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
-  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol]] [:or nat-int? :seon.error/base]]}
-  [ran failures reused digests deferred]
+  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword]] [:or nat-int? :seon.error/base]]}
+  [ran failures reused digests deferred removed]
   (let [db (db)]
    (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
@@ -1027,7 +1029,15 @@
         ran-es (keep #(pdb/eid db :var/name %) (distinct (concat (keys ran) (keys reused) deferred)))
         old (into {} (map (fn [m] [(:var/name m) (dissoc m :var/name)])) (d/pull-many db pattern (vec (distinct (concat held ran-es)))))
         ;; a test with no var entity here (loaded, never recorded) has no fact to hold
-        tx (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)) digests (into #{} (filter old) deferred))]
+        ;; main's tests the branch removed judge from main's definition each run, with no reach digest of the
+        ;; branch's (never cached): their verdict is this run's, on their name
+        rm (vec (for [[t st] removed :let [o (some->> (pdb/eid db :var/name t) (d/pull db [:seon.test/status :seon.test/failures]))
+                                            status (if (= :pass st) :green :red) fs (when (= :red status) (not-empty (vec (failures t))))]
+                      :when (or (not= status (:seon.test/status o)) (not= fs (:seon.test/failures o)))]
+                  [(cond-> {:var/name t :seon.test/status status} fs (assoc :seon.test/failures fs))
+                   (when (and (:seon.test/failures o) (not fs)) [:db/retract [:var/name t] :seon.test/failures (:seon.test/failures o)])]))
+        tx (-> (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)) digests (into #{} (filter old) deferred))
+               (into (comp cat (remove nil?)) rm))]
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
@@ -1131,7 +1141,8 @@
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
-                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)))]
+                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)
+                                                                     (select-keys (proofs/results r) (keys (:removed plan)))))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)]))
                       (dissoc :measured)))))
@@ -1353,6 +1364,11 @@
                                                              :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                              (update :seon.task/ns symbol))]))))
     (transact! [{:seon.task/id task :seon.task/execution :running}
+                ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
+                ;; the branch was cut before it: what a design step's done rule compares (:no-design)
+                (cond-> {:seon.run/id run}
+                  (not (:seon.run/plan (d/entity (db) [:seon.run/id run])))
+                  (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task (db) task)))))
                 {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)
                                                          ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
                                                          ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with

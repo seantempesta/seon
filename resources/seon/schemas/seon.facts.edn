@@ -487,6 +487,9 @@
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/unrun): :after, that call's id
  :seon.turn/not-run [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-run]] [:after :string]]]
+ ;; a turn whose agent's walk drew no status (its render threw, or no layout placed it): the done rule
+ ;; cannot be read, so the run ends :error on it, never :green (seon.turn/status-now)
+ :seon.turn/no-status [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/no-status]]]]
  ;; a model's eval call with no prose or no form, not run (seon.turn/call-problem): :problem why, :forms 0 for an empty one
  :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
