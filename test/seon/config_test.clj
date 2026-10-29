@@ -97,7 +97,7 @@
                         (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
                         [(java.io.File. (str root "/config/local.edn"))])
         text (apply str (for [f sources :when (.isFile f)] (slurp f)))
-        set-somewhere? (fn [n] (str/includes? text n))]
+        set-somewhere? (fn [n] (boolean (some #(str/includes? text %) [(str n "=") (str "export " n)])))]
     (is (seq names) "the reader finds the file's #env tags")
     (is (= [] (vec (remove set-somewhere? (remove env-awaiting-their-task names))))
         "an #env tag whose variable no script, source or test sets is a hidden layer nothing uses: delete it")

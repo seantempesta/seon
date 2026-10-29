@@ -904,7 +904,7 @@
   Each cycle's row (cycle-row), read from its last line."
   [n]
   (vec (for [i (range n)]
-         (let [{:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-cycle" (str i))]
+         (let [{:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-cycle" (str i) "--profile" (name (seon.config/profile)))]
            (if (zero? exit)
              (sedn/decode (last (clojure.string/split-lines out)))
              {:cycle i :ok false :exit exit :err err :health #{}})))))
@@ -1094,7 +1094,7 @@
   once, and this one boots none."
   [n]
   (let [rows (cycles n)
-        {:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-pause")
+        {:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-pause" "--profile" (name (seon.config/profile)))
         pr (if (zero? exit) (sedn/decode (last (clojure.string/split-lines out))) {:exit exit :err err})
         [r1 r2] (get-in pr [:resumed :printed])]
     (run-check "LIFECYCLE" nil

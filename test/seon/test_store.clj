@@ -181,7 +181,7 @@
   store with the test."
   {:malli/schema [:=> [:cat :string :string] :map]}
   [store main]
-  (binary-sh "./seon" "drop" main "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
+  (binary-sh "./seon" "drop" main "--profile" (name (config/profile)) "--set" (str ":seon.config.root/store-path=" (pr-str store)) :dir "target"))
 
 (defn start-root!
   "A built root (bin/root start, this checkout's binary) on store and main, both named and never
