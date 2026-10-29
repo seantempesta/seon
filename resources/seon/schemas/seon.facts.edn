@@ -68,7 +68,7 @@
  ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
  ;; that digest, seon.proofs/verdict), or deferred (a process test the run left to root's gate), and present only while that digest is the test's reach digest now (a
  ;; moved digest retracts them: unknown); its failing assertions as data, the test child's reports (seon.proofs/failures,
- ;; at most :seon.config.proofs/max-assertions; present only while not green, printed by the one printer where shown);
+ ;; every one; present only while not green, printed by the one printer where shown);
  ;; and running sums over the runs at this digest (a new digest resets them): mean = sum / runs, computed on read
  :seon.test/digest [:and {:seon.db/no-history? true} :string]
  :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky :deferred]]
