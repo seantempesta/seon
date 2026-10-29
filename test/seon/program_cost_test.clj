@@ -101,7 +101,7 @@
 (defn- on-disk-path
   "Where divergence's proof keeps its store of size n, in this process's own directory."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" process-token "-" n))
+  [n] (str (seon.config/checkout) "/target/tmp/divergence-" process-token "-" n))
 
 (defn on-disk-diverged-of
   "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's
@@ -517,7 +517,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :nil :string]]}
   [n]
   (let [[db] (branch-of n)
-        dir (str (System/getProperty "user.dir") "/target/tmp/stored-reach-" (random-uuid))]
+        dir (str (seon.config/checkout) "/target/tmp/stored-reach-" (random-uuid))]
     (.mkdirs (java.io.File. dir))
     (runner/reach-graph-of db nil dir)
     [(d/db-with db (program/record-tx db (acct (dec n) "(dec x)"))) nil dir]))

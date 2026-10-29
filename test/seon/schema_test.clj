@@ -14,7 +14,7 @@
             [my.schema :as schema]
             [seon.source :as source]))
 
-(def ^:private here (System/getProperty "user.dir"))
+(def ^:private here (seon.config/checkout))
 
 (defn- schema-files []
   (into {} (for [f (.listFiles (java.io.File. (str here "/resources/seon/schemas")))

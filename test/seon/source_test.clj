@@ -19,7 +19,7 @@
 
 (declare hold!)
 
-(def ^:private here (System/getProperty "user.dir"))
+(def ^:private here (seon.config/checkout))
 
 (defn- src-files
   "next/src as the :source effect reads it: {relative path text}."
@@ -785,7 +785,7 @@
   ;; Jolt three fixes old. The one sync path moves a submodule checkout to the commit its HEAD pins
   ;; (bin/build calls it first); one with uncommitted work it would lose is an error naming it
   (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-sync-" (random-uuid))) (.mkdirs)))
-        here (.getCanonicalPath (java.io.File. "."))
+        here (seon.config/checkout)
         sub (str tmp "/sub") co (str tmp "/co") x (str co "/reference-code/x")
         git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" "-c" "protocol.file.allow=always" args)]
                                (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))

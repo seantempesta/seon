@@ -177,7 +177,7 @@
   src/app/gl.clj defining z.
   Answers {:dir :first :second}."
   []
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/git-fixture-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
                            (assert (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
         put (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))]
@@ -228,7 +228,7 @@
       (is (= [] (seon.docs/load-tx db "docs" (seon.docs/pages dir "docs")))))))
 
 (deftest a-baseline-git-cannot-give-is-today-and-says-so
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/not-git-" (random-uuid))) (.mkdirs)))
         _ (doseq [[p t] {"src/app/gn.clj" "(ns app.gn)\n\n(defn f [] 1)\n" "docs/p.md" "# P\n\nIt reads `app.gn/f`.\n"}]
             (.mkdirs (.getParentFile (java.io.File. (str dir "/" p)))) (spit (str dir "/" p) t))
         {:keys [db baseline]} (db-of-fixture dir "src/app/gn.clj")
