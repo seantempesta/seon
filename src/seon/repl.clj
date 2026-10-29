@@ -555,9 +555,7 @@
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 ;; where the REPL is after it: the next eval runs there, and the agent's part shows it
-                                                 (cond-> (record-details (agent/db) code r req (get-in @agent/state [:turn :run]))
-                                                   (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))))
+                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
           (assoc r :record id))
       r)))
 
@@ -580,7 +578,10 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r render/summarized)]))
+     (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
+                answered (fn [] (let [r (cond-> (repaired (response @answers handle) req)
+                                          (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))]
+                                  [r (print/response-text r render/summarized)]))
                 ;; what the call's prose cites, read after its forms ran (the parser is program the agent may
                 ;; have just changed: a defect in it is this eval's error, never the turn loop's)
                 cites (volatile! nil)

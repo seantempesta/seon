@@ -1495,7 +1495,7 @@
   (let [db (d/db-with (db-with-program)
                       [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
                        {:form/id "x.nsd" :form/defines "n" :form/src "(ns x.nsd (:require [clojure.string :as str] [datahike.api :as d]))"}
-                       {:db/id "f1" :form/id "x.nsd/b" :form/order 1} {:db/id "f2" :form/id "x.nsd/a" :form/order 2}
+                       {:db/id "f1" :form/id "x.nsd/b" :form/order 1 :form/src "(defn b \"B.\" [x] x)"} {:db/id "f2" :form/id "x.nsd/a" :form/order 2}
                        {:var/name 'x.nsd/b :var/ns "n" :var/form "f1"} {:var/name 'x.nsd/a :var/ns "n" :var/form "f2"}
                        {:var/name 'x.nsd-test/t1 :var/ns "nt" :var/kind :test :seon.test/status :green}
                        {:var/name 'x.nsd-test/t2 :var/ns "nt" :var/kind :test :seon.test/status :red}])]
@@ -1503,4 +1503,6 @@
         "its aliases from its ns form, its definitions in file order")
     (is (= '{:ns x.nsd-test :tests {:deftests 2 :green 1 :red [x.nsd-test/t2]}} (context/namespace-data db 'x.nsd-test))
         "a test namespace: how many deftests, how many green, which red")
+    (is (= '[(b [x]) a] (:defines (context/namespace-data db 'x.nsd true)))
+        "the namespace the REPL is in: each definition with its arglists, as eldoc shows them")
     (is (nil? (context/namespace-data db 'x.nowhere)) "a namespace db does not record")))
