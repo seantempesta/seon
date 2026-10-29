@@ -424,6 +424,15 @@
   [conn main branch]
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
+(defn at-commit
+  "The db of commit cid on conn's store: conn's own head when cid is the commit it holds (already
+  in memory, no store read), else made from the store (datahike.api/commit-as-db). What a reader
+  of main's commit notices (seon.writer/main-commit) calls when it takes one, so it keeps the
+  commit and lets the db go. See docs/machine.md#what-a-process-owns-in-memory."
+  {:malli/schema [:=> [:cat :seon.host/conn :uuid] :seon.host/db]}
+  [conn cid]
+  (let [db @conn] (if (= cid (d/commit-id db)) db (d/commit-as-db db cid))))
+
 ;; ---- tx-data with explicit ids ----------------------------------------------------
 ;; The store issues every entity id and transaction id once (ids!), so ids are unique
 ;; across branches: a branch's new entity keeps its id on main. The fork server's replica

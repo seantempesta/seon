@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
+            [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg] [seon.error :as err]))
 
 
@@ -1155,7 +1155,7 @@
    (case in
      ;; each commit's datoms move the index (observe); a commit the sliding buffer dropped
      ;; (main's t is not the next one) lists main again (index), k8s's relist after a gap
-     :main (let [db (d/commit-as-db (:conn st) (:commit m)) t (:max-tx db)
+     :main (let [db (pdb/at-commit (:conn st) (:commit m)) t (:max-tx db)
                  next? (and (:idx st) (= (:prev m) (:t st)))
                  idx (if next? (observe (:idx st) db (:ops m)) (index db))
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own

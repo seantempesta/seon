@@ -734,7 +734,7 @@
                 :system "a promise of the built system (its declared procs, for the health tile)"
                 :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
-             :main "main's commit notices from the writer {:t :prev :ops :commit}, read with d/commit-as-db: each one's datoms find the pages whose reads they touched"}
+             :main "main's commit notices from the writer {:t :prev :ops :commit}, read with seon.db/at-commit: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
@@ -761,7 +761,7 @@
               ;; a commit on main: the pages its datoms touched walk in the pass
               ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
               ;; found by their diff, so a lagging proc never parks the writer)
-              :main (pass (advance-main st (d/commit-as-db (:conn st) (:commit m))) o)
+              :main (pass (advance-main st (seon.db/at-commit (:conn st) (:commit m))) o)
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]

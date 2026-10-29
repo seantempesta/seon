@@ -12,7 +12,7 @@
   (native/vector.c)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg]
-            [seon.step :as step] [jolt.ffi :as ffi] [datahike.api :as d] [clojure.string :as str] [seon.error :as err]))
+            [seon.step :as step] [jolt.ffi :as ffi] [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [seon.error :as err]))
 
 ;; ---- the pyramid (native/vector.c, in libprobe: no threads, every process loads it) ------
 
@@ -312,15 +312,15 @@
   for), only the texts that commit to this one changed are looked at (`written`: the cost of the commit,
   not of the store); otherwise, at the first round and after a backlog, a failure or an unwritten
   answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
-  commit. Both dbs are made from their commits here (d/commit-as-db) and let go with the round: the
+  commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (AGENTS section 4).
   Answers [st outputs]; nothing due, nothing asked."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st m]
-  (let [db (d/commit-as-db (:conn st) (:commit m))
+  (let [db (pdb/at-commit (:conn st) (:commit m))
         clean (:clean st)
         todo (remove (comp (:unembeddable st) first)
-                     (if clean (due db (:model st) (written (d/commit-as-db (:conn st) (:commit clean)) db)) (due db (:model st))))
+                     (if clean (due db (:model st) (written (pdb/at-commit (:conn st) (:commit clean)) db)) (due db (:model st))))
         due (take (:texts st) todo)
         st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
     (if (empty? due)
@@ -341,7 +341,7 @@
   those are kept out of later rounds (:unembeddable, shown in its ping), so they never hold back
   the texts due after them."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:conn "the store main's commits are read from (d/commit-as-db)"
+  ([] {:params {:conn "the store main's commits are read from (seon.db/at-commit)"
                 :model "the model id its vectors are made by (seon.vector/model-id)"
                 :texts "the texts one round asks for, :seon.config.vector/texts (0: none, the model never loads)"}
        :ins {:main "main's commit notice {:t :commit}, a sliding buffer of one" :answers "the api's answers"}
@@ -364,7 +364,7 @@
                                       ;; vectors written (:seon.vector/model)
                                       (let [st (cond-> (assoc st :clean nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
                                             ;; the newest main it holds, so the row's count reads what is stored
-                                            tx (err/asked-tx (d/commit-as-db (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
+                                            tx (err/asked-tx (pdb/at-commit (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
                                         (if (seq tx)
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])

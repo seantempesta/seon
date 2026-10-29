@@ -113,8 +113,11 @@
         _ (d/branch! conn b s)
         c (d/connect (assoc cfg :branch s))
         _ (d/transact c {:tx-data [{:form/id "vnew" :form/src "(defn vnew [])"}]})
-        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn conn}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))}) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
-    (d/release c) (d/release bc)
+        ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
+        ;; holds its nodes when this round diffs from it: read them here, as that round did
+        _ (vector/due (d/commit-as-db c (d/commit-id (pdb/head conn b))) "m")
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))}) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
+    (d/release bc)
     r))
 
 (deftest a-commit-is-embedded-for-what-it-changed
@@ -130,12 +133,13 @@
        ;; a scan of every text read ~790 ticks and 5 KB a text (what-is-due-reads-each-fact-once)
        ;; 2026-10-27: 130k / 263 KB / 12 calls at 100: the written text's title by seeks (seon.vector/title,
        ;; its stored read), two contracted calls more
-       ;; 2026-10-29 (vectors-clean-is-a-commit): the notice and :clean are commits, the proc makes both dbs with
-       ;; d/commit-as-db: 433k ticks / 1.61 MB / 12 calls at 100 (+300k ticks, +1.34 MB, no more contracted calls). The setup
-       ;; here is a cold LMDB read of two commits' index roots (root's cache holds them: the writer has just written the
-       ;; commit), so this is the cost of making a db from a commit, twice, once per round, whatever the store's size
+       ;; 2026-10-29 (vectors-clean-is-a-commit): the round makes its dbs from commits (seon.db/at-commit), where it held
+       ;; them: 130k ticks / 263 KB / 12 calls became 287k / 961 KB / 14 calls at 100. Measured apart: the notice's
+       ;; commit is the conn's head (a deref and the contract: 55k / 238 KB), the :clean commit is made from the store
+       ;; (datahike commit-as-db, 97k / 440 KB, steady state: its cost is the store's read of the commit, not a cold cache),
+       ;; the diff itself unchanged (121k / 229 KB). Size-independent; the price of not pinning a version of the index
        :per-n {:ticks 70.0 :bytes 150.0}
-       :fixed {:ticks 430000.0 :bytes 1590000.0 :calls 12}
+       :fixed {:ticks 285000.0 :bytes 950000.0 :calls 14}
        :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
