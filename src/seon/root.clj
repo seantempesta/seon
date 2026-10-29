@@ -540,6 +540,8 @@
                      (spawn-failed o (:agent m) (or (:reason m) (str "fork refused: " (:active-threads m) " active threads")) nil))
       :applied (-> st (view! update-in [:stats :lag-ms] lib/push-window (:lag-ms m) 200)
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
+      ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
+      :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting

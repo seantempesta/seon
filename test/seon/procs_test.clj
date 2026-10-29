@@ -855,6 +855,50 @@
           [_ r2] (union-of st)]
       (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
 
+(deftest a-fork-server-step-that-throws-answers-with-the-error-and-its-state-is-unchanged
+  ;; docs/processes.md#a-step-that-throws: the server's step caught what it threw (a thrown step left the
+  ;; process alive and silent, or dead, with every request it took unanswered); the event names the op
+  ;; and carries the typed error, a fork's received socket is closed, and root's proc answers the asker
+  (let [step-failed? #(= :seon.fork-server/step-failed (get-in % [:error :seon.error/type]))]
+    (testing "a step with no db to read answers its stats request the error, its state as it was"
+      (let [st {:db nil}
+            [st' outs] (#'server/server-step st :cmd {:op :stats})]
+        (is (identical? st st'))
+        (is (= [:step-failed] (map :ev (:ev outs))))
+        (is (step-failed? (first (:ev outs))))
+        (is (= :stats (:op (first (:ev outs)))))))
+    (testing "a fork that throws before it forks closes the socket that came with it"
+      (let [[a b] (sock/socketpair) [fa fpeer] (sock/socketpair)
+            conn (sock/conn b)
+            _ (sock/send! a {:op :fork :agent :a1} fa)
+            m (loop [] (let [f (sock/next-frame! conn)] (if (= :none f) (recur) f)))
+            fd (first @(:fds conn))
+            st {:db nil :conn conn :graph-moved true}
+            [st' outs] (#'server/server-step st :cmd m)]
+        (is (some? fd) "a descriptor came with the request")
+        (is (identical? st st'))
+        (is (= {:ev :step-failed :op :fork :agent :a1} (select-keys (first (:ev outs)) [:ev :op :agent])))
+        (is (empty? @(:fds conn)) "taken from the pending descriptors")
+        (is (= -1 (seon.lib/c-close fd)) "and closed")
+        (sock/close! fa) (sock/close! fpeer) (sock/close! a) (sock/close! b)))
+    (testing "root's proc answers the waiter the stats request is, and fails the fork"
+      (let [err (#'server/step-failed {:op :stats} (ex-info "boom" {}))
+            [st outs] (step #'server/fork-server-proc
+                            {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}
+                            :ev {:ev :step-failed :op :stats :error (:error err)})]
+        (is (= [5] (keep #(get-in % [:dest :rid]) (:to-api outs))))
+        (is (step-failed? {:error (:r (first (:to-api outs)))}))
+        (is (empty? (:waiters st))))
+      (let [[afd apeer] (sock/socketpair)
+            err (#'server/step-failed {:op :fork :agent :a1} (ex-info "boom" {}))
+            [st outs] (step #'server/fork-server-proc {:waiters clojure.lang.PersistentQueue/EMPTY :pid 1 :log [] :in-flight {:a1 afd}}
+                            :ev {:ev :step-failed :op :fork :agent :a1 :error (:error err)})]
+        (is (= [:fork-failed :step-failed] (map :ev (:to-api outs))))
+        (is (string? (:reason (first (:to-api outs)))))
+        (is (empty? (:in-flight st)))
+        (is (= -1 (sock/close! afd)) "root's copy of the agent's socket is closed")
+        (sock/close! apeer)))))
+
 (deftest the-fork-servers-stop-ends-every-child-before-it-answers
   ;; bin/check lifecycle's :left (docs/processes.md#a-stop-reaps-every-child): root SIGKILLed the fork
   ;; server while an agent that had closed its socket was still exiting, and launchd

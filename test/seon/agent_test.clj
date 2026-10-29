@@ -187,6 +187,34 @@
     (is (= 0 agents) "no agent was made for the refused spawn")
     (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
 
+(deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
+  ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
+  ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
+  ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
+  ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
+  ;; throw is an error fact on root, the server's state is as it was, and the next spawn is served.
+  ;; No clock decides: an unfixed run waits on the spawn until the runner's budget ends it
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "fork-server-throw-" (random-uuid))
+        store (ts/process-store checkout)
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store store :main main :runs runs})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (value-of (:response r)))))
+        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
+        _ (eval-root "@(clojure.core.async.flow/inject (:graph sys) [:fork-server :cmd] [{:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []}])")
+        spawned (eval-root "(try (c/spawn! sys {}) :spawned (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
+        recorded (eval-root "(pr-str (my.root/problems sys))")
+        alive (eval-root "(get-in (c/state sys) [:fork-server :pid])")
+        stopped (ts/stop-root! root)
+        log (let [f (java.io.File. (str runs "/root.log"))] (if (.exists f) (slurp f) ""))]
+    (ts/drop-main! store main)
+    (sh/sh "rm" "-rf" runs)
+    (is (= :spawned spawned) (str (pr-str spawned) log))
+    (is (= fs alive) "the same server serves on")
+    (is (re-find #"step-failed" recorded) "and root recorded the error")
+    (is (= "0" (str (:exit stopped))) (str (pr-str (dissoc stopped :log))))))
+
 (deftest an-agent-ends-when-its-root-is-gone
   ;; task seon.agent/an-agent-ends-with-its-root: with its fork server gone first (a pid
   ;; cleanup), an agent ends on EOF of its own socket to root, whatever it is doing: an idle
