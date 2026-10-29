@@ -571,8 +571,6 @@
  ;; shows them. seon.context/render makes the exact user message from it on that commit.
  :seon.model-call/basis [:map [:commit :uuid] [:task :seon.task/id] [:run :seon.run/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.turn/origin]
-                   ;; what the turn took that no fact holds yet: the ids of the entries it took, the sends of its inbox
-                   [:taken {:optional true} :map]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)
                    [:agent {:optional true} :string]]

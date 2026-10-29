@@ -120,41 +120,40 @@
     cache-miss-tokens (assoc :seon.model-call/cache-miss-tokens cache-miss-tokens)))
 
 (defn- take!
-  "The entries since the last turn (a person's message, root's at a stage boundary, a refused
-  verdict: :seon.message/kind), taken before the turn's request is made, so each sits in the
-  conversation before the page that shows what came after it (a session's next stage opens with
-  its :stage entry, seon.reconcile/stage-boundary, before that stage's first page). They are the
-  facts main holds to the session's runs that this branch does not (seon.agent/untaken-entries):
-  delivery is the fact, which root syncs before anything that follows it. The turn is their
-  reader: each is written on this branch first, the same fact root wrote on main, and named by
-  id, so its text is read again from the commit; with them, what root wrote on main of the
-  agent's own entities (seon.agent/untaken-facts). The inbox holds the sends no fact holds
-  (another agent's), shown and taken with them. A read that is not the run's turn (take? false:
-  an observer's read of an agent its model drives) shows both and writes nothing. Answers the
-  observations they add: {:message-ids [..]} and {:messages [{:from :body} ..]}, each only when
-  there are some."
-  {:malli/schema [:=> [:cat :boolean] :map]}
+  "Take what was delivered since the last turn onto this branch, before the turn's request is made, so
+  each sits in the conversation before the page that shows what came after it: the entries main holds
+  to the session's runs (a person's message, root's at a stage boundary, a refused verdict:
+  seon.agent/take-main!, the same facts root wrote on main, with what root wrote of the agent's own
+  entities), then each send of the inbox (another agent's, root's request) as a message fact of its
+  own. Each is :seon.message/agent's, so its presence on the branch is its delivery and the record's
+  messages read it (seon.context/records); nothing is held for the turn's basis. An effect's outcome
+  (:from :fx) is no message: its fact is the effect's (seon.agent/fx-record!). A read that is not the
+  run's turn (take? false: an observer's read of an agent its model drives) takes nothing."
+  {:malli/schema [:=> [:cat :boolean] :nil]}
   [take?]
-  (let [sends (agent/inbox)
-        entries (if take? (agent/take-main!) (agent/untaken-entries))]
-    ;; taken once their facts are committed: a refused write leaves them for the next turn
-    (when take? (agent/taken! (count sends)))
-    (cond-> {}
-      (and take? (seq entries)) (assoc :message-ids (mapv :id entries))
-      ;; an observer's read: the entries as they are, unwritten
-      (and (not take?) (seq entries)) (assoc :messages (mapv #(select-keys % [:from :body]) entries))
-      (seq sends) (update :messages (fnil into []) (mapv (fn [{:keys [from body]}] {:from (name from) :body body}) sends)))))
+  (when take?
+    (let [sends (agent/inbox)
+          k (:key @agent/state)
+          tx (into [] (mapcat (fn [{:keys [from body]}]
+                                ;; a send's body is the sender's value: its text is the message
+                                (update (task/message-tx (str k "/send/" (random-uuid)) :message (name from) nil (if (string? body) body (pr-str body)))
+                                        0 assoc :seon.message/agent {:seon.agent/key k})))
+                   (remove #(= :fx (:from %)) sends))]
+      (agent/take-main!)
+      (when (seq tx) (agent/transact! tx) (agent/commit!))
+      ;; taken once their facts are committed: a refused write leaves them for the next turn
+      (agent/taken! (count sends))))
+  nil)
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
-  model call's wait would), the task, run and turn, and what it took that no fact holds yet
-  (taken, take!). How the work stands is the commit's facts (seon.context/standing)."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :boolean :map] :seon.model-call/basis]}
-  [task run turn max-turns origin merge? taken]
+  model call's wait would), the task, run and turn. Everything the request shows is a fact of that
+  commit: how the work stands (seon.context/standing), what the turn took (take!)."
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :boolean] :seon.model-call/basis]}
+  [task run turn max-turns origin merge?]
   (agent/commit!)
   (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns :origin origin}
-    (seq taken) (assoc :taken taken)
     merge? (assoc :merge? true)))
 
 (defn- call-problem
@@ -226,8 +225,8 @@
   [{:keys [turn tokens max-turns merge? whole? run] :as st} {:keys [tests-ms] :as obs} s model-name]
   (let [t (:task obs)
         t0 (profile/now-ns)
-        taken (take! true)
-        basis (assoc (basis! (:seon.task/id t) run turn max-turns :model (boolean merge?) taken) :agent (:key @agent/state))
+        _ (take! true)
+        basis (assoc (basis! (:seon.task/id t) run turn max-turns :model (boolean merge?)) :agent (:key @agent/state))
         id (str run "/" turn)
         ;; the turn first, what it was made from (its model call's basis): its page is drawn on the db that
         ;; holds it (its proofs as this turn observed them), then what it sent, committed, so a page shows the
@@ -352,10 +351,10 @@
         n (get-in (swap! agent/state update-in [:turn :reads] (fnil inc 0)) [:turn :reads])
         t0 (profile/now-ns)
         ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
-        taken (take! take?)
+        _ (take! take?)
         ;; the read's related units, decided as a model turn's are, before its request is drawn
         _ (when take? (when-let [tx (not-empty (included-tx task))] (agent/transact! tx) (agent/commit!)))
-        basis (assoc (basis! task run n 1 :outside true taken) :agent (:key @agent/state))
+        basis (assoc (basis! task run n 1 :outside true) :agent (:key @agent/state))
         [db parts] (repl/page-hiccup)
         {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
