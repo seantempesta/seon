@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program]))
+            [seon.test-store :as ts] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -359,11 +359,14 @@
   ;; Each run writes under a directory of its own, named on its first line, ends with its own
   ;; complete result (its output holds its plan line and PROVE OK), and a green run's directory is
   ;; removed with the run: its logs are read by no one (a red or killed run's stay, the evidence)
-  (let [run (fn [] (clojure.java.shell/sh "bin/prove" "--tests" "seon.step-test"))
-        pa (promise) pb (promise)
-        _ (doto (Thread. #(deliver pa (run))) .start)
-        _ (doto (Thread. #(deliver pb (run))) .start)
-        rs [@pa @pb]
+  ;; run from the checkout this process runs from (seon.config/checkout), never the working directory: a test
+  ;; child of main's boot run works in its own run directory, where bin/prove is not (the thread that
+  ;; threw never delivered its promise, and the whole boot run waited on it for good: 2026-10-30). A
+  ;; future's deref rethrows what its body threw, so a run that cannot start ends this test with that error
+  (let [ck (seon.config/checkout)
+        run (fn [] (clojure.java.shell/sh (str ck "/bin/prove") "--tests" "seon.step-test" :dir ck))
+        fa (future (run)) fb (future (run))
+        rs [@fa @fb]
         dir (fn [r] (second (re-find #"prove: run \S+, logs in (\S+)" (:out r))))]
     (doseq [r rs]
       (is (zero? (:exit r)) (str (:out r) (:err r)))
