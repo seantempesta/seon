@@ -67,7 +67,7 @@
          (let [r (repl/edit! 'x.repl-edit/f "c 3" "c 4")]
            (is (= :not-found (:seon.repl/refused-because r)) "old text not there: refused, nothing changed")
            (is (= 22 ((resolve 'x.repl-edit/f) 1))))
-         ;; md-scan #23: ten evals printing lines with visible whitespace; the refusal names the line and how it differs
+         ;; md-scan #23: ten evals printing lines with visible whitespace; the refused edit names the line and how it differs
          (let [r (repl/edit! 'x.repl-edit/f "(let [b 1\n      c 20]" "(let [b 1\n      c 3]")]
            (is (= :not-found (:seon.repl/refused-because r)))
            (is (= {:line 3 :old "      c 20]" :source "        c 20]" :indent [6 8]} (first (:seon.repl/differs r))) (pr-str r))
