@@ -24,13 +24,13 @@
 ;; :id :branch :task :run (the task and run root forked it for, or nil) :fd :conn :db :base (main at the branch's merge base: as forked, then each merge-main!) :main (main's head as last read: as forked, then heard-main) :results :n :pending :tx-seq :mode :ns :home :mismatch
 ;; :embedded-from (the db embed-written! last read the branch's writes up to)
 ;; :unembeddable (the entities whose text llama.cpp could not encode, as vectors-proc keeps them)
-;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
-;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
-;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
+;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
+;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
+;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
-;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)
+;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
 (defonce state (atom nil))
 
@@ -622,8 +622,8 @@
 
 (defn- base-graph
   "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
-  graph-index), reused while base is the very value it was made for: a value never changes,
-  so neither does its graph (AGENTS §5, results reused by input). A new base (merge-main!, a
+  graph-index), reused while base is the point (seon.db/point) it was made for: a value never changes,
+  so neither does its graph (AGENTS §5, results reused by input), and the db itself is not held. A new base (merge-main!, a
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph), and built here only when there is none or
@@ -631,14 +631,15 @@
   graph 640 ms, 816 MB; a one-form change's update and index 20-45 ms."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
   [base inputs]
-  (let [{w-db :db g0 :graph :as w} (:base-graph @state)]
-    (if (and w (identical? base w-db) (= inputs (:inputs w)))
+  (let [{w-at :point g0 :graph :as w} (:base-graph @state)
+        at (pdb/point base)]
+    (if (and w (= at w-at) (= inputs (:inputs w)))
       (:value w)
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
-                    (identical? base w-db) g0
+                    (= at w-at) g0
                     :else (program/reach-update g0 base))
             v {:graph g :index (program/graph-index g inputs nil)}]
-        (swap! state assoc :base-graph {:db base :graph g :inputs inputs :value v})
+        (swap! state assoc :base-graph {:point at :graph g :inputs inputs :value v})
         v))))
 
 (defn judges?
@@ -661,18 +662,19 @@
 
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
-  updated to db (seon.program/reach-update), or db's own with no base; reused while db is the very
-  value it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
-  key lookup; a new db value is base's graph updated again, at the cost of what the branch changed
-  from base (20-45 ms for one form). Holds that one db value while it is the newest asked."
+  updated to db (seon.program/reach-update), or db's own with no base; reused while db is the point
+  (seon.db/point) it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
+  key lookup; a new db is base's graph updated again, at the cost of what the branch changed
+  from base (20-45 ms for one form). Holds the point of the newest asked, never its db."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
   [db base in]
-  (let [{w-db :db g :graph w-in :inputs} (:branch-graph @state)]
-    (if (and g (identical? db w-db) (= in w-in))
+  (let [{w-at :point g :graph w-in :inputs} (:branch-graph @state)
+        at (pdb/point db)]
+    (if (and g (= at w-at) (= in w-in))
       g
       (let [b (when base (base-graph base in))
             g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))]
-        (swap! state assoc :branch-graph {:db db :graph g :inputs in})
+        (swap! state assoc :branch-graph {:point at :graph g :inputs in})
         g))))
 
 (defn branch-changes
@@ -683,11 +685,12 @@
   inherits it. {} with no base."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :seon.merge/changes]}
   [base db]
-  (let [{w-base :base w-db :db ch :changes} (:branch-changes @state)]
+  ;; the two points are seon.db/point inlined: the lookup is declared one call (seon.program-cost-test/a-turns-held-diff-is-a-lookup)
+  (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
-          (and ch (identical? base w-base) (identical? db w-db)) ch
+          (and ch (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
           :else (let [ch (pm/delta-changes base db #{})]
-                  (swap! state assoc :branch-changes {:base base :db db :changes ch})
+                  (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
 
 (defn test-plan
@@ -1392,7 +1395,7 @@
                    :ns nsx :interrupt-ok intr-ok :serve serve}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
-                   graph (assoc :base-graph {:db db0 :graph graph})
+                   graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
                    ;; observes the branch from it (seon.turn's index!), never lists it here
                    index (assoc :index index)))
