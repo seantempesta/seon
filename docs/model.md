@@ -14,7 +14,7 @@ The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 
 ## One tool, eval
 
-Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is prose to the user): its code is the REPL's input, so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
+Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is prose to the user): its code is the REPL's input, one form a call by the prompt's ask though several run in order (they answer `:forms` and `:value`, the vector of their values: `seon.repl/response`, [prompt](prompt.md)), so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
 
 ## One function answers a request
 
