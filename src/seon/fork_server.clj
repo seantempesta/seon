@@ -200,6 +200,13 @@
         ;; docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
         _ (when boot? (pdb/preload! db0))
+        ;; root evaluates no test namespace (program/load-all! {:tests? false}); this server does, once,
+        ;; so every agent and test child forked from here inherits main's tests compiled, as read-only
+        ;; pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). The first fork
+        ;; waits behind it; its errors go to root as a tx's load errors do.
+        _ (when boot?
+            (when-let [errs (seq (:errors (program/load-all! db0)))]
+              (sock/send! fd {:ev :load-errors :t (:max-tx db0) :errors (vec errs)})))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
         kq (lib/kq-new)
         recv! (fn [] (loop []
