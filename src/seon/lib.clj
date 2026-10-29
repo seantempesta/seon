@@ -210,15 +210,16 @@
   (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_NEW_SIZE\" \"" (long trip) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
-(defchecked ^:private heap-reserve* [:=> [:cat :double] :any]
-  (scm/eval-string "(lambda (r) (heap-reserve-ratio r))"))
-
-(defn heap-reserve!
-  "Keep at most r times the non-static heap in use as free memory after a full collection, and
-  return the rest to the OS (Chez's heap-reserve-ratio, 1.0 unset: one free page per page in
-  use). See docs/machine.md#roots-heap."
-  {:malli/schema [:=> [:cat [:double {:min 0.0}]] :any]}
-  [r] (heap-reserve* r))
+(defn max-heap-free-ratio!
+  "Keep at most p% of this process's heap free after a full collection and return the rest to
+  the OS: Jolt's JOLT_MAX_HEAP_FREE_RATIO (the JVM's -XX:MaxHeapFreeRatio), installed with its
+  collector policy, which also bounds the nursery's headroom by it; a process forked from this
+  one inherits it. Answers the reserve ratio in force. See docs/machine.md#roots-heap."
+  {:malli/schema [:=> [:cat [:int {:min 1 :max 99}]] number?]}
+  [p]
+  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP_FREE_RATIO\" \"" (long p) "\") "
+                        "(if jolt-gc-policy-installed? (jolt-install-gc-policy!) (heap-reserve-ratio (inexact (/ " (long p) " (- 100 " (long p) ")))))"
+                        " (heap-reserve-ratio))")))
 
 (defchecked ^:private collect-sweepers* [:=> [:cat :int] :int]
   (scm/eval-string "(foreign-procedure \"(cs)collect_sweepers\" (iptr) iptr)"))
