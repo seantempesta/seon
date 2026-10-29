@@ -272,8 +272,11 @@
  ;; a proof could be red in its turn and green at the judge). Larger than a form's: cost proofs
  ;; measure large sizes. Provenance: the per-run judge bound it was (no single in-process test
  ;; needed more); each result records its :ticks. At the bound that test is an :error of
- ;; :seon.test/ticks-spent naming it, and the run goes on. 0: none.
- :seon.config.agent/test-ticks 200000000000
+ ;; :seon.test/ticks-spent naming it, and the run goes on. 0: none. Lowered 2026-10-29 (owner: "I don't
+ ;; want long running tests period and I want to catch the problems sooner"): 200 G let a looping
+ ;; test run ~30 min; the costliest green in-process test recorded 8.3 G ticks (p99 1.9 G, median
+ ;; 2 M; 1,186 tests' newest verdicts), so 10 G ends a loop in about a minute and fails none today.
+ :seon.config.agent/test-ticks 10000000000
  ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
