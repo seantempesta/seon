@@ -834,25 +834,36 @@
   ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
+  ;; Every eighth file of src, test and the schemas (a sample as the digests see it: the same cross-file
+  ;; references and quoted names, an eighth of the import and reach work), copied twice to two
+  ;; repositories (program-db reads a tree from its git objects); the whole tree's run of the same
+  ;; property cost 6.7 G ticks.
   (let [here (System/getProperty "user.dir")
-        copy (scratch-dir "copy")
-        ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
-        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
-        ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
-        ;; (a tracked file deleted on disk is no file of the tree: left out)
         dirs (cfg/value :seon.config.source/dirs)
-        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard " (str/join " " dirs) ")\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
+        ;; the files of the tree as they are on disk (tracked and untracked, unignored), not HEAD's: the
+        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
+        ;; (pure-tests 2026-10-23: HEAD is no input of the digest); a tracked file deleted on disk is no file
+        files (->> (:out (apply sh/sh "git" "-C" here "ls-files" "-co" "--exclude-standard" dirs))
+                   str/split-lines sort (filter #(.exists (java.io.File. here %)))
+                   (keep-indexed (fn [i f] (when (zero? (mod i 8)) f))))
+        listing (str (scratch-dir "list") "/files")
+        _ (spit listing (str/join "\n" files))
+        sample (fn [label] (let [d (scratch-dir label)]
+                             (sh/sh "zsh" "-c" (str "tar -c -C '" here "' -T '" listing "' -f - | tar -x -C '" d "' && git -C '" d "' init -q"))
+                             d))
+        copy (sample "copy") copy2 (sample "copy2")
         in (fx/inputs here)
-        a (ts/reach-digests (runner/program-db here (ts/program-store)) in)
-        b (ts/reach-digests (runner/program-db here (ts/program-store)) in)
-        c (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        a (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        b (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        ;; another checkout, in a store of its own: imported again, not read from a's branch
+        c (ts/reach-digests (runner/program-db copy2 (scratch-dir "store2")) in)
         ;; root imports into its own store, which holds no example program (the test store's seed
         ;; does: names a test quotes would reach it)
         {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
-        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
+        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root copy :dirs dirs}})))})
                (ts/reach-digests @conn in)
                (finally (d/release conn true)))]
-    (is (< 300 (count a)) "the whole suite")
+    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
@@ -901,7 +912,7 @@
         a (ts/reach-digests db (in "t1"))
         b (ts/reach-digests db (in "t2"))
         step #(ts/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
-    (is (< 300 (count a)) "the whole suite")
+    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
     ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
     ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)
