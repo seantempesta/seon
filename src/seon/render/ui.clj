@@ -777,7 +777,7 @@
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
-      (str "task · " (namespace (symbol id)) (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
+      (str "task · " (namespace (symbol id)))]
      [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
      ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
      ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
@@ -977,9 +977,6 @@
         cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
         n (count (:turns c))]
     [:section
-     (render/html {:schema :seon.run/run-fact}
-                  (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
-                                                :seon.run/branch (:seon.agent/branch c)}))
      ;; the run's schema render draws its declared keys only: the turns taken and a cut reply are lines of their own
      ;; this turn's number (its record is written before its page is drawn), of the cap, as chat-end says it,
      ;; and the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
@@ -1153,6 +1150,15 @@
           [:ol {:class "seon-turn mt-1 flex flex-col"} (for [e evals] [#'eval-item {} e])]])
        [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(when n (str "turn " n)) (when tokens (str (print/tokens-text tokens) " of context"))]))]])))
 
+(defn chat-ask
+  "What was asked, the chat's first message, a person's on the right (a component over ctx): the
+  task's plan as it accumulated, as Markdown. The model reads the plan in the task's part; the chat
+  opens with it so a person reads the conversation from its start. See docs/render.md#the-page."
+  {:seon.render/style "max-w-[85%] self-end rounded-2xl rounded-tr-sm bg-base-800 px-4 py-2.5 text-text-100" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} _aid]
+  (when-let [plan (some-> (:task c) ratom/realize :seon.task/plan)]
+    [:section [:div {:class "seon-message"} (markdown plan)]]))
+
 (defn chat-message
   "A message to the agent as the chat shows it (a component over ctx): who sent it, its body as
   Markdown, a person's on the right. See docs/render.md#the-page."
@@ -1214,6 +1220,7 @@
       (when aid [#'own-problems {} aid])
       (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
+      (when (:task c) [#'chat-ask {} aid])
       (for [id conv :when (not (in-turn id))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
@@ -1237,7 +1244,8 @@
       [:h1 {:class "text-base font-bold text-signal"} (kname id)]
       ;; how it is now, at a glance: working (its process runs a form), waiting, or ended
       [:span {:class (case status :busy "text-signal" (:green :done) "text-success" (:red :failed :error) "text-error" "text-text-500")}
-       (str "● " (kname status))]
+       ;; in a person's words: working while its process runs a form, waiting for you, finished
+       (str "● " (case status :busy "working" :idle "waiting" :ended "finished" :dead "stopped" (kname status)))]
       ;; what it evaluates now, while its process runs one: the newest thing it does, live
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
