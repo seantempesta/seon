@@ -74,6 +74,14 @@
   moved the increments' exponent by 0.02, its whole margin under the bound."
   0.25)
 
+(def increment-floor
+  "An increment over the smallest size is fitted only when it is at least this share of the
+  smallest size's cost (a twenty-fifth of growth-share, twice the 0.5% variance of a measure): a
+  step in the cost (an index's depth, between two sizes) leaves the size before it a few bytes
+  over the smallest, and the fit read 409k over 300 B as n^3.1
+  (seon.program-diff-test/a-diff-costs-the-change-never-the-program, 2026-10-29)."
+  0.01)
+
 (def loose
   "At or below this fraction of its estimate at the largest size, the estimate is loose."
   (/ 1.0 3.0))
@@ -132,8 +140,10 @@
   allows over the same sizes (its own plus steeper-by). A change making every size cheaper,
   or dearer, by one amount never moves it (task seon.cost/a-speedup-never-reads-as-steeper;
   docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
-  smallest against the work's own (three sizes or more with two positive increments, the
-  largest at least growth-share of the smallest size's cost, no fixed part assumed);
+  smallest against the work's own (three sizes or more with two increments over increment-floor
+  of the smallest size's cost, the largest at least growth-share of it, no fixed part assumed:
+  an index's depth is a step, and the step's flat side, a few bytes of noise above the smallest
+  size, is no shape to fit);
   :total, the cost itself, for constant work (it should not grow);
   else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
   size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
@@ -147,7 +157,7 @@
         fit (fn [basis pts wpts] {:exponent (exponent pts) :allowed (+ steeper-by (exponent wpts)) :basis basis})
         r0 (first rs)
         incs (when (and (>= (count rs) 3) (not= :constant (:growth e)))
-               (for [r (rest rs) :when (pos? (- (m r) (m r0)))] r))]
+               (for [r (rest rs) :when (>= (- (m r) (m r0)) (* increment-floor (m r0)))] r))]
     (cond
       (< (count rs) 2) nil
       (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))

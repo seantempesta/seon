@@ -66,16 +66,18 @@
                   "entry, log n), then the candidate entities' own datoms and the one changed form's row; the "
                   "whole read before was four live-form scans and one entity read a definition on each side")
        :growth :log
-       ;; sizes 10, 100, 1,000, not 100, 300, 1,000: the index's depth steps, so between sizes 3x
-       ;; apart the bytes are not log-shaped (2026-10-29: 895k at 100, 976k at 300, 1.22M at 1,000, +80k
-       ;; then +245k: n^1.16 against the n^0.91 log allows over those two increments, which
-       ;; seon.cost/growth fitted right from a measure that is a step); a decade apart the steps
-       ;; average out (737.6k, 895k, 1.22M: n^0.49 against n^0.60 allowed)
+       ;; 2026-10-29, task seon.cost/step-costs-are-not-a-shape: what diff-plan reads is the nine descents (the
+       ;; four pointers, :form/id, :form/defines, the schema's three: 54-95 KB each when nothing differs, 100-340 KB
+       ;; with a change) and ~85 KB of lookups beside them, one descent an attribute and no more (an in-process
+       ;; probe summed the nine at 650 KB of 738 KB at 10 forms); an index's depth is a step in them: 738 KB at 10 and
+       ;; 100 forms, 912 KB at 300, 1.15 MB at 1,000, 1.39 MB at 3,000 on Jolt 546c3d1f (655k, 699k, 972k at 10, 100,
+       ;; 1,000 on the Jolt before it). The fit leaves out an increment under :seon.cost/growth-share, so the flat side
+       ;; of a step is no shape at any sizes; the estimate is the trend through those rows
        ;; measured 2026-10-26 on LMDB: 1.56 MB at 100 forms, 2.34 MB at 1,000 (about 234 KB a doubling:
        ;; the index paths to the changed form), 6 contracted calls; reading both programs whole was
        ;; 400-450 ms a resumed spawn on Seon's program (seon.agent/spawn-phases' :base)
-       :per-n {:bytes 240000.0}
-       :fixed {:bytes 100000.0 :calls 6}
+       :per-n {:bytes 85000.0}
+       :fixed {:bytes 480000.0 :calls 6}
        :sizes diff-sizes})
     (finally
       (doseq [n diff-sizes :let [path (#'pc/on-disk-path n)] :when (pdb/store? path)]
