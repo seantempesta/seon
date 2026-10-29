@@ -66,6 +66,23 @@
     (is (= [true false] (:value after)) "the forms after the error never ran")
     (is (= [true true] (:value branch)) "the branch's program holds c and d")))
 
+(deftest a-top-level-dos-inner-forms-are-recorded-with-their-own-text
+  ;; coordinator, 2026-10-29: the inner forms of a written (do ...) come from the form the reader
+  ;; returned, each form's exact text from the reader's positions (seon.repl/do-parts), no regex over
+  ;; the code. Each definition is program with its own text, comments and spacing as written
+  (let [[_ r branch]
+        (at/in-agent (fn [{:keys [ns task]}]
+                       [(str "(ns " ns ".core)")
+                        (str "(do ; leads f\n  (seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))\n"
+                             "  ;; leads g-test\n  (clojure.test/deftest g-test (clojure.test/is (= 2 (f 1)))))")
+                        {:op :eval :agent "root"
+                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test]))")}]))]
+    (is (= 2 (count (:recorded r))) (str "both inner definitions are program: " (pr-str r)))
+    (is (= ["(seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))"
+            "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]
+           (:value branch)) "each recorded with its own exact text, not the do's")))
+
 (deftest a-value-that-is-no-data-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
   ;; carries the text, never the live value (which no wire encodes)
@@ -491,6 +508,16 @@
       (is (= :invalid-contract (:seon.repl/finding f)) (pr-str r5))
       (is (= 'seon.repl-test.warned/bad-n (:var f)) "naming the definition whose contract could not be armed"))))
 
+(defn- with-result-ns
+  "Run f, then leave the namespace result as it was before: the vars f interned are unmapped and the
+  ones it replaced or evicted are interned again (other tests read handles a process earlier made)."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f]
+  (let [rns (create-ns 'result) before (into {} (map (fn [[s v]] [s (var-get v)])) (ns-interns rns))]
+    (try (f)
+         (finally (doseq [s (keys (ns-interns rns))] (ns-unmap rns s))
+                  (doseq [[s v] before] (intern rns s v))))))
+
 (defn- retained-bytes
   "The bytes of evaluation values an agent holds live: the chars of every string a held response's
   :value is, in its state's :results and in the vars of the namespace result (the two places that
@@ -499,7 +526,7 @@
   []
   (let [size (fn [r] (let [v (:value r)] (if (string? v) (count v) 0)))
         in-state (reduce + (map size (vals (:results @agent/state))))
-        in-vars (reduce + (map #(size (var-get %)) (vals (ns-interns (the-ns 'result)))))]
+        in-vars (reduce + (map #(size (var-get %)) (vals (ns-interns (create-ns 'result)))))]
     (+ in-state in-vars)))
 
 (deftest an-agents-held-results-are-bounded-by-the-window-not-by-its-evals
@@ -512,11 +539,11 @@
         held (fn [n] (reset! agent/state {:n 0 :ns (the-ns 'user)})
                (doseq [_ (range n)] (repl/eval-string (str "(apply str (repeat " mb " \\x))") {}))
                (retained-bytes))]
-    (try (let [at-w (held w) at-100 (held 100)]
-           (is (= (* 2 w mb) at-w) "up to the window every value is held (once in :results, once as its var)")
-           (is (= at-w at-100) "past it, 100 evals hold what 16 did"))
-         (finally (reset! agent/state old)
-                  (doseq [s (keys (ns-interns (the-ns 'result)))] (ns-unmap (the-ns 'result) s))))))
+    (try (with-result-ns
+           #(let [at-w (held w) at-100 (held 100)]
+              (is (= (* 2 w mb) at-w) "up to the window every value is held (once in :results, once as its var)")
+              (is (= at-w at-100) "past it, 100 evals hold what 16 did")))
+         (finally (reset! agent/state old)))))
 
 (deftest a-recent-result-reads-and-an-evicted-one-answers-why
   ;; the newest window of result/e<n> read as a REPL's would; one let go answers the typed
@@ -524,7 +551,8 @@
   (let [old @agent/state
         w (cfg/value :seon.config.agent/result-window)]
     (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (let [rs (mapv #(repl/eval-string (str "(* 2 " % ")") {}) (range (+ w 3)))
+         (with-result-ns
+          (fn [] (let [rs (mapv #(repl/eval-string (str "(* 2 " % ")") {}) (range (+ w 3)))
                h (fn [r] (symbol (name (:handle r))))]
            (is (= (* 2 (+ w 2)) (:value @(resolve (:handle (peek rs))))) "the newest reads through its var")
            (is (= 6 (:value (get-in @agent/state [:results (keyword (name (:handle (nth rs 3))))]))) "the oldest held is the window's first")
@@ -532,5 +560,5 @@
            (is (= (:value (nth rs 5)) (:value (my.agent/$ (keyword (name (:handle (nth rs 5))))))) "$ reads a live one")
            (let [e (my.agent/$ (keyword (name (:handle (first rs)))))]
              (is (= :seon.repl/result-evicted (:seon.error/type e)) "an evicted one is an explicit error value")
-             (is (= (keyword (name (:handle (first rs)))) (:handle e)))))
+             (is (= (keyword (name (:handle (first rs)))) (:handle e)))))))
          (finally (reset! agent/state old)))))

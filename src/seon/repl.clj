@@ -78,12 +78,28 @@
     (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
     ns))
 
-(defn- do-body
-  "The text inside a top-level do form's own text src, after its do: what Clojure's compiler
-  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it),
-  each with its own budget of ticks, as each top-level form has. See docs/prompt.md."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [src] (subs src (count (re-find #"^\(\s*do\s" src)) (dec (count src))))
+(defn- do-parts
+  "The inner forms of a top-level form written as (do ...), each as [text lead]: its exact text and the
+  ; comments its writer put before it, taken from the reader's positions in src (the form's own
+  text, which the reader gave it; an inner form read again in ns, as the form was, stops where
+  the reader stops). What Clojure's compiler evaluates as top-level forms when the form it evaluates
+  is (do ...) (Compiler.eval unrolls it), each with its own budget of ticks, as each top-level form
+  has. A form that only expands to do (a reader macro) is no written do: its text does not open
+  with ( and the token do. Nil for any form but a written do with a body. See docs/prompt.md."
+  {:malli/schema [:=> [:cat :any [:maybe :string] :seon.host/namespace] [:maybe [:vector [:tuple :string [:maybe :string]]]]]}
+  [form src ns]
+  (when (and (seq? form) (= 'do (first form)) (next form) src (= \( (.charAt ^String src 0)))
+    (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. src))
+          starts (reader/line-starts src)
+          pos #(+ (starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))]
+      (.read r)
+      (when (= 'do (binding [*ns* ns] (read {:eof ::eof} r)))
+        (loop [prev (pos) k (count (next form)) acc []]
+          (if (zero? k)
+            acc
+            (let [_ (binding [*ns* ns] (read {:eof ::eof} r))
+                  end (pos)]
+              (recur end (dec k) (conj acc [(subs src (reader/lead-end src prev end) end) (reader/lead src prev end)])))))))))
 
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
@@ -102,6 +118,36 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
+        ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
+        ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
+        ;; before the do leading the first of them
+        exec! (fn exec! [form src lead ns top]
+                (if-let [parts (do-parts form src ns)]
+                  (loop [ns ns forms (next form) [[t l] & more] parts lead lead]
+                    (let [[ns' how] (exec! (first forms) t (not-empty (apply str (interpose "\n" (keep identity [lead l])))) ns top)]
+                      (if (and (= :ok how) more) (recur ns' (next forms) more nil) [ns' how])))
+                 (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
+                       out (java.io.StringWriter.)
+                       err (java.io.StringWriter.)
+                       ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
+                       ;; *test-out*, bound to the form's output as nREPL does
+                       {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
+                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
+                                                (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
+                                              (catch Throwable e [:err e ns (outer-frames)]))
+                       ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
+                       common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
+                                       :repl/src src :top top}
+                                lead (assoc :lead lead))]
+                   (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
+                   (when (= tag :ret) (keep-source! v (:repl/src common)))
+                   (if (= tag :ret)
+                     (do (reply (merge common {:repl/value v :tag :ret}))
+                         [(equip-ns! ns') :ok])
+                     (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
+                                                        "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                                 (assoc m :repl/ex (error-data v m))))
+                         [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
         ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
         forms! (fn forms! [code ns top]
@@ -124,35 +170,9 @@
                                    (assoc m :repl/ex (error-data form m))))
                            [ns :read])
 
-                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
-                         ;; the comments before the do leading the first of them
-                         (and (seq? form) (= 'do (first form)) (next form) src (re-find #"^\(\s*do\s" src))
-                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns (or top k))]
-                           (if (= :eof how) (recur ns' end (inc k)) [ns' how]))
-
                          :else
-                         (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
-                               out (java.io.StringWriter.)
-                               err (java.io.StringWriter.)
-                               ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
-                               ;; *test-out*, bound to the form's output as nREPL does
-                               {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                               [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
-                                                        (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
-                                                      (catch Throwable e [:err e ns (outer-frames)]))
-                               ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
-                               common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
-                                               :repl/src src :top (or top k)}
-                                        lead (assoc :lead lead))]
-                           (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
-                           (when (= tag :ret) (keep-source! v (:repl/src common)))
-                           (if (= tag :ret)
-                             (do (reply (merge common {:repl/value v :tag :ret}))
-                                 (recur (equip-ns! ns') end (inc k)))
-                             (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
-                                                                "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
-                                         (assoc m :repl/ex (error-data v m))))
-                                 [ns :err]))))))))
+                         (let [[ns' how] (exec! form src lead ns (or top k))]
+                           (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
