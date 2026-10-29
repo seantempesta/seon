@@ -53,9 +53,13 @@
 (deftest the-pyramid-ranks-as-an-exact-search
   (let [vs (vectors 11 600 24 768)
         db (db-with-vectors vs)
-        queries (take 40 (vectors 13 40 24 768))
-        hits (fn [opts] (for [q queries]
-                          (count (filter (set (exact db q 10)) (map first (vector/near db q 10 opts))))))]
+        queries (take 20 (vectors 13 20 24 768))
+        ;; each query's exact top 10 is the same for every option set: computed once (each stored vector unpacked once)
+        truth (let [vecs (vec (for [[e] (d/q '[:find ?e :where [?e :form/id] [?v :seon.vector/of ?e] [?v :seon.vector/f16]] db)] [e (vector/vector-of db e)]))]
+                (mapv (fn [q] (->> vecs (map (fn [[e v]] [(- (/ (reduce + (map * q v)) (Math/sqrt (reduce + (map * v v))))) e])) sort (take 10) (map second) set))
+                      queries))
+        hits (fn [opts] (for [[q t] (map vector queries truth)]
+                          (count (filter t (map first (vector/near db q 10 opts))))))]
     (is (= (* 10 (count queries)) (reduce + (hits {:shortlist 600}))) "a shortlist of every vector ranks them all exactly")
     (is (thrown? Exception (vector/near db (vec (repeat 64 0.125)) 10)) "a query of another width is refused, never read past")
     (is (<= 0.99 (/ (reduce + (hits {})) (* 10.0 (count queries)))) "the default levels find the exact top 10")

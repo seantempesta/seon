@@ -15,6 +15,9 @@
                            :cancelled "cancelled: no task file declares it any more"}}
                    :running :blocked :open :failed :held :done :merged :cancelled]
  :seon.task/config [:map {:closed true} [:seon.config.agent/max-turns {:optional true} :seon.config.agent/max-turns]
+                    ;; the model that answers its turns: a test's scripted reply or no provider (docs/config.md#the-resolver), read by seon.config/provider-at
+                    [:seon.config.ai/provider {:optional true} :seon.config.ai/provider]
+                    [:seon.config.ai/script {:optional true} :seon.config.ai/script]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the functions near its plan its task data lists (seon.context/similar: off by default, on to measure it)
