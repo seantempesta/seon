@@ -46,11 +46,26 @@
     (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
       (:message r) (assoc :message (:message r)))))
 
+(defn failures
+  "A test's failing assertions as the agent reads them (`failure`), those that got the same value
+  with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
+  assertions that each threw one NullPointerException are one cause, read once (the md-scan bench,
+  2026-10-29). See docs/agent.md#what-you-read."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
+  [fs]
+  (let [ms (mapv failure fs)
+        k (juxt :got :message)
+        order (distinct (map k ms))
+        by (group-by k ms)]
+    (vec (for [g order :let [[m :as same] (by g)]]
+           (if (next same) (-> m (dissoc :assert) (assoc :asserts (mapv :assert same))) m)))))
+
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
   the compiler's resolved references), each at summary level from its own facts on db: its
-  contract and doc, never its body; a var is program when db holds it (a branch's callee
-  this process never loaded included)."
+  contract and doc, and for a helper of p's own namespace its source too (what the proof means:
+  the md-scan bench's agent read its proofs' block-of first, 2026-10-29); a var is program when db
+  holds it (a branch's callee this process never loaded included)."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
@@ -58,7 +73,8 @@
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
            (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
-           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})))))
+           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})
+           (= (namespace p) (namespace q)) (merge (some->> (docs/source-of db q) print/code (hash-map :source)))))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
@@ -80,7 +96,7 @@
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
-                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
+                                          (assoc :failures (failures (filter #(= symbol (:test %)) reds)))
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
                                           (and (= :stray-red reason) (defined? symbol))
                                           (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
@@ -859,7 +875,7 @@
                                       calls (when (and src (not= :pass st)) (callees db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
-                              (seq fs) (assoc :failures (mapv failure fs))
+                              (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq (refused reasons reds defined?)) (assoc :refused (refused reasons reds defined?))
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})

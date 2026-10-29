@@ -62,6 +62,11 @@
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
+(def ^:private repl-helpers
+  "The clojure.repl names an agent's REPL keeps in every namespace it moves to (`equip-ns!`), and
+  warns of when the namespace's own var hides one (`shadowed`)."
+  '[source apropos dir pst doc find-doc])
+
 (defn- equip-ns!
   "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
   agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
@@ -74,18 +79,18 @@
   {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
   [ns]
   (let [held (ns-publics (find-ns 'clojure.repl))
-        free (vec (for [s '[source apropos dir pst doc find-doc] :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
+        free (vec (for [s repl-helpers :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
     (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
     ns))
 
 (defn- shadowed
-  "The REPL helpers (`equip-ns!`'s names) namespace ns holds a var of its own for, {name its-var}:
+  "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
   error four times, 2026-10-29). nil when none."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
-  (not-empty (into {} (for [s '[source apropos dir pst doc find-doc]
+  (not-empty (into {} (for [s repl-helpers
                             :let [v (ns-resolve ns s)]
                             :when (and (var? v) (not= 'clojure.repl (ns-name (:ns (meta v)))))]
                         [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))

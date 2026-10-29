@@ -6,12 +6,7 @@
                    ;; a nested value's own render: (fn [v] {:text :html}) for a value whose schema
                    ;; declares one, or (fn [v] {:value x}) for one whose schema declares a summary
                    ;; (x printed here, as any value), else nil; the printer shows it in that value's place
-                   [:render {:optional true} [:maybe :seon.host/fn]]
-                   ;; values already shown in earlier responses, each with the form that reads it
-                   ;; again ((:value result/e4)): strings by text, collections by identity (their
-                   ;; identity hash to [[value form]]); such a value nested in the printed one prints as that form
-                   [:seen {:optional true} [:maybe [:map [:strings {:optional true} [:map-of :string :any]]
-                                                        [:colls {:optional true} [:map-of :int [:vector [:tuple :any :any]]]]]]]]
+                   [:render {:optional true} [:maybe :seon.host/fn]]]
  :seon.print/answer [:map [:text :string] [:tokens nat-int?] [:truncated? :boolean] [:elisions nat-int?]
                      [:html {:optional true} :seon.print/hiccup]]
  ;; printed, or the budget refused the value's first part (an error map)

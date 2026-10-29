@@ -915,11 +915,12 @@
         [:li {:class "flex flex-col gap-0.5"}
          [:div {:class "flex gap-2"} (verdict-badge status) [:code {:class "text-text-100"} (str test)]
           (when-not (#{:pass :fail :error} status) [:span {:class "text-text-500"} (kname status)])]
-         (for [{a :assert g :got m :message} failures]
+         ;; several assertions that got the same value are one entry (seon.context/failures)
+         (for [{a :assert as :asserts g :got m :message} failures]
            [:div {:class "ml-5 grid grid-cols-[3.5rem_minmax(0,1fr)] gap-x-2 text-xs"}
             (when m [:span {:class "col-span-2 text-text-300"} m])
-            [:span {:class "text-text-500"} "assert"] (value a)
-            [:span {:class "text-text-500"} "got"] (value g)])])]
+            (for [a (or as [a])] (list [:span {:class "text-text-500"} "assert"] (value a)))
+            [:span {:class "text-text-500"} (if as (str "each got") "got")] (value g)])])]
      (when test-run [:p {:class "text-error"} (str "the test run failed: " (str/join "; " (:failed test-run)))])
      (when (seq refused)
        [:div {:class "flex flex-col gap-1"}

@@ -55,22 +55,12 @@
                 (or (str/starts-with? (str n) "def")
                     (and (= 'clojure.core (ns-name s)) (contains? env-forms n))))))))))
 
-(defn edn-value?
-  "Is v plain data that EDN prints and reads back equal: nil, booleans, numbers, strings,
-  keywords, symbols, and lists, vectors, maps and sets of them."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [v]
-  (boolean (cond (record? v) false
-                 (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)) true
-                 (map? v) (every? (fn [[k x]] (and (edn-value? k) (edn-value? x))) v)
-                 (coll? v) (every? edn-value? v)
-                 :else false)))
-
 (defn non-edn
-  "The first value in v that is no EDN (`edn-value?`), depth first, as [path value] (path the keys
-  and indices that reach it, a set member by its place in the set's seq), or nil when v is EDN: what
-  a refusal names, so its reader fixes that value (a predicate written unquoted, nat-int?, is a
-  function value, its symbol 'nat-int? the data)."
+  "The first value in v that is no EDN, depth first, as [path value] (path the keys and indices that
+  reach it, a set member by its place in the set's seq), or nil when v is plain data that EDN prints
+  and reads back equal (nil, booleans, numbers, strings, keywords, symbols, and lists, vectors, maps
+  and sets of them): what a refusal names, so its reader fixes that value (a predicate written
+  unquoted, nat-int?, is a function value, its symbol 'nat-int? the data)."
   {:malli/schema [:=> [:cat :any] [:maybe [:tuple [:vector :any] :any]]]}
   [v]
   (letfn [(walk [path x]
@@ -80,6 +70,11 @@
                   (coll? x) (some (fn [[i y]] (walk (conj path i) y)) (map-indexed vector x))
                   :else [path x]))]
     (walk [] v)))
+
+(defn edn-value?
+  "Is v plain data that EDN prints and reads back equal (`non-edn` finds none in it)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v] (nil? (non-edn v)))
 
 ;; ---- the compiler's account of one form ------------------------------------------------
 
