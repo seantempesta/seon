@@ -316,7 +316,7 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  {:rid 1 :pending {} :watch #{:root :a3} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch :branch :task-demo-f}}
+  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -392,7 +392,7 @@
   (let [[main branch eid] (paged-dbs)
         st (root-state (proc-state main branch) main)
         root (#'p/page-value st :root)
-        agent (#'p/page-value st :a3)
+        agent (#'p/page-value st [:chat :a3])
         in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
@@ -416,17 +416,17 @@
     (testing "a location naming no entity is that error, never an empty page; a branch that could not be read is shown as its error"
       (is (= :seon.render/no-location (:seon.error/type (#'p/page-value st 99999999))))
       (let [err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
-            l (#'p/page-value (-> st (update-in [:branches :a3] dissoc :db) (assoc-in [:branches :a3 :error] err)) :a3)]
+            l (#'p/page-value (-> st (update-in [:branches [:chat :a3]] dissoc :db) (assoc-in [:branches [:chat :a3] :error] err)) [:chat :a3])]
         (is (some #(str/includes? (str (:html %)) "no branch :task-demo-f") (:seon.render/units l)) "its error, by the error's render")
         (is (empty? (in l "#c-rows")) "no branch read: none of its rows")))
     (testing "an agent of an earlier boot is not live (root's boot is its entity's on main): its id names no process of this one"
       (let [st2 (assoc st :main-db (d/db-with (:main-db st) [{:seon.root/id :root :seon.root/boot "b2"}]))]
         (is (false? (:live? (:input (input (#'p/page-value st2 eid))))))
-        (let [e (#'p/page-value st2 :a3)]
+        (let [e (#'p/page-value st2 [:chat :a3])]
           (is (= :seon.render/no-location (:seon.error/type e)) "and its id in this boot names no entity: the page says so, never nothing")
           (is (str/includes? (:seon.error/message e) "no agent a3 in root's boot b2"))
           (testing "the pass answers it as that page"
-            (is (str/includes? (p/view-html (first (#'p/pass-view st2 :a3)) :a3) "no agent a3 in root's boot b2"))))))
+            (is (str/includes? (p/view-html (first (#'p/pass-view st2 [:chat :a3])) [:chat :a3]) "no agent a3 in root's boot b2"))))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
@@ -450,16 +450,16 @@
   ;; d/with-reads and the proc indexes its reads by key, so a transaction finds the pages it
   ;; touched by its datoms' keys (seon.render.proc/touched), never by walking them
   (let [[main branch eid] (paged-dbs)
-        [st _] (#'p/pass-view (proc-state main branch) :a3)
+        [st _] (#'p/pass-view (proc-state main branch) [:chat :a3])
         e1 (:db/id (d/entity branch [:seon.eval/id "e1"]))
         touched (fn [db tx-data] (#'p/touched st (:tx-data (d/with db tx-data))))
         ;; an entity of main the page did not read, a form of the example program (ids from separate
         ;; speculative d/with calls can repeat in a test; on a store they are issued once); not a
         ;; namespace: related reads every namespace's file (seon.program/program-nss)
-        unread (first (remove #(contains? (get-in st [:views :a3 :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :form/id]] main)))]
+        unread (first (remove #(contains? (get-in st [:views [:chat :a3] :reads]) [:e %]) (d/q '[:find [?e ...] :where [?e :form/id]] main)))]
     (is (some? unread) "a form the page did not read")
-    (is (seq (get-in st [:views :a3 :reads])) "the page holds what it read")
-    (is (= #{:a3} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
+    (is (seq (get-in st [:views [:chat :a3] :reads])) "the page holds what it read")
+    (is (= #{[:chat :a3]} (touched main [{:db/id eid :seon.agent/status :idle}])) "the agent's own datom")
     (is (empty? (touched branch [{:db/id e1 :seon.eval/by "user"}]))
         "a branch's entity is drawn outside the read set: a move of the branch marks the page when root reads it (take-read; a-new-evaluation-is-one-append)")
     (is (empty? (touched main [[:db/retractEntity unread]])) "an entity the page did not read")))
@@ -479,17 +479,17 @@
                                   (first (#'p/render-proc st :main {:t (:max-tx (:db-after r)) :prev prev :commit (d/commit-id @conn)
                                                                     :ops (mapv (fn [d] [(if (:added d) :db/add :db/retract) (:e d) (:a d) (:v d)]) (:tx-data r))}))))]
     (is (= 2 (walked st)) "the first pass walks each watched page")
-    (let [unread (first (remove #(some (fn [v] (contains? (get-in st [:views v :reads]) [:e %])) [:root :a3]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
+    (let [unread (first (remove #(some (fn [v] (contains? (get-in st [:views v :reads]) [:e %])) [:root [:chat :a3]]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
           ;; a commit's datoms as the writer reports them, on an entity of main the page did not read
           st' (first (#'p/render-proc st :main {:t (:max-tx main) :prev (dec (:max-tx main)) :commit (d/commit-id main) :ops [[:db/add unread :ns/name 'unrelated.ns]]}))]
       (is (= (walked st) (walked st')) "a commit on an entity no page read walks nothing")
       (is (empty? (:last-walked st'))))
     (let [st' (commit st [{:db/id eid :seon.agent/status :idle}])]
-      (is (= #{:root :a3} (set (:last-walked st'))) "a commit on the agent walks its page, and root's, which lists it"))
+      (is (= #{:root [:chat :a3]} (set (:last-walked st'))) "a commit on the agent walks its page, and root's, which lists it"))
     (testing "a view no tab watches leaves the index: no commit names it again"
       (let [[st' _] (#'p/render-proc st :from-web {:op :views :views #{:root} :tabs 1})]
         (is (empty? (#'p/touched st' [{:e eid :a :seon.agent/status :v :idle}])) "root's page reads no datom: its walk marks it")
-        (is (not (some (fn [[_ vs]] (contains? vs :a3)) (:read-index st'))))))
+        (is (not (some (fn [[_ vs]] (contains? vs [:chat :a3])) (:read-index st'))))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (deftest a-branch-commit-touches-its-page-by-its-datoms-diff
@@ -502,8 +502,8 @@
         k (seon.task/agent-key "b1" :a3)
         branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
         answer (fn [st db] (#'p/answered (assoc-in st [:pending 9] [:branch :task-demo-f]) o [:branch :task-demo-f] {:db db}))]
-    (is (not (some #{:a3} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
-    (is (some #{:a3} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
+    (is (not (some #{[:chat :a3]} (:last-walked (answer st branch)))) "the same branch db: nothing moved, nothing walked")
+    (is (some #{[:chat :a3]} (:last-walked (answer st branch'))) "a new evaluation on it: the page walks")))
 
 (deftest a-new-evaluation-is-one-append
   ;; an agent's commit on its branch: what moved (the datoms-diff) touches the list, and the new
@@ -511,12 +511,12 @@
   (let [[main branch _] (paged-dbs)
         o (volatile! {})
         ;; one tab, on a3's page
-        st (assoc (branch-state main branch) :watch #{:a3})
-        [st1 _] (#'p/pass-view st :a3)
+        st (assoc (branch-state main branch) :watch #{[:chat :a3]})
+        [st1 _] (#'p/pass-view st [:chat :a3])
         k (seon.task/agent-key "b1" :a3)
         branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
         st2 (#'p/answered st1 o [:branch :task-demo-f] {:db branch'})
-        patch (first (filter #(and (= :patch (:op %)) (= :a3 (:view %))) (:to-web @o)))]
+        patch (first (filter #(and (= :patch (:op %)) (= [:chat :a3] (:view %))) (:to-web @o)))]
     (is (empty? (:frags patch)) "no held part changed")
     (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends patch) (:afters patch))))) "one part, the new eval")
     (is (= 1 (count (concat (:appends patch) (:afters patch) (:prepends patch)))) "and nothing else sent")))
@@ -526,14 +526,14 @@
   ;; branch is rendered again, so a change made while it could not be read is shown
   (let [[main branch _] (paged-dbs)
         o (volatile! {})
-        st (assoc (branch-state main branch) :watch #{:a3})
-        [st1 _] (#'p/pass-view st :a3)
+        st (assoc (branch-state main branch) :watch #{[:chat :a3]})
+        [st1 _] (#'p/pass-view st [:chat :a3])
         err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
         st2 (#'p/answered st1 o [:branch :task-demo-f] err)
-        branch' (d/db-with branch [{:seon.model-call/id "demo/f#1/0" :seon.model-call/tokens 4321}])
+        branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
         st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
-    (is (not (str/includes? (p/view-html st1 :a3) "4,321 tokens")))
-    (is (str/includes? (p/view-html st3 :a3) "4,321 tokens") "the turn's tokens, written while its branch was unread")))
+    (is (not (str/includes? (p/view-html st1 [:chat :a3]) "result/e4")))
+    (is (str/includes? (p/view-html st3 [:chat :a3]) "result/e4") "the eval, written while its branch was unread")))
 
 (deftest the-agent-page-is-its-conversation
   ;; task seon.render/a-page-is-its-entitys-view (4b; design section 5): an agent's page is its
@@ -541,11 +541,11 @@
   ;; a message; the input under it
   (let [[main branch _] (paged-dbs)
         st (branch-state main branch)
-        [st1 _] (#'p/pass-view st :a3)
-        html (p/view-html st1 :a3)
+        [st1 _] (#'p/pass-view st [:chat :a3])
+        html (p/view-html st1 [:chat :a3])
         at #(str/index-of html %)]
     ;; the fixture writes the turn after its evals (seon.turn writes it as its request goes, before them)
-    (is (< (at "check g") (at "f doubles?") (at "turn 1 of 8") (at "result/e3")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
+    (is (< (at "check g") (at "f doubles?") (at "it doubles") (at "result/e3")) "in the order written: the message, an eval's prose, the turn, the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
@@ -555,30 +555,30 @@
   ;; each unit of a page is drawn only when its input changes (seon.render.proc/step-units): a commit on
   ;; the agent moves its head's input alone
   (let [[main branch _] (paged-dbs)
-        [st1 _] (#'p/pass-view (branch-state main branch) :a3)
+        [st1 _] (#'p/pass-view (branch-state main branch) [:chat :a3])
         made #(get-in % [:counts :rendered] 0)
         r (d/with main (seon.task/agent-tx "b1" :a3 {:status :idle}))
-        [st2 patch] (#'p/pass-view (assoc st1 :main-db (:db-after r)) :a3)]
+        [st2 patch] (#'p/pass-view (assoc st1 :main-db (:db-after r)) [:chat :a3])]
     (is (= 1 (- (made st2) (made st1))) "the head rendered again, nothing else")
     (is (= #{"p-agent-head"} (set (map first (:frags patch)))) "its fragment sent")
     (is (empty? (:prepends patch)))
     (testing "a pass with nothing touched renders nothing"
-      (is (= (made st2) (made (first (#'p/pass-view st2 :a3))))))))
+      (is (= (made st2) (made (first (#'p/pass-view st2 [:chat :a3]))))))))
 
 (deftest the-sidebar-is-roots-agents
   ;; the agents list is root's ctx, drawn by root's walk: root, then root's agents, each its own component,
   ;; the same on every page
   (let [[main branch _] (paged-dbs)
         st (root-state (branch-state main branch) main)
-        [st1 _] (#'p/pass-view st :a3)
-        side (fn [st] (filter #(= "#c-side" (:container %)) (vals (get-in st [:views :a3 :units]))))]
+        [st1 _] (#'p/pass-view st [:chat :a3])
+        side (fn [st] (filter #(= "#c-side" (:container %)) (vals (get-in st [:views [:chat :a3] :units]))))]
     (is (= 2 (count (side st1))) "root, and its one agent, a3")
-    (is (str/includes? (p/view-html st1 :a3) "href=\"/\"") "root's line links to its page")
-    (is (str/includes? (p/view-html st1 :a3) "href=\"/agent/a3\"") "a link to its page")
+    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/\"") "root's line links to its page")
+    (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/a3\"") "a link to its page")
     (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
       (let [main' (d/db-with (:main-db st1) (seon.task/agent-tx "b1" :a4 {:status :busy}))
             st2 (#'p/advance-main st1 main')
-            [st3 patch] (#'p/pass-view st2 :a3)]
+            [st3 patch] (#'p/pass-view st2 [:chat :a3])]
         (is (= 3 (count (side st3))))
         (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (concat (:appends patch) (:afters patch) (:prepends patch))) "its line is sent")
         (is (not-any? #(str/includes? (second %) "href=\"/agent/a3\"") (:frags patch)) "a3's line is not sent again")))
@@ -615,11 +615,11 @@
 (deftest a-units-change-rerenders-that-unit
   (let [[main branch _] (paged-dbs)
         st (proc-state main branch)
-        pass (fn [st] (#'p/pass-view st :a3))
+        pass (fn [st] (#'p/pass-view st [:chat :a3]))
         patch-ids (fn [patch] {:frags (set (map first (:frags patch))) :prepends (:prepends patch) :appends (mapv first (:appends patch)) :removes (:removes patch)})
         [st1 p1] (pass st)]
     (testing "the first pass renders every unit; a second with nothing changed renders and sends nothing"
-      (is (= (count (:seon.render/units (#'p/page-value st :a3))) (get-in st1 [:counts :rendered])))
+      (is (= (count (:seon.render/units (#'p/page-value st [:chat :a3]))) (get-in st1 [:counts :rendered])))
       (let [[st2 p2] (pass st1)]
         (is (nil? p2))
         (is (= (get-in st1 [:counts :rendered]) (get-in st2 [:counts :rendered])))))
@@ -631,7 +631,7 @@
     (testing "a new evaluation on its branch: one new row, prepended above the rows the page holds; the others untouched"
       (let [k (seon.task/agent-key "b1" :a3)
             branch' (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(h)" :response {:handle 'result/e4 :value 1}}))
-            [_ p] (pass (assoc-in st1 [:branches :a3 :db] branch'))]
+            [_ p] (pass (assoc-in st1 [:branches [:chat :a3] :db] branch'))]
         (is (empty? (:frags p)) "no held unit changed its input")
         (is (= 1 (count (filter #(str/includes? (second %) "result/e4") (concat (:appends p) (:afters p))))) "one part, placed after the one before it")))
     (testing "a page asked for before main is read waits for its first render, never answered empty"
@@ -649,25 +649,25 @@
           (r/dispose-walk! (get-in st2 [:root-walk :w]))))
       (testing "an agent's page waits for its branch read too: answered with the rows its branch records"
         (let [o (volatile! {})
-              st1 (#'p/pass (-> st (update :branches dissoc :a3) (assoc :waiting {8 :a3})) o)]
+              st1 (#'p/pass (-> st (update :branches dissoc [:chat :a3]) (assoc :waiting {8 [:chat :a3]})) o)]
           (is (empty? (filter #(= :page (:op %)) (:to-web @o))))
           (let [o (volatile! {})
-                st2 (#'p/pass (assoc-in st1 [:branches :a3 :db] branch) o)
+                st2 (#'p/pass (assoc-in st1 [:branches [:chat :a3] :db] branch) o)
                 page (first (filter #(= :page (:op %)) (:to-web @o)))]
             (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
             (is (str/includes? (:html page) "its process has not answered yet") "and it says so")
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")
             (let [o (volatile! {})
                   st3 (#'p/answered st2 o [:parts :a3] (drawn-parts branch))]
-              (is (not (str/includes? (p/view-html st3 :a3) "has not answered yet")) "its own parts replace them")
+              (is (not (str/includes? (p/view-html st3 [:chat :a3]) "has not answered yet")) "its own parts replace them")
               (is (some #(= "p-caption" (first %)) (mapcat :frags (filter #(= :patch (:op %)) (:to-web @o))))
                   "and the open tab is sent the line that said whose drawing it was"))))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
-      (let [[st2 _] (#'p/render-proc (assoc st1 :shown {:a3 21}) :from-web {:op :views :views #{:root} :tabs 1})]
-        (is (nil? (get-in st2 [:views :a3])))
-        (is (nil? (get-in st2 [:branches :a3])))
-        (is (nil? (get-in st2 [:shown :a3])))
-        (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view :a3}))) "and its end scrolling into view asks for nothing")))))
+      (let [[st2 _] (#'p/render-proc (assoc st1 :shown {[:chat :a3] 21}) :from-web {:op :views :views #{:root} :tabs 1})]
+        (is (nil? (get-in st2 [:views [:chat :a3]])))
+        (is (nil? (get-in st2 [:branches [:chat :a3]])))
+        (is (nil? (get-in st2 [:shown [:chat :a3]])))
+        (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view [:chat :a3]}))) "and its end scrolling into view asks for nothing")))))
 
 (defn- debug-state
   "The render proc's state holding agent a1's debug page: context-test's two model turns (each
@@ -883,10 +883,10 @@
                       :seon.model-call/sent [[:no-such-part "x"]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}]])
         debug [:debug :a1]
         o (volatile! {})
-        st {:rid 1 :pending {} :watch #{debug :a1} :waiting {1 debug 2 :a1} :kf-wanted #{} :new-events [] :events [] :views {}
+        st {:rid 1 :pending {} :watch #{debug [:chat :a1]} :waiting {1 debug 2 [:chat :a1]} :kf-wanted #{} :new-events [] :events [] :views {}
             ;; a1's process ended: root draws its page from its branch, in the same pass
             :main-db db :view {:agents {:a1 {:status :ended}}}
-            :branches {debug {:db db :read [:task-x]} :a1 {:db db :read [:task-x]}}}
+            :branches {debug {:db db :read [:task-x]} [:chat :a1] {:db db :read [:task-x]}}}
         st' (#'p/pass st o)
         pages (into {} (for [m (:to-web @o) :when (= :page (:op m))] [(:k m) (:html m)]))]
     (is (= #{1 2} (set (keys pages))) "both pages are answered: neither waits on the other's render")
@@ -988,6 +988,31 @@
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
+
+(deftest the-proofs-part-renders-the-recorded-status
+  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the task part of the one layout shows each
+  ;; proof's status, the digest it was judged at and (while red) its first failure from @ctx, where the
+  ;; agent's run recorded them on the proof's var entity; nothing is run or read from the cache to draw it
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        draw #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
+                              (requiring-resolve (r/declared :seon.render/render-ctx)))]
+                (try (:html (unit-of (r/placed-units w) "task-data-")) (finally (r/dispose-walk! w))))
+        written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
+                                   {:var/name 'demo/f-test :var/kind :test :var/form "f"}])
+        red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
+                                 :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"}])
+        green (d/db-with red [[:db/retract [:var/name 'demo/f-test] :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"]
+                              {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
+    (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
+    (let [h (draw red)]
+      (is (str/includes? h ":red") (str "the recorded status: " h))
+      (is (str/includes? h "it doubles") "and its first failure")
+      (is (str/includes? h "digest-1") "and the digest it was judged at")
+      (is (str/includes? h "done-when") "marked: done when green"))
+    (let [h (draw green)]
+      (is (str/includes? h ":green"))
+      (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-shows-what-an-outside-read-observed
   ;; task seon.render/the-status-before-any-model-turn: an outside read (seon.turn/context-block,
@@ -1093,9 +1118,9 @@
   (let [[main branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
         main (d/db-with main [{:seon.agent/key k :seon.agent/opened #{"e1"}}])
-        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
+        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) [:chat :a3])
         e1 (str "eval-item-" (seon.db/eid branch :seon.eval/id "e1"))
-        html (get-in st [:views :a3 :units e1 :html])]
+        html (get-in st [:views [:chat :a3] :units e1 :html])]
     (is (re-find #"<details[^>]* open" html) (str "drawn open: " html))))
 
 (deftest a-new-member-is-an-append
@@ -1104,14 +1129,16 @@
   (let [[main branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
         o (volatile! {})
-        st (#'p/answered (first (#'p/pass-view (proc-state main branch) :a3)) o [:parts :a3] (drawn-parts branch))
+        st (#'p/answered (first (#'p/pass-view (proc-state main branch) [:chat :a3])) o [:parts :a3] (drawn-parts branch))
         branch2 (d/db-with branch (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e4" "a3" {:code "(f 4)" :response {:handle 'result/e4 :value 8}}))
         o2 (volatile! {})
         _ (#'p/answered st o2 [:parts :a3] (drawn-parts branch2))
         patch (first (filter #(= :patch (:op %)) (:to-web @o2)))
         e4 (str "eval-item-" (seon.db/eid branch2 :seon.eval/id "e4"))]
-    (is (= [["#c-rows" e4]] (mapv (fn [[sel html]] [sel (second (re-find #"id=\"([^\"]+)\"" html))]) (:appends patch)))
-        "the new eval, appended to the conversation")
+    ;; the run's end line (chat-end) closes the conversation, so a new row is placed before it, after the row it follows
+    (is (= [e4] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) (:afters patch)))
+        "the new eval, placed in the conversation before its end line")
+    (is (empty? (:appends patch)) "nothing else appended")
     (is (empty? (:frags patch)) "nothing else of the page sent")))
 
 (deftest a-handle-links-to-its-eval
@@ -1139,7 +1166,7 @@
   ;; is drawn from its branch and says so
   (let [[main branch _] (paged-dbs)
         o (volatile! {})
-        st (assoc (proc-state main branch) :watch #{:a3} :waiting {5 :a3})
+        st (assoc (proc-state main branch) :watch #{[:chat :a3]} :waiting {5 [:chat :a3]})
         st1 (#'p/pass st o)
         page (first (filter #(= :page (:op %)) (:to-web @o)))]
     (is (= 5 (:k page)) "running: answered in the pass that asked its process")
@@ -1147,12 +1174,12 @@
     (testing "its process ended: root's view says so, its parts are dropped, and the page says it is not running"
       (let [st2 (#'p/answered (assoc-in st1 [:parts :a3 :units] []) (volatile! {}) :state (assoc-in (:view st1) [:agents :a3 :status] :dead))]
         (is (nil? (get-in st2 [:parts :a3])))
-        (is (str/includes? (p/view-html st2 :a3) "its process is not running"))
-        (is (str/includes? (p/view-html st2 :a3) "result/e1") "its parts, drawn by root from its branch")))
+        (is (str/includes? (p/view-html st2 [:chat :a3]) "its process is not running"))
+        (is (str/includes? (p/view-html st2 [:chat :a3]) "result/e1") "its parts, drawn by root from its branch")))
     (testing "its ask answered with why (gone, refused): the page says so"
       (let [gone (seon.contract/error :seon.root/no-agent 'seon.root/request "no live agent :a3" {})
             st2 (#'p/answered st1 (volatile! {}) [:parts :a3] gone)]
-        (is (str/includes? (p/view-html st2 :a3) "its process did not answer (no live agent :a3)"))))))
+        (is (str/includes? (p/view-html st2 [:chat :a3]) "its process did not answer (no live agent :a3)"))))))
 
 (deftest an-agents-run-tile-is-its-ctxs
   ;; the owner, 2026-10-26: "any changes you want updated in the agents context and html should go
@@ -1160,8 +1187,8 @@
   ;; writes reaches the agent's branch by take!; until then the tile shows what the branch holds
   (let [[main branch _] (paged-dbs)
         main (d/db-with main [{:seon.run/id "demo/f#1" :seon.run/status :closed :seon.run/outcome :done}])
-        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
-        tile (some (fn [[id u]] (when (str/starts-with? id "run-head-") (:html u))) (get-in st [:views :a3 :units]))]
+        [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) [:chat :a3])
+        tile (some (fn [[id u]] (when (str/starts-with? id "run-head-") (:html u))) (get-in st [:views [:chat :a3] :units]))]
     ;; the tile is the agent's record's (its status, turn cap and turns taken: seon.agent/the-agent-is-the-unit-not-the-run,
     ;; cut 1); the run's own status and outcome leave the page at cut 2
     (is (some? tile) "the run's tile, from the agent's record")
@@ -1347,8 +1374,41 @@
     (is (str/includes? a3 "href=\"/agent/a3\"") "its page")
     (is (str/includes? (card 2) "no task yet"))))
 
+(deftest the-model-and-the-page-read-the-same-parts
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons (2026-10-29: "build with both the context
+  ;; render and the web ui render in mind so we don't let one get out of sync with the other"): the
+  ;; parts the model's request holds (seon.context/drawn-parts, the #p-task list of render-ctx) are, by
+  ;; element id, the hiccup of the page's units of that id (the page /agent/{name} draws, render-ctx);
+  ;; the conversation beside them holds the reply and the evals
+  (let [[main branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        c (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)
+        model (seon.context/drawn-parts branch c)
+        st (root-state (proc-state main branch) main)
+        page (#'p/page-value st [:chat :a3])
+        units (:seon.render/units page)
+        in (fn [sel] (filterv #(= sel (:container %)) units))
+        w (a3-walk branch)
+        shown (try (apply array-map (mapcat identity (r/placed-hiccup w ["#p-task"]))) (finally (r/dispose-walk! w)))]
+    (is (seq model) "the model reads parts")
+    (is (= (keys model) (map :id (in "#p-task"))) "the page's task list is the model's parts, by id and in order")
+    (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
+    (doseq [u (in "#p-task")] (is (str/includes? (:html u) (str "id=\"" (:id u) "\"")) "and the unit is that part"))
+    (let [conv (apply str (map :html (in "#c-rows")))]
+      (is (str/includes? conv "it doubles") "the chat holds the model's reply")
+      (is (str/includes? conv "(f 2)") "and an eval's line")
+      (is (str/includes? conv "check g") "and a message"))
+    (is (nil? (ns-resolve 'seon.render.ui 'chat-ctx)) "no second layout")
+    (testing "the debug view is @ctx printed as data, not a second layout"
+      (let [d (#'p/page-value st :a3)
+            ds (filterv #(= "d-ctx" (:id %)) (:seon.render/units d))]
+        (is (= 1 (count ds)) "one unit, the agent's record")
+        (is (str/includes? (:html (first ds)) ":evals") "its keys, by the one printer")
+        (is (empty? (filterv #(= "#p-task" (:container %)) (:seon.render/units d))) "none of the page's parts")))
+    (r/dispose-walk! (get-in st [:root-walk :w]))))
+
 (deftest an-agents-chat-reads-as-a-conversation
-  ;; docs/render.md#the-page (owner, 2026-10-28: a chat a person reads): the task opens it, a model turn is a
+  ;; docs/render.md#the-page (owner, 2026-10-28: a chat a person reads): a model turn is a
   ;; bubble of its reply with its thinking folded, a message a bubble with its sender, the agent's status its last line
   ;; (the agent's record holds the task, turns and messages: seon.agent/the-agent-is-the-unit-not-the-run)
   (let [c {:task {:seon.task/id "seon.print/a-long-string" :seon.task/plan "Make `seon.print/text` share its budget."}
@@ -1357,10 +1417,6 @@
                    3 {:seon.turn/n 2 :seon.turn/reply "" :seon.turn/reasoning ""}}
            :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
-    (testing "the task is the opening message, its plan as written"
-      (let [o (h (ui/chat-opening {:seon.ctx/ctx c} 1))]
-        (is (str/includes? o "A long string"))
-        (is (str/includes? o "Make `seon.print/text` share its budget."))))
     (testing "a model turn is its reply, its thinking folded"
       (let [t (h (ui/chat-turn {:seon.ctx/ctx c} 1 2))]
         (is (str/includes? t "I'll **reproduce** it first."))

@@ -71,9 +71,11 @@
   ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded
   :evidence {:perform seon.fx/stall-evidence :workers 1}
   ;; the model provider is only root's: the agents never hold the key
-  ;; the embedding model in process (seon.vector/open: llama.cpp, root only, ggml starts threads); a
-  ;; batch kind: a step embeds every queued request's texts in one call
-  :embed {:perform seon.vector/embed :open seon.vector/open :workers 1 :batch :bind/embed-batch}
+  ;; the embedding model in an exec'd helper (`seon embed-worker`: llama.cpp and Metal, which a fork
+  ;; cannot run and root should not hold): the worker starts it with the first batch of a spell of
+  ;; work and ends it (seon.vector/close) when the queue is empty; a batch kind: a step embeds every
+  ;; queued request's texts in one call. One worker: the idle event goes to one (docs/vector.md#the-model)
+  :embed {:perform seon.vector/embed :open seon.vector/open :close seon.vector/close :workers 1 :batch :bind/embed-batch}
   :model {:perform seon.fx/model :workers :bind/model-workers :ctx {:provider :bind/provider} :rate :bind/model-rate}}
  :conns
  [[[:writer :to-fork-server] [:fork-server :cmd]]

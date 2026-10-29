@@ -825,6 +825,7 @@
                       ;; a test's end: its result, after its reports, and the live heap it left (a
                       ;; collection, then the heap's bytes: what it holds for the tests after it, docs/cost.md#what-a-test-run-measures)
                       (:test x) (do (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" (:test x)) :reports @current :fns (:fns x)
+                                                                      :ms (:ms x) :ticks (:ticks x) :bytes (:bytes x)
                                                                       :heap (do (System/gc) (lib/bytes-in-heap))}))
                                     (swap! reports into @current)
                                     (reset! current []))
@@ -866,7 +867,8 @@
           (:seon.test/ended x) (let [t (:seon.test/ended x)]
                                  (cond-> (-> acc (update :streamed into (:reports x)) (update :ended conj t))
                                    (seq (:fns x)) (assoc-in [:fns (proofs/test-symbol t)] (:fns x))
-                                   (:heap x) (assoc-in [:heap (proofs/test-symbol t)] (:heap x))))
+                                   (:heap x) (assoc-in [:heap (proofs/test-symbol t)] (:heap x))
+                                   (:ms x) (assoc-in [:measured (proofs/test-symbol t)] (select-keys x [:ms :ticks :bytes]))))
           :else acc)))
 
 (defn test-run-answer
@@ -986,7 +988,25 @@
                   (lib/c-close r)
                   (if (contract/error? read)
                     read
-                    (-> (select-keys @lines [:streamed :ended :fns :heap]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
+                    (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
+
+(defn- record-results!
+  "Record a test run's results on this branch (task seon.proofs/test-results-are-a-few-facts, seon.proofs/result-tx: only what differs from the
+  facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
+  cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
+  entity for. Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
+  lacks the facts' attributes (a branch cut before they existed): the run still answers, with it."
+  {:malli/schema [:=> [:cat :map :map :map] [:or nat-int? :seon.error/base]]}
+  [ran failures reused]
+  (let [db (db)]
+   (if-not (contains? (d/schema db) :seon.test/status)
+    (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
+   (let [
+        old (into {} (for [t (distinct (concat (keys ran) (keys reused))) :let [e (pdb/eid db :var/name t)] :when e]
+                       [t (d/pull db [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes] e)]))
+        ;; a test with no var entity here (loaded, never recorded) has no fact to hold
+        tx (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)))]
+    (if (seq tx) (:datoms (transact! tx)) 0)))))
 
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
@@ -999,7 +1019,8 @@
   one is, nothing is forked (no :pid). The counts are its reports' types, as a run's are. One bound in every mode
   (:seon.config.agent/test-ticks, per test), so a test's verdict is the same in a turn, the
   judge and bin/test, and the judge after a turn reruns no green the turn left.
-  Each test that ran is cached at its digest, green or red (seon.fx/write-verdicts!); a write the
+  Each test that ran is cached at its digest, green or red (seon.fx/write-verdicts!), and its result
+  recorded as facts on this branch beside it (record-results!, in every mode but :main); a write the
   cache refused is named under :unstored, and those tests run again. A cache that cannot be read
   answers its :seon.fx/io-error (test-plan's :unread): no test is run as if none were cached. :ran is how many tests reported. (forked pid) runs here once the child exists.
   A fork refused (threads active) is :seon.test/fork-refused: no test ran.
@@ -1056,7 +1077,7 @@
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
               ;; a child that dies loses the test it was running (its :error stays) and the rest
               ;; run in a new child: the death of one test never costs the run its other results
-              (loop [todo run reports [] fns {} heap {}]
+              (loop [todo run reports [] fns {} heap {} measured {}]
                 (let [c (test-child plan ticks todo forked say)]
                   (if (contract/error? c)
                     c
@@ -1068,9 +1089,9 @@
                       ;; a death with something to show for it (a test ended, or the one it died in is
                       ;; named) leaves the rest to a new child; none, and the run ends on it
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
-                        (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)))
+                        (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)) (merge measured (:measured c)))
                         {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
+                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :measured (merge measured (:measured c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
     ;; what ran, cached by digest (seon.fx/write-verdicts!), whoever asked for the run; a file the
@@ -1079,8 +1100,14 @@
       res
       (-> res
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
+                      ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)]
-                  (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)]))))
+                  ;; beside the cache, the same run's results as facts on this branch (the record shows them)
+                  ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
+                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected)))]
+                  (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
+                        (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)]))
+                      (dissoc :measured)))))
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
