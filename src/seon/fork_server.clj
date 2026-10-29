@@ -55,14 +55,23 @@
   [st] (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved))))
 
 (defn index-at-fork
-  "Server state st with main's reconciler index (:index {:db :index}, listed when the server starts)
-  observed forward to :db (seon.reconcile/index over what differs), when main moved since: a forked
-  agent's first turn observes its branch from it, never lists the index itself (a listing of 903
-  tasks: 33M ticks, 160 MB, in every agent)."
+  "Server state st with main's reconciler index (:index {:commit :index}, listed when the server
+  starts: the index and the commit it is of, never the db, which would pin its own version of the
+  index between forks) observed forward to :db (seon.reconcile/index over what differs, the commit
+  made again for it), when main moved since: a forked agent's first turn observes its branch from
+  it, never lists the index itself (a listing of 903 tasks: 33M ticks, 160 MB, in every agent). See
+  docs/machine.md#roots-heap."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [{from :db idx :index} (:index st)]
-    (cond-> st (not (identical? from (:db st))) (assoc :index {:db (:db st) :index (r/index idx from (:db st))}))))
+  (let [{from :commit idx :index} (:index st)]
+    (cond-> st (not= from (d/commit-id (:db st)))
+            (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
+
+(defn index-for-agent
+  "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
+  (index-at-fork brought it there), which the agent holds as its :main and :base."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] {:db (:db st) :index (get-in st [:index :index])})
 
 (defn static-due?
   "Whether the fork server freezes its heap into static before this fork: main's program moved
@@ -84,7 +93,7 @@
        :workload :io
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork or a standby after a program commit (graph-at-fork), handed
-  ;; to every agent forked (seon.agent/base-graph); a standby inherits it. :index, main's reconciler index and the db it is of,
+  ;; to every agent forked (seon.agent/base-graph); a standby inherits it. :index, main's reconciler index and the commit it is of,
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
@@ -94,7 +103,7 @@
     :static-due true
     :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
     ;; listed here when the server boots; a standby inherits its server's
-    :index (or index {:db db :index (r/index db)})})
+    :index (or index {:commit (d/commit-id db) :index (r/index db)})})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
   ;; before this process exits, so root's waitpid of this server is the end of every one of
   ;; them. An agent that had closed its socket but not yet exited was handed to launchd when
@@ -138,7 +147,7 @@
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :index (:index st) :marks marks) (:db st) (:ns m))
+             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :marks marks) (:db st) (:ns m))
                              (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
                                          [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
@@ -200,6 +209,13 @@
         ;; docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
         _ (when boot? (pdb/preload! db0))
+        ;; root evaluates no test namespace (program/load-all! {:tests? false}); this server does, once,
+        ;; so every agent and test child forked from here inherits main's tests compiled, as read-only
+        ;; pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). The first fork
+        ;; waits behind it; its errors go to root as a tx's load errors do.
+        _ (when boot?
+            (when-let [errs (seq (:errors (program/load-all! db0)))]
+              (sock/send! fd {:ev :load-errors :t (:max-tx db0) :errors (vec errs)})))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
         kq (lib/kq-new)
         recv! (fn [] (loop []

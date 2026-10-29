@@ -907,7 +907,7 @@
             open-ms (profile/ms-since t0)
             load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
-            program (program/load-all! @conn)
+            program (program/load-all! @conn {:tests? false})
             program-ms (profile/ms-since t1)
             contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])]
         (warm! conn)
@@ -927,7 +927,7 @@
   [e]
   (let [ex (::flow/ex e)
         in (when ex (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))))]
-    (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data) :msg (::flow/msg e)}
+    (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
       (qualified-symbol? in) (assoc :in in))))
 
 (defn start!

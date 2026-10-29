@@ -479,7 +479,7 @@
                                                     (str n "'s run ended before this test reported"))]
                                         (note! {:seon.test/report {:type :error :message msg} :test tst})
                                         [tst (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0 :message msg :unreported true}
-                                               (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown))))]))
+                                               (ex-data thrown) (assoc :data (contract/kept (sedn/encode (ex-data thrown)))))]))
                          result (into @ran unreported)
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]

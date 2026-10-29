@@ -53,6 +53,8 @@
   [e]
   (ex-info (step/error-msg e) (agent/error-map e)))
 
+(declare error-data)
+
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
   clojure.repl/source shows what this process runs, a REPL-typed defn included."
@@ -76,12 +78,28 @@
     (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
     ns))
 
-(defn- do-body
-  "The text inside a top-level do form's own text src, after its do: what Clojure's compiler
-  evaluates as top-level forms when the form it evaluates is (do ...) (Compiler.eval unrolls it),
-  each with its own budget of ticks, as each top-level form has. See docs/prompt.md."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [src] (subs src (count (re-find #"^\(\s*do\s" src)) (dec (count src))))
+(defn- do-parts
+  "The inner forms of a top-level form written as (do ...), each as [text lead]: its exact text and the
+  ; comments its writer put before it, taken from the reader's positions in src (the form's own
+  text, which the reader gave it; an inner form read again in ns, as the form was, stops where
+  the reader stops). What Clojure's compiler evaluates as top-level forms when the form it evaluates
+  is (do ...) (Compiler.eval unrolls it), each with its own budget of ticks, as each top-level form
+  has. A form that only expands to do (a reader macro) is no written do: its text does not open
+  with ( and the token do. Nil for any form but a written do with a body. See docs/prompt.md."
+  {:malli/schema [:=> [:cat :any [:maybe :string] :seon.host/namespace] [:maybe [:vector [:tuple :string [:maybe :string]]]]]}
+  [form src ns]
+  (when (and (seq? form) (= 'do (first form)) (next form) src (= \( (.charAt ^String src 0)))
+    (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. src))
+          starts (reader/line-starts src)
+          pos #(+ (starts (dec (.getLineNumber r))) (dec (.getColumnNumber r)))]
+      (.read r)
+      (when (= 'do (binding [*ns* ns] (read {:eof ::eof} r)))
+        (loop [prev (pos) k (count (next form)) acc []]
+          (if (zero? k)
+            acc
+            (let [_ (binding [*ns* ns] (read {:eof ::eof} r))
+                  end (pos)]
+              (recur end (dec k) (conj acc [(subs src (reader/lead-end src prev end) end) (reader/lead src prev end)])))))))))
 
 (defn- eval-code
   "Read the request's code once, form by form, and evaluate each with (:repl/eval-fn req)
@@ -100,6 +118,36 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
+        ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
+        ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
+        ;; before the do leading the first of them
+        exec! (fn exec! [form src lead ns top]
+                (if-let [parts (do-parts form src ns)]
+                  (loop [ns ns forms (next form) [[t l] & more] parts lead lead]
+                    (let [[ns' how] (exec! (first forms) t (not-empty (apply str (interpose "\n" (keep identity [lead l])))) ns top)]
+                      (if (and (= :ok how) more) (recur ns' (next forms) more nil) [ns' how])))
+                 (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
+                       out (java.io.StringWriter.)
+                       err (java.io.StringWriter.)
+                       ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
+                       ;; *test-out*, bound to the form's output as nREPL does
+                       {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
+                       [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
+                                                (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
+                                              (catch Throwable e [:err e ns (outer-frames)]))
+                       ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
+                       common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
+                                       :repl/src src :top top}
+                                lead (assoc :lead lead))]
+                   (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
+                   (when (= tag :ret) (keep-source! v (:repl/src common)))
+                   (if (= tag :ret)
+                     (do (reply (merge common {:repl/value v :tag :ret}))
+                         [(equip-ns! ns') :ok])
+                     (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
+                                                        "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                                 (assoc m :repl/ex (error-data v m))))
+                         [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
         ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
         forms! (fn forms! [code ns top]
@@ -117,38 +165,14 @@
 
                          (instance? Throwable form)
                          (let [n (:n (swap! agent/state update :n (fnil inc 0)))]
-                           (reply {:repl/ex form :tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
-                                   :err-text (nrepl/err->msg form {:phase :read-source})})
+                           (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
+                                           :err-text (nrepl/err->msg form {:phase :read-source})}]
+                                   (assoc m :repl/ex (error-data form m))))
                            [ns :read])
 
-                         ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
-                         ;; the comments before the do leading the first of them
-                         (and (seq? form) (= 'do (first form)) (next form) src (re-find #"^\(\s*do\s" src))
-                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns (or top k))]
-                           (if (= :eof how) (recur ns' end (inc k)) [ns' how]))
-
                          :else
-                         (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
-                               out (java.io.StringWriter.)
-                               err (java.io.StringWriter.)
-                               ;; *1 *2 *3 *e as clojure.main/repl keeps them; clojure.test reports to
-                               ;; *test-out*, bound to the form's output as nREPL does
-                               {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
-                               [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
-                                                        (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
-                                                      (catch Throwable e [:err e ns (outer-frames)]))
-                               ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
-                               common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
-                                               :repl/src src :top (or top k)}
-                                        lead (assoc :lead lead))]
-                           (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
-                           (when (= tag :ret) (keep-source! v (:repl/src common)))
-                           (if (= tag :ret)
-                             (do (reply (merge common {:repl/value v :tag :ret}))
-                                 (recur (equip-ns! ns') end (inc k)))
-                             (do (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
-                                                       "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])}))
-                                 [ns :err]))))))))
+                         (let [[ns' how] (exec! form src lead ns (or top k))]
+                           (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
         [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
@@ -188,8 +212,18 @@
           sym (assoc :seon.error/in sym)))
       {})))
 
+(defn- error-data
+  "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
+  terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
+  carries error data and never the Throwable, whose frames and ex-data would pin the system for as
+  long as the reply is held (AGENTS 4, a kept value is a reference; docs/errors.md#an-error-keeps-data)."
+  {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
+  [e m]
+  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
+    (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)))
+
 (defn wrap-caught
-  "An eval error also as the one error map (seon.agent/error-map, the answer's :err: its
+  "An eval error also as the one error map (made with the reply: `error-data`, the answer's :err: its
   message and fix as data, which the response carries as :ex), and
   noted in this agent's error fold (seon.error/note): its next commit carries the fold to
   root, which counts each signature across agents."
@@ -197,11 +231,9 @@
   [h]
   (fn [req]
     (h (around-reply req
-         (fn [m] (if-let [e (:repl/ex m)]
-                   (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
-                         em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
-                     (swap! agent/state update :errors err/note em :eval (:form m) (System/currentTimeMillis))
-                     (assoc m :err em))
+         (fn [m] (if-let [em (:repl/ex m)]
+                   (do (swap! agent/state update :errors err/note em :eval (:form m) (System/currentTimeMillis))
+                       (assoc m :err em))
                    m))))))
 
 (defn wrap-cost
@@ -502,6 +534,26 @@
           (assoc r :record id))
       r)))
 
+(defn- keep-result!
+  "Hold response r under its handle (result/e<n>, the var a printed cut reads through, as the REPL's
+  *1 is read, and :results in this agent's state, which (my.agent/$ :e<n>) reads) for the newest
+  :seon.config.agent/result-window handles; the oldest past that are let go (dissoc'd, and their
+  vars unmapped), so an agent's memory does not grow with each eval's value. A let-go response is
+  derived data (cacheable, evictable at any time: AGENTS 5): its eval's record on the branch holds
+  it, and my.agent/$ re-creates it from there, or answers :seon.repl/result-evicted. `ns-unmap`
+  and `intern` are used here as a REPL harness uses them, to build and retire vars in the namespace
+  `result` this ns owns, where no definition form exists (AGENTS 5, resolution). See
+  docs/agent.md#your-turn."
+  {:malli/schema [:=> [:cat :qualified-symbol :map] :any]}
+  [handle r]
+  (let [k (keyword (name handle))
+        ks (conj (vec (:result-keys @agent/state)) k)
+        n (max 0 (- (count ks) (cfg/value :seon.config.agent/result-window)))
+        old (subvec ks 0 n)]
+    (swap! agent/state #(-> % (assoc-in [:results k] r) (assoc :result-keys (subvec ks n)) (update :results (fn [m] (apply dissoc m old)))))
+    (intern (create-ns 'result) (symbol (name handle)) r)
+    (run! #(ns-unmap (the-ns 'result) (symbol (name %))) old)))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
@@ -529,9 +581,7 @@
                                 (let [em (agent/error-map e)]
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
                                   (answered))))]
-            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-            ;; the handle a printed cut reads through, as the REPL's *1 is read
-            (intern (create-ns 'result) (symbol (name handle)) r)
+            (keep-result! handle r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -548,7 +598,7 @@
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
-    (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+    (keep-result! handle r)
     (record! (assoc r :text (print/response-text r render/summarized)) code req)))
 
 (defn- layout
@@ -567,6 +617,17 @@
         (swap! agent/state assoc :walk w)
         w)))
 
+(defn- walked-db
+  "The db the walk last framed at, from its reference {:branch :commit :t}: this branch's current
+  db when that is the commit, else made from the store (seon.db/at-commit, which reads the commit
+  and lets it go with its caller). The state keeps the reference, never the db value, which would
+  pin its whole version of the index (AGENTS 4, a kept db value is a reference)."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.host/db]]}
+  [{:keys [commit]}]
+  (when commit
+    (let [db (agent/db)]
+      (if (= commit (d/commit-id db)) db (pdb/at-commit (:store-conn @agent/state) commit)))))
+
 (defn- framed
   "This agent's walk drawn as of now (seon.render/frame!), under its branch's schemas: what changed
   since the last frame re-run (the reactions ctx's patch reached, the db components the datoms
@@ -574,9 +635,10 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (with-branch-schemas
-    #(let [w (the-walk) db (agent/db) db0 (:walk-db @agent/state)]
-       (render/frame! w (when (and db0 db (not (identical? db0 db))) (ctx/moved db0 db nil)))
-       (swap! agent/state assoc :walk-db db)
+    #(let [w (the-walk) db (agent/db) held (:walk-db @agent/state)
+           ref (when db {:branch (:branch @agent/state) :commit (d/commit-id db) :t (:max-tx db)})]
+       (render/frame! w (when (and held db (not= held ref)) (ctx/moved (walked-db held) db nil)))
+       (swap! agent/state assoc :walk-db ref)
        w)))
 
 (defn render-ctx
@@ -602,7 +664,7 @@
   draw, seon.context/drawn-parts, costs every component). [db parts]: the db it framed at, which the request is
   made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (framed)] [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
+  [] (let [w (framed)] [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
 (defn page-parts
   "This agent's parts now, from its live walk framed once (`page-hiccup`'s): [db parts data], the db it

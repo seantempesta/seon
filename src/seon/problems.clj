@@ -34,7 +34,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task] [seon.config :as config]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -187,8 +187,10 @@
   ;; the law is the program's own source's: its namespaces, read once, when a site asks
   (let [program (delay (program/program-nss db))]
   (vec (for [{:keys [law fact page except]} laws
-             :let [page-eids (into #{} (keep (fn [{:keys [e v]}] (when (str/starts-with? v (str page "#")) e))) (d/datoms db :aevt :seon.section/address))
-                   named (into #{} (keep (fn [{:keys [e v]}] (when (page-eids e) v))) (d/datoms db :aevt :seon.section/names))
+             :let [;; the page's cited names, read when a candidate site asks (a branch that changed no catching form reads nothing)
+                   named-set (delay (into #{} (comp (map :e) (mapcat #(d/datoms db :eavt % :seon.section/names)) (map :v))
+                                          (d/index-range db {:attrid :seon.section/address :start (str page "#") :end (str page "#\uffff")})))
+                   named (fn [v] (@named-set v))
                    ;; the multimethod or protocol a form without a var extends: read only if one asks
                    owners (delay (merge (into {} (map (fn [{:keys [e v]}] [v (:method/multi (d/entity db e))])) (d/datoms db :aevt :method/form))
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
@@ -268,14 +270,24 @@
                   [:=> [:cat :seon.host/db :map [:maybe :map]] [:vector :seon.problems/row]]]}
   ([db ans] (stale-sections db ans nil))
   ([db ans only]
-   (let [address (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address))
+   (let [;; with only, the sections it names and those that reference a var of its names are sought by entity
+         ;; (a reference is an AVET entry), never every section scanned
+         es (when only (into (set (:sections only))
+                             (for [n (:names only) :let [ve (pdb/eid db :var/name n)] :when ve
+                                   dt (d/datoms db :avet :seon.section/references ve)]
+                               (:e dt))))
+         address (if only
+                   (into {} (for [e es] [e (:v (first (d/datoms db :eavt e :seon.section/address)))]))
+                   (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.section/address)))
          reads (if only
                  (keep (fn [{:keys [e v tx]}]
                          (let [vs (if ((:sections only) e) v (select-keys v (filter (:names only) (keys v))))]
                            (when (seq vs) {:e e :v vs :tx tx})))
-                       (d/datoms db :aevt :seon.section/read))
+                       (mapcat #(d/datoms db :eavt % :seon.section/read) es))
                  (map (fn [{:keys [e v tx]}] {:e e :v v :tx tx}) (d/datoms db :aevt :seon.section/read)))
-         reviewed (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.section/reviewed))
+         reviewed (if only
+                    (into {} (for [e es dt (d/datoms db :eavt e :seon.section/reviewed)] [e (:tx dt)]))
+                    (into {} (map (juxt :e :tx)) (d/datoms db :aevt :seon.section/reviewed)))
          ;; a contract or docstring changes only with its form's text, so only a recorded name whose
          ;; form moved has its history read
          now-form (if only (docs/read-map db (into #{} (mapcat (comp keys :v)) reads)) (current-forms db))
@@ -365,35 +377,36 @@
 
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
-(defn- section-state
-  "{address {:e :names :dead :read :reviewed :baseline}} of db's sections, by aevt scans and no pull:
-  what a section cites, the links it made that reached nothing, and what closes or opens its
-  stale-section rows (the code it read, who reviewed it, a baseline git could not give)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :map]]}
-  [db]
-  (let [group (fn [attr] (reduce (fn [m {:keys [e v]}] (update m e (fnil conj #{}) v)) {} (d/datoms db :aevt attr)))
-        one (fn [attr] (into {} (map (juxt :e :v)) (d/datoms db :aevt attr)))
-        names (group :seon.section/names) dead (group :seon.section/dead-links)
-        reads (one :seon.section/read) reviewed (one :seon.section/reviewed) baseline (one :seon.section/baseline-unread)
-        text (one :seon.section/text)]
-    (into {} (for [{:keys [e v]} (d/datoms db :aevt :seon.section/address)]
-               [v {:e e :names (get names e #{}) :dead (get dead e #{}) :read (reads e) :reviewed (reviewed e) :baseline (baseline e) :text (text e)}]))))
+(def ^:private section-attrs
+  "The attributes `section-at` reads of a section: what a stale-section, dead-citation or old-word row of it depends on (docs/health.md#a-stale-section)."
+  [:seon.section/address :seon.section/names :seon.section/dead-links :seon.section/read :seon.section/reviewed
+   :seon.section/baseline-unread :seon.section/text])
 
-(defn- existing-names
-  "The names db's vars and tasks hold (a task id as a symbol): what a citation may name."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
-  [db]
-  (into (into #{} (map :v) (d/datoms db :aevt :var/name)) (comp (map :v) (filter #(str/includes? % "/")) (map symbol)) (d/datoms db :aevt :seon.task/id)))
+(defn- section-at
+  "{:e :names :dead :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
+  pull: what it cites, the links it made that reached nothing, and what closes or opens its stale-section rows
+  (the code it read, who reviewed it, a baseline git could not give); nil when db holds none."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
+  [db a]
+  (when-let [e (pdb/eid db :seon.section/address a)]
+    (let [one (fn [attr] (:v (first (d/datoms db :eavt e attr))))
+          many (fn [attr] (into #{} (map :v) (d/datoms db :eavt e attr)))]
+      {:e e :names (many :seon.section/names) :dead (many :seon.section/dead-links) :read (one :seon.section/read)
+       :reviewed (one :seon.section/reviewed) :baseline (one :seon.section/baseline-unread) :text (one :seon.section/text)})))
 
-(defn- law-forms
-  "{form id {:e :catches :src}} of the forms db holds that carry a law's fact: the facts' datoms in
-  one scan each (an AVET seek per form would cost ~33 KB a site)."
-  {:malli/schema [:=> [:cat :seon.host/db :keyword] [:map-of :string :map]]}
-  [db fact]
-  (let [carrying (reduce (fn [m {:keys [e v]}] (update m e (fnil conj #{}) v)) {} (d/datoms db :aevt fact))
-        attr (fn [a] (into {} (comp (filter #(contains? carrying (:e %))) (map (juxt :e :v))) (d/datoms db :aevt a)))
-        ids (attr :form/id) srcs (attr :form/src)]
-    (into {} (for [[e cs] carrying] [(ids e) {:e e :catches cs :src (srcs e)}]))))
+(defn- name-exists?
+  "Whether db holds a var named n or a task whose id is n (a citation may name either)."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :boolean]}
+  [db n]
+  (boolean (or (seq (d/datoms db :avet :var/name n)) (seq (d/datoms db :avet :seon.task/id (str n))))))
+
+(defn- law-form-at
+  "{:e :catches :src} of the form with id id on db when it carries the law's fact, else nil."
+  {:malli/schema [:=> [:cat :seon.host/db :keyword :string] [:maybe :map]]}
+  [db fact id]
+  (when-let [e (pdb/eid db :form/id id)]
+    (when-let [cs (seq (map :v (d/datoms db :eavt e fact)))]
+      {:e e :catches (set cs) :src (:v (first (d/datoms db :eavt e :form/src)))})))
 
 (def old-word-kept
   "Files whose text keeps an old word of AGENTS.md section 7a's table (it is the subject, a quoted word of the
@@ -409,6 +422,7 @@
    "test/seon/problems_test.clj" "this class's tests name the old words"
    "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
    "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
+   "src/seon/render/ui.clj" "draws the scan's :fence block kind, CommonMark's word"
    "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
    "test/seon/reader_test.clj" "a Markdown code fence"
    "test/seon/ref_test.clj" "a Markdown code fence"
@@ -478,6 +492,8 @@
   one `old-word-hits` call."
   {:malli/schema [:=> [:cat :seon.host/db :map [:map [:vars [:set :symbol]] [:sections [:set :string]] [:tasks [:set :string]]]] [:vector :seon.problems/row]]}
   [db ans {:keys [vars sections tasks]}]
+  (if (and (empty? vars) (empty? sections) (empty? tasks))
+    []
   (let [words (old-word-spellings (slurp (str (config/checkout) "/AGENTS.md")))
         texts (vec (concat
                      (for [v (sort vars)
@@ -498,7 +514,7 @@
     (vec (for [[[kind id path] w] (old-word-hits (filterv (comp some? second) texts) words)
                :let [s (str "old-word " path " " (name kind) " " id " " w)]]
            (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": AGENTS.md section 7a says what to say instead")
-                        {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id})))))
+                        {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id}))))))
 
 (defn uncited-vars
   "Each of the named vars (a set of symbols, the vars a branch changed) that is public in a
@@ -515,7 +531,7 @@
                      doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
                :when (and ent (not= :test (:var/kind ent)) (not (and doc (str/includes? doc "docs/")))
                           (contains? @program nsym)
-                          (some->> ent :var/form :form/src (re-find #"^\((?:defn|defmacro|def|defmulti)\s")))
+                          (contains? #{"defn" "defmacro" "def" "defmulti"} (some->> ent :var/form :form/src (source/first-head nsym))))
                :let [s (str "uncited-var " v)]]
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
@@ -524,47 +540,75 @@
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
   #{:dead-citation :unnamed-site :stale-section :old-word :uncited-var})
 
+(defn caused-datoms
+  "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
+  names, the task ids and plans, the catches and text of forms), one datahike.api/datoms-diff range each: what
+  its 2- and 3-arity read when they are given none. A caller that read the whole :eavt diff already passes
+  that instead (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.host/datom]]}
+  [base head]
+  (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base head :aevt [a]))))
+        (concat section-attrs [:var/name :seon.task/id :seon.task/plan :form/src] (map :fact laws))))
+
 (defn- split-rows
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
   that base had not, and base had that head has not, by signature: the candidates `caused-split`
-  explains, read on both."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
-  [base head ans ch]
-  (let [bs (section-state base) hs (section-state head)
-        bn (existing-names base) hn (existing-names head)
-        removed (set/difference bn hn)
-        changed (set (for [[a st] hs :when (not= (dissoc st :e) (dissoc (bs a) :e))] a))
-        added (set/difference hn bn)
-        new-sections (set/difference (set (keys hs)) (set (keys bs)))
+  explains, read on both. The candidates come from moved, the datoms that differ between base and head
+  (`caused-datoms`, or the whole diff): the sections, names, plans and forms they touch, each looked up
+  by entity on both sides; nothing is scanned."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :map :seon.merge/changes [:sequential :seon.host/datom]] [:map [:made [:vector :map]] [:closed [:vector :map]]]]}
+  [base head ans ch moved]
+  (let [by-attr (group-by :a moved)
+        ents (fn [attrs] (into #{} (comp (mapcat by-attr) (map :e)) attrs))
+        first-v (fn [db e a] (:v (first (d/datoms db :eavt e a))))
+        either (fn [e a] (or (first-v head e a) (first-v base e a)))
+        bs (memoize (fn [a] (section-at base a))) hs (memoize (fn [a] (section-at head a)))
+        cand (into #{} (keep #(either % :seon.section/address)) (ents section-attrs))
+        changed (set (for [a cand :let [h (hs a)] :when (and h (not= (dissoc h :e) (dissoc (bs a) :e)))] a))
+        new-sections (set (for [a cand :when (and (hs a) (not (bs a)))] a))
+        gone (set (for [a cand :when (and (bs a) (not (hs a)))] a))
+        ;; the names a var or task gained or lost
+        named (set (concat (map :v (by-attr :var/name))
+                           (for [{:keys [v]} (by-attr :seon.task/id) :when (str/includes? v "/")] (symbol v))))
+        removed (set (filter #(and (name-exists? base %) (not (name-exists? head %))) named))
+        added (set (filter #(and (name-exists? head %) (not (name-exists? base %))) named))
+        address-of (fn [e] (first-v head e :seon.section/address))
         ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
-        secs (-> changed
-                 (into (for [[a st] hs :when (or (some removed (:names st)) (some added (:names st)) (some new-sections (:dead st)))] a))
-                 (into (for [a (keys bs) :when (not (contains? hs a))] a)))
-        eids (fn [state] (set (keep #(:e (state %)) secs)))
+        cited (when (or (seq removed) (seq added))
+                (into #{} (comp (mapcat #(d/datoms head :avet :seon.section/names %)) (keep #(address-of (:e %)))) (into removed added)))
+        dead (when (seq new-sections)
+               (into #{} (comp (filter #(new-sections (:v %))) (keep #(address-of (:e %)))) (d/datoms head :aevt :seon.section/dead-links)))
+        secs (-> changed (into cited) (into dead) (into gone))
+        eids (fn [state] (into #{} (keep #(:e (state %))) secs))
         page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
         all-sites? (some page? changed)
         sites (fn [db state eids-of]
                 (if all-sites?
                   (unnamed-sites db ans nil)
                   (mapcat (fn [{:keys [fact]}] (unnamed-sites db ans (eids-of fact))) laws)))
-        lf (memoize (fn [db fact] (law-forms db fact)))
-        changed-forms (memoize (fn [fact] (let [h (lf head fact) b (lf base fact)]
-                                            (set (for [[id st] h :when (not= (dissoc st :e) (dissoc (b id) :e))] id)))))
+        ;; the forms carrying a law's fact whose catches or text differ
+        changed-forms (memoize (fn [fact]
+                                 (set (for [id (into #{} (keep #(either % :form/id)) (ents [fact :form/src]))
+                                            :let [h (law-form-at head fact id)]
+                                            :when (and h (not= (dissoc h :e) (dissoc (law-form-at base fact id) :e)))]
+                                        id))))
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
-        moved (pm/changed-vars ch)
+        moved-vars (pm/changed-vars ch)
         ;; the places whose text changed: sections whose text differs, tasks whose plan differs
-        plans (fn [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/plan)))
-        text-secs (set (for [[a st] hs :when (not= (:text st) (:text (bs a)))] a))
-        bp (plans base) hp (plans head)
-        task-ids (set (for [[e plan] hp :when (not= plan (bp e))] (:v (first (d/datoms head :eavt e :seon.task/id)))))
+        text-secs (set (for [a cand :let [h (hs a)] :when (and h (not= (:text h) (:text (bs a))))] a))
+        task-ids (set (for [e (ents [:seon.task/plan])
+                            :let [plan (first-v head e :seon.task/plan)]
+                            :when (and plan (not= plan (first-v base e :seon.task/plan)))]
+                        (first-v head e :seon.task/id)))
         rows (fn [db state forms-of]
                (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
-                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved :sections (eids state)}))
-                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved :sections text-secs :tasks task-ids}))
-                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved))))
-        had (vec (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))
-        has (vec (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
+                       (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
+                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved-vars :sections text-secs :tasks task-ids}))
+                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))))
+        forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
+        had (vec (rows base bs (forms-in base)))
+        has (vec (rows head hs (forms-in head)))
         sigs (fn [rs] (into #{} (map :signature) rs))]
     {:made (vec (remove (comp (sigs had) :signature) has)) :closed (vec (remove (comp (sigs has) :signature) had))}))
 
@@ -578,19 +622,23 @@
   sections whose citations or dead links differ, the sections citing a name a var or task lost,
   and the forms carrying a law's fact whose catches or text differ are the candidates, and
   `dead-citations` and `unnamed-sites` read only those, on head and on base; a change to a
-  section of a law's page names or unnames any site, so then every site is read. Cost: a scan of
-  the sections', var names', task ids' and catch forms' datoms (no pull, no rule), and the rule
-  for the candidates only: flat in the rows, citations and sites the branch did not touch
-  (seon.problems-test/caused-follows-what-changed). Measured on Seon's own program (300 sections,
-  880 citations, 1,735 vars, 30 catch forms) with a var every cite deleted: 11-12 ms against 26-29 ms
-  for the two full readings; an unchanged branch 7 ms, the scan's floor."
+  section of a law's page names or unnames any site, so then every site is read. The candidates are found
+  from moved, the datoms that differ between base and head (`caused-datoms` when the caller holds none, or the
+  whole :eavt diff it read already): Cost: the datoms of moved and one entity seek per section, name, form and
+  task they touch, on both sides, plus the rule for the candidates and one seek of the citations of each name
+  that appeared or vanished; flat in the sections, citations, vars and sites the branch did not touch
+  (seon.problems-cost-test/caused-follows-what-changed). Measured on a two-var branch of 18 evals on Seon's own
+  program (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
                                                                      [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
+                                                                                    [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes [:sequential :seon.host/datom]] [:map [:caused [:vector :string]] [:attention [:vector :string]] [:rows [:vector [:map [:class :keyword] [:message :string]]]]
                                                                                     [:closed [:vector [:map [:class :keyword] [:message :string]]]]]]]}
   ([base head] (caused-split base head (pm/delta-changes base head #{})))
-  ([base head ch]
-  (let [{:keys [made closed]} (split-rows base head {} ch)
+  ([base head ch] (caused-split base head ch (caused-datoms base head)))
+  ([base head ch moved]
+  (let [{:keys [made closed]} (split-rows base head {} ch moved)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))
         messages (fn [pred] (vec (sort (into #{} (comp (filter pred) (map :message)) made))))
         shown (fn [rs] (vec (sort-by (juxt (comp str :class) :message) (into #{} (map #(select-keys % [:class :message])) rs))))]
@@ -599,11 +647,14 @@
 
 (defn caused
   "The derived problems the branch at head has that base had not that refuse its done
-  (`caused-split`'s :caused), with the branch's changes since base ch when its caller holds them."
+  (`caused-split`'s :caused), with the branch's changes since base ch when its caller holds them, and the
+  datoms that differ moved when it holds those."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:set :string]]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:set :string]]]}
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes] [:set :string]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/changes [:sequential :seon.host/datom]] [:set :string]]]}
   ([base head] (into (sorted-set) (:caused (caused-split base head))))
-  ([base head ch] (into (sorted-set) (:caused (caused-split base head ch)))))
+  ([base head ch] (into (sorted-set) (:caused (caused-split base head ch))))
+  ([base head ch moved] (into (sorted-set) (:caused (caused-split base head ch moved)))))
 
 ;; ---- runs ------------------------------------------------------------------------
 
@@ -832,7 +883,7 @@
   {:malli/schema [:=> [:cat :seon.problems/report :seon.host/db :seon.host/db [:sequential :any]] :seon.problems/report]}
   [prev base head moved]
   (let [ans (answers head)
-        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved))
+        {:keys [made closed]} (split-rows base head ans (pm/delta-changes base head #{} moved) moved)
         gone (into #{} (map :signature) closed)
         current (fn [row] (assoc row :answered-by (get-in ans (if (:run row) [:from (:run row)] [:signature (:signature row)]) [])))
         carried (fn [c] (into (into [] (comp (remove #(gone (:signature %))) (map current)) (get-in prev [:classes c :rows]))

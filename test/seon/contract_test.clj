@@ -69,3 +69,28 @@
                       (fn [& xs] (last xs)))
        1 2 "three")
       (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
+
+;; docs/errors.md#an-error-keeps-data: an error keeps data, never the value that made it.
+;; (AGENTS.md section 4: root's *e reached 1.08 GB).
+(deftest an-error-keeps-bytes-that-do-not-grow-with-its-value
+  (let [kept-bytes
+        (fn [n]
+          (let [big (vec (range (quot n 8)))
+                text (apply str (repeat n "x"))
+                live (atom big)
+                ;; each keeping site: the constructor, an exception's ex-data as error-map keeps it,
+                ;; Flow's error channel value, a test's unreported ex-data
+                made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})
+                mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
+                mapped2 ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" (assoc made :extra big)))
+                flowed (:data (#'seon.root/flow-error {:clojure.core.async.flow/pid :render :clojure.core.async.flow/ex (ex-info "boom" {:v big})}))
+                kept [made mapped mapped2 flowed]]
+            (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq kept)) "no live object is kept, only its print")
+            (is (string? (:seon.print/code (:held made))) "the atom is kept as its print")
+            (is (or (= n 1000) (re-find #"\+\d+ chars" (:took made))) "a value past the budget is kept as the printer's cut, which says what it omitted")
+            (count (pr-str kept))))
+        sizes (map kept-bytes [1000 100000 10000000])]
+    ;; a small value is kept whole (1 KB), anything past the budget as its bounded print: the
+    ;; bytes kept stop growing, and 10,000 times the value adds none
+    (is (every? #(< % 8000) sizes) (str "bytes kept for 1 KB, 100 KB and 10 MB values: " (vec sizes)))
+    (is (<= (last sizes) (+ 100 (second sizes))) (str "100 times more value keeps no more: " (vec sizes)))))

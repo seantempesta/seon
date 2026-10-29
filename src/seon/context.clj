@@ -479,15 +479,15 @@
 
 (defn- names-in
   "The names q holds that name something on db, as seeds of the references: q itself when it is a var's
-  symbol or a keyword; in a text, each qualified symbol that names a var and each qualified keyword."
+  symbol or a keyword; in a text, each qualified symbol that names a var and each qualified keyword, as
+  the citation parser reads them (seon.ref/parse: in backticks or bare), once each in first-mention order.
+  See docs/references.md."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string :qualified-symbol :qualified-keyword]] [:vector :any]]}
   [db q]
   (cond (keyword? q) [q]
         (symbol? q) (if (d/entity db [:var/name q]) [q] [])
-        :else (vec (distinct (concat (for [m (re-seq #"[a-z][a-z0-9.*+!?<>=-]*/[a-z0-9.*+!?<>=-]+" q)
-                                       :let [sym (symbol m)] :when (d/entity db [:var/name sym])]
-                                   sym)
-                                     (for [[_ m] (re-seq #":([a-z][a-z0-9.-]*/[a-z0-9.-]+)" q)] (keyword m)))))))
+        :else (into [] (comp (keep :seon.ref/name) (filter #(or (keyword? %) (d/entity db [:var/name %]))))
+                    (ref/cited (:seon.ref/citations (ref/parse nil q))))))
 
 (defn search
   "What on db is the best match for q (a text; a var's name, whose neighbours it also finds by who

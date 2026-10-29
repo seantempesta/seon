@@ -1249,6 +1249,18 @@
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
 
+(deftest names-in-a-query-are-read-by-the-citation-parser
+  ;; docs/references.md: a query's names come from seon.ref/parse: a var's symbol kept only when the db
+  ;; holds it, a keyword always, once each in first-mention order, in backticks or bare
+  (let [db (d/db-with (seon.docs-test/corpus-db) [{:db/id "c" :var/name 'app/caller} {:db/id "d" :var/name 'app/other}])
+        names-in #'context/names-in]
+    (is (= ['app/caller] (names-in db "who calls `app/caller`?")) "a name in backticks")
+    (is (= ['app/caller] (names-in db "who calls app/caller now")) "a bare name")
+    (is (= [:seon.task/plan] (names-in db "read :seon.task/plan please")) "a keyword, held or not")
+    (is (= ['app/other :seon.task/plan 'app/caller] (names-in db "app/other and `:seon.task/plan` then `app/caller`, app/other again"))
+        "once each, in first-mention order, symbols and keywords together")
+    (is (= [] (names-in db "see `no.such/var` and not.a/var")) "a symbol naming no var on db is left out")))
+
 (deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
   (let [db (d/db-with (seon.docs-test/corpus-db)

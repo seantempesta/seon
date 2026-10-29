@@ -323,14 +323,13 @@
                      (let [text (get files [sha file])
                            r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
                                    (nil? text) {:ids {}}
-                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text}
+                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text :ns nsym}
                                               (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
                        (vswap! cache assoc [sha file] r)
                        r)))
         ;; what a var's form today says of it, read as the old file is (the same reader, both sides as written)
         meaning-now (fn [n] (when-let [f (some->> (pdb/eid db :var/name n) (d/entity db) :var/form)]
-                              (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))
-        mentioned? (fn [text n] (boolean (re-find (re-pattern (str "[\\s(\\[{'#]" (java.util.regex.Pattern/quote (name n)) "[\\s)\\]}]")) text)))]
+                              (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))]
     (into {}
           (keep (fn [{:keys [address] :as r}]
                   (let [info (get sections address) sha (:commit info)
@@ -340,7 +339,7 @@
                       (or (nil? info) (:error info)) [address {:read today :unread (or (:error info) "git gave no history for the section")}]
                       :else (let [per (for [[n {:keys [file ns]}] (:files r)] [n (ids-at sha file ns)])
                                   bad (or (some :error (map second per))
-                                          (some (fn [[n res]] (when (and (not (contains? (:ids res) n)) (:text res) (mentioned? (:text res) n))
+                                          (some (fn [[n res]] (when (and (not (contains? (:ids res) n)) (:text res) (source/mentions? (:ns res) (:text res) (symbol (name n))))
                                                                 (str n " is in its file at " (subs sha 0 8) ", but no form this reading knows (one by its head) defines it")))
                                                 per))]
                               (if bad

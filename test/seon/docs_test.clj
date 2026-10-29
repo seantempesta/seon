@@ -242,10 +242,12 @@
         plan [{:path "docs/p.md" :address "docs/p.md#a" :lines [1 3] :files {'app.m0/f0 {:file "src/app/m0.clj" :ns 'app.m0}}}
               {:path "docs/p.md" :address "docs/p.md#b" :lines [4 6] :files {'app.m0/f1 {:file "src/app/m0.clj" :ns 'app.m0}}}
               {:path "docs/p.md" :address "docs/p.md#c" :lines [7 9] :files {'app.m0/f2 {:file "src/app/m0.clj" :ns 'app.m0}}}
-              {:path "docs/p.md" :address "docs/p.md#d" :lines [10 12] :files {'app.m0/f3 {:file "src/app/m0.clj" :ns 'app.m0}}}]
-        old "(ns app.m0)\n\n(defn f0 [] 1)\n\n(my.macros/defthing f1 [] 2)\n"
+              {:path "docs/p.md" :address "docs/p.md#d" :lines [10 12] :files {'app.m0/f3 {:file "src/app/m0.clj" :ns 'app.m0}}}
+              {:path "docs/p.md" :address "docs/p.md#e" :lines [13 15] :files {'app.m0/f5 {:file "src/app/m0.clj" :ns 'app.m0}}}]
+        ;; f5 is only in a string, a comment and the longer symbol f55: the file does not mention it
+        old "(ns app.m0)\n\n(defn f0 [] 1)\n\n(my.macros/defthing f1 [] 2)\n\n;; f5 was here\n(defn f55 [] \"calls (f5 )\")\n"
         answer {:sections {"docs/p.md#a" {:commit (apply str (repeat 40 "a"))} "docs/p.md#b" {:commit (apply str (repeat 40 "a"))}
-                           "docs/p.md#c" {:commit nil} "docs/p.md#d" {:commit (apply str (repeat 40 "b"))}}
+                           "docs/p.md#e" {:commit (apply str (repeat 40 "a"))} "docs/p.md#c" {:commit nil} "docs/p.md#d" {:commit (apply str (repeat 40 "b"))}}
                 :files {[(apply str (repeat 40 "a")) "src/app/m0.clj"] old}
                 :errors {[(apply str (repeat 40 "b")) "src/app/m0.clj"] "git show: exploded"}}
         r (seon.docs/baseline-reads db plan answer)]
@@ -256,6 +258,9 @@
       (is (nil? (:unread (r "docs/p.md#a")))))
     (testing "a var the old file mentions but no known head defines is unread, never absent"
       (is (re-find #"no form this reading knows" (:unread (r "docs/p.md#b")))))
+    (testing "a name only in a string, a comment or a longer symbol is not mentioned: absent, never unread"
+      (is (nil? (:unread (r "docs/p.md#e"))))
+      (is (= :absent (get-in r ["docs/p.md#e" :read 'app.m0/f5]))))
     (testing "a section with an uncommitted line is as of today, nothing unread"
       (is (= {:read (seon.docs/read-map db #{'app.m0/f2})} (r "docs/p.md#c"))))
     (testing "a file git could not show is unread with git's words, never absent"

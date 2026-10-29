@@ -215,10 +215,44 @@
                 (= \| c) :table
                 :else :para)))
           (emit [out kind from to line end-line]
-            ;; one block; the block after a heading carries its text (the section's lead or opening)
+            ;; one block; the block after a heading carries its text (the section's lead or opening); a
+            ;; fence its content, the lines between its opening line and its closing one (or the text's end)
             (let [b {:seon.ref/kind kind :seon.ref/from from :seon.ref/to to :seon.ref/line line :seon.ref/end-line (max line end-line)}
-                  prev (when (pos? (count out)) (nth out (dec (count out))))]
-              (conj! out (cond-> b (= :heading (:seon.ref/kind prev)) (assoc :seon.ref/text (str/trimr (subs text from to)))))))]
+                  prev (when (pos? (count out)) (nth out (dec (count out))))
+                  open-end (when (= :fence kind) (or (str/index-of text "\n" from) to))]
+              (conj! out (cond-> b
+                           (= :heading (:seon.ref/kind prev)) (assoc :seon.ref/text (str/trimr (subs text from to)))
+                           open-end (assoc :seon.ref/text-from (min to (inc open-end)) :seon.ref/text-to (max (min to (inc open-end)) (fence-content-end from to)))))))
+          (non-space [p e]
+            ;; the first offset from p before e that is neither a space nor a tab (e when none)
+            (loop [j p] (if (and (< j e) (#{\space \tab} (.charAt text j))) (recur (inc j)) j)))
+          (line-end [p limit]
+            (min limit (or (str/index-of text "\n" p) limit)))
+          (fence-content-end [from to]
+            ;; where a fence's content ends: before its closing line when the block's last line closes
+            ;; it (a run of its char at least its length), else at the block's end (an unclosed fence)
+            (let [last-start (let [i (str/last-index-of text "\n" (dec to))] (if (and i (>= i from)) (inc i) from))
+                  p (non-space last-start to)
+                  o (non-space from (line-end from to))
+                  [c n] (fence-at o (line-end from to))]
+              (if (and (> last-start from) (< p to) (= c (.charAt text p)) (fence-closes? p to c n))
+                (max from (dec last-start))
+                to)))
+          (list-items [from to]
+            ;; a list block's items: [from to] of each item's content (after its marker and the spaces
+            ;; that follow), an item starting on each line at the list's own indent that starts a list
+            ;; item (start-kind), and whether its first marker is a number
+            (let [lines (loop [pos from acc []] (if (>= pos to) acc (let [e (line-end pos to)] (recur (inc e) (conj acc [pos e])))))
+                  base (let [[pos e] (first lines)] (- (non-space pos e) pos))
+                  starts (vec (for [[pos e] lines :let [p (non-space pos e)]
+                                    :when (and (= base (- p pos)) (< p e) (= :list (start-kind p e)))]
+                                (let [m (if (Character/isDigit (.charAt text p))
+                                          (inc (loop [j p] (if (Character/isDigit (.charAt text j)) (recur (inc j)) j)))
+                                          (inc p))]
+                                  {:line pos :marker p :content (non-space m e)})))
+                  ends (concat (map #(max from (dec (:line %))) (rest starts)) [to])]
+              {:seon.ref/items (mapv (fn [{:keys [content]} end] [content (max content end)]) starts ends)
+               :seon.ref/ordered (boolean (some-> (first starts) :marker (#(Character/isDigit (.charAt text %)))))}))]
     (let [n (count text)
           ;; one pass over the lines. The open block: okind (nil: none) from ofrom on line oline;
           ;; prev-e, the previous line's end; fch and flen, an open fence's char and length.
@@ -272,7 +306,7 @@
                   (let [k (start-kind p e)
                         kind (if (and list? (pos? indent) (= :para k)) :list k)]
                     (recur nx (inc line) kind pos line e nil 0 (= :list kind) (cond-> out okind (emit okind ofrom prev-e oline (dec line)))))))))]
-      {:seon.ref/blocks bs
+      {:seon.ref/blocks (mapv (fn [b] (if (= :list (:seon.ref/kind b)) (merge b (list-items (:seon.ref/from b) (:seon.ref/to b))) b)) bs)
        :seon.ref/line-count line-count
        :seon.ref/spans (into [] (comp (remove (comp #{:fence :code :break} :seon.ref/kind))
                                       (mapcat (fn [{:seon.ref/keys [kind from to line text-from text-to]}]

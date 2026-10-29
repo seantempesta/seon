@@ -274,6 +274,38 @@
       147 "```\n``` aaa\n```\n" [:fence])
     (is (= [] (:seon.ref/spans (ref/scan "```\n`a.b/c`\n``` aaa\n```\n"))) "147: an info string closes no fence")))
 
+(defn- block-of
+  "The first block of kind k in text's scan."
+  {:malli/schema [:=> [:cat :keyword :string] :seon.ref/block]}
+  [k text] (first (filter #(= k (:seon.ref/kind %)) (:seon.ref/blocks (ref/scan text)))))
+
+(deftest a-fence-gives-its-content-between-its-lines
+  ;; docs/references.md: the scan gives a fence's content as offsets, so a renderer cuts no marks by regex
+  (let [content (fn [text] (let [b (block-of :fence text)] (subs text (:seon.ref/text-from b) (:seon.ref/text-to b))))]
+    (are [text expected] (= expected (content text))
+      "```clojure\n(+ 1 2)\nx\n```\n" "(+ 1 2)\nx"
+      "~~~\na\n~~~" "a"
+      "````\na\n```\nb\n````\n" "a\n```\nb"
+      "``` info words\nbody\n```\n\ntail" "body"
+      "```\nnever closed\nstill" "never closed\nstill"
+      "```\n```\n" ""
+      "```" ""
+      "```\nopen\n\nafter blank" "open\n\nafter blank"
+      "para\n\n  ```\n  indented\n  ```\n" "  indented")))
+
+(deftest a-list-gives-its-items-and-whether-it-is-numbered
+  ;; docs/references.md: items are the lines at the list's own indent that start a list item; a nested or
+  ;; continuation line stays inside its parent item
+  (let [items (fn [text] (let [b (block-of :list text)] [(:seon.ref/ordered b) (mapv (fn [[a z]] (subs text a z)) (:seon.ref/items b))]))]
+    (are [text expected] (= expected (items text))
+      "- one\n- two\n* three\n" [false ["one" "two" "three"]]
+      "1. first\n2.   second\n3) third" [true ["first" "second" "third"]]
+      "- one\n  more\n- two" [false ["one\n  more" "two"]]
+      "- parent\n  - child\n    - grandchild\n- next" [false ["parent\n  - child\n    - grandchild" "next"]]
+      "1. a\n   - nested\n2. b" [true ["a\n   - nested" "b"]]
+      "  - indented\n  - list" [false ["indented" "list"]]
+      "-\n- x" [false ["" "x"]])))
+
 (defn markdown
   "The input of size n: Markdown of about n bytes, a doc page's mix of headings, prose with
   code spans, links and bare names, lists and fenced code, every block a few lines."
