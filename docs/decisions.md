@@ -3,6 +3,7 @@
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
 ## 2026-10-29 rulings
+The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
 ### An eval call holds one or more forms (owner, 2026-10-29)
 "remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.

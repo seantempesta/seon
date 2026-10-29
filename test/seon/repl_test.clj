@@ -446,17 +446,19 @@
 
 (deftest a-call-is-one-response
   ;; docs/render.md: one response per eval call, {:handle :value :out
-  ;; :err :ex}, each key only when present; its forms run in order as load-string runs them,
-  ;; and the first exception stops them; its handle result/e<n> holds it
+  ;; :err :ex}, each key only when present; its forms run in order as a REPL runs them, each
+  ;; one's value answered (:forms, :value their vector), and the first exception stops them; its
+  ;; handle result/e<n> holds it
   (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
-    (is (= "x" (:value r)) (pr-str r))
+    (is (= [nil 3 "x"] (:value r)) (pr-str r))
+    (is (= 3 (:forms r)))
     (is (= "a\n" (:out r)))
     (is (not-any? #(contains? r %) [:ex :err]) "keys only when present")
-    (is (= "x" (:value @(find-var (:handle r)))) "the handle holds the response")
+    (is (= [nil 3 "x"] (:value @(find-var (:handle r)))) "the handle holds the response")
     (is (str/starts-with? (:text r) (str "{:handle " (:handle r))) "printed under its handle"))
   (let [r (repl/eval-string "(+ 1 2) (/ 1 0) (def a-call-is-one-response-never 1)" {"ns" "user" :origin :outside})]
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
-    (is (not (contains? r :value)) "an exception is the response: no value")
+    (is (= {:forms 2 :value [3]} (select-keys r [:forms :value])) "the value of the form before the exception, and the exception")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
 
 (deftest an-uncontracted-definition-is-told-on-its-answer
