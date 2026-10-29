@@ -213,6 +213,11 @@
  ;; returns (:system-available-returned-mb-per-agent, reported, not checked). Provenance: the
  ;; window it replaced. At the bound: the available memory is read.
  :seon.config.check/pages-ms 500
+ ;; Unit: ms between the readings scale-work takes of the machine's available memory and of each process
+ ;; under root's fork server while its agents work (seon.check/scale-work). Provenance: a footprint
+ ;; reading of ~25 processes takes ~100-300 ms; the window is what the test children's peaks are caught
+ ;; within, a measurement and never a dependency. At the bound: the reading is taken again.
+ :seon.config.check/sample-ms 200
  ;; Unit: runs running at once. Provenance: owner, 2026-10-29 ("10-20 should be fine for users
  ;; with small machines"): an agent costs ~20.6 MB of real memory (bin/check scale, 2026-10-29), so
  ;; ten fit an 8 GB machine beside the user's work (was 4, v1's, when an agent was counted by its

@@ -258,6 +258,26 @@
               (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store)) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
+(deftest a-namespace-gaining-its-first-test-is-updated-not-rebuilt
+  ;; docs/source.md#tests-run-by-reach: an agent that adds a deftest to a namespace src already holds (or writes
+  ;; a new test namespace) used to have its graph built from nothing (720 MB, 0.6 s on Seon's program, 114 MB of
+  ;; footprint); the forms the namespace already held are now re-edged as added. The rows the update leaves equal a rebuild's.
+  (let [srcs {"src/app/pt_ft.clj" "(ns app.pt-ft (:require [clojure.test :refer [deftest is]]))\n(defn f [x] x)\n(defn g [x] x)\n(def names ['app.pt-ft/g])\n(defn run-by-name [sym] (@(requiring-resolve sym) 1))\n"}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db srcs)))
+        g0 (program/reach-graph db nil)
+        in {:env "e" :tree "t" :config {}}
+        t2 (record db 'app.pt-ft "(deftest by-name (is (= 1 (run-by-name 'app.pt-ft/f))))")
+        t3 (record t2 'app.pt-ft "(defn f [x] (identity x))")
+        ;; what differs: the graph-index's answers and the keys of the graph the walk reads
+        same? (fn [a b] (vec (concat (when-not (= (program/graph-index a in nil) (program/graph-index b in nil)) [:index])
+                                     (remove #(= (% a) (% b)) [:rows :adj :rev :refd :tests :test-nss :plain :defs :methods :impls :contract :reads :scans :proc :bin :own]))))]
+    (is (empty? (:test-nss g0)) "no test namespace to begin with")
+    (is (= #{'app.pt-ft} (:test-nss (program/reach-update g0 t2))))
+    (is (= [] (same? (program/reach-graph t2 nil) (program/reach-update g0 t2))) "gaining its first test: the update is the rebuild")
+    (is (some #{'app.pt-ft/by-name} (program/tests-reaching (program/reach-update g0 t2) 'app.pt-ft/f)) "the quoted name is now an edge")
+    (is (= [] (same? (program/reach-graph t3 nil) (program/reach-update (program/reach-update g0 t2) t3))) "and a later edit")
+    (is (= [] (same? g0 (program/reach-update (program/reach-update g0 t2) db))) "losing its last test: rebuilt, so the same")))
+
 (deftest load-order-reads-no-quoted-name
   ;; task seon.program/load-dependencies-leave-quoted-names-out: a form recorded at a REPL that
   ;; quotes a later var (an error's data naming it) is not ordered after it
