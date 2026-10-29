@@ -244,17 +244,10 @@
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
-    [seon.procs-test/reconciler seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
-    [seon.procs-test/a-wait-on-main-is-answered-at-the-reconcilers-quiet seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.procs-test/notice seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read (the one helper the procs and reconcile tests build their notices with)"
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
-    [seon.reconcile-test/a-merge-behind-again-and-again-is-held-for-root seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-spawn-writes-a-refused-run seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/an-idle-system-does-nothing-after-a-reason seon.profile/now-ns] "a message's :ns stamp"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
     [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
 
@@ -326,8 +319,8 @@
     (let [[a] (spawn-ready! sys "instrument")
           bad @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
           ;; the agent's uncontracted set, as the done rule reads it (seon.repl/instrument)
-          u1 (printed @(c/submit! sys a "(defn plain [x] x) (count (:uncontracted @seon.agent/state))"))
-          u2 (printed @(c/submit! sys a "(defn plain2 [x] x) (count (:uncontracted @seon.agent/state))"))]
+          u1 (printed @(c/submit! sys a "(do (defn plain [x] x) (count (:uncontracted @seon.agent/state)))"))
+          u2 (printed @(c/submit! sys a "(do (defn plain2 [x] x) (count (:uncontracted @seon.agent/state)))"))]
       {:report {:refused (short-items bad) :uncontracted [u1 u2]}
        :checks {:armed-and-refused (re-find #"invalid-input" (str (get-in bad [:ex :seon.error/message])))
                 :uncontracted-grows (= ["1" "2"] [u1 u2])}}))))
@@ -1194,7 +1187,7 @@
   (run-check "BACKPRESSURE" {:datoms 2000}
    (fn [sys]
     (let [[a] (spawn-ready! sys "flood")
-        flood "(dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded"
+        flood "(do (dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded)"
         ev (c/events sys)
         p (c/submit! sys a flood)
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
@@ -1216,7 +1209,7 @@
         _ (flow/pause-proc (:graph sys) :writer)
         ;; agents own their branches' writes: a paused writer does not hold them
         agents-ok (count (filter #(= ":ok" (printed %))
-                                 (mapv #(deref (c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok")) ids)))
+                                 (mapv #(deref (c/submit! sys % "(do (transact! [{:note/text \"bp\" :note/agent :bp}]) :ok)")) ids)))
         ;; root's own writes to main wait for it
         mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
