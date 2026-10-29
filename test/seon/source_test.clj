@@ -69,6 +69,33 @@
       (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
           "and so does load-changes!"))))
 
+(deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
+  ;; task seon.root/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
+  ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
+  ;; both, so every agent inherits main's tests. A form changed later follows the same rule
+  (let [files {"src/x/rnt_prog.clj" "(ns x.rnt-prog)\n\n(defn k [] 1)\n"
+               "test/x/rnt_thing_test.clj" "(ns x.rnt-thing-test (:require [clojure.test :refer [deftest is]] [x.rnt-prog :as p]))\n\n(deftest t (is (= 1 (p/k))))\n\n(defn helper [] 2)\n"}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        bound? (fn [s] (boolean (some-> (find-ns (symbol (namespace s))) (ns-resolve (symbol (name s))) bound?)))
+        forms-of (fn [db nsym] (d/q '[:find [?e ...] :in $ ?n :where [?ns :ns/name ?n] [?e :form/ns ?ns]] db nsym))]
+    (is (= #{'x.rnt-thing-test} (program/test-nss db)) "a namespace read from test/ is a test's; src/'s is the program's")
+    (testing "root's load: the program's forms, none of the test namespace's"
+      (let [r (program/load-all! db {:tests? false})]
+        (is (= [] (:errors r)))
+        (is (true? (bound? 'x.rnt-prog/k)) "src/ is evaluated")
+        (is (not (bound? 'x.rnt-thing-test/t)) "the deftest is not")
+        (is (not (bound? 'x.rnt-thing-test/helper)) "nor a helper beside it")))
+    (testing "a change main makes to the test namespace: root's load-changes! leaves it, the fork server's loads it"
+      (let [ops (vec (for [e (forms-of db 'x.rnt-thing-test) :let [s (:form/src (d/entity db e))]] [:db/add e :form/src s]))]
+        (is (seq ops))
+        (is (= [] (program/load-changes! db ops {:tests? false})))
+        (is (not (bound? 'x.rnt-thing-test/t)) "root's leaves it")
+        (is (= [] (program/load-changes! db ops)))
+        (is (true? (bound? 'x.rnt-thing-test/t)) "the default loads it")))
+    (testing "and load-all! with no option (the fork server's, an agent's) holds it all"
+      (is (= [] (:errors (program/load-all! db))))
+      (is (true? (bound? 'x.rnt-thing-test/helper))))))
+
 (deftest import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
@@ -303,9 +330,13 @@
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
-      (let [t1 (ask "(seon.e2e/loop-turn! sys)")
+      ;; root evaluates no test namespace (task seon.root/root-holds-no-test-code); its REPL loads the
+      ;; driver it is about to call, as any REPL would
+      (let [loaded (ask "(do (seon.program/load-all! @(:conn sys)) (boolean (resolve 'seon.e2e/loop-turn!)))")
+            t1 (ask "(seon.e2e/loop-turn! sys)")
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
+        (is (true? loaded) "the test namespaces load in root on request")
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
         (is (= 2 (count (:commits t2)))
             (when-not (= 2 (count (:commits t2)))

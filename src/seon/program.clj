@@ -602,6 +602,17 @@
     (into #{} (keep (fn [{:keys [e v]}] (when (some #(str/starts-with? v %) dirs) (:ns/name (d/entity db e)))))
           (d/datoms db :aevt :ns/file))))
 
+(defn test-nss
+  "The namespaces of db read from a file outside :seon.config.source/program-dirs: test/'s (a test,
+  a fixture, a driver), which the process that runs tests holds evaluated and root never does
+  (load-all!'s :tests?). One with no file (an agent's app, a test store's example program) is
+  none. One read of the namespaces' files. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :symbol]]}
+  [db]
+  (let [prog (program-nss db)]
+    (into #{} (keep (fn [{:keys [e]}] (let [n (:ns/name (d/entity db e))] (when-not (prog n) n))))
+          (d/datoms db :aevt :ns/file))))
+
 (defn program-names
   "Of qualified symbols ns, those the program's, in ns's order: what a task's page cites as vars.
   A name is the program's when db holds its namespace with a file under
@@ -786,8 +797,8 @@
 ;; A form imported from a source tree (seon.source: :form/source) whose namespace this
 ;; process holds is the running binary's own code, compiled in. An imported namespace the
 ;; binary was not built with (test/'s) is loaded like every other form when its import is
-;; (load-changes!, in root's writer and the fork server), so every agent forked after it
-;; holds main's tests compiled. Every other form of main runs where main's program runs: a merge
+;; (load-changes!, in the fork server; root's writer and boot leave test namespaces out, {:tests? false}:
+;; root runs no deftest), so every agent forked after it holds main's tests compiled. Every other form of main runs where main's program runs: a merge
 ;; loads in place, in root, the fork server (so every agent forked after it inherits it
 ;; compiled) and an agent that merges main (BUILD plan P4). A binary's own form is
 ;; evaluated again only where a changed macro expanded (`dependents`) or a changed schema
@@ -960,22 +971,38 @@
     :method (when-let [v (find-var a)] (when (instance? clojure.lang.MultiFn @v) (remove-method @v (read-string b))))
     nil))
 
+(defn- loadable
+  "Of form rows, those a process loads: all, or with tests? false (root's), those not in a test
+  namespace (test-nss, read only when there are forms to filter)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :boolean] [:vector :map]]}
+  [db forms tests?]
+  (if (or tests? (empty? forms))
+    (vec forms)
+    (let [t (test-nss db)] (filterv #(not (t (:ns %))) forms))))
+
 (defn- load!
   "Load changed (form rows this binary does not hold), the forms a changed macro expanded
   in (dependents) and the forms whose contracts the changed schema keys reach
-  (schema-dependents), in load order. Answers the errors."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:set :qualified-keyword]] [:vector :seon.program/error]]}
-  [db changed schema-keys]
-  (load-forms! db (vec (vals (into {} (map (juxt :id identity))
-                                   (concat changed (dependents db changed) (schema-dependents db schema-keys)))))))
+  (schema-dependents), in load order, less the test namespaces' when tests? is false
+  (loadable). Answers the errors."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] [:set :qualified-keyword] :boolean] [:vector :seon.program/error]]}
+  [db changed schema-keys tests?]
+  (load-forms! db (loadable db (vec (vals (into {} (map (juxt :id identity))
+                                           (concat changed (dependents db changed) (schema-dependents db schema-keys)))))
+                            tests?)))
 
 (defn load-all!
   "Load db's program where this binary runs: every live form it does not hold, with what
-  they reach (load!). Answers {:loaded n :errors [...]}."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.program/load-report]}
-  [db]
-  (let [forms (filterv #(not (held? db %)) (live-forms db))]
-    {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))))}))
+  they reach (load!). With {:tests? false} (root's) the test namespaces' forms are left
+  unevaluated: root imports test/ as facts and runs no deftest; the fork server loads them for
+  every agent and test child (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them).
+  Answers {:loaded n :errors [...]}."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.program/load-report]
+                  [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean]]] :seon.program/load-report]]}
+  ([db] (load-all! db {}))
+  ([db {:keys [tests?] :or {tests? true}}]
+   (let [forms (loadable db (filterv #(not (held? db %)) (live-forms db)) tests?)]
+     {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))) tests?)})))
 
 (defn- live-in?
   "Is form entity e live on db, for one form: it has an id, and defines nothing or one of its
@@ -1028,16 +1055,18 @@
   [db-from db-to]
   (let [{:keys [remove load schemas]} (diff-plan db-from db-to)]
     (run! remove-definition! remove)
-    (load! db-to (filterv #(not (held? db-to %)) load) schemas)))
+    (load! db-to (filterv #(not (held? db-to %)) load) schemas true)))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
   they leave pointing to no form is removed, and each live form they assert (but the
   binary's own) is loaded, with what it reaches (load!: where a changed macro expanded, and
-  the contracts a changed schema entry reaches). Answers the error
-  maps (empty when all loaded)."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]}
-  [db ops]
+  the contracts a changed schema entry reaches). With {:tests? false} (root's) the test
+  namespaces' forms are left unevaluated (load-all!). Answers the error maps (empty when all loaded)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:sequential :seon.db/op]] [:vector :seon.program/error]]
+                  [:=> [:cat :seon.host/db [:sequential :seon.db/op] [:map [:tests? {:optional true} :boolean]]] [:vector :seon.program/error]]]}
+  ([db ops] (load-changes! db ops {}))
+  ([db ops {:keys [tests?] :or {tests? true}}]
   (let [ptr (set (vals pointer))
         added (set (for [[op e a] ops :when (and (= op :db/add) (ptr a))] e))]
     (doseq [[op e a] ops
@@ -1051,7 +1080,8 @@
                      f))
            (set (for [[op e a] ops :when (and (= op :db/add) (= a :schema/form))
                       :let [x (d/entity db e)] :when (not (:schema/source x))]
-                  (:schema/key x))))))
+                  (:schema/key x)))
+           tests?))))
 
 ;; ---- reach: which tests a change reaches ----------------------------------------------
 
@@ -1073,14 +1103,18 @@
   "The vars that read one class of the checkout's files that have no program facts
   (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
   that class's digest. The bin/ scripts, web/ and resources/public, system.edn, deps.edn and the
-  schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
+  schema resources (read whole only by the two vars that filter a db's schema by namespace) are classes; the rest (native/, the pins, test fixtures) is every test's
   (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
   takes every class, which graph-index adds from its flags, not this map."
   '{seon.fx/declared-refs :seon.env/system
     seon.system/read-decl :seon.env/system
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
-    clojure.java.shell/sh :seon.env/bin})
+    clojure.java.shell/sh :seon.env/bin
+    ;; the vars that walk every attribute a db's schema declares (the schema resources' entries)
+    ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
+    seon.reconcile/index :seon.env/schemas
+    seon.merge/content-datoms :seon.env/schemas})
 
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the

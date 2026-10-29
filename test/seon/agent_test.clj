@@ -385,6 +385,21 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(deftest root-holds-no-test-code-and-its-agents-hold-mains-tests
+  ;; task seon.root/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
+  ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
+  ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
+  (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
+        _ [#'seon.root/boot! #'seon.writer/main-commit #'seon.fork-server/main]
+        t "(some-> (resolve 'seon.reader-test/prose-without-a-fence-is-a-comment) bound?)"
+        [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
+                                                {:op :eval :agent "root" :code (str "(boolean " t ")")}
+                                                {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
+                                               {:dirs ["src" "test"]})]
+    (is (true? (:value agent-held)) "the agent holds main's test compiled")
+    (is (false? (:value root-held)) "root does not")
+    (is (true? (:value facts)) "though main's program holds it as facts")))
+
 (defn- statuses
   "The code of {test status} over the run that code x answers, every test it ran or reused (its
   :digests): an answer carries only its proofs' passes and its reds (seon.proofs/answer), so every
@@ -399,11 +414,13 @@
   ;; and every other namespace's do not run
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
+        also 'seon.config-test/the-profile-is-read-from-the-command-line
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
                           {:dirs ["src" "test"] :proofs #{proof}})]
-    (is (= {proof :pass reached :pass} (:value run))
-        "the proof and the one test reaching the change ran, green; nothing else ran")))
+    (is (= {proof :pass reached :pass also :pass} (:value run))
+        "the proof and the tests reaching the change ran, green; nothing else ran")))
 
 (deftest a-death-costs-the-test-it-interrupted-and-no-other
   ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
@@ -448,6 +465,8 @@
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
+        also 'seon.config-test/the-profile-is-read-from-the-command-line
         run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [" (statuses "r") " (:key r)])")
         own (str "(let [p (prove)] {:results " (statuses "p") " :ran (:ran p) :reused (:reused p)})")
         ;; how many of the two tests' verdicts the cache holds at the digests the agent's plan gives
@@ -470,12 +489,12 @@
                   ;; since tests-are-facts dropped it)
                   {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
+    (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are cached at the agent's digests")
     ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
-    (is (= {proof :pass reached :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
+    (is (= {proof :pass reached :pass also :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
     (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
-    (is (= {proof :pass reached :pass} (:results (:value second-run))) "and so is the agent's next run")))
+    (is (= {proof :pass reached :pass also :pass} (:results (:value second-run))) "and so is the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each

@@ -209,27 +209,28 @@
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code), prose (.md), the shipped config (resources/seon/config/: its
-  values are :config's, which a test's digest takes by the keys it reads) and the schema
-  resources (their entries are program facts: a test's digest takes the entries its reach names)?
+  root loads, no test's code), prose (.md) and the shipped config (resources/seon/config/: its
+  values are :config's, which a test's digest takes by the keys it reads)? The schema resources
+  are in: their entries are program facts, which a test's digest takes by the entries its reach
+  names, and their class (env-class) for a reach that reads a db's whole schema.
   (claude_scratch/ is already out of the tree, tree-id's excludes.)"
   {:malli/schema [:=> [:cat :string] :boolean]}
   [p]
   (not (or (str/ends-with? p ".md")
            (str/starts-with? p "resources/seon/tasks/")
            (str/starts-with? p "resources/seon/config/")
-           (str/starts-with? p "resources/seon/schemas/")
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
 (defn- env-class
-  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps or /bin, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
+  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps, /bin or /schemas, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
   [p]
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
-        (str/starts-with? p "bin/") :seon.env/bin))
+        (str/starts-with? p "bin/") :seon.env/bin
+        (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas))
 
 (defn- group-entries
   "The :seon.pin class of each source group cfg's :seon.config.source/pin-namespaces names
