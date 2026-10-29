@@ -78,8 +78,6 @@
  ;; (procedure calls and loop back-edges; never elapsed time): runtime-fixable, the agent's to read
  :seon.repl/ticks-spent [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/ticks-spent]] [:ticks :int] [:budget :int]]]
  ;; the agent could not fork its test run (threads were active): no proof ran
- ;; an eval's response no longer held live (older than :seon.config.agent/result-window) that its record on the branch cannot give back as a value
- :seon.repl/result-evicted [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/result-evicted]] [:handle :keyword] [:printed {:optional true} :string]]]
  :seon.test/fork-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.test/fork-refused]] [:active-threads :int]]]
  ;; a line the agent's test process sent does not read (a value that prints as no EDN in it): its test
  ;; ends :error with the line's head, and the agent goes on (seon.agent/child-line)

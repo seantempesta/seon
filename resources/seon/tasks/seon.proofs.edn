@@ -108,8 +108,8 @@ Readers, each moved from the file cache to these facts (file:line from the 2026-
 - reuse: seon.proofs/plan, plan-of, found (green at the same digest → reused; flaky → rerun once code changes);
   test_runner/plan-of, read-results, measured-ms (shards by mean ms).
 - seon.agent/test-plan (:684), seon.agent/stored-results (:692); my.task/status (:48); seon.reconcile/done-explain (:43);
-  seon.problems classes :red :cost :unrun (:41, :685, :709); seon.proofs/answer (:199, bounded: counts, reds with
-  their first failure up to :seon.config.proofs/answer-reds, a handle); the dashboard's verdict-box, cost-report and
+  seon.problems classes :red :cost :unrun (:41, :685, :709); seon.proofs/answer (:199, counts, every red with
+  its failures); the dashboard's verdict-box, cost-report and
   per-form :fns table (seon.render.ui :377, :385, :505); my.agent's per-call view (:120-137).
 
 Deleted: seon.fx key-dir, verdict-path, read-verdict, stored-results, verdict-files, evict, write-verdicts!, last-ms

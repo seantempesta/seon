@@ -69,16 +69,15 @@
 (defn failures
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
-  the first :seon.config.proofs/max-assertions of each (expected and actual as the test child printed them)."
+  every one of each (expected and actual as the test child printed them)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
   [test-run]
-  (let [kept (cfg/value :seon.config.proofs/max-assertions)]
-   (reduce (fn [acc {:keys [type var] :as r}]
+  (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
-              (if (and t (#{:fail :error} type) (< (count (get acc t)) kept))
+              (if (and t (#{:fail :error} type))
                 (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
                 acc)))
-          {} (:reports test-run))))
+          {} (:reports test-run)))
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
@@ -154,7 +153,7 @@
   [dg red]
   (-> red
       (assoc :flaky true :digest dg)
-      ;; first, so no cut of a test's failures (:seon.config.proofs/max-assertions) leaves it out
+      ;; first, so it leads the test's failures
       (update :failures #(into [{:type :fail :flaky true :message (str "flaky: green and red at digest " dg " (seon.proofs/flaky)")}]
                                (remove :flaky) %))))
 
@@ -247,11 +246,9 @@
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
   and :key as they are, and of its :reports only what the done rule reads: one :pass report for each
-  of proofs that passed, every report of a died test, and the failing reports of the first
-  :seon.config.proofs/answer-reds red tests (those among proofs first), each test's first
-  :seon.config.proofs/max-assertions. The rest is counted (:reds-left, the red tests left out) and
-  is in the verdict cache under the run's digests (an agent reads one whole by
-  seon.agent/stored-results). So the answer costs its reds, never the tests run (an agent's whole run
+  of proofs that passed, every report of a died test, and the failing reports of every
+  red test, every failing assertion of each. The verdict cache holds the run whole under its
+  digests (an agent reads one by seon.agent/stored-results). So the answer costs its reds, never the tests run (an agent's whole run
   was about 3 MB in one frame): docs/merging.md#verdicts-are-a-cache. results, failures, costs and
   died read it as they read the whole run."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :map]}
@@ -259,20 +256,16 @@
   (let [reports (vec (:reports r))
         st (results {:reports reports})
         dead (died {:reports reports})
-        reds (vec (sort-by (juxt (comp not proofs) str) (keep (fn [[t s]] (when (not= :pass s) t)) st)))
-        bound (cfg/value :seon.config.proofs/answer-reds)
-        kept (set (take bound reds))
-        per (cfg/value :seon.config.proofs/max-assertions)
+        reds (set (keep (fn [[t s]] (when (not= :pass s) t)) st))
         failing (reduce (fn [acc {:keys [type var] :as rep}]
                           (let [t (test-symbol var)]
-                            (if (and (kept t) (#{:fail :error} type) (< (count (get acc t)) per))
+                            (if (and (reds t) (#{:fail :error} type))
                               (update acc t (fnil conj []) rep)
                               acc)))
                         {} reports)]
-    (cond-> (assoc r :reports (vec (concat (for [t (sort-by str proofs) :when (= :pass (st t))] {:type :pass :var (str "#'" t)})
+    (assoc r :reports (vec (concat (for [t (sort-by str proofs) :when (= :pass (st t))] {:type :pass :var (str "#'" t)})
                                            (filter #(dead (test-symbol (:var %))) reports)
-                                           (mapcat val (sort-by (comp str key) failing)))))
-      (> (count reds) bound) (assoc :reds-left (- (count reds) bound)))))
+                                           (mapcat val (sort-by (comp str key) failing)))))))
 
 ;; ---- what the results answer ------------------------------------------------------------
 
@@ -466,7 +459,7 @@
                                                     (str n "'s run ended before this test reported"))]
                                         (note! {:seon.test/report {:type :error :message msg} :test tst})
                                         [tst (cond-> {:test tst :digest (digests tst) :pass 0 :fail 0 :error 1 :ms 0 :message msg :unreported true}
-                                               (ex-data thrown) (assoc :data (contract/kept (sedn/encode (ex-data thrown)))))]))
+                                               (ex-data thrown) (assoc :data (sedn/encode (ex-data thrown))))]))
                          result (into @ran unreported)
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]

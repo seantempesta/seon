@@ -402,7 +402,7 @@
            (let [cause (step/error-msg e)
                  d (contract/error :seon.server/defect #'seon.server/respond
                                    (if (and mcp? (nil? @msg)) (str "a line opening {\" is MCP's JSON-RPC, and an EDN request a keyword-keyed map; this one is not JSON: " cause) cause)
-                                   (cond-> {:line line} (ex-data e) (assoc :data (contract/kept (ex-data e)))))]
+                                   (cond-> {:line line} (ex-data e) (assoc :data (sedn/encode (ex-data e)))))]
              (if mcp?
                (json/write-str (rpc-error (get @msg "id") (if @msg -32603 -32700) (print/text d)))
                (sedn/encode d)))))))

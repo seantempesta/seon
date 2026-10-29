@@ -534,26 +534,6 @@
           (assoc r :record id))
       r)))
 
-(defn- keep-result!
-  "Hold response r under its handle (result/e<n>, the var a printed cut reads through, as the REPL's
-  *1 is read, and :results in this agent's state, which (my.agent/$ :e<n>) reads) for the newest
-  :seon.config.agent/result-window handles; the oldest past that are let go (dissoc'd, and their
-  vars unmapped), so an agent's memory does not grow with each eval's value. A let-go response is
-  derived data (cacheable, evictable at any time: AGENTS 5): its eval's record on the branch holds
-  it, and my.agent/$ re-creates it from there, or answers :seon.repl/result-evicted. `ns-unmap`
-  and `intern` are used here as a REPL harness uses them, to build and retire vars in the namespace
-  `result` this ns owns, where no definition form exists (AGENTS 5, resolution). See
-  docs/agent.md#your-turn."
-  {:malli/schema [:=> [:cat :qualified-symbol :map] :any]}
-  [handle r]
-  (let [k (keyword (name handle))
-        ks (conj (vec (:result-keys @agent/state)) k)
-        n (max 0 (- (count ks) (cfg/value :seon.config.agent/result-window)))
-        old (subvec ks 0 n)]
-    (swap! agent/state #(-> % (assoc-in [:results k] r) (assoc :result-keys (subvec ks n)) (update :results (fn [m] (apply dissoc m old)))))
-    (intern (create-ns 'result) (symbol (name handle)) r)
-    (run! #(ns-unmap (the-ns 'result) (symbol (name %))) old)))
-
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
@@ -581,7 +561,9 @@
                                 (let [em (agent/error-map e)]
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
                                   (answered))))]
-            (keep-result! handle r)
+            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+            ;; the handle a printed cut reads through, as the REPL's *1 is read
+            (intern (create-ns 'result) (symbol (name handle)) r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -598,7 +580,7 @@
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
-    (keep-result! handle r)
+    (swap! agent/state assoc-in [:results (keyword (name handle))] r)
     (record! (assoc r :text (print/response-text r render/summarized)) code req)))
 
 (defn- layout
