@@ -838,6 +838,33 @@
           (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
       (finally (sh/sh "rm" "-rf" tmp)))))
 
+;; task seon.fx/the-standing-root-follows-main-not-the-checkouts-head: the source tree follows the ref
+;; of the branch main, so a topic branch checked out in the main tree changes nothing root reads.
+(deftest the-standing-root-follows-main-not-the-checkouts-head
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-ref-" (random-uuid))) (.mkdirs)))
+        co (str tmp "/main") wb (str tmp "/merges")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
+        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
+    (try
+      (.mkdirs (java.io.File. (str co "/src")))
+      (git co "init" "-q" "-b" "main")
+      (let [m0 (commit! co "a.clj" "(ns a)")]
+        (git co "worktree" "add" "-q" "-b" "merges" wb)
+        (git co "checkout" "-q" "-b" "topic")
+        (let [topic (commit! co "topic.clj" "(ns topic)") r (read)]
+          (is (not= m0 topic))
+          (is (not (contract/error? r)) (pr-str r))
+          (is (= ["src/a.clj"] (keys (:value r))) "the topic branch's file is not read")
+          (is (= m0 (git wb "rev-parse" "HEAD")) "the write-back branch stays at main"))
+        (git co "checkout" "-q" "main")
+        (let [m1 (commit! co "b.clj" "(ns b)")]
+          (git co "checkout" "-q" "topic")
+          (is (= ["src/a.clj" "src/b.clj"] (keys (:value (read)))) "main's own commit is followed from a topic checkout")
+          (is (= m1 (git wb "rev-parse" "HEAD")))))
+      (finally (sh/sh "rm" "-rf" tmp)))))
+
 (deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
   ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
   ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
@@ -865,6 +892,7 @@
         import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
     (try
       (is (zero? (:exit (sh/sh "git" "clone" "-q" "--local" here main))))
+      (git main "checkout" "-q" "-B" "main") ; the clone's branch main (a worktree's branch is not named main)
       ;; the built libraries, probe library and binary are this checkout's: the clone's target/ is its
       (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
       (git main "worktree" "add" "-q" "-b" "write-back" wb)
