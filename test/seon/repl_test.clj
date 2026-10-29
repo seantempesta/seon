@@ -60,9 +60,17 @@
          (let [r2 (repl/edit! 'x.repl-edit/f "c" "d")]
            (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
            (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
+         ;; md-scan #17: an edit one paren short was repaired far from it and failed as cond there
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
-           (is (= 3 ((resolve 'x.repl-edit/g))) "a delimiter left open is closed by the forgiving reader")
-           (is (seq (:repaired r)) "and the repair is said"))
+           (is (= :unbalanced (:seon.repl/refused-because r)) "a delimiter the new text leaves open: refused, never repaired")
+           (is (str/includes? (:seon.error/message r) "opens 1 more (") (:seon.error/message r))
+           (is (= 2 ((resolve 'x.repl-edit/g))) "nothing changed"))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 1))")]
+           (is (= :unbalanced (:seon.repl/refused-because r)) "a closer more")
+           (is (str/includes? (:seon.error/message r) "closes 1 more )") (:seon.error/message r)))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(str \\) \")\" ;)\n 1)")]
+           (is (nil? (:seon.repl/refused-because r)) (str "a closer in a character literal, a string or a comment is none: " (pr-str r)))
+           (is (= "))1" ((resolve 'x.repl-edit/g)))))
          (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source (outside an agent: no branch to name the nearest from)")
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
