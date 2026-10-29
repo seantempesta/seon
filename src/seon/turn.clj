@@ -179,7 +179,7 @@
 
 (defn- call-problem
   "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
-  result is, or nil: a call is prose and exactly one form (docs/prompt.md).
+  result is, or nil: a call is prose and one or more forms (docs/prompt.md).
   Code that does not read is left to the REPL, whose read error says where."
   {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
   [prose code]
@@ -188,10 +188,9 @@
       (str/blank? prose)
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
-      (and forms (not= 1 (count forms)))
+      (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
-                      (str "one form per call: this code holds " (count forms) " forms; make each its own call. None was run")
-                      {:problem :forms :forms (count forms)}))))
+                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
@@ -310,7 +309,7 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            ;; a call that is not prose and one form, or after one that threw, is not run: its one
+            ;; a call with no prose or no form, or after one that threw, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
             calls (reduce (fn [acc [i {:keys [id code prose]}]]
                             (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
@@ -322,7 +321,7 @@
                                         content (assoc :content content)
                                         (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
                                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                                  ;; a call that failed (threw, or was not prose and one form) stops the rest
+                                  ;; a call that failed (threw, or had no prose or no form) stops the rest
                                   failed (some #(when (:ex (:response %)) (:id %)) acc)
                                   why (if failed
                                         (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})

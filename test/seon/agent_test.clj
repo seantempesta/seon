@@ -805,13 +805,13 @@
     (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
-(deftest a-call-is-prose-and-one-form
-  ;; owner, 2026-10-28: a call is prose and exactly one form; one that is not answers a typed
-  ;; error as its one result and runs nothing, and the calls after it are not run (docs/prompt.md)
+(deftest a-call-is-prose-and-its-forms
+  ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
+  ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.turn/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
     (is (= :no-prose (:problem (problem " " "(+ 1 2)"))) "no prose")
-    (is (= [:forms 2] ((juxt :problem :forms) (problem "Two." "(def a 1) (inc a)"))) "two forms")
+    (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
     (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
@@ -824,10 +824,9 @@
                            {:sets [":seon.config.ai/script=seon.fixtures/two-forms-in-a-call"]})
         [r0 r1 :as rs] (:value msgs)]
     (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
-    (is (str/includes? r0 "invalid-call") "the two-form call's result is its error")
-    (is (str/includes? r0 "holds 2 forms"))
-    (is (not (str/includes? r0 ":value")) "and nothing of it ran")
-    (is (str/includes? r1 "not-run") "the call after it is not run")))
+    (is (not (str/includes? r0 "invalid-call")) "the two-form call runs")
+    (is (str/includes? r0 ":value 2") "its value is its last form's, (inc g) after (def g 1)")
+    (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary

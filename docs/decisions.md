@@ -2,16 +2,21 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-10-29 rulings
+
+### An eval call holds one or more forms (owner, 2026-10-29)
+"remove that from the docs that only one form runs". A call is prose and one or more forms, run in order as a file loads, the first throw stopping the rest; its `:value` is the last form's, as `load-string` answers. A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`.
+
 ## 2026-10-28 rulings
 The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
 
-### An eval call is prose and one form; its result is data with Clojure's value (owner, 2026-10-28)
+### An eval call is prose and one form; its result is data with Clojure's value (owner, 2026-10-28; one form superseded 2026-10-29)
 "we can also just require both fields and be explicit"; "Okay match clojure for the eval output (4)"; "I mean the full data output with timing and result too. Not just the value". A call with no prose, or not exactly one form, is not run and answers `:seon.turn/invalid-call`; a `;` comment is code, never the description. The response is the full data map, its `:value` the one Clojure answers ((do (+ 1 1) (+ 2 2)) is 4): no `:values`. Supersedes the 2026-10-25 "each form's value" ruling. Stated in: docs/prompt.md, docs/agent.md, `seon.repl/response`, `seon.turn/call-problem`.
 
 ### The model is sent the whole conversation; no history budget (owner, 2026-10-28)
 "who made a 32k history budget? Remove it I never approved that". A session chose 32,000 tokens on 2026-10-21; it dropped the agent's own evals while page re-renders filled the request. Every request now sends every record whole. Stated in: `seon.context/request`, docs/render.md.
 
-### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28)
+### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28; one form superseded 2026-10-29)
 A reply's text heads its block of evals; each eval is one tool call with `prose` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run"; a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)

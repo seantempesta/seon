@@ -99,11 +99,11 @@
   "The model's one tool (v1's): its code is the REPL's input, read as reply text is."
   {:type "function"
    :function {:name "eval"
-              :description "Evaluate exactly one Clojure form at your REPL; prose and code are both required. A reply may make several calls; they run in order, and a call after one that threw is not run. The response is data, {:handle :value :out :err :ex :recorded :redefined :warnings :repaired :ms :ticks :bytes}, each key only when present: the form's value as Clojure answers it, what it wrote, its error, what it made program, the functions whose contract or docstring it changed, what to fix, what the reader changed of your code, and its cost; result/e<n>, its handle, holds it."
+              :description "Evaluate Clojure code at your REPL: one or more forms, run in order until one throws; prose and code are both required. A reply may make several calls; they run in order, and a call after one that threw is not run. The response is data, {:handle :value :out :err :ex :recorded :redefined :warnings :repaired :ms :ticks :bytes}, each key only when present: the last form's value as Clojure answers it, what it wrote, its error, what it made program, the functions whose contract or docstring it changed, what to fix, what the reader changed of your code, and its cost; result/e<n>, its handle, holds it."
               ;; prose first: a model fills arguments in order, so it says what it expects before the code
               :parameters {:type "object"
                            :properties (array-map :prose {:type "string" :description "What you are doing and what you expect to see, in markdown; the user reads it."}
-                                                  :code {:type "string" :description "One Clojure form"})
+                                                  :code {:type "string" :description "Clojure forms"})
                            :required ["prose" "code"]}}})
 
 (defn- wire-message

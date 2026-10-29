@@ -523,7 +523,7 @@
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
-  (seon.turn's: a call before it in its reply threw, or the call is not prose and one form), so
+  (seon.turn's: a call before it in its reply threw, or the call has no prose or no form), so
   every call of a reply has its one result. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string :map :seon.error/base] :seon.eval/response]}
   [code req e]
