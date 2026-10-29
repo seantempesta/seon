@@ -137,7 +137,7 @@
 (clojure.core/defn- first-problem
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form when short, else its type), malli's kind for a
-  missing or refused key; and how many reasons more. md-scan #14, 2026-10-29: \"its value does not
+  missing or refused key; and how many reasons more. md-scan #14: \"its value does not
   satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key.
   See docs/errors.md#errors."
   {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}

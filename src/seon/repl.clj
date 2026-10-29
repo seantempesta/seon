@@ -93,7 +93,7 @@
   "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
-  error four times, 2026-10-29). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
+  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
   (not-empty (into {} (for [s repl-helpers
@@ -244,7 +244,7 @@
   "Error map em's message as Clojure's REPL says it (clojure.main/ex-str): for an error in reading,
   macroexpanding or compiling, the phase, the symbol and the position before the cause, \"Syntax error
   macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is. md-scan
-  #11, 2026-10-29: Jolt's cond failed on an odd number of forms, the message said only \"index out of
+  #11: Jolt's cond failed on an odd number of forms, the message said only \"index out of
   bounds\", and the agent bisected its runtime code for 40 evals. See docs/errors.md#an-eval-errors-diagnostics."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [{:clojure.error/keys [phase line column] sym :clojure.error/symbol msg :seon.error/message}]
@@ -660,7 +660,7 @@
   :seon.repl/edit-refused, nothing changed: no recorded source, old not in it (with the lines that
   hold old's first line, ignoring indentation), or old there more than once (each candidate's line).
   Exact text and one occurrence, as file editors converged on (docs/agent.md#changing-a-definition):
-  the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan, 2026-10-29."
+  the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan."
   {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]}
   [sym old new]
   (let [src (my.agent/source-fn sym)

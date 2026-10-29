@@ -85,14 +85,14 @@
 
 (defn chars-tokens
   "Estimated tokens of n characters: the one sizer's rule (seon.print.select/estimate is it over a
-  text's length; docs/render.md#cut-where-a-value-is-made), what every count a reader sees is in (owner, 2026-10-29: \"only report tokens
+  text's length; docs/render.md#cut-where-a-value-is-made), what every count a reader sees is in (owner: \"only report tokens
   (estimates are fine) not characters\")."
   {:malli/schema [:=> [:cat nat-int?] :int]}
   [n] (long (Math/floor (/ n chars-per-token))))
 
 (defn tokens-text
   "A count of tokens as every reader is shown one, estimated and short: ~840 tok, ~12.4k tok (owner,
-  2026-10-29: \"only report tokens (estimates are fine) not characters\"). The one wording of a size,
+  \"only report tokens (estimates are fine) not characters\"). The one wording of a size,
   beside the one sizer (`chars-tokens`) and the cut that names what it left (`cut-words`): docs/render.md#cut-where-a-value-is-made."
   {:malli/schema [:=> [:cat nat-int?] :string]}
   [n] (if (< n 1000) (str "~" n " tok") (str "~" (/ (Math/round (/ n 100.0)) 10.0) "k tok")))

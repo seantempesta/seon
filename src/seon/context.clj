@@ -49,8 +49,7 @@
 (defn failures
   "A test's failing assertions as the agent reads them (`failure`), those that got the same value
   with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
-  assertions that each threw one NullPointerException are one cause, read once (the md-scan bench,
-  2026-10-29). See docs/render.md#a-part-answers-data."
+  assertions that each threw one NullPointerException are one cause, read once (the md-scan bench). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [fs]
   (let [ms (mapv failure fs)
@@ -64,7 +63,7 @@
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
   the compiler's resolved references), each at summary level from its own facts on db: its
   contract and doc, and for a helper of p's own namespace its source too (what the proof means:
-  the md-scan bench's agent read its proofs' block-of first, 2026-10-29); a var is program when db
+  the md-scan bench's agent read its proofs' block-of first); a var is program when db
   holds it (a branch's callee this process never loaded included). See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
@@ -427,8 +426,9 @@
              depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
                     :doc (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)})}
              ;; what the plan cites, as its write derived it (seon.task/references-of): no draw parses it
-             {:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
-             cites (plan-citations db (task/task db (:seon.task/id t)))
+             tk (task/task db (:seon.task/id t))
+             {:keys [plan]} (:seon.task/accumulated tk)
+             cites (plan-citations db tk)
              fns (into #{} (keep :seon.ref/name) (program-vars db cites))
              ;; a wiki page's section only: a cited file is read whole by its view
              secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
@@ -745,12 +745,13 @@
   as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
   [db a]
-  (some->> (d/q '[:find ?tx ?r :in $ ?a :where [?e :seon.eval/agent ?a ?tx] [?e :seon.eval/record ?r]] db a)
-           (keep (fn [[tx rec]] (when-let [n (get-in rec [:response :ns])] [tx n]))) seq (apply max-key first) second))
+  ;; newest eval first, by the datoms alone; only a record is read until one carries the ns, never every record of the session
+  (some->> (d/q '[:find ?tx ?e :in $ ?a :where [?e :seon.eval/agent ?a ?tx]] db a)
+           (sort-by first >) (some (fn [[_ e]] (get-in (d/pull db [:seon.eval/record] e) [:seon.eval/record :response :ns])))))
 
 (defn namespace-data
   "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
-  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns, 2026-10-29): its
+  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns): its
   aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
   and its deftests, how many are green and which are red. With arglists? (the namespace the REPL is
   in, as a REPL's eldoc shows what is at point) each definition is its name and arglists,

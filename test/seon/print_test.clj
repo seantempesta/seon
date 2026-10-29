@@ -15,12 +15,12 @@
 
 (defn cuts-of
   "Every cut in printed text, read as an agent reads it: how many it says it left (:n, nil for
-  `…?`, members not yet counted), whether in characters (:chars?; a long name's cut is `…+N`
-  with neither, :name?), and the form after it that reads the rest (:form, nil when none)."
+  `…?`, members not yet counted), whether it counts the omitted characters as estimated tokens (:chars?, `…+~N tokens`;
+  its :n is then that estimate, not an exact count; :name? stays for a bare `…+N`), and the form after it that reads the rest (:form, nil when none)."
   [text]
   (loop [from 0 cuts []]
     (if-let [i (str/index-of text "…" from)]
-      (let [[m plus n chars?] (re-find #"^…(\+?)(\d+|\?)( chars(?: in \d+ more lines?)?)?" (subs text i))
+      (let [[m plus n chars?] (re-find #"^…(\+?)~?(\d+|\?)( tokens(?: in \d+ more lines?)?)?" (subs text i))
             after (when m (subs text (+ i (count m))))
             form (when (and after (re-find #"^ [(r]" after)) (edn/read-string (subs after 1)))]
         (recur (inc i) (cond-> cuts m (conj {:n (parse-long n) :chars? (some? chars?) :name? (and (= "+" plus) (not chars?)) :form form}))))
@@ -45,8 +45,8 @@
                    ;; a name's text (read as `(str …)`) prints bare; a string's as its literal
                    name? (and (seq? form) (seq? (second form)) (= 'str (first (second form))))
                    shown (subs whole 0 k)]
-               (and (= n (count rest)) (= rest (subs whole k))
-                    (str/includes? text (str (if name? shown (emit/string-literal shown)) "…+" n))))
+               (and (= n (max 1 (emit/chars-tokens (count rest)))) (= rest (subs whole k))
+                    (str/includes? text (str (if name? shown (emit/string-literal shown)) "…+~" n " tokens"))))
       (nil? n) (some? (seq rest))
       drop? (let [c (read-rest (nth form 2) h v)]
               (and (= (nth form 1) (- (count c) n)) (= (seq rest) (seq (drop (- (count c) n) c)))))
@@ -202,7 +202,7 @@
     (is (= (count msg) (+ (count shown) omitted)) "shown + omitted is the whole")
     (is (str/ends-with? shown "\n") "a multi-line text is cut after a whole line")
     (is (= (count (str/split-lines (subs msg offset))) lines) "the cut counts the lines it left")
-    (is (str/includes? text (str "…+" omitted " chars in " lines " more lines")) "the cut says what it omitted")
+    (is (str/includes? text (str "…+~" (max 1 (emit/chars-tokens omitted)) " tokens in " lines " more lines")) "the cut says what it omitted, in tokens")
     (is (= (list 'subs '(:message e) offset) continuation))
     (is (str/includes? text "(subs (:message e) ") "the cut names the form that reads the rest")
     (is (= msg (str shown (subs msg offset))) "the form reads exactly the rest"))
@@ -210,7 +210,7 @@
     (let [s (str/join " " (repeat 60 "word"))
           {:keys [text shown omitted]} (seon/prose s 20)]
       (is (str/ends-with? shown " ") "cut at a space, not mid-word")
-      (is (= (str shown "…+" omitted " chars") text) "no lines left: characters only, and no form")))
+      (is (= (str shown "…+~" (max 1 (emit/chars-tokens omitted)) " tokens") text) "no lines left: tokens only, and no form")))
   (testing "one-line reads whitespace runs as one space"
     (is (= "a b c" (:text (seon/prose "a\n  b\t\tc" 20 {:one-line? true}))))))
 
@@ -319,7 +319,7 @@
             [cut] (cuts-of text)
             rest (read-rest (:form cut) h {:source (seon/code (str/join "\n" (repeat 40 a-deftest)))})]
         (is (:chars? cut) text)
-        (is (= (:n cut) (count rest)) "the form reads the characters it says it left")))))
+        (is (= (:n cut) (max 1 (emit/chars-tokens (count rest)))) "the form reads the characters whose tokens it says it left")))))
 
 
 (deftest a-map-shows-its-first-entry-whenever-its-least-form-fits
@@ -336,10 +336,11 @@
         {:keys [text]} (seon/print-value v {:budget 60 :handle h})
         [c :as cs] (cuts-of text)]
     (is (= 1 (count cs)) text)
-    (is (:chars? c) "the cut says its unit: `…+N chars`")
+    (is (:chars? c) "the cut says its unit: `…+~N tokens`")
     (is (some? (:form c)) "and the form that reads the rest")
-    (is (= (subs (name v) (- 300 (:n c))) (when (:form c) (read-rest (:form c) h v)))
-        "the form reads exactly the N characters of the name that were left")))
+    (is (= (:n c) (max 1 (emit/chars-tokens (count (when (:form c) (read-rest (:form c) h v))))))
+        "the form reads the characters of the name whose tokens were said left")
+    (is (str/ends-with? (name v) (read-rest (:form c) h v)) "and they are the name's last characters")))
 
 (deftest a-long-name-cuts-the-same-anywhere
   ;; the cut reads `(subs (str <path>) k)`: a namespaced keyword's or symbol's printed text, and a

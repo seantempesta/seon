@@ -92,7 +92,7 @@
   branch's registrations; (keys (forms)) are every key. With a key, that key's form (agents asked
   (forms k) four times in step E's paid runs), or, for a key no schema registers,
   :seon.schema/unknown-key naming the nearest registered keys (`unknown-key`): unknown is no nil (md-scan #6,
-  2026-10-29, asked for :seon.ref/names twenty times and read nil each time). See docs/references.md#resolving-and-showing."
+  asked for :seon.ref/names twenty times and read nil each time). See docs/references.md#resolving-and-showing."
   {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
                   [:=> [:cat :qualified-keyword] :any]]}
   ([] (merge contract/forms (program/schema-changes (agent/db))))

@@ -172,7 +172,8 @@ The places that cut a value where it is made, not in the printer, each with its 
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
 - `seon.contract/kept`: root keeps no live value of another process's error ([errors](errors.md#an-error-keeps-data)); a value past the part budget is kept as the printer's cut (`print/prose` for a string, `print/text` marked code for the rest), which says what it omitted.
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
-- `seon.turn/turn-error!`: the error a turn threw (or the missing status) becomes its message's text where the message is made, printed whole (`:seon.print/full`), never cut: the agent reads all of it, as it reads any message.
+- `seon.turn/tell-error!`: the error a turn threw (or the missing status) becomes its message's text where the message is made, printed whole (`:seon.print/full`), never cut: the agent reads all of it, as it reads any message.
+- `seon.contract/first-problem`: the offending value in a contract error's message, `print/text` under 60 tokens (the part budget is for the error's `:value`, whole in `:seon.error/problems`): one line of where, what it got and what was expected, so the reader finds the first problem without opening the map.
 - `seon.turn/take!`: a send's body that is not text (another agent's value) becomes its message fact's text where the message is made, printed whole (`:seon.print/full`), never cut: the message's body is text by its schema, and the fact is what every later reader reads.
 - A test child's reports: a child process prints an assertion's expected and actual at its pipe, a process boundary, and the reports are kept as it sent them; `seon.proofs/failures` keeps every one, whole (owner, 2026-10-29: "do not put any artificial limits or cuts on agents context or evals"), the facts on its var entity hold that data (`:seon.test/failures`), and the one printer prints it where it is shown (the owner, 2026-10-29: "keep everything as data until it's at a print boundary").
 
@@ -180,6 +181,7 @@ The places that cut a value where it is made, not in the printer, each with its 
 
 Uses of take, subs and the like in display code that choose what to find or read, not what to cut from output.
 
+- `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.

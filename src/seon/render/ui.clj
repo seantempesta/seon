@@ -811,7 +811,7 @@
   [#'seon.render/html opts data], expanded when the page is written, so the model reads the data as
   data. Each proof's source and verdict are the status's (`status`), and each thing the plan cites
   a part of its own (`cited`): neither is here again (a run was sent each proof's source and
-  failures twice, 2026-10-29). It runs again when the task's own attributes in ctx change or a
+  failures twice). It runs again when the task's own attributes in ctx change or a
   transaction touches what task-data read."
   {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300") :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
@@ -1092,7 +1092,7 @@
    (for [k (added-keys c)] [#'ctx-key {} k])])
 
 (defn eval-item
-  "An eval of the conversation (a component over ctx), as a chat reads it (owner, 2026-10-29: \"I
+  "An eval of the conversation (a component over ctx), as a chat reads it (owner: \"I
   want the chat to look like a nice chat screen with just prose unless I dig into it\"): one quiet
   line, whether it came out well (✓) or threw (✗), the prose the agent wrote beside it (else its code,
   cut by the page's width only), how long it ran and the tokens it puts in the model's context (its
@@ -1197,7 +1197,7 @@
 
 (defn chat-turn
   "A model turn as the chat shows it (a component over ctx and the db), a message on the left as a
-  person reads a chat (owner, 2026-10-29: \"Does that look like a friendly chat window that my mom could
+  person reads a chat (owner: \"Does that look like a friendly chat window that my mom could
   use?\"): its reply's prose, then its evals folded into one quiet line (how many steps, how long they
   ran, any that failed), opened to one line each (`eval-item`); its thinking folded; a small footer
   with its turn and the tokens its request sent, the provider's count on its model call
@@ -1633,7 +1633,7 @@
 
 (defn sent-request
   "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request),
-  whole, nothing hidden (owner, 2026-10-29: \"I want to understand what the agent was sent cleanly ...
+  whole, nothing hidden (owner: \"I want to understand what the agent was sent cleanly ...
   I don't want anything hidden\"): its turn and the provider's numbers (its tokens, the prompt tokens it
   served from cache), then every message it sent in order, each a card with its role, the record that
   made it and its tokens (the one sizer's estimate): what it sends as the turn before it did, grouped

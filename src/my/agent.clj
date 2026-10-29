@@ -96,7 +96,7 @@
   (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
   names answers its callers ([] when none uses it: the true answer); any other answers
   :seon.schema/unknown-key with the nearest registered keys (my.schema/unknown-key: a typo is no
-  \"nothing calls it\", the md-scan bench, 2026-10-29)."
+  \"nothing calls it\", the md-scan bench)."
   {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var :seon.schema/unknown-key]]}
   [x]
   (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))
@@ -344,7 +344,7 @@
   "What a help address that is no section may have meant: the help page's sections and the pages
   whose address holds a word of it (four letters or more), the sections whose text the search finds
   for it (`search`: \"schema\" named no address, though the help page says how a schema changes;
-  md-scan #6, 2026-10-29), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
+  md-scan #6), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
   addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]

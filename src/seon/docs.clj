@@ -644,7 +644,7 @@
   "Schema key k as its citation's depth shows it (docs/references.md#resolving-and-showing),
   read from the db's schema entry (:schema/form), so it changes as the db does: :summary the form
   that reads it; :doc and :code its form as written (code), the form of each other key it names
-  (one level: the agent of the md-scan bench read them one a turn, 2026-10-29), and how it changes
+  (one level: the agent of the md-scan bench read them one a turn), and how it changes
   at the REPL (my.schema/register!). Never the resource file it merges into: an agent's working
   directory holds no checkout, and the file sent three runs to slurp it."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.ref/depth] :map]}
