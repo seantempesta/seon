@@ -177,13 +177,14 @@
          (is (= {:calls 12 :ticks 108 :self-ticks 83 :bytes 6 :self-bytes 6} (get (proofs/per-call details) 'a/f))))))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-tests-last-ms-is-the-most-any-digest-measured
+(deftest a-tests-typical-ms-is-the-median-of-its-digests
   (with-dir
    (fn [dir]
      (rec! dir {'a/t {:test 'a/t :digest "ms-1" :pass 1 :fail 0 :error 0 :ms 40}})
      (rec! dir {'a/t {:test 'a/t :digest "ms-2" :pass 1 :fail 0 :error 0 :ms 900}
                 'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
-     (is (= '{a/t 900 a/u 7} (fx/last-ms dir '[a/t a/u a/none])) "by test; a test never run is left out"))))
+     (rec! dir {'a/t {:test 'a/t :digest "ms-4" :pass 1 :fail 0 :error 0 :ms 50}})
+     (is (= '{a/t 50 a/u 7} (fx/typical-ms dir '[a/t a/u a/none])) "by test, the median not the largest; a test never run is left out"))))
 
 (def ^:private red-cost
   "A red cost proof's report, as seon.cost/proof's :actual carries it."
