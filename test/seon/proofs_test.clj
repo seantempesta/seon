@@ -29,12 +29,12 @@
 (defn- digests [db env] (select-keys (ts/reach-digests db {:env env :tree "t" :config {}}) ts))
 
 (defn- scratch-dir []
-  (let [d (str (System/getProperty "user.dir") "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
+  (let [d (str (seon.config/checkout) "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
 
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f]
-  (let [dir (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid))]
+  (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
     (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (defn- stored
@@ -261,7 +261,7 @@
         ;; a result the schema refuses (a duration that is no number): the commit is refused whole
         ;; the writer refuses the commit (root's writer answers an error map)
         ;; a cache that refuses the write (its directory is a file): the verdict is not cached
-        unrecorded (let [f (str (System/getProperty "user.dir") "/target/tmp/not-a-dir-" (random-uuid))]
+        unrecorded (let [f (str (seon.config/checkout) "/target/tmp/not-a-dir-" (random-uuid))]
                      (spit f "") (try (fx/write-verdicts! f {:id "proofs-test"} ran {}) (finally (.delete (java.io.File. f)))))
         notes (atom [])
         thrown (proofs/run-tests! '[app.pv-fx-test/never-runs] '{app.pv-fx-test/never-runs "d-never"} #(swap! notes conj %))
@@ -325,7 +325,7 @@
   ;; 2026-10-29: a merge's 217 tests were dealt by the largest ms any verdict measured; one 17 s test
   ;; once measured 625 s in a hung run, so a shard ended at 62 s beside three at 640-746 s
   ;; (docs/merging.md#a-merge-runs-what-the-change-reaches)
-  (let [dir (str (System/getProperty "user.dir") "/target/tmp/typical-ms-" (random-uuid))
+  (let [dir (str (seon.config/checkout) "/target/tmp/typical-ms-" (random-uuid))
         rec (fn [t dg ms] (fx/write-verdicts! dir {:id "proofs-test"} {t {:test t :digest dg :pass 1 :fail 0 :error 0 :ms ms}} {}))]
     (try (doseq [[dg ms] [["d1" 17000] ["d2" 625000] ["d3" 16000] ["d4" 18000] ["d5" 15000]]] (rec 'app.pv-slow-test/hung-once dg ms))
          (rec 'app.pv-slow-test/once "d1" 4000)

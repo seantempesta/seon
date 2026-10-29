@@ -96,7 +96,7 @@
 ;; its index nodes no addresses, so no two db values of it share a stored subtree and a structural diff
 ;; of them reads everything (as in seon.merge-cost-test); main's dbs are LMDB's, which share them.
 (def ^:private store
-  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/vector-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/vector-cost-" (random-uuid)) 0 :db))))
 
 (defn round-of
   "seon.vector/vectors-proc's arguments for main's notice of a commit that wrote one form, with n

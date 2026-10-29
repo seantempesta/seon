@@ -11,7 +11,7 @@
 ;; store gives its index nodes no addresses, so no two db values of it share a stored subtree
 ;; and a structural diff of them reads everything; LMDB, as in production, shares them.
 (def ^:private store
-  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/merge-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-cost-" (random-uuid)) 0 :db))))
 
 (defn three-of
   "delta-three-way's arguments: base, a branch holding n forms (app.pc/f0..fn-1), and ours
@@ -64,7 +64,7 @@
 ;; data-of's store, a second of this test's own: the three-way proof releases and removes its
 ;; store at its end
 (def ^:private data-store
-  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/merge-data-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-data-cost-" (random-uuid)) 0 :db))))
 
 (defn data-of
   "delta-three-way's arguments for a merge of declared data (:all): base holding n data
@@ -118,7 +118,7 @@
 ;; embedded-of's store, a third of this test's own, for the same reason as data-store: the other proofs
 ;; release and remove theirs at their end, and tests of one shard share the process
 (def ^:private embedded-store
-  (delay (:conn (pdb/open! :lmdb (str (System/getProperty "user.dir") "/target/merge-embedded-cost-" (random-uuid)) 0 :db))))
+  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-embedded-cost-" (random-uuid)) 0 :db))))
 
 (defn embedded-of
   "delta-three-way's arguments for a main that only embedded: base holding n forms, ours changing

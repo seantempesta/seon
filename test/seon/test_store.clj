@@ -51,7 +51,7 @@
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
   under target/tmp: a test process's own, so shards running at once never share one; removed
   when the process ends (a shutdown hook)."
-  (delay (let [path (str (System/getProperty "user.dir") "/target/tmp/program-store-" (random-uuid))]
+  (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
            path)))
 
@@ -95,7 +95,7 @@
   does not exist\" (task seon.test-store/the-process-store-is-made-before-any-shard). A missing
   store is refused, naming who makes it, never created here. checkout: default this process's."
   {:malli/schema [:function [:=> [:cat] :string] [:=> [:cat :string] :string]]}
-  ([] (process-store (.getCanonicalPath (java.io.File. "."))))
+  ([] (process-store (seon.config/checkout)))
   ([checkout]
    (let [path (str checkout "/target/runs/test-store-" pdb/schema-digest)]
      (when-not (pdb/store? path)
@@ -194,10 +194,10 @@
   never by a shutdown hook: hooks run at once, and one removing it raced the shared roots' stop
   (start-shared-root!), whose bin/held then refused to run (the roots outlived their shards).
   [path its-holder]."
-  (delay (let [dir (.getCanonicalPath (java.io.File. "target/tmp"))
+  (delay (let [dir (.getCanonicalPath (java.io.File. (seon.config/checkout) "target/tmp"))
                path (str dir "/test-starter-" (seon.lib/c-getpid) ".fifo")]
            (.mkdirs (java.io.File. dir))
-           (sh/sh "bin/held" "--reclaim" dir)
+           (sh/sh (str (seon.config/checkout) "/bin/held") "--reclaim" dir)
            (sh/sh "rm" "-f" path)
            (sh/sh "mkfifo" path)
            [path (java.io.RandomAccessFile. path "rw")])))
@@ -208,7 +208,11 @@
   reach digest covers the whole tree the binary is built from. It runs under bin/held with this
   process's starter fifo: what it starts ends when the test process ends."
   {:malli/schema [:=> [:cat [:* :any]] :map]}
-  [& args] (apply sh/sh "env" (str "SEON_STARTER_FIFO=" (first @starter)) (.getCanonicalPath (java.io.File. "bin/held")) args))
+  [& args] (let [[cmd opts] (split-with string? args)
+                 d (:dir (apply hash-map opts) ".")   ; a relative :dir (or none) is the checkout's, never this process's cwd
+                 dir (if (.startsWith ^String d "/") d (str (seon.config/checkout) "/" d))]
+             (apply sh/sh "env" (str "SEON_STARTER_FIFO=" (first @starter)) (str (seon.config/checkout) "/bin/held")
+                    (concat cmd (apply concat (assoc (apply hash-map opts) :dir dir))))))
 
 (defn- root-sh
   "bin/root COMMAND ARGS for a test's root (root): its store, main and runs named in the
@@ -308,7 +312,7 @@
   [{:keys [port log]} m]
   (if (nil? port)
     {:error :root-did-not-listen :log log}
-    (let [{:keys [out]} (sh/sh "bin/ask" (str port) :in (str (pr-str m) "\n"))]
+    (let [{:keys [out]} (sh/sh (str (seon.config/checkout) "/bin/ask") (str port) :in (str (pr-str m) "\n") :dir (seon.config/checkout))]
       (if (clojure.string/blank? out)
         {:error :no-answer}
         (clojure.edn/read-string {:default tagged-literal} out)))))
@@ -351,7 +355,7 @@
   generation) or main itself starts a root of its own."
   {:malli/schema [:=> [:cat [:sequential :string]] :map]}
   [args]
-  (let [k [(.getCanonicalPath (java.io.File. ".")) (vec args)]
+  (let [k [(seon.config/checkout) (vec args)]
         ;; a start that is not run unless it is the one put: two callers at once share one root
         d (delay (start-shared-root! (first k) (second k)))]
     @(or (.putIfAbsent ^java.util.concurrent.ConcurrentHashMap shared-roots k d) d)))

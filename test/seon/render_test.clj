@@ -228,7 +228,7 @@
   ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
   ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
   (let [forms (seon.program/live-forms (src-program))
-        doc (let [t (slurp "docs/render.md")] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
         named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
         printer? #(not (str/starts-with? (str %) "seon.print"))

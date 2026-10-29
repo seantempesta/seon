@@ -59,7 +59,7 @@
   ;; Its store: a main of its own on the one test store, target/runs/test-store (under runs/
   ;; so a worktree's clone of target/ leaves it out: a store's identity is its path), deleted
   ;; with its branches when the root has stopped.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "root-test-" (random-uuid))
         runs (str checkout "/target/runs/" main "-runs")
         root (ts/start-root! {:store (test-store) :main main :runs runs
@@ -96,7 +96,7 @@
   ;; seon.task/entity-value could not read. The built root resumes that main and answers a
   ;; root eval and {:op :agents}. A store on disk of this test's own, the last resort: what
   ;; is proved is a kept store another build wrote; removed at the end.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         path (str checkout "/target/root-test-resume-" (random-uuid))
         later? #(or (str/starts-with? (namespace (:db/ident %)) "seon.config") (= "seon.ai.model" (namespace (:db/ident %)))
                     (#{:ns/file :ns/tail :form/lead :form/source :seon.run/commit :seon.run/commit-error} (:db/ident %)))
@@ -129,7 +129,7 @@
   ;; lacks). A store of this test's own, as a-root-resumes-a-store-an-earlier-build-wrote: main and
   ;; a kept branch cut from it before the attribute; today's root opens main (which gains it) and
   ;; spawns an agent onto the kept branch, which gains it on resume and answers an eval
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         path (str checkout "/target/root-test-cut-before-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database cfg)
@@ -165,7 +165,7 @@
   ;; first loaded and the run it started are still there. A store of this test's own, the
   ;; last resort: what is proved is the default main of a store, which a shared test store's
   ;; other users would also resume; removed at the end.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         path (str checkout "/target/runs/root-test-main-" (random-uuid))
         tasks (str path "-tasks")
         _ (.mkdirs (java.io.File. tasks))
@@ -193,7 +193,7 @@
   ;; a task file's event loads every file of the task dir. A test root's task dir is its own
   ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
   ;; Asserted through the root's own reads, with no watcher event and no write to the checkout
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         path (test-store)
         main (str "root-test-own-tasks-" (random-uuid))
         runs (str checkout "/target/runs/" main "-runs")
@@ -231,7 +231,7 @@
   ;; the whole wiki. Now the rest loads, the link is a dead citation my.root/problems shows,
   ;; and the root boots. A
   ;; checkout of this test's own: this one's files, its docs/ with one broken page more
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         tmp (str checkout "/target/runs/root-test-wiki-" (random-uuid))
         path (test-store)
         main (str "root-test-wiki-" (random-uuid))
@@ -261,7 +261,7 @@
   ;; test running start-root!, or the last --started-by its arguments name. A store of this test's
   ;; own, as a-second-boot-resumes-the-same-main's (root-answers names its fifo and log after the
   ;; store); removed at the end.
-  (let [path (ts/clone-process-store! (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid)))
+  (let [path (ts/clone-process-store! (str (seon.config/checkout) "/target/runs/root-test-ends-" (random-uuid)))
         ev (fn [code] {:op :eval :agent "root" :code code})
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
@@ -301,9 +301,9 @@
   ;; JOLT_NO_WP_INFER=1, `jolt build` of an app requiring clojure.tools.reader fails to analyze
   ;; tools.reader.impl.utils (`<=clojure-1-7-alpha5 is not bound`), so a root cannot be built
   ;; open-world; with inference on the same app builds and reads.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         out (str checkout "/target/reader-no-wp-" (random-uuid))
-        build (sh/sh "env" "JOLT_NO_WP_INFER=1" (str "JOLT_PWD=" checkout) "target/jolt/jolt" "-A:hello" "build" "-m" "build.reader" "-o" out)]
+        build (sh/sh "env" "JOLT_NO_WP_INFER=1" (str "JOLT_PWD=" checkout) (str checkout "/target/jolt/jolt") "-A:hello" "build" "-m" "build.reader" "-o" out :dir checkout)]
     (try
       (is (= 0 (:exit build)) "the build without whole-program inference succeeds")
       (is (= "[1 2]" (str/trim (:out (sh/sh out)))) "and the binary reads")
@@ -316,7 +316,7 @@
   ;; boots on a main of their own on the test store (deleted at the end), the tree a scratch
   ;; repository under target/: commit A, then commit B with one function changed and one
   ;; removed, then B again.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
         tasks (str tree "-tasks")
         git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))

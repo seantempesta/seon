@@ -255,7 +255,7 @@
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
           "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store)) nil) 'seon.program/reach-update))
+              (program/tests-reaching (program/reach-graph (runner/program-db (seon.config/checkout) (ts/kept-program-store)) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
 (deftest a-namespace-gaining-its-first-test-is-updated-not-rebuilt
@@ -387,7 +387,7 @@
   (apply record (empty-db) (concat calc-srcs ['app.pt-calc-test "(deftest neg-test (is (= -1 (app.pt-calc/neg 1))))"])))
 
 (defn- scratch-dir [label]
-  (let [d (str (System/getProperty "user.dir") "/target/tmp/reach-" label "-" (random-uuid))]
+  (let [d (str (seon.config/checkout) "/target/tmp/reach-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -399,7 +399,7 @@
   and pins ask of the whole program cost 3.4 G ticks to import alone). program-db reads a tree from
   its repository's git objects, so the sample is a repository."
   [label n extra]
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         files (->> (:out (apply sh/sh "git" "-C" here "ls-files" "-co" "--exclude-standard" (cfg/value :seon.config.source/dirs)))
                    str/split-lines sort (filter #(.exists (java.io.File. here %)))
                    (keep-indexed (fn [i f] (when (or (zero? (mod i n)) (contains? (set extra) f)) f))))
@@ -522,7 +522,7 @@
 
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
-  [f] (let [dir (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid))]
+  [f] (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
         (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (defn- run-plan "bin/test's plan of digests against the verdicts the cache at dir holds." [digests dir]
@@ -595,7 +595,7 @@
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
   ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         a (update-vals (program/graph-index g in nil) :digest)
@@ -691,7 +691,7 @@
   ;; green shared it and bin/test listed them flaky. The agent's code is reached over a socket and as
   ;; a quoted form root sends it: a form using a process var has an edge to the process's entry vars
   ;; (:seon.config.source/process-entry)
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         in (fx/inputs here)
         g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs in))
         idx (program/graph-index g in nil)
@@ -776,7 +776,7 @@
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
   ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
   ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         in (fx/inputs here)
         sample (sampled-repo "pins" 6 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj" "src/seon/source.clj" "src/seon/contract.clj"])
         g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
@@ -851,7 +851,7 @@
           (spit (str p "/docs/a.md") "# c")
           (is (= e (env)) "an unrelated file (prose) moves no :env"))))
     (testing "the digest of every test and every contract key takes :env"
-      (let [here (System/getProperty "user.dir")
+      (let [here (seon.config/checkout)
             in (fx/inputs here)
             sample (sampled-repo "runtime-pins" 12 ["test/seon/reader_test.clj" "src/seon/reader.clj"])
             g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
@@ -962,7 +962,7 @@
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
   ;; An eighth of the tree's files, in two repositories (sampled-repo); the whole tree's run of the same
   ;; property cost 6.7 G ticks.
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         dirs (cfg/value :seon.config.source/dirs)
         copy (sampled-repo "copy" 8 []) copy2 (sampled-repo "copy2" 8 [])
         in (fx/inputs here)
@@ -989,7 +989,7 @@
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         digests #(update-vals (program/graph-index g % nil) :digest)
@@ -1020,7 +1020,7 @@
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
   ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
   ;; namespace (seon.program/file-readers) does.
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store))
+  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (ts/reach-digests db (in "t1"))
         b (ts/reach-digests db (in "t2"))
@@ -1065,13 +1065,13 @@
         in {:env "e" :tree "t" :config {} :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((ts/reach-digests db in) k) ((ts/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (fx/declared-refs (str (System/getProperty "user.dir") "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (str (seon.config/checkout) "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest the-config-in-force-is-an-input
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
   ;; checkout's config was reused in another's
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         cfg {:seon.config.ai/model "a" :seon.config.root/runs-dir (str here "/runs") :seon.config.web/port 8451
              :seon.config.native/probe-lib (str here "/target/lib/libprobe.dylib")}
         config #(:config (fx/inputs here % here))]

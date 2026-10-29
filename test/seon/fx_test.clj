@@ -119,7 +119,7 @@
 ;; ---- write-back answers what happened (audit GUARDS #21) ------------------------------
 
 (defn- scratch-dir []
-  (let [d (str (System/getProperty "user.dir") "/target/tmp/fx-test-" (random-uuid))]
+  (let [d (str (seon.config/checkout) "/target/tmp/fx-test-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
 
@@ -195,7 +195,7 @@
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
   ;; merges branch does not exist until the first write-back, which git-commit starts at HEAD; the gate asked
   ;; for the branch itself. branch-head is the one rule
-  (let [dir (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "user.dir") "/target/tmp/fx-branch-head-" (random-uuid))) (.mkdirs)))
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-branch-head-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))]
     (try
       (git "init" "-q")

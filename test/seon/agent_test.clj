@@ -13,7 +13,7 @@
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
-  (.getCanonicalPath (java.io.File. "test/seon/await.clj")))
+  (.getCanonicalPath (java.io.File. (seon.config/checkout) "test/seon/await.clj")))
 
 (def ^:private before-done
   "Main's t just before a :done, kept in root's REPL as t-before-done: :done answers once the judge
@@ -46,7 +46,7 @@
   naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
   ([forms {:keys [dirs proofs sets config decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
         tasks (str checkout "/target/runs/" tns "-tasks")
@@ -118,7 +118,7 @@
   seon.test-store/kill-root!'s drain, an event; a process that never ends holds the test), and
   root's log, for a red run's message."
   [code fork-server-first?]
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "root-ended-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -171,7 +171,7 @@
   ;; agent is made, and root stops. Unfixed, the fork was neither sent nor answered and the spawn
   ;; (an attach's) waited for good; then a spawn made an agent whose socket the lost server closed,
   ;; so it answered :seon.agent/died or :seon.agent/failed, whichever end reached root first
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "fork-server-lost-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -208,7 +208,7 @@
   ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
   ;; throw is an error fact on root, the server's state is as it was, and the next spawn is served.
   ;; No clock decides: an unfixed run waits on the spawn until the runner's budget ends it
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "fork-server-throw-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -246,7 +246,7 @@
   ;; proof run is in its test, its EOF that nothing holds the fifo any more, the proof run gone.
   ;; No clock decides: a run that outlives its agent wakes from its sleep (a minute) and writes a
   ;; second byte, which fails the test.
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "proof-ended-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -282,7 +282,7 @@
   ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
   ;; decides: a child that outlives its agent wakes from its sleep (a minute) and writes a second byte. (A child also
   ;; ends by watching its parent, so this does not alone show a sibling holds no copy of A's pipe: the next test does)
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "proofs-ended-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -329,7 +329,7 @@
   ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
   ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
   ;; holding a sibling's pipe end has one more than the child forked before it
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         dir (str checkout "/target/runs/fds-" (random-uuid))
         _ (.mkdirs (java.io.File. ^String dir))
         count-in (fn [n] (str "(ns fds" n "-proof (:require [clojure.test :refer [deftest is]]))"
@@ -346,7 +346,7 @@
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
   ;; child holds in its test until this test lets it go (a fifo, no clock): the eval is answered
   ;; while it holds, then the run answers green
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "answers-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -457,7 +457,7 @@
 (deftest root-interrupts-a-blocked-take
   ;; task seon.intr/a-signal-wakes-a-blocked-wait: root's interrupt! stops an eval blocked in a
   ;; channel take, and the agent answers its next request
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         main (str "blocked-take-" (random-uuid))
         store (ts/process-store checkout)
         runs (str checkout "/target/runs/" main "-runs")
@@ -572,7 +572,7 @@
 
 (defn- cache-dir
   "A fresh verdict cache directory under this checkout's target/tmp (seon.fx/write-verdicts!)."
-  [] (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid)))
+  [] (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid)))
 
 (defn- own-cache
   "The --set that gives a test's root (and its agents) the verdict cache dir, one this test's own
@@ -587,7 +587,7 @@
   ;; is its own: seon.test-store/start-root!, so nothing an earlier run cached is reused),
   ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
   ;; unchanged branch reruns nothing and answers the same results
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
         ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
@@ -715,7 +715,7 @@
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
   ;; the same digests. The checkout caches p1 green there; an agent on the same tree reuses it and
   ;; runs p2, which is then cached too, so the checkout's plan reuses the agent's p2
-  (let [here (System/getProperty "user.dir")
+  (let [here (seon.config/checkout)
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
         digests (ts/reach-digests (runner/program-db here (ts/kept-program-store)) (fx/inputs here))
@@ -970,9 +970,9 @@
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it
   ;; (:seon.config.agent/cwd) and still reads any file by its path
-  (let [[abs git] (in-agent [(str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. "src/seon/reconcile.clj"))) "))")
+  (let [[abs git] (in-agent [(str "(count (slurp " (pr-str (.getCanonicalPath (java.io.File. (seon.config/checkout) "src/seon/reconcile.clj"))) "))")
                              "(clojure.java.shell/sh \"git\" \"rev-parse\" \"--git-dir\")"])]
-    (is (= (count (slurp "src/seon/reconcile.clj")) (:value abs)) "a file reads by its absolute path")
+    (is (= (count (slurp (str (seon.config/checkout) "/src/seon/reconcile.clj"))) (:value abs)) "a file reads by its absolute path")
     (is (str/includes? (:text git) ":exit 128") (str "git finds no repository: " (pr-str git)))
     (is (str/includes? (:text git) "not a git repository") (pr-str git))))
 

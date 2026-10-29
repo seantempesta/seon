@@ -69,7 +69,7 @@
 (deftest a-reopened-store-issues-past-every-head
   ;; the page is reseeded from the heads when it opens, so a page lost (a crash, a deleted
   ;; file) re-issues no id a committed head holds; a store on disk of its own, removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [r (d/transact conn [{:db/id "n" :note/text "before"}])
@@ -84,7 +84,7 @@
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
   ;; store reports its map; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (let [{:keys [used-bytes map-bytes]} (pdb/map-use cfg)]
@@ -100,9 +100,9 @@
   ;; two processes at once each make 50 branches of one store (two roots on one store, as
   ;; parallel check steps or a standing root beside a run): every branch is listed. A store on
   ;; disk of this test's own, the last resort: the race is between processes; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-race-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-race-" (random-uuid))
         _ (d/release (:conn (pdb/open! :lmdb path 0 :db)))
-        jolt (str (System/getProperty "user.dir") "/target/jolt/jolt")
+        jolt (str (seon.config/checkout) "/target/jolt/jolt")
         code (fn [tag] (pr-str `(do (require 'seon.db 'datahike.api)
                                     (let [c# (:conn (seon.db/open! :lmdb ~path 0 :db))]
                                       (dotimes [i# 50] (datahike.api/branch! c# :db (keyword (str ~tag "-" i#))))
@@ -125,7 +125,7 @@
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
   ;; open does to a kept store seeded before an attribute existed; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         lacking (:db/ident (last pdb/schema))
         _ (d/create-database cfg)
@@ -148,7 +148,7 @@
   ;; a store seeded before content ids (its identities without :db/contentId): opening it
   ;; gives them their content ids; an entity it holds keeps its id, a new identity takes its
   ;; content id. A store on disk of this test's own, the last resort; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database (pdb/made-cfg cfg))
         c0 (d/connect cfg)
@@ -172,7 +172,7 @@
   ;; a write applied run-ahead (datahike.writer/apply!, an agent's transact!) and not yet
   ;; committed is committed by the release (the :sync writer's shutdown drains it), never
   ;; dropped. A store on disk of this test's own, the last resort; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (map? (dw/apply! conn {:tx-data [{:note/text "applied, not committed"}] :tx-meta (pdb/tx-meta :db)})))
@@ -188,7 +188,7 @@
   ;; Datahike's throwable-promise, which on Jolt is no channel: the fiber threw and the caller
   ;; waited for ever (pure-tests' store-release-all-hang, after a store was removed). A store
   ;; on disk of this test's own, the last resort; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
@@ -203,7 +203,7 @@
   ;; (konserve.jolt.lmdb/release-env!), so the new store opens its own files, never the old
   ;; mapping (which still held :db: "Database already exists"). A store on disk of this
   ;; test's own, the last resort; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (d/transact conn {:tx-data [{:note/text "the first store's"}] :tx-meta (pdb/tx-meta :db)})
@@ -222,7 +222,7 @@
   ;; reference that killed the process; it answers :lmdb-env-closed naming the store, and the
   ;; value is read before its last release. A store on disk of this test's own, the last
   ;; resort; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))]
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))]
     (try
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)
             _ (d/transact conn {:tx-data [{:note/text "kept"}] :tx-meta (pdb/tx-meta :db)})
@@ -243,7 +243,7 @@
   ;; then holds a whole store or none, and the next open answers either. Ten creates (n <= 20); the
   ;; kill's moment moves with the machine, the verdict holds for any. Stores on disk of this test's
   ;; own, removed at the end
-  (let [base (str (System/getProperty "user.dir") "/target/db-test-create-" (random-uuid))
+  (let [base (str (seon.config/checkout) "/target/db-test-create-" (random-uuid))
         data-shown? (fn [path]
                       (or (.exists (java.io.File. (str path "/data.mdb")))
                           (some #(and (str/starts-with? (.getName ^java.io.File %) (str (.getName (java.io.File. path)) ".making-"))
@@ -272,7 +272,7 @@
   ;; store made before the attribute existed (every store before 2026-10-22) failed to open
   ;; (bin/check seed: "Bad entity attribute :seon.tx/runtime"). A store on disk of this test's
   ;; own, the last resort: what is proved is a root's open of a kept store; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-runtime-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-runtime-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))]
     (try
       (d/create-database made)
@@ -290,7 +290,7 @@
   ;; next/runs/store-full-20261021, renamed from next/runs/store) was refused at its new path
   ;; with "Store identity mismatch". Now it is named by the id it records. A store on disk of
   ;; this test's own, the last resort: what is proved is a move and a copy; removed at the end
-  (let [base (str (System/getProperty "user.dir") "/target/db-test-move-" (random-uuid))
+  (let [base (str (seon.config/checkout) "/target/db-test-move-" (random-uuid))
         moved (str base "-moved")
         copied (str base "-copied")
         made (do (d/release (:conn (pdb/open! :lmdb base 0 :db))) (get-in (pdb/store-cfg :lmdb base) [:store :id]))
@@ -315,7 +315,7 @@
   ;; attributes before they became plain data, 2026-10-22) is refused at open, naming each such
   ;; attribute: never opened to fail at its first write. A store on disk of this test's own,
   ;; the last resort: what is proved is a root's open of a kept store; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-types-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-types-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))
         old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
     (try
@@ -396,7 +396,7 @@
   ;; (the standing root's store was made without history). A store on disk of this test's own,
   ;; the last resort: what is proved is a root's open of a kept store; removed at the end
   (doseq [kept? [false true]]
-    (let [path (str (System/getProperty "user.dir") "/target/db-test-history-" (random-uuid))
+    (let [path (str (seon.config/checkout) "/target/db-test-history-" (random-uuid))
           made (assoc (pdb/store-cfg :lmdb path) :keep-history? kept?)]
       (try
         (d/create-database made)
@@ -482,7 +482,7 @@
   ;; read only, as a later connection may reuse the store's storage and its cache); GC's mark
   ;; keeps the value while a branch reaches it and sweeps it once none does. A store on disk of this test's own, the last resort: what is
   ;; proved is the store's bytes and its collection; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-ool-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-ool-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         _ (d/release conn)
         reply (slice @prose 7 3000)
@@ -515,7 +515,7 @@
   ;; collection, whose result holds no :db-after, failed in commit! ("Parent cannot be nil").
   ;; A store on disk of this test's own, the last resort: the in-memory store has no nodes to
   ;; collect; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-gc-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-gc-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (d/transact conn [{:note/text "kept"}])
@@ -532,7 +532,7 @@
   ;; since is recorded as seen, nothing swept; once a branch named in the record is gone, its nodes and its values out of line are swept and
   ;; every live branch reads as before. A store on disk of this test's own, the last resort:
   ;; the in-memory store has no nodes to collect; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-collect-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-collect-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         reply (slice @prose 11 3000)
         vk (hasch.core/uuid reply)
@@ -570,7 +570,7 @@
   ;; another process's commit could be reusing a value the sweep would delete (Datahike's
   ;; collection sees only its own process's commits). A store on disk of this test's own, the
   ;; last resort: the in-memory store has no nodes to collect; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-shared-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-shared-" (random-uuid))
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)
         reply (slice @prose 11 3000)
         vk (hasch.core/uuid reply)]
@@ -595,7 +595,7 @@
   ;; per turn, wrote ~15x the one commit, because every commit rewrites the whole tail leaf
   ;; of :eavt and :aevt (up to 64 contexts) holding the values inline. A store on disk of
   ;; this test's own, the last resort: the in-memory store writes no nodes; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/db-test-commit-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/db-test-commit-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         n 20]
     (try
@@ -681,7 +681,7 @@
   ;; 0.97x at 1, 1.51x at 2, 4.50x at 10. A store on disk of this test's own, the last resort:
   ;; the in-memory store writes no nodes to count
   (let [nodes (fn [content?]
-                (let [path (str (System/getProperty "user.dir") "/target/db-test-" (random-uuid))
+                (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
                       cfg (pdb/made-cfg (pdb/store-cfg :lmdb path))
                       _ (d/create-database cfg)
                       conn (d/connect (dissoc cfg :keep-history?))
