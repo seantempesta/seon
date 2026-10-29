@@ -134,6 +134,25 @@
           ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
           :value (print/code (print/text value (:part print/budgets)))})))
 
+(clojure.core/defn- first-problem
+  "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
+  what it got, and what was expected (its schema's form when short, else its type), malli's kind for a
+  missing or refused key; and how many reasons more. md-scan #14, 2026-10-29: \"its value does not
+  satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
+  [s v]
+  (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]
+    (if-not schema
+      ""
+      (let [f (pr-str (m/form schema))
+            expected (if (<= (count f) 60) f (str (m/type schema) " (" (count f) " chars of form)"))]
+        (str " at " (pr-str in) ": "
+             (case type
+               :malli.core/missing-key "a key it must hold is missing"
+               :malli.core/extra-key "a key its closed map does not admit"
+               (str (print/text value 60) ", expected " expected))
+             (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
+
 (clojure.core/defn- invalid
   "Malli's report for fn-sym, as the thrown error map."
   {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map] :any]}
@@ -144,8 +163,8 @@
                    :seon.error/operation fn-sym
                    :seon.error/member kind
                    :seon.error/message (str fn-sym " " (name kind)
-                                            (case arm :input ": its arguments do not satisfy its contract"
-                                                  :output ": its value does not satisfy its contract"
+                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data)))
+                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data)))
                                                   :arity (str ": called with " (:arity data) " arguments")
                                                   ""))
                    :seon.error/fix (case arm
