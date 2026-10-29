@@ -113,7 +113,7 @@
   (case (first (seon.config/without-overrides args))
     "root" (root-serve (seon.config/without-overrides args))
     "ports" (ports)
-    "seed" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
+    "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))
     "embed-worker" (seon.vector/serve!)

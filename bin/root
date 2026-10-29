@@ -45,7 +45,7 @@ if [[ ${1:-} == seed ]]; then
   # bin/root seed STORE: the program and the wiki of this tree on STORE's :db (seon.root/seed-program!), so a
   # root whose main is made from it imports nothing: a test store's, made by bin/test after it builds the binary
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home JOLT_LMDB_LIB=$ROOT/target/lib/liblmdb.dylib \
-    JOLT_LZ4_LIB=$ROOT/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$ROOT/target/lib/libzstd.dylib exec ./seon seed "${@:2}"
+    JOLT_LZ4_LIB=$ROOT/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$ROOT/target/lib/libzstd.dylib exec ./seon seed-program "${@:2}"
 fi
 mkdir -p "$SEON_RUNS"
 PIDS=$SEON_RUNS/root.pids LOG=$SEON_RUNS/root.log PORTF=$SEON_RUNS/root.port
