@@ -105,13 +105,14 @@
 
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
-  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns)
+  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns). The agent
+  ;; is the one with a key: main's evals, root's, are on the branch too (any one agent was root's by chance)
   (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
                                    [(str "(ns " ns ".here)")
                                     "(+ 1 1)"
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
-                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a]] b)]"
+                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a] [?a :seon.agent/key _]] b)]"
                                                 " (seon.context/current-ns b a))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
