@@ -6,7 +6,7 @@
   sentence; the scanner meets CommonMark 0.31.2's examples for its subset in one pass."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
-            [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref] [seon.reader :as reader]))
+            [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref] [seon.reader :as reader] [seon.config]))
 
 (defn- kinds
   "What text cites, each once at its strongest depth: [name path anchor problem-kind depth]."
@@ -397,7 +397,9 @@
         edge ["seon.ref/parse" ":seon.task/id" "a/b" "a.b/c-d?" "7888/7777" "call/1cc" "a/b/c" "/" "a/" "/a" ":a" "::a/b" "a/b:"
               "x/y*" "-1/2" "+a/b" "'a/b" "#a/b" "a b/c" "(a/b)" "a/b)" "@a/b" "~a/b" "a//b" "<id>/x" "a/b.c" ".a/b" "a/b#c" "a#b/c"
               "a/b'" "e/\u00fc" ":a.b/c" ":a/b/c" "my.agent/prove!" "$a/b" "a/&b"]
-        spans (into edge (comp (mapcat #(:seon.ref/citations (ref/parse nil (slurp %)))) (keep :seon.ref/name) (map str))
+        ;; read from the checkout this process runs from (seon.config/checkout), never the working directory: an
+        ;; agent's is empty, and the test was red in every agent's run (md-scan #23 spent seven evals on it)
+        spans (into edge (comp (mapcat #(:seon.ref/citations (ref/parse nil (slurp (str (seon.config/checkout) "/" %))))) (keep :seon.ref/name) (map str))
                     ["AGENTS.md" "docs/references.md"])]
     (is (< 100 (count spans)) "the corpus holds the wiki's own spans")
     (doseq [s (distinct spans)]
