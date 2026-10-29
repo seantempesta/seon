@@ -754,23 +754,14 @@
                                  (set (for [[t d] a :when (not= d (b t))] t)))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
-    ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
-    ;; class it moved 451 tests on every bump. Jolt is keyed by source group (its analyzer and IR,
-    ;; deps, nREPL, core.async), each taken by the tests reaching it; its runtime core and Chez, which
-    ;; every form runs on, by none: the forks' suites and the full run after a pin bump catch a change there
-    (is (every? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez :seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt
-                                             :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async])
-        "every submodule and every source group is a class")
-    (is (= #{} (moved :seon.pin/jolt) (moved :seon.pin/chez)) "the runtime core takes no pin, a process test's digest included")
-    (is (not= (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj) (moved :seon.pin/jolt.stdlib.clojure.core.async))
-        "each group moves the tests that reach it")
+    ;; the runtime's pins (Jolt, Chez) are no class: every test's :env takes them (a-runtime-pin-moves-every-digest)
+    (is (every? #(contains? (:config in) %) [:seon.pin/lmdb :seon.pin/zstd :seon.pin/llama.cpp :seon.pin/awesome-jolt]) "every other submodule is a class")
+    (is (not-any? #(contains? (:config in) %) [:seon.pin/jolt :seon.pin/chez]) "the runtime's pins are in :env, no class")
     (is (= #{} (moved :seon.pin/crypto)) "a library no reached namespace names is no test's (src calls no jolt.crypto)")
-    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd
-               :seon.pin/jolt.jolt-core.jolt.analyzer.clj :seon.pin/jolt.stdlib.clojure.core.async]]
+    (doseq [c [:seon.pin/datahike :seon.pin/lmdb :seon.pin/zstd]]
       (is (< 0 (count (moved c)) (count all-tests)) (str (count (moved c)) " of " (count all-tests) " tests take " c ": some, not every test"))
       (is (not ((moved c) 'seon.reader-test/prose-without-a-fence-is-a-comment)) (str "a pure test takes no " c)))
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
-    (is (< (count (moved :seon.pin/jolt.jolt-core.jolt.analyzer.clj)) (* 0.5 (count all-tests))) "a change to Jolt's analyzer moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
 (deftest an-uncommitted-edit-in-a-submodule-is-an-input
@@ -794,35 +785,49 @@
       (spit core "(ns lib.core)")
       (is (= before (lib)) "its files back as committed: the same input as before"))))
 
-(deftest a-source-group-moves-with-its-own-files-only
-  ;; root's ruling D (2026-10-27): Jolt is keyed by source group. A group is the git entry of its path
-  ;; in the tree of the submodule's files as they are: an edit, or an untracked file, in it moves its
-  ;; class and no other group's; a group path the tree does not hold refuses the inputs
-  (let [p (checkout! "with-groups" {"deps.edn" "{}"})
-        s (str p "/reference-code/lib")
-        core (str s "/core.clj")]
-    (.mkdirs (java.io.File. (str s "/x")))
-    (spit core "(ns lib.core)")
-    (spit (str s "/x/a.clj") "(ns lib.x.a)")
-    (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "lib"]]]
-      (apply sh/sh "git" "-C" s args))
-    (sh/sh "git" "-C" p "add" "reference-code/lib")
-    (let [c (assoc cfg/config :seon.config.source/pin-namespaces '{lib.core #{"reference-code/lib/core.clj"} lib.x #{"reference-code/lib/x"}})
-          classes #(select-keys (:config (fx/inputs p c (cfg/checkout))) [:seon.pin/lib.core.clj :seon.pin/lib.x])
-          before (classes)]
-      (is (= 2 (count (filter string? (vals before)))) "each group is a class of the inputs")
-      (spit core "(ns lib.core) (def edited 1)")
-      (let [after (classes)]
-        (is (not= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "an edit moves its group's class")
-        (is (= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "and no other group's"))
-      (spit core "(ns lib.core)")
-      (spit (str s "/x/b.clj") "(ns lib.x.b)")
-      (let [after (classes)]
-        (is (not= (:seon.pin/lib.x before) (:seon.pin/lib.x after)) "an untracked file in a group moves its class")
-        (is (= (:seon.pin/lib.core.clj before) (:seon.pin/lib.core.clj after)) "its files back as committed: the same as before"))
-      (is (thrown-with-msg? Exception #"reference-code/lib/nope.clj"
-                            (fx/inputs p (assoc c :seon.config.source/pin-namespaces '{lib.nope #{"reference-code/lib/nope.clj"}}) (cfg/checkout)))
-          "a group path the tree does not hold refuses the inputs, naming it"))))
+(deftest a-runtime-pin-moves-every-digest
+  ;; 2026-10-29: seon.cost-test/the-unit-table-is-current stayed green across a Jolt pin that moved
+  ;; its numbers, since the runtime core took no pin (root's ruling D, 2026-10-27). The gitlinks of
+  ;; :seon.config.source/runtime-pins (Jolt, Chez) are in every test's and every contract key's :env;
+  ;; a bump re-runs everything once. docs/source.md#tests-run-by-reach
+  (let [p (checkout! "runtime-pins" {"deps.edn" "{}" "docs/a.md" "# a"})
+        commit (fn [s msg] (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" msg]]]
+                             (apply sh/sh "git" "-C" s args)))
+        bump (fn [name] (let [s (str p "/reference-code/" name)]
+                          (spit (str s "/core.clj") (str "(ns " name ") " (rand-int 1000000)))
+                          (sh/sh "git" "-C" s "add" ".")
+                          (sh/sh "git" "-C" s "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "bump")
+                          (sh/sh "git" "-C" p "add" (str "reference-code/" name))))
+        c (assoc cfg/config :seon.config.source/runtime-pins #{"reference-code/jolt" "reference-code/chez"})
+        env #(:env (fx/inputs p c (cfg/checkout)))]
+    (doseq [n ["jolt" "chez"]]
+      (.mkdirs (java.io.File. (str p "/reference-code/" n)))
+      (spit (str p "/reference-code/" n "/core.clj") (str "(ns " n ")"))
+      (commit (str p "/reference-code/" n) n)
+      (sh/sh "git" "-C" p "add" (str "reference-code/" n)))
+    (let [before (env)]
+      (is (not-any? #(contains? (:config (fx/inputs p c (cfg/checkout))) %) [:seon.pin/jolt :seon.pin/chez]) "no class of their own: they are :env")
+      (bump "jolt")
+      (let [after-jolt (env)]
+        (is (not= before after-jolt) "a Jolt bump moves :env, which every test's digest takes")
+        (bump "chez")
+        (is (not= after-jolt (env)) "and a Chez bump")
+        (let [e (env)]
+          (spit (str p "/docs/a.md") "# c")
+          (is (= e (env)) "an unrelated file (prose) moves no :env"))))
+    (testing "the digest of every test and every contract key takes :env"
+      (let [here (System/getProperty "user.dir")
+            in (fx/inputs here)
+            sample (sampled-repo "runtime-pins" 12 ["test/seon/reader_test.clj" "src/seon/reader.clj"])
+            g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
+            roots {"k" ['seon.reader/read-text]}
+            at (fn [env] [(update-vals (program/graph-index g (assoc in :env env) nil) :digest)
+                          (update-vals (program/graph-index g (assoc in :env env) roots) :digest)])
+            [t1 k1] (at "jolt-1") [t2 k2] (at "jolt-2") [t3 _] (at "jolt-1")]
+        (is (seq t1))
+        (is (every? #(not= (t1 %) (t2 %)) (keys t1)) "every test's digest moves with the runtime pin")
+        (is (= t1 t3) "and returns with it")
+        (is (not= (k1 "k") (k2 "k")) "a contract key's digest too")))))
 
 ;; ---- refs the expansion and the quote leave (task seon.program/refs-name-quoted-symbols-and-macro-uses)
 

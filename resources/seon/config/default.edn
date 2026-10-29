@@ -403,36 +403,25 @@
  ;; include all of src … the daily full run is the net"); a change to the boot alone is the merge's
  ;; run's and the daily run's to catch.
  :seon.config.source/process-entry #{seon.server/op-answer seon.turn/work!}
- ;; Unit: namespace prefix -> submodules, or source groups inside one (a path under a
- ;; submodule: a file or a directory). The pins a test takes by what its reach references (the
- ;; namespace's own library and the libraries it runs on): a datahike bump reruns the tests that
- ;; reach datahike.*, not every test. Each submodule and each group is a class (seon.config/pin-class),
- ;; taken by reach alone, by a test that reads files or runs a process too. Jolt is keyed by source
- ;; group: its analyzer and IR by jolt.analyzer and jolt.ir, deps and nREPL by theirs, core.async by
- ;; clojure.core.async and jolt.async (its Clojure and its host fibers); lmdb and zstd by
- ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none. What
- ;; no prefix names takes no pin: Chez and Jolt's runtime core (its host layer, clojure.core, the
- ;; reader, io/nio/zip, which 970 of 977 tests reach, so a group narrows nothing; their classes are
- ;; recorded in the inputs and read by no test's digest). The trade: a
- ;; change there in a Jolt or Chez bump is caught by the forks' own suites (bin/check forks) and the
- ;; full run the merge session runs after every pin bump, not by the bump's own prove (owner, 2026-10-27:
- ;; "no test digests the whole tree"). Measured 2026-10-27 over the last 15 Jolt bumps: 122 tests a
- ;; bump (0 on 5 of them, 203 on the 10 that touch async), against 451 on every bump as one pin.
+ ;; Unit: submodule paths. The runtime every test, and every check step's contract key, runs on:
+ ;; Jolt (its host layer, clojure.core and analyzer, which 970 of 977 tests reach) and Chez under it;
+ ;; the binary and the test runner are built from them. Their gitlinks (a dirty submodule's files as
+ ;; they are, seon.fx/pin) are in :env, so a bump of either re-runs every test once (about 5 minutes
+ ;; for the non-process set). Measured 2026-10-29: seon.cost-test/the-unit-table-is-current stayed
+ ;; green across a Jolt pin that moved its numbers, its digest unmoved. Replaces root's ruling D
+ ;; (2026-10-27), which gave the runtime core no pin to spare reruns (Jolt bumped 15 times in 3 days)
+ ;; and left a change there to the forks' suites and the full run, and the Jolt source groups it keyed
+ ;; (analyzer, IR, deps, nREPL, core.async), which a pin in every digest subsumes.
+ :seon.config.source/runtime-pins #{"reference-code/jolt" "reference-code/chez"}
+ ;; Unit: namespace prefix -> submodules. The libraries a test takes the pin of by what its reach
+ ;; references (the namespace's own library and the libraries it runs on): a datahike bump reruns the
+ ;; tests that reach datahike.*, not every test. Each submodule is a class (seon.config/pin-class),
+ ;; taken by reach alone, by a test that reads files or runs a process too; lmdb and zstd by
+ ;; konserve.jolt.lmdb and konserve.jolt.zstd, llama.cpp by seon.vector, awesome-jolt by none.
  ;; Provenance: root's task (2026-10-27): pins moved every digest in 3 of the last 12 --merge
- ;; batches (datahike 3, konserve 2, jolt 2), and the Jolt pin, in every test's :env, moved 15 times
- ;; in 3 days; root's ruling D (2026-10-27).
+ ;; batches (datahike 3, konserve 2, jolt 2).
  :seon.config.source/pin-namespaces
- {jolt.analyzer #{"reference-code/jolt/jolt-core/jolt/analyzer.clj" "reference-code/jolt/jolt-core/jolt/ir.clj"
-                  "reference-code/jolt/jolt-core/jolt/passes" "reference-code/jolt/jolt-core/jolt/passes.clj"
-                  "reference-code/jolt/jolt-core/jolt/backend_scheme.clj" "reference-code/jolt/jolt-core/jolt/op_registry.clj"}
-  jolt.ir #{"reference-code/jolt/jolt-core/jolt/ir.clj"}
-  jolt.deps #{"reference-code/jolt/jolt-core/jolt/deps.clj" "reference-code/jolt/jolt-core/jolt/deps"
-              "reference-code/jolt/jolt-core/clojurestar/deps.cljc"}
-  jolt.nrepl #{"reference-code/jolt/jolt-core/jolt/nrepl.clj"}
-  clojure.core.async #{"reference-code/jolt/stdlib/clojure/core/async.clj" "reference-code/jolt/stdlib/clojure/core/async"
-                       "reference-code/jolt/host/chez/java/async.ss" "reference-code/jolt/host/chez/java/fibers-async.ss"}
-  jolt.async #{"reference-code/jolt/stdlib/jolt/async"}
-  datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
+ {datahike #{"reference-code/datahike" "reference-code/konserve" "reference-code/persistent-sorted-set"
              "reference-code/jolt-fressian" "reference-code/jolt-overlay"}
   konserve #{"reference-code/konserve" "reference-code/jolt-fressian"}
   seon.vector #{"reference-code/llama.cpp"}
