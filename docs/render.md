@@ -158,7 +158,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.context/eval-messages`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`) around a response the one printer already printed: the wire, not output.
 - `seon.context/request`: a part's content hash (`hasch/uuid` of the part's `pr-str`, since its hiccup holds the Vars of its components, which no content hash reads), recorded on the model call so the next request knows what the model has of it: a key, never output.
 - `seon.context/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
-- `my.schema/registration`: the part of a schema form that is no EDN, and where it is, in the refusal's message (`pr-str` of the value and its path, whole): the message tells the agent what to quote.
+- `my.schema/registration`: the part of a schema form that is no EDN, and where it is, in the invalid registration's message (`pr-str` of the value and its path, whole): the message tells the agent what to quote.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
 - `seon.server/verdict-line`: the form in its `:handle` (`(seon.server/verdict @(:conn sys) run task)`, the run and task ids as `pr-str` writes them): code to evaluate that reads the whole verdict, not output; the line beside it is the one printer's.
@@ -191,7 +191,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
 - `seon.repl/do-parts`: a top-level form written `(do ...)` (its text opens with `(` and the token `do`, so a reader macro that expands to do is not one) as its inner forms, each the form the reader already returned, with its exact text and leading comments from the reader's own positions in the do's text (no pattern, no cut by text), each then evaluated as a top-level form as Clojure's compiler takes them: code read, not output.
-- `seon.repl/edit!`: the offsets of the old text in a definition's recorded source (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refusal names every line that could be meant.
+- `seon.repl/edit!`: the offsets of the old text in a definition's recorded source (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refused edit names every line that could be meant.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.

@@ -488,7 +488,8 @@
                           (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))
                       ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!); the
                       ;; second in a row, with no model turn between, ends its work with that error
-                      (catch Throwable e [::undrawn (agent/error-map e 'seon.turn/work!)]))
+                      ;; root's interrupt is a stop, not the agent's error: it ends the work as it did before this boundary
+                      (catch Throwable e (if (:interrupted (ex-data e)) (throw e) [::undrawn (agent/error-map e 'seon.turn/work!)])))
             ;; a turn that threw is given to the agent (turn-error!) and counted; the second in a row, with no
             ;; model turn between, ends its work with that error
             step (if (and (vector? step) (= ::undrawn (first step)))

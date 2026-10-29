@@ -70,7 +70,7 @@
 (defn rederive-tx
   "The facts that make task t's references, sections and citations those its text states now
   (`references-of` over its plan and instructions): what a write of its plan or instructions adds,
-  as task creation does (my.task/update!)."
+  as task creation does (my.task/update!). See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db t]
   (let [id [:seon.task/id (:seon.task/id t)]

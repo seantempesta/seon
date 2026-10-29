@@ -34,6 +34,12 @@
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
+(def ^:private budgeted
+  "The origins whose forms run under the config's budgets of ticks and bytes (an agent's model, an
+  outside agent, the page): root's own platform requests and the agent's loop run unbounded. See
+  docs/processes.md#interrupts."
+  #{:model :outside :ui})
+
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
   the offset where the reader stopped after it, or nil for a form that carries no position (a
@@ -133,10 +139,10 @@
         ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
         ticks (let [t (or (:ticks req)
-                          (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
+                          (when (budgeted (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
         ;; and of allocation (bytes), for the same requests (seon.intr/run): root's and work!'s run unbounded
-        bytes (let [b (or (:bytes req) (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-bytes)))]
+        alloc (let [b (or (:bytes req) (when (budgeted (:origin req)) (cfg/value :seon.config.agent/form-bytes)))]
                 (when (and b (pos? b)) b))
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
@@ -153,7 +159,7 @@
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
                        [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
-                                                (let [v (intr/run ticks bytes #(eval-fn form))] [:ret v *ns*]))
+                                                (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                        common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
@@ -239,16 +245,16 @@
   macroexpanding or compiling, the phase, the symbol and the position before the cause, \"Syntax error
   macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is. md-scan
   #11, 2026-10-29: Jolt's cond failed on an odd number of forms, the message said only \"index out of
-  bounds\", and the agent bisected its runtime code for 40 evals."
+  bounds\", and the agent bisected its runtime code for 40 evals. See docs/errors.md#an-eval-errors-diagnostics."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
-  [{:clojure.error/keys [phase symbol line column] msg :seon.error/message}]
+  [{:clojure.error/keys [phase line column] sym :clojure.error/symbol msg :seon.error/message}]
   (let [what (case phase
                (:macroexpansion :macro-syntax-check) "macroexpanding"
                :compile-syntax-check "compiling"
                :read-source "reading source"
                nil)]
     (if (and what msg (not (clojure.string/starts-with? msg "Syntax error")))
-      (str "Syntax error " what (when symbol (str " " symbol)) (when line (str " at (" line (when column (str ":" column)) ")")) ". " msg)
+      (str "Syntax error " what (when sym (str " " sym)) (when line (str " at (" line (when column (str ":" column)) ")")) ". " msg)
       msg)))
 
 (defn- error-data
@@ -491,7 +497,7 @@
                    (conj (let [sh (some :shadowed fs)]
                            {:seon.repl/finding :helper-shadowed :shadowed sh
                             :seon.repl/fix (str "In this namespace " (clojure.string/join ", " (map (fn [[k v]] (str k " is " v)) sh))
-                                                ", not the REPL's: call clojure.repl/" (key (first sh)) " qualified")})))]
+                                                ", not the REPL's: call " (clojure.string/join " or " (map #(str "clojure.repl/" (key %)) sh)) " qualified")})))]
     (cond-> {:handle handle}
       (next tops) (assoc :forms (count tops)
                          :value (into [] (comp (map last) (filter #(contains? % :repl/value)) (map :repl/value)) tops))
@@ -631,14 +637,14 @@
           (finally (swap! agent/state assoc :eval outer))))))
 
 (defn- numbered
-  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each."
+  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: an edit's refusal names its candidates by them (docs/agent.md#changing-a-definition)."
   {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple pos-int? :string]]]}
   [text from to]
   (let [ls (clojure.string/split-lines text)]
     (vec (for [i (range (max 1 from) (inc (min (count ls) to)))] [i (nth ls (dec i))]))))
 
 (defn- offsets
-  "Every offset at which s occurs in text, in order (an occurrence may not overlap the one before)."
+  "Every offset at which s occurs in text, in order (an occurrence may not overlap the one before): where `edit!` finds its old text (docs/agent.md#changing-a-definition)."
   {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]}
   [text s]
   (loop [from 0 acc []]

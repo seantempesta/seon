@@ -79,7 +79,9 @@
         (seq? form) (str "(" (str/join " " (map form-text form)) ")")
         :else (literal form)))
 
-(def ^:private chars-per-token (config/value :seon.config.ai/chars-per-token-prior))
+(def ^:private chars-per-token
+  "The characters a token is taken to hold, the config's prior (docs/render.md#cut-where-a-value-is-made)."
+  (config/value :seon.config.ai/chars-per-token-prior))
 
 (defn chars-tokens
   "Estimated tokens of n characters: the one sizer's rule (seon.print.select/estimate is it over a

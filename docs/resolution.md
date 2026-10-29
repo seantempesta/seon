@@ -19,6 +19,7 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 The sites that resolve a name held in data to a var by design, each with its reason.
 
 - `seon.contract/arm!`: arming a contract is Malli's instrument model, the Var's root replaced once by its checked wrapper at definition.
+- `seon.contract/rearm!`: the same root replaced again, over the raw root `arm!` kept, when a schema the contract reaches is registered after it was armed (docs/source.md#schemas-at-the-repl): Malli's instrument run again, the definition unchanged.
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.render/model-of`: a schema's declared model render (`:seon.render/model`) is a symbol in data, resolved when a request sends the part, as `render-of` is for its html render ([a part answers data](render.md#a-part-answers-data)).

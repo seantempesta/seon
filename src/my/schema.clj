@@ -101,7 +101,7 @@
 (defn unknown-key
   "The answer for k, a key no schema of population fs registers: :seon.schema/unknown-key naming
   the nearest registered keys by Jolt's did-you-mean ranking (jolt.analyzer/suggestions-for, as
-  my.agent/no-var ranks names). What (forms k) and my.agent/callers answer of one, never nil or []."
+  my.agent/no-var ranks names). What (forms k) and my.agent/callers answer of one, never nil or []. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any] :qualified-keyword] :seon.schema/unknown-key]}
   [fs k]
   (contract/error :seon.schema/unknown-key #'unknown-key (str k " is no registered schema: the nearest registered keys are named")

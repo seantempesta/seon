@@ -1025,7 +1025,7 @@
   evaluating that definition again (its source as the REPL kept it, else as db records it): what a registration in a running agent owes the code it holds, whose
   contracts were compiled before it (my.schema/register!; md-scan #7, #8 and #11 met their own
   registered :seon.ref/block in Seon's seon.ref/sections, still checking the old one). A load of
-  db's program re-arms the same by evaluating the forms again (load!). Answers the errors."
+  db's program re-arms the same by evaluating the forms again (load!). Answers the errors. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   ;; the keys reached: keys, and every schema naming one, on and on (schema-dependents' closure)

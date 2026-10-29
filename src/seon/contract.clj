@@ -138,7 +138,8 @@
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form when short, else its type), malli's kind for a
   missing or refused key; and how many reasons more. md-scan #14, 2026-10-29: \"its value does not
-  satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key."
+  satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key.
+  See docs/errors.md#errors."
   {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
   [s v]
   (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]
@@ -344,7 +345,7 @@
   "Arm var v again by its contract, compiled now (under the registry in force: a branch's changed
   schemas, seon.program/rearm!), over the root its arm wrapped: what a schema registered since it
   was armed owes it. Answers :armed, :uncontracted, :unarmed (no arm to redo), or the
-  :seon.contract/invalid error map."
+  :seon.contract/invalid error map. See docs/source.md#schemas-at-the-repl."
   {:malli/schema [:=> [:cat :seon.host/var] [:or [:enum :armed :uncontracted :unarmed] :seon.contract/invalid]]}
   [v]
   (let [c (contract v) raw (::raw (meta v))]

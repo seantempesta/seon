@@ -153,7 +153,7 @@
   "The references task t's texts make, read on db: the citations their writes derived
   (:seon.task/citations, along its needs: seon.task/references-of), once each at their strongest
   depth, those db holds (seon.ref/kept). What every part reads of what the plan cites; none parses
-  the plan again with the program the agent may be changing."
+  the plan again with the program the agent may be changing. See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
   [db t] (ref/kept db (ref/cited (vec (:citations (:seon.task/accumulated t))))))
 
