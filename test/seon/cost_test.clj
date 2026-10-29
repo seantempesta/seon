@@ -372,6 +372,15 @@
     (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
     (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
 
+(deftest a-unit-measures-the-same-across-runs
+  ;; :db/pull-attr read 11.6 KB on one run and 8.9 KB on the next two (a warm or cold Datahike
+  ;; cache at its start); each measurement here builds its own db, and the counted dimensions
+  ;; agree to 1%, so the row does not depend on the cache's state when it began
+  (let [ms (vec (repeatedly 3 #(measure-unit :db/pull-attr 1000)))
+        near (fn [d] (let [vs (map d ms)] (<= (apply max vs) (* 1.01 (apply min vs)))))]
+    (is (near :bytes) (str "bytes differ across runs: " (mapv :bytes ms)))
+    (is (near :ticks) (str "ticks differ across runs: " (mapv :ticks ms)))))
+
 (deftest an-open-overrun-is-accepted-until-it-regresses
   ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000)
   (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})]

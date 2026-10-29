@@ -1,7 +1,7 @@
 (ns test-runner
   "bin/test's and bin/prove's runner (task seon.proofs/prove-runs-what-a-change-reaches):
   :seon.config.source/dirs imported as program facts (program-db), as root imports them, each test keyed by its reach digest
-  (seon.program/reach-digests) and each bin/check step by its functions' (seon.proofs/
+  (seon.program/graph-index) and each bin/check step by its functions' (seon.proofs/
   check-steps); seon.proofs/plan selects what has no green result at its digest.
     --plan WHAT OUT [--all] [NS ...]  the selection: tests dealt into OUT/shard-<i>.edn, steps
                                       into OUT/steps (WHAT: tests, checks or both)
@@ -331,18 +331,6 @@
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
     (cond-> p @unread (assoc :unread @unread))))
 
-(defn- prune-runs!
-  "Remove the oldest run directories beside out (target/prove/<timestamp>-<pid>: the names sort by
-  time) past :seon.config.proofs/runs-kept; out's own, the run starting, always stays. Answers nil."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [out]
-  (let [own (io/file out)
-        runs (some->> (.getParentFile own) .listFiles
-                      (filter #(and (.isDirectory ^java.io.File %) (re-matches #"\d{8}T\d{6}-\d+" (.getName ^java.io.File %))))
-                      (sort-by #(.getName ^java.io.File %)) reverse)]
-    (doseq [^java.io.File d (drop (config/value :seon.config.proofs/runs-kept) runs) :when (not= d own)]
-      (sh/sh "rm" "-rf" (.getPath d)))))
-
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
@@ -507,7 +495,6 @@
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
-                   (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))
