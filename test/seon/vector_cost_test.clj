@@ -19,8 +19,8 @@
   "The test store's seed with n forms, each with its vector."
   {:malli/schema [:=> [:cat pos-int?] :seon.host/db]}
   [n]
-  (d/db-with (ts/test-db) (vec (for [i (range n)] (assoc (vector/pack (unit-vector i)) :db/id (str "f" i) :form/id (str "vf" i)
-                                                       :form/src (str "(defn vf" i " [])") :seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 8)))))
+  (d/db-with (ts/test-db) (vec (for [i (range n) m [{:db/id (str "f" i) :form/id (str "vf" i) :form/src (str "(defn vf" i " [])")}
+                                                  (vector/fact (str "f" i) 0 (unit-vector i) 8 "m")]] m))))
 
 (defn near-of
   "seon.vector/near's arguments: n forms with vectors, a query vector, k 10."
@@ -40,6 +40,8 @@
      ;; reranked) 0.33M / 1.6 MB at 100, ~2,900 ticks and 14 KB a reranked row, so the 400 reranked
      ;; rows are most of the fixed part (set below it: a fixed part near the smallest size's whole
      ;; cost reads as steeper growth)
+     ;; 2026-10-29 (a-vector-is-its-own-entity): the join of each coarse row to the entity it embeds is a merge
+     ;; join with the scan of :seon.vector/of, one datom read more a row: 5.22 MB at 1,000 (from 5.16), inside these
      :per-n {:ticks 200.0 :bytes 700.0}
      :fixed {:ticks 1050000.0 :bytes 5200000.0}
      :sizes [250 500 1000 2000]}))
@@ -107,8 +109,8 @@
         b (keyword (str "r" n "-" (random-uuid)))
         _ (d/branch! conn :db b)
         bc (d/connect (assoc cfg :branch b))
-        _ (d/transact bc {:tx-data (vec (for [i (range n)] (assoc (vector/pack (unit-vector i)) :db/id (str "f" i) :form/id (str "vf" i)
-                                                                   :form/src (str "(defn vf" i " [])") :seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 8)))})
+        _ (d/transact bc {:tx-data (vec (for [i (range n) m [{:db/id (str "f" i) :form/id (str "vf" i) :form/src (str "(defn vf" i " [])")}
+                                                   (vector/fact (str "f" i) 0 (unit-vector i) 8 "m")]] m))})
         s (keyword (str (name b) "-next"))
         _ (d/branch! conn b s)
         c (d/connect (assoc cfg :branch s))
@@ -116,7 +118,7 @@
         ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
         ;; holds its nodes when this round diffs from it: read them here, as that round did
         _ (vector/due (d/commit-as-db c (d/commit-id (pdb/head conn b))) "m")
-        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))}) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))} :seen (d/commit-id (pdb/head conn b))) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
     (d/release bc)
     r))
 
@@ -138,8 +140,10 @@
        ;; commit is the conn's head (a deref and the contract: 55k / 238 KB), the :clean commit is made from the store
        ;; (datahike commit-as-db, 97k / 440 KB, steady state: its cost is the store's read of the commit, not a cold cache),
        ;; the diff itself unchanged (121k / 229 KB). Size-independent; the price of not pinning a version of the index
+       ;; 2026-10-29 (a-vector-is-its-own-entity): the written text's vector is found through :seon.vector/of
+       ;; (seon.vector/vector-e), one contracted call and seek more: 301k / 1.01 MB / 15 calls at 100
        :per-n {:ticks 70.0 :bytes 150.0}
-       :fixed {:ticks 285000.0 :bytes 950000.0 :calls 14}
+       :fixed {:ticks 310000.0 :bytes 1000000.0 :calls 15}
        :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]

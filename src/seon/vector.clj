@@ -56,32 +56,75 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword] :any]}
   [db e a] (:v (first (d/datoms db :eavt e a))))
 
+(defn- vector-e
+  "The vector entity of entity e on db (its :seon.vector/of identity, docs/vector.md#a-vector-is-its-own-entity), or nil: one AVET seek."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
+  [db e] (:e (first (d/datoms db :avet :seon.vector/of e))))
+
+(defn- stored-of
+  "Attribute a of the vector entity of e on db, or nil: two seeks."
+  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword] :any]}
+  [db e a] (when-let [ve (vector-e db e)] (stored db ve a)))
+
+(defn- vectors-of
+  "{vector entity e} of every vector on db: one scan of :seon.vector/of, the join `near` and `due`
+  make from a scan of another vector attribute back to the entity embedded."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :int :int]]}
+  [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/of)))
+
 (defn vector-of
   "Entity e's vector on db, or nil when it has none."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector number?]]]}
-  [db e] (some-> (stored db e :seon.vector/f16) unpack))
+  [db e] (some-> (stored-of db e :seon.vector/f16) unpack))
+
+(defn- fine-scores
+  "The cosine of vector q with the vector of each vector entity of ves on db (the fine level over the
+  first fd dims), nil where ves holds nil: `scores`' work, for callers that hold the vector entities."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential [:maybe :int]] pos-int?] [:vector [:maybe number?]]]}
+  [db q ves fd]
+  (let [dims (count q) fd (min fd dims)
+        rows (mapv #(when % (stored db % :seon.vector/f16)) ves)
+        have (filterv some? rows) m (count have)]
+    (if (zero? m)
+      (mapv (constantly nil) ves)
+      (ffi/with-arena [a]
+        (let [fp (ffi/alloc a (* m 2 dims)) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (* 4 m))]
+          (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (nth have j)))
+          (ffi/write-array qf :float (float-array q) 0)
+          (c-fine fp m dims fd qf fs)
+          (let [ss (ffi/read-array fs :float m 0)]
+            (first (reduce (fn [[out j] r] (if r [(conj out (double (nth ss j))) (inc j)] [(conj out nil) j])) [[] 0] rows))))))))
 
 (defn scores
   "The cosine of vector q with the vector of each entity of es on db, in es's order (the fine level,
   c-fine, over their first fd dims, each prefix renormalized: all of q's unless given), nil for an
   entity with no vector: `near`'s ranking of its shortlist, and seon.context/relevance's of a pool.
-  Cost: one EAVT seek an entity."
+  Cost: two seeks an entity (its vector entity by :seon.vector/of, inlined: `vector-e` is a contracted call an entity, 100 more in a related part; then the vector)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int]] [:vector [:maybe number?]]]
                   [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int] pos-int?] [:vector [:maybe number?]]]]}
   ([db q es] (scores db q es (count q)))
-  ([db q es fd]
-   (let [dims (count q) fd (min fd dims)
-         rows (mapv #(stored db % :seon.vector/f16) es)
-         have (filterv some? rows) m (count have)]
-     (if (zero? m)
-       (mapv (constantly nil) es)
-       (ffi/with-arena [a]
-         (let [fp (ffi/alloc a (* m 2 dims)) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (* 4 m))]
-           (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (nth have j)))
-           (ffi/write-array qf :float (float-array q) 0)
-           (c-fine fp m dims fd qf fs)
-           (let [ss (ffi/read-array fs :float m 0)]
-             (first (reduce (fn [[out j] r] (if r [(conj out (double (nth ss j))) (inc j)] [(conj out nil) j])) [[] 0] rows)))))))))
+  ([db q es fd] (fine-scores db q (mapv #(:e (first (d/datoms db :avet :seon.vector/of %))) es) fd)))
+
+(defn- coarse-rows
+  "The coarse rows of db that embed an entity keep? accepts and self is not: [rows es], rows the coarse
+  datoms (their :e the vector entity, their :v the bytes) and es the entities they embed, in step. A merge
+  join of the scans of :seon.vector/of and :seon.vector/coarse, both in vector-entity order: advance the
+  smaller, emit when equal, building nothing per row but the datoms the scans read (a vector left on
+  another entity has no :seon.vector/of, and is no row)."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int]] [:tuple :any :any]]}
+  [db keep? self]
+  (let [cv (vec (d/datoms db :aevt :seon.vector/coarse)) n (count cv) j (volatile! 0) rows (volatile! (transient [])) es (volatile! (transient []))]
+    (reduce (fn [_ o]
+              (let [oe (:e o)]
+                (loop [i @j]
+                  (cond (>= i n) (vreset! j i)
+                        (< (:e (nth cv i)) oe) (recur (inc i))
+                        :else (do (vreset! j i)
+                                  (when (and (= oe (:e (nth cv i))) (keep? (:v o)) (not= self (:v o)))
+                                    (vswap! rows conj! (nth cv i)) (vswap! es conj! (:v o)))))))
+              nil)
+            nil (d/datoms db :aevt :seon.vector/of))
+    [(persistent! @rows) (persistent! @es)]))
 
 (defn near
   "The k entities of db nearest q, [[e score] ...] best first, score the cosine: a Datalog
@@ -101,7 +144,7 @@
    (let [self (when (int? q) q)
          qv (if self (vector-of db self) q)
          keep? (if of (into #{} (map :e) (d/datoms db :aevt of)) any?)
-         rows (into [] (filter #(and (keep? (:e %)) (not= self (:e %)))) (d/datoms db :aevt :seon.vector/coarse))]
+         [rows rowe] (coarse-rows db keep? self)]
      (if (or (empty? rows) (empty? qv) (zero? k))
        []
        (let [n (count rows) w (count (:v (first rows))) cd (- w 4) dims (count qv)
@@ -115,9 +158,10 @@
              (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (:v (nth rows i))))
              (ffi/write-bytes qp (:seon.vector/coarse (pack-dims qv cd)))
              (let [m (c-coarse cp n cd qp sl ip sp)
-                   es (mapv #(:e (nth rows %)) (ffi/read-array ip :int64 m 0))]
+                   hit (vec (ffi/read-array ip :int64 m 0))
+                   es (mapv rowe hit)]
                ;; best first; the entity id breaks a tie, so one db answers one order
-               (->> (map (fn [e s] [(- s) e]) es (scores db qv es fd))
+               (->> (map (fn [e s] [(- s) e]) es (fine-scores db qv (mapv #(:e (nth rows %)) hit) fd))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
 (defmacro fused
@@ -212,12 +256,21 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]
                   [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :int]]]]}
   ([db model]
-   (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
-         of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
+   (let [on (vectors-of db)
+         by-e (fn [a] (into {} (keep (fn [d] (when-let [e (on (:e d))] [e (:v d)]))) (d/datoms db :aevt a)))
+         made (by-e :seon.vector/text-t)
+         of (by-e :seon.vector/model)]
      (let [title-of (titles db)]
        (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) #(title db %) model)))
+   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text-t) #(stored-of db % :seon.vector/model) #(title db %) model)))
+
+(defn- retract-vector
+  "The retractions of every :seon.vector/* fact entity ve holds on db. Only the vector's own attributes: a
+  vector an earlier version wrote on a form or section is dropped the same way, never the entity."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :any]]}
+  [db ve]
+  (into [] (comp (filter #(= "seon.vector" (namespace (:a %)))) (map (fn [d] [:db/retract (:e d) (:a d) (:v d)]))) (d/datoms db :eavt ve)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
@@ -226,13 +279,46 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]}
   [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
 
+(defn- gone-in
+  "The retractions of the vectors whose :seon.vector/of datom is among the datoms removed, which db lacks
+  (see `orphaned`)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :any]]}
+  [db removed]
+  (into [] (comp (filter #(= :seon.vector/of (:a %))) (map :e) (distinct)
+                 (remove #(seq (d/datoms db :eavt % :seon.vector/of)))
+                 (mapcat #(retract-vector db %)))
+        removed))
+
+(defn fact
+  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t,
+  that text's whole tokens n (past :seon.config.vector/max-tokens its first were embedded), made by
+  model. Its identity is :seon.vector/of, so a vector written again replaces e's
+  (docs/vector.md#a-vector-is-its-own-entity)."
+  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :int :string] :map]}
+  [e t v n model]
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n))
+
+(defn orphaned
+  "The retractions of the vectors on db whose entity was retracted, [[:db/retract ve a v] ...].
+  Retracting an embedded entity drops the :seon.vector/of datom that pointed at it, and leaves its vector
+  (about 1.6 KB) behind. With from, those whose :seon.vector/of datom db lacks and from held (datoms-diff:
+  the cost of the commits between); without, every coarse row with no :seon.vector/of (one pass over the two
+  scans, as `near` joins them), for the round that has no commit to diff from
+  (docs/vector.md#a-vector-is-its-own-entity)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db] [:vector :any]]
+                  [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]]}
+  ([db]
+   (let [of (into #{} (map :e) (d/datoms db :aevt :seon.vector/of))]
+     (into [] (comp (map :e) (remove of) (mapcat #(retract-vector db %))) (d/datoms db :aevt :seon.vector/coarse))))
+  ([from db] (gone-in db (first (d/datoms-diff from db :eavt [])))))
+
 (defn tx-data
-  "The facts of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
+  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
   text's whole tokens ns[i] (past :seon.config.vector/max-tokens its first were embedded), made by
-  model."
+  model (`fact`)."
   {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] [:sequential :int] :string] [:vector :map]]}
   [es ts vs ns model]
-  (mapv (fn [e t v n] (assoc (pack v) :db/id e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n)) es ts vs ns))
+  (mapv (fn [e t v n] (fact e t v n model)) es ts vs ns))
 
 ;; ---- the model (native/embed.c over llama.cpp: root's :embed worker alone loads it) ------
 ;; Bound here, resolved on the first call: the library is loaded by `open`, in the worker, so an
@@ -314,20 +400,36 @@
   answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
   commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (AGENTS section 4).
-  Answers [st outputs]; nothing due, nothing asked."
+  The vectors of entities retracted since go in the same write (`orphaned`), or alone when no text is due.
+  Answers [st outputs]; nothing due and nothing retracted, nothing asked."
   {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
   [st m]
   (let [db (pdb/at-commit (:conn st) (:commit m))
         clean (:clean st)
+        ;; one diff from the previous round's commit (:seen) serves both: the texts it added and the vectors whose entity it
+        ;; removed. Not from :clean, which is the commit before this proc's own write of a vector: a vector written and
+        ;; orphaned after :clean has no datom in a diff from it
+        from (when (and clean (:seen st)) (pdb/at-commit (:conn st) (:seen st)))
+        [removed added] (when from (d/datoms-diff from db :eavt []))
+        base (when clean (if (= (:commit clean) (:seen st)) from (pdb/at-commit (:conn st) (:commit clean))))
         todo (remove (comp (:unembeddable st) first)
-                     (if clean (due db (:model st) (written (pdb/at-commit (:conn st) (:commit clean)) db)) (due db (:model st))))
+                     (cond (not clean) (due db (:model st))
+                           (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
+                           :else (due db (:model st) (written base db))))
+        ;; the vectors of retracted entities go in the write of the embeddings, or alone when none is due
+        gone (if from (gone-in db removed) (orphaned db))
         due (take (:texts st) todo)
+        st (assoc st :seen (:commit m))
         st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
-    (if (empty? due)
-      [(assoc st :running false) []]
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
+    (cond
+      (seq due)
+      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
                              {:op :fx :kind :embed :req {:texts (mapv second due)}})]
-        [(assoc st :running true) [m]]))))
+        [(assoc st :running true) [m]])
+      (and (seq gone) (pos? (:texts st)))
+      (let [[st m] (step/ask st [:vectors :answers] [:written 0] {:op :write :req {:op :tx :branch :db :tx-data gone}})]
+        [(assoc st :running true) [m]])
+      :else [(assoc st :running false) []])))
 
 (defn vectors-proc
   "Keeps main's vectors current (docs/vector.md#what-is-embedded). At main's commit notice
@@ -348,7 +450,7 @@
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil :seen nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]
@@ -358,11 +460,11 @@
                    (round (dissoc st :latest) m))
            :answers (let [[st [step es]] (step/answered st (:tag m)) r (:r m)]
                       (case step
-                        :embedded (let [[es ts asked] es]
+                        :embedded (let [[es ts asked gone] es]
                                     (if (contract/error? r)
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
-                                      (let [st (cond-> (assoc st :clean nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
+                                      (let [st (cond-> (assoc st :clean nil :seen nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
                                             ;; the newest main it holds, so the row's count reads what is stored
                                             tx (err/asked-tx (pdb/at-commit (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
                                         (if (seq tx)
@@ -371,11 +473,11 @@
                                           [(assoc st :running false) []]))
                                       (let [{:keys [model vectors tokens]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
-                                                             {:op :write :req {:op :tx :branch :db :tx-data (tx-data es ts vectors tokens model)}})]
+                                                             {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors tokens model) gone)}})]
                                         [st [w]])))
                         :written (let [st (cond-> (assoc st :running false)
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))
-                                            (contract/error? r) (assoc :clean nil))
+                                            (contract/error? r) (assoc :clean nil :seen nil))
                                        l (:latest st)]
                                    (if (and l (>= (:t l) (:written-t st)))
                                      (round (dissoc st :latest) l)

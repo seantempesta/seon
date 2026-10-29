@@ -1287,12 +1287,13 @@
     (mapv #(/ % n) raw)))
 
 (deftest search-ranks-meaning-across-kinds-by-score
-  (let [with-vec (fn [m i] (merge m (vector/pack (unit-vec i)) {:seon.vector/model "m" :seon.vector/text-t 0 :seon.vector/tokens 4}))
+  (let [with-vec (fn [m i] [m (vector/fact (:db/id m) 0 (unit-vec i) 4 "m")])
         db (d/db-with (ts/test-db)
-                      [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
-                       (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
-                       {:db/id "v" :var/name 'm/f :var/form "f"}
-                       (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)])
+                      (into [] cat
+                            [(with-vec {:db/id "s0" :seon.section/address "m.md#a" :seon.section/heading "a" :seon.section/text "about a"} 0)
+                             (with-vec {:db/id "s1" :seon.section/address "m.md#b" :seon.section/heading "b" :seon.section/text "about b"} 5)
+                             [{:db/id "v" :var/name 'm/f :var/form "f"}]
+                             (with-vec {:db/id "f" :form/id "m/f" :form/src "(defn f [] 1)" :form/defines ["v"]} 1)]))
         hits (context/search db "zzz" {:by #{:meaning} :k 10 :min 0.0} (unit-vec 0))]
     (is (= ["m.md#a" "m.md#b"] (map :name (filter #(= :section (:kind %)) hits))) "the nearer section first")
     (is (= #{:section :var} (set (map :kind hits))))

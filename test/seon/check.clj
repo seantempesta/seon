@@ -1529,7 +1529,7 @@
                _ (my.root/load-docs! sys)
                db (seon.root/await-db sys #(empty? (seon.vector/due % model)))
                embed-ms (- (System/currentTimeMillis) t0)
-               es (sort (map :e (d/datoms db :aevt :seon.vector/f16)))
+               es (sort (map :v (d/datoms db :aevt :seon.vector/of)))
                qs (take-nth (max 1 (quot (count es) 200)) es)
                found (fn [q opts] (set (map first (seon.vector/near db q 10 opts))))
                exact (into {} (for [q qs] [q (found q {:shortlist (count es)})]))
