@@ -609,6 +609,10 @@
     (is (src 'seon.main-test/no-docstring-carries-a-date) "a test reading the checkout's whole program takes the src class")
     (is (not (src 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test takes no src class")
     (is (not (src 'seon.test-store-test/n-roots-open-the-process-store-at-once)) "nor does a test that only starts processes")
+    ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
+    ;; the step green at its digest, which only its own code made (2026-10-30)
+    (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[seon.check/contracts]}) "contracts")))]
+      (is (not= (step in) (step (assoc-in in [:config :seon.env/src] "other"))) "the contracts step takes the src class"))
     ;; a-move-of-main-costs-what-moved went red when 14 attributes joined the schema, its digest unmoved:
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
     (is (schemas 'seon.render-cost-test/main-info-reads-what-the-page-shows) "a test reaching seon.reconcile/index takes the schema class")

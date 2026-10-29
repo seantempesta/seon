@@ -1174,7 +1174,11 @@
     seon.merge/content-datoms :seon.env/schemas
     ;; the test that reads the checkout's own program from its kept db (docstrings, form sources): a
     ;; change to any src or test text is a change to what it reads, though no test names the var
-    seon.test-store/kept-program-store :seon.env/src})
+    seon.test-store/kept-program-store :seon.env/src
+    ;; every var of the process's namespaces without a contract (bin/check contracts): a new function in
+    ;; src changes its answer, though no test names it (batch 18's scan-code went uncontracted with
+    ;; the contracts step green at its digest, 2026-10-30)
+    seon.contract/uncontracted :seon.env/src})
 
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the
