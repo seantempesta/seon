@@ -11,7 +11,8 @@
   rev42.md §2). Selection, first match wins, and nothing else (DECISIONS, Renders attach to
   schemas; the UI and the context are renders, ported not reinvented):
     1. the value's own override key (:seon.render/html, in the map or its metadata): a render
-       symbol, or already-rendered hiccup;
+       symbol (the value rendered itself, never one nested in another: there it is a schema's
+       properties, data), or already-rendered hiccup;
     2. the render its schema declares: a schema's property {:seon.render/html sym} in
        resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
@@ -133,10 +134,13 @@
   "The printer's :render: a nested value whose schema declares a render, as a call of that render
   inline ({:text, the value in one line; :html, the call}), else nil. Its render is looked up by
   render-of (seon.render/schema-of: one metadata read or one map lookup per key, never a
-  validation)."
+  validation). A nested map holding a render symbol under :seon.render/html is data, printed as it
+  is: it is what a schema's properties look like inside a printed schema form, and drawing it by
+  that render called the render with the properties (an agent's registered :lab.ctx/steps form,
+  its lab.ui/steps called with {:seon.render/html lab.ui/steps}, killed the agent drawing it)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
-  (when-let [h (render-of v nil)]
+  (when-let [h (when-not (symbol? (own-key v :seon.render/html)) (render-of v nil))]
     {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline} v]}))
 
 (defn- nested-html
