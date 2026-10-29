@@ -491,6 +491,15 @@
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
  :seon.config.proofs/jobs 4
+ ;; Unit: ms. The least work a test child of an agent's test run is worth (seon.agent/run-tests-forked): the run forks
+ ;; no more children than its tests' typical ms (seon.fx/typical-ms) divided by this, so a handful of quick tests run in
+ ;; one. Provenance: measured 2026-10-29 (load ~10): a run of one trivial test in a fresh child took 36-42 ms (fork,
+ ;; child start, exit); a child saves its cost only past twice that on each side, so 100 (docs/merging.md#a-merge-runs-what-the-change-reaches).
+ ;; At the bound: a run of less work than this runs in one child.
+ :seon.config.proofs/child-min-ms 100
+ ;; Unit: ms. What a test counts for in that division when none of the run's tests was ever measured (the mean of those
+ ;; measured, when some were). Provenance: the median typical ms of the main tests, 2026-10-29 (a verdict cache read).
+ :seon.config.proofs/unmeasured-ms 16
  ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
  ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
  ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's

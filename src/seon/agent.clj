@@ -962,22 +962,25 @@
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
 (defn- test-child
-  "Fork this agent to run tests in a child (run-tests-here) and read it to its end: {:answer
+  "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
   :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names) through say, the loop's send! or what
   hands the loop a message to send."
-  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
-  [plan ticks tests forked say]
+  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn :any] [:or :map :seon.test/fork-refused]]}
+  [plan ticks tests forked say fds]
   (let [[r w] (sock/socketpair)
-        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})]
+        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
+        ;; fds: the pipe ends open in this agent for the run's children (an atom, a set), each child closes every
+        ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
+        _ (swap! fds conj r w)]
     (lib/fork!
-     {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+     {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
                                  (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
       :child (fn []
-               (lib/c-close r)
+               (run! lib/c-close (disj @fds w))
                ;; nothing this child forks (a test's own child, a root it starts) holds the
                ;; write end, so its exit is the pipe's end of file
                (sock/clofork! w)
@@ -1001,11 +1004,11 @@
                  ;; the reports went as their tests ended: this line is the run's end and its counts
                  (sock/write-line! w (sedn/encode (assoc res :reports [])))))
       :parent (fn [pid]
-                (lib/c-close w)
+                (lib/c-close w) (swap! fds disj w)
                 (forked pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (lib/wait-status pid)]
-                  (lib/c-close r)
+                  (lib/c-close r) (swap! fds disj r)
                   (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
@@ -1115,9 +1118,9 @@
         ;; nothing to run, so no child is forked
         ;; one child's run of todo: a child that dies loses the test it was running (its :error stays) and the
         ;; rest of its todo run in a new child: the death of one test never costs the run its other results
-        run-child (fn [todo say]
+        run-child (fn [todo say fds]
               (loop [todo todo reports [] fns {} heap {} measured {}]
-                (let [c (test-child plan ticks todo forked say)]
+                (let [c (test-child plan ticks todo forked say fds)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))
@@ -1137,8 +1140,15 @@
         run-all (fn [say]
             (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              (let [fibers (mapv #(let [g (a/io-thread (run-child % say))] [g (a/go-monitor g)])
-                                 (proofs/shards run (cfg/value :seon.config.proofs/jobs) (fx/typical-ms run)))
+              (let [typical (fx/typical-ms run)
+                    ;; a test never measured counts as the mean of those measured, else the default
+                    mean (if (seq typical) (quot (reduce + (vals typical)) (count typical)) (cfg/value :seon.config.proofs/unmeasured-ms))
+                    ms (into {} (map (fn [t] [t (get typical t mean)])) run)
+                    ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
+                    n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
+                    fds (atom #{})
+                    fibers (mapv #(let [g (a/io-thread (run-child % say fds))] [g (a/go-monitor g)])
+                                 (proofs/shards run n ms))
                     ;; all are taken before a throw is raised, so no child outlives the run
                     cs (mapv (fn [[g died]] (or (a/<!! g) {::threw (a/<!! died)})) fibers)]
                 (if-let [e (some ::threw cs)]
