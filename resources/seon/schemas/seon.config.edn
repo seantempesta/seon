@@ -155,7 +155,6 @@
   [:seon.config.vector/batch :seon.config.vector/batch]
   [:seon.config.vector/rrf-k :seon.config.vector/rrf-k]
   [:seon.config.vector/threads :seon.config.vector/threads]
-  [:seon.config.vector/model-threads :seon.config.vector/model-threads]
   [:seon.config.render/big-alloc :seon.config.render/big-alloc]
   [:seon.config.render/value-budget :seon.config.render/value-budget]
   [:seon.config.render/root-context-budget :seon.config.render/root-context-budget]

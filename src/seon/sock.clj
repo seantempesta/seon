@@ -284,6 +284,32 @@
     (System/arraycopy b 0 f 4 n)
     f))
 
+(defn- read-fully!
+  "Fill the first n bytes of buf from the stream in: true, or false when it ended first."
+  {:malli/schema [:=> [:cat :any :seon.host/bytes :int] :boolean]}
+  [^java.io.InputStream in ^bytes buf n]
+  (loop [off 0]
+    (if (= off n)
+      true
+      (let [r (.read in buf off (- n off))]
+        (if (neg? r) false (recur (+ off r)))))))
+
+(defn recv-stream!
+  "The next frame's value from the java.io.InputStream in (the pipe of an exec'd child: its
+  stdout here, our own stdin there; no descriptor of ours, so `conn` does not read it), or :eof at
+  the stream's end, in the middle of a frame or at an end frame. Blocks: the caller's one read."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [in]
+  (let [h (byte-array 4)]
+    (if-not (read-fully! in h 4)
+      :eof
+      (let [n (bit-or (bit-and 255 (aget h 0)) (bit-shift-left (bit-and 255 (aget h 1)) 8)
+                      (bit-shift-left (bit-and 255 (aget h 2)) 16) (bit-shift-left (bit-and 255 (aget h 3)) 24))]
+        (if (= (bit-and n 0xFFFFFFFF) END)
+          :eof
+          (let [b (byte-array n)]
+            (if (read-fully! in b n) (codec/decode b) :eof)))))))
+
 (defn write-line!
   "Write s and a newline to fd whole (a pipe or stderr; EINTR retried). Answers true, or
   :epipe (the reader is gone)."

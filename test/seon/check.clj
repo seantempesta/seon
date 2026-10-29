@@ -580,8 +580,8 @@
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
-  roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
+  pool; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
        ;; the C thread that ends this process with its starter (seon.lib/end-with!), outside Jolt's roster
@@ -590,13 +590,10 @@
    (let [pm (:procs @(get-in sys [:bindings :system]))
          procs (vals pm)
          mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
-         web? (true? (get-in (c/state sys) [:web :listening]))
-         ;; an :embed worker holding the model: Metal's own threads, outside Jolt's roster
-         model? (some #(get-in (ping sys %) [:state :open?]) (filter #(= "fx.embed" (namespace %)) (keys pm)))]
-     (cond-> (update (declared-threads) :roster merge
-                     (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-                       web? (assoc "clojure-agent-pool" 2)))
-       model? (assoc :foreign (seon.config/value :seon.config.vector/model-threads))))))
+         web? (true? (get-in (c/state sys) [:web :listening]))]
+     (update (declared-threads) :roster merge
+             (cond-> {"async-mixed" mixed "seon-fs-events" 1}
+               web? (assoc "clojure-agent-pool" 2))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -608,12 +605,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster, the sweepers and the declared :foreign and :native ones."
+  counts threads beyond the roster, the sweepers and the declared :native one."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0) (:native decl 0))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:native decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -687,13 +684,10 @@
                 :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
-       ;; started yet: it starts at the first socket wait, an agent's). With the model open, its
-       ;; foreign threads (the :os count) are judged only where root has settled, after the work and
-       ;; after the kill: right after the last encode, Metal's GCD idle workers are still parked
-       ;; until libdispatch's idle timeout ends them, and waiting that out would need a clock
-       ;; (root's ruling, 2026-10-23); Jolt's own roster is judged at every sample
+       ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
+       ;; GCD workers) are the embedding helper's, not root's, so the OS count is judged at every sample
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [(cond-> th-ready (:foreign (declared-threads sys)) (dissoc :os)) th-work th-end])
+                :root-threads-as-declared (every? empty? [th-ready th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
 
 (defn orphan

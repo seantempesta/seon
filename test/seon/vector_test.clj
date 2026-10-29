@@ -2,11 +2,12 @@
   "Semantic search (seon.vector): a stored vector keeps what it was made from, the pyramid ranks
   as an exact search does, `near` is one more relation in a query, a text is embedded once, and
   the proc that keeps main's vectors current asks only for what is due, and a branch embeds
-  what it writes there. The model itself runs
-  only in root (it starts threads), so these use made vectors; bin/check vectors proves the
-  pyramid's recall on the checkout's own forms, embedded by the model."
+  what it writes there. The model runs only in an exec'd helper (docs/vector.md#the-model), so
+  most of these use made vectors; the helper's own tests start the real one, and bin/check vectors
+  proves the pyramid's recall on the checkout's own forms, embedded by the model."
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d] [seon.test-store :as ts]
-            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems]))
+            [seon.vector :as vector] [seon.contract :as contract] [seon.agent :as agent] [seon.problems] [seon.lib :as lib]
+            [clojure.java.shell :as sh] [clojure.string :as str]))
 
 (defn- unit [v] (let [n (Math/sqrt (reduce + (map #(* % %) v)))] (mapv #(/ % n) v)))
 
@@ -379,3 +380,70 @@
         (is (empty? (:to-api o2)) "and nothing more is asked"))
       (is (empty? (vector/orphaned db3)) "a full scan finds none left")
       (is (= [ve] (distinct (map second (vector/orphaned db2)))) "a full scan finds it")))))
+
+;; ---- the model in its own process (docs/vector.md#the-model) ------------------------------------
+;; These start the built binary's `embed-worker` (seon.vector/start! is a :seon.config.source/binary-vars
+;; var, so bin/test builds target/seon first) and the real model, bin/build embed.
+
+(defn- maps-model?
+  "Does process pid hold the model file open or mapped (lsof lists a mapped file)?"
+  [pid]
+  (str/includes? (:out (sh/sh "lsof" "-p" (str pid))) ".gguf"))
+
+(defn- gone? [pid] (not (zero? (lib/c-kill pid 0))))
+
+(deftest root-holds-no-model-after-an-embed
+  ;; the helper holds the model while work is queued, this process never; its end is the close, and
+  ;; the next embed starts another
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        [r] (embed ["title: none | text: (defn a [])" "title: none | text: (defn b [])"])
+        pid (:pid @(:facts handle))]
+    (testing "a batch is embedded: one unit vector of the model's dims per text"
+      (is (= 2 (count (get-in r [:value :vectors]))) (pr-str (keys r)))
+      (is (= 768 (count (first (get-in r [:value :vectors])))))
+      (is (< 0.999 (reduce + (map * (first (get-in r [:value :vectors])) (first (get-in r [:value :vectors])))) 1.001) "normalised")
+      (is (= (vector/model-id (seon.config/value :seon.config.vector/model)) (get-in r [:value :model]))))
+    (testing "the model is the helper's, never this process's"
+      (is (pos? pid))
+      (is (maps-model? pid) "the helper maps the model")
+      (is (not (maps-model? (lib/c-getpid))) "this process, root's place, does not"))
+    (testing "the queue empty, the helper is closed and gone"
+      (let [f (vector/close handle)]
+        (is (= pid (:pid f)))
+        (is (= 0 (:exit f)) "it exits 0 at the end of its input")
+        (is (gone? pid))
+        (is (nil? (vector/close handle)) "closing nothing is nothing")))
+    (testing "a search after it ended starts a new helper and answers"
+      (let [[r2] (embed ["task: search result | query: a"])
+            pid2 (:pid @(:facts handle))]
+        (is (= 1 (count (get-in r2 [:value :vectors]))) (pr-str r2))
+        (is (not= pid pid2) "another process")
+        (is (maps-model? pid2))
+        (is (not (maps-model? (lib/c-getpid))))
+        (vector/close handle)
+        (is (gone? pid2))))))
+
+(deftest a-helper-killed-mid-batch-answers-an-error-and-the-next-batch-works
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        embed #(vector/embed {:batch [{:req {:texts %}} {:req {:texts ["x"]}}] :handle handle})
+        _ (embed ["warm"])
+        pid (:pid @(:facts handle))
+        big (vec (repeat 64 (str/join " " (repeat 400 "token"))))
+        work (future (embed big))]
+    ;; the helper is working the big batch (its answer takes about a second) or has not read it yet: either way it dies
+    (lib/c-kill pid 9)
+    (let [rs @work]
+      (is (= 2 (count rs)) "every request of the batch is answered")
+      (is (every? #(= :seon.vector/helper-died (:seon.error/type %)) rs) (pr-str (map #(select-keys % [:seon.error/type :seon.error/message]) rs)))
+      (is (every? #(contract/valid? :seon.vector/helper-died %) rs))
+      (is (integer? (:exit (first rs))) "its exit status is in the error"))
+    (is (gone? pid))
+    (testing "the next batch starts another helper"
+      (let [rs (embed ["again"])]
+        (is (= 2 (count rs)))
+        (is (every? #(= 1 (count (get-in % [:value :vectors]))) rs) (pr-str rs))
+        (is (not= pid (:pid @(:facts handle))))
+        (vector/close handle)))))
