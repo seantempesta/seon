@@ -264,13 +264,6 @@
  ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
  ;; bound the rest are left out of the item; the record says nothing of them.
  :seon.config.agent/form-top-fns 10
- ;; Unit: evals. How many of an agent's newest evals keep their response (value included) live under
- ;; result/e<n> and in its state (seon.repl/keep-result!). Provenance: estimated 2026-10-29: an agent
- ;; reads its last few results (the model's context names the newest handles); before this every
- ;; response was kept for the life of the process (measured: 100 evals of a 1 MB value held ~100 MB).
- ;; At the bound: the oldest response is let go and its var unmapped; (my.agent/$ :e<n>) then reads the
- ;; value back from the eval's record on the branch, or answers the typed :seon.repl/result-evicted.
- :seon.config.agent/result-window 16
  ;; Unit: engine ticks ONE test (its :each fixtures included) may run, wherever it runs: an
  ;; agent's turn, the judge, bin/test (seon.proofs/run-tests!). One bound, per test, so a test's
  ;; verdict is a function of the test alone and the same in every place, and a green reused by

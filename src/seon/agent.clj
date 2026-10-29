@@ -541,7 +541,7 @@
   ([e] (error-map e 'seon.repl/eval-code))
   ([^Throwable e op]
    (if (contract/error? (ex-data e))
-     (contract/bounded (ex-data e))
+     (ex-data e)
      (let [d (ex-data e)
            diag? (comp #{"jolt.error" "clojure.error"} namespace key)
            jd (into {} (filter (every-pred (comp qualified-keyword? key) diag?)) d)
@@ -553,7 +553,7 @@
        (contract/error :seon.agent/eval-error op m
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
-                         other (assoc :data (contract/kept other))
+                         other (assoc :data other)
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!
