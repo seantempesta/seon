@@ -715,9 +715,14 @@
   ;; work done (what the fork server held live), not load. Measured as the agent found them at
   ;; its start (:inherited-bytes, seon.lib/generation-bytes): its own start-up promotes 2 MB more
   ;; into them, which the fork server's rule (:seon.config.agent/inherited-bytes) does not bound.
+  ;; An agent is forked and used first: the fork server's first fork freezes its heap (nothing is
+  ;; outside static then, so an agent measured alone inherits 0 and any bound passes); the second
+  ;; inherits what the server holds outside static since, which the bound is about.
+  (in-agent ["1"])
   (let [[r] (in-agent ["(:inherited-bytes @seon.agent/state)"])
+        bound (/ (seon.config/value :seon.config.agent/inherited-bytes) 1048576.0)
         mb (/ (:value r) 1048576.0)]
-    (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
+    (is (< mb bound) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
 
 (deftest an-agents-collect-trip-is-the-configured-one
   ;; docs/machine.md#what-a-process-owns-in-memory: Jolt's adaptive nursery raises any trip
