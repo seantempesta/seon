@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -1422,3 +1422,21 @@
     (let [l (agent/main-line base branch both)]
       (is (str/includes? l "ones you changed too: [app.md/g]") l)
       (is (str/includes? l "conflict on: [app.md/g]") l))))
+
+;; See docs/merging.md#main-moved-is-said-at-every-eval
+(deftest main-line-costs-what-changed
+  ;; the coordinator, 2026-10-29: an eval should cost ms; main-line (13.9 M ticks, 38.8 MB, 304 contracted
+  ;; calls on every eval, 13.0 M with main the base) is O(1) while main is the base, pays main's diff once
+  ;; per (base, main) pair, and a later eval at the same main pays only the branch's diff and one query.
+  ;; Work done (ticks, bytes, calls), never time
+  (let [base (seon.program-test/record (ts/test-db) 'user "(ns app.md)" 'app.md "(defn f [x] x)" 'app.md "(defn g [x] (f x))" 'app.md "(defn h [x] x)")
+        branch (seon.program-test/record base 'app.md "(defn g [x] (inc (f x)))")
+        main (seon.program-test/record base 'app.md "(defn f [x] (* 2 x))" 'app.md "(defn h [x] (dec x))")
+        fresh! #(swap! agent/state dissoc :main-changes :branch-changes)
+        unchanged (cost/measure (fn [] (fresh!) (agent/main-line base branch base)) [])
+        first-eval (cost/measure (fn [] (fresh!) (agent/main-line base branch main)) [])
+        _ (agent/main-line base branch main)
+        second-eval (cost/measure (fn [] (agent/main-line base branch main)) [])]
+    (is (< (:ticks unchanged) (* 0.01 (:ticks first-eval))) "main as the base: no diff, no query")
+    (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
+    (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))

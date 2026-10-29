@@ -27,6 +27,7 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
+;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :pages (seon.turn/context-block: {run {commit page}}, the newest page it drew, which the next read's diff takes its earlier page from: seon.context/world)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -149,27 +150,49 @@
   {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (let [m (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))] (swap! state assoc :main m) m))
 
+(declare branch-changes)
+
+(defn main-changes
+  "What main changed since base (seon.merge/delta-changes, declared data left out), a derived value
+  held keyed by the two commits it is a function of (:main-changes on the state: the newest pair, which
+  an eval after an eval at the same main reuses; evicted by the next pair, regenerated from the two dbs).
+  {} when main's head is base's. See docs/merging.md#main-moved-is-said-at-every-eval."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.merge/changes]}
+  [base main]
+  (let [at (juxt d/commit-id :max-tx)
+        k [(at base) (at main)]
+        {held :key ch :changes} (:main-changes @state)]
+    (cond (= (k 0) (k 1)) {}
+          (= k held) ch
+          :else (let [ch (pm/delta-changes base main #{})]
+                  (swap! state assoc :main-changes {:key k :changes ch})
+                  ch))))
+
 (defn main-line
   "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
-  nothing of the program since base: how many names main changed (seon.merge/readiness, the
-  three-way a merge of main runs), those of them b changed too, those b's changed functions call,
-  and those a merge of main would conflict on, each list cut by the one printer; and the form that
-  merges main (docs/merging.md#main-moved-is-said-at-every-eval). Cost, per call (it runs seon.merge/readiness
-  and a d/q over b's changed vars): see the section's measured numbers."
+  nothing of the program since base: how many names main changed (main-changes, held per pair of
+  commits), those of them b changed too (branch-changes), those b's changed functions call, and
+  those both changed to different content (what a merge of main would leave unmerged), each list
+  cut by the one printer; and the form that merges main
+  (docs/merging.md#main-moved-is-said-at-every-eval). Cost: O(1) while main is the base; the first
+  call at a main costs the diff of main since base, and a later one only the diff of b (held per
+  turn) and one query over b's changed vars; measured in docs/merging.md."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:maybe :string]]}
   [base b main]
-  (let [{:keys [main-moved conflicts]} (pm/readiness base b main)
-        moved (into #{} (keep (fn [[kind x]] (when (#{:var :schema} kind) x))) main-moved)
-        changed (pm/changed-vars (pm/delta-changes base b #{}))
-        ours (filter moved changed)
-        reached (remove (set ours) (filter moved (d/q '[:find [?r ...] :in $ [?v ...] :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs ?r]] b (vec changed))))
-        names #(print/text (vec (sort-by str %)) (:part print/budgets))]
-    (when (or (seq moved) (seq conflicts))
-      (str "main moved since your base: " (count moved) " names changed"
-           (when (seq ours) (str "; ones you changed too: " (names ours)))
-           (when (seq reached) (str "; ones your changes call: " (names reached)))
-           (when (seq conflicts) (str "; a merge of main would conflict on: " (names (map second conflicts))))
-           ". Merge it when you choose: (my.branch/merge-main!)"))))
+  (let [theirs (main-changes base main)]
+    (when (seq theirs)
+      (let [ours-ch (branch-changes base b)
+            moved (into #{} (keep (fn [[kind x]] (when (#{:var :schema} kind) x))) (keys theirs))
+            changed (pm/changed-vars ours-ch)
+            ours (filter moved changed)
+            conflicts (sort-by str (for [[k [_ after]] ours-ch :let [t (theirs k)] :when (and t (not= after (second t)))] (second k)))
+            reached (remove (set ours) (filter moved (d/q '[:find [?r ...] :in $ [?v ...] :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs ?r]] b (vec changed))))
+            names #(print/text (vec (sort-by str %)) (:part print/budgets))]
+        (str "main moved since your base: " (count moved) " names changed"
+             (when (seq ours) (str "; ones you changed too: " (names ours)))
+             (when (seq reached) (str "; ones your changes call: " (names reached)))
+             (when (seq conflicts) (str "; a merge of main would conflict on: " (names conflicts)))
+             ". Merge it when you choose: (my.branch/merge-main!)")))))
 
 (defn main-difference
   "main-line for this agent now: its merge base, its branch and main as last heard (heard-main),
