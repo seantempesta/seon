@@ -29,6 +29,18 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 "Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
 
+### Fix every major optimization issue; memory is the thread to pull (owner, 2026-10-29)
+"Your job is to priortize fixing ALL major optimization issues that you see. Memory problems seem like a good way to finding real system / platform / core issues so it's not a bad thread to pull on. Blockers of course." and "I don't see why hundreds of mb are being used for anything right now so I think there's a lot of headroom". The machine session works beside step 1: blockers first, then every large cost found, each measured before and after. Stated in: docs/plan.md (beside step 1).
+
+### Config levels are built as keys need them (owner, 2026-10-29)
+Chose "only levels in use": one resolver with the levels something sets today (defaults < profile < --config < --set); main's root entity, model, provider, task and agent levels join that resolver the day a key needs them, in the order of the entry above. Stated in: docs/plan.md (beside step 1), resources/seon/tasks/seon.config.edn.
+
+### The memory budget: Seon fits 8 GB and runs beside other apps on 16 GB (owner, 2026-10-29)
+Chose "8 GB, fits in 16": root and ten working agents under ~4 GB in all, so Seon runs beside a browser and an editor on a 16 GB MacBook and still works on an 8 GB one; `bin/check scale` charges against that. Stated in: docs/plan.md, docs/machine.md#ten-agents-at-once.
+
+### The standing root follows main's ref, never the checkout's HEAD (owner, 2026-10-29)
+Chose "root follows main ref": a topic branch checked out in the main tree never reaches root's source or main through `bin/update`. Stated in: task seon.fx/the-standing-root-follows-main-not-the-checkouts-head.
+
 ### Old worktrees' run data is not kept (owner, 2026-10-29)
 "No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
 
