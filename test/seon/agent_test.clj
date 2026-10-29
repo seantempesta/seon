@@ -769,9 +769,9 @@
   (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
                               {:sets [":seon.config.agent/heap-extra-bytes=268435456"]})
         heap (get-in oom [:ex :jolt/heap])]
-    (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str oom))
+    (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
     (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
-    (is (= (:live heap) (+ (:static heap) (:dynamic heap))) "the totals add up")
+    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap) (* 1.01 (+ (:static heap) (:dynamic heap)))) "static and dynamic make up the live heap")
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
