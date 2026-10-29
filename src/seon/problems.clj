@@ -34,7 +34,7 @@
   derived classes, which read the program's names once (a set): their cost follows the
   citations (seon.problems-test/dead-citations-follow-the-citations)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.docs :as docs] [seon.task :as task] [seon.config :as config]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -515,7 +515,7 @@
                      doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
                :when (and ent (not= :test (:var/kind ent)) (not (and doc (str/includes? doc "docs/")))
                           (contains? @program nsym)
-                          (some->> ent :var/form :form/src (re-find #"^\((?:defn|defmacro|def|defmulti)\s")))
+                          (contains? #{"defn" "defmacro" "def" "defmulti"} (some->> ent :var/form :form/src (source/first-head nsym))))
                :let [s (str "uncited-var " v)]]
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
