@@ -14,7 +14,7 @@
   "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 0: the
   messages seon.context/render makes for a fresh agent's run whose proofs have no result yet
   (the agent and its run written on a speculative db, d/with: nothing stored), and the model
-  and thinking mode the task resolves to. A fresh run's standing has no verdicts yet: a proof
+  and thinking mode the task resolves to. A fresh run's status has no verdicts yet: a proof
   not written reads :undefined, so the judge's tasks are ones whose proofs are not written."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any]]]}
   [db t]

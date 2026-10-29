@@ -47,7 +47,7 @@
 
 (defn status
   "How this agent's work on its task stands now, as its page and its model read it
-  (seon.context/standing, its model render): each proof by the verdict its branch holds (a red one
+  (seon.context/status, its model render): each proof by the verdict its branch holds (a red one
   with its failures, source and calls), what else the done rule refuses with the form that does
   it, the functions without a contract, the problems its work caused, what its merge carries, its
   unmerged entries, a test run that failed as a whole. A verdict is what the branch's last run
@@ -55,7 +55,7 @@
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [db (agent/db)]
-    (context/standing-model {} (context/standing db (pdb/eid db :seon.agent/key (:key @agent/state)) {}))))
+    (context/status-model {} (context/status db (pdb/eid db :seon.agent/key (:key @agent/state)) {}))))
 
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the

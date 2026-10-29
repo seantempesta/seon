@@ -2,7 +2,7 @@
   "The agent's context, a render of its record (docs/render.md#a-part-answers-data): the system
   prompt, then its record (its evals, messages and replies, `records`) and the parts of its page
   the model reads (the task, each var the plan cites, what is related, how its work stands:
-  `standing`), each part's data sent by its model render and printed through the one value printer
+  `status`), each part's data sent by its model render and printed through the one value printer
   (seon.print). Nothing is stored: a turn records its basis (the commit it read and what it took
   that no fact holds), and `render` makes the text from it, for the model and again for anyone who
   reads it later."
@@ -764,7 +764,7 @@
              [(:var/name v) (cond-> {:status (case st :green :pass :deferred :deferred :fail)}
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
-(defn standing
+(defn status
   "How agent a's work on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
   entity holds (`verdicts`; none: :unknown, or :undefined while the branch defines no such test),
@@ -797,7 +797,9 @@
         base (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db)))
         moved (when base (pm/content-datoms base db #{}))
         ch (if base (pm/delta-changes base db #{} moved) {})
-        split (when base (problems/caused-split base db ch))
+        ;; what caused-split reads differs from the content (sections, names, plans, catches): its own
+        ;; attributes' diff, one descent each (seon.problems/caused-datoms), never a scan of the wiki
+        split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
         unmerged (pm/unmerged db)
         ;; its run by the agent, never through its turns: a turn's record moves nothing this reads
@@ -850,8 +852,8 @@
   (let [{:keys [plan]} (:seon.task/accumulated t)]
     (mapv :seon.ref/name (program-vars db (ref/references db (str plan "\n" (:seon.task/instructions t)))))))
 
-(defn standing-model
-  "The standing as the model is sent it (the declared model render of :seon.context/standing): its
+(defn status-model
+  "The status as the model is sent it (the declared model render of :seon.context/status): its
   data, the done rule's raw :reasons left out (each is told as what to do, :refused). See
   docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :map] :map]}
@@ -1116,7 +1118,7 @@
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis) on db,
   the commit b names: the agent's request (`request`), b's :agent's: the system prompt, its record and
-  its parts, how its work stands among them (`standing`, a fact of the commit). The one maker of a
+  its parts, how its work stands among them (`status`, a fact of the commit). The one maker of a
   context: the model's request is this, and so is every later reading of it. opts :printed, what
   the run's earlier requests printed (the cache `printed-run` answers): only what is new is printed;
   :parts, {id content}, the agent's live walk's parts at db (`request`; else drawn cold).

@@ -468,7 +468,7 @@
   "The data of walk w's parts placed in the root's lists with element ids sels: {schema-key data} of each
   component that answered data (a part: seon.render/part), by its schema (the metadata
   :seon.render/schema its data names), from the same prewalk as placed-hiccup. What a reader that
-  decides from a part (the turn's done check reads the standing) takes, so the walk computes it once.
+  decides from a part (the turn's done check reads the status) takes, so the walk computes it once.
   See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
   [w sels]

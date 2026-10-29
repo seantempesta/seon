@@ -669,7 +669,7 @@
 (defn page-parts
   "This agent's parts now, from its live walk framed once (`page-hiccup`'s): [db parts data], the db it
   framed at, what the model reads of each part ({element-id content}) and the data of each part that
-  answered data ({schema-key data}, seon.render/placed-data): the turn decides from the standing and
+  answered data ({schema-key data}, seon.render/placed-data): the turn decides from the status and
   draws its request from the same frame (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map :map]]}
   [] (let [w (framed)]

@@ -28,16 +28,16 @@
                                  ;; a test the agent wrote in its scratch namespace, no proof of its task
                                  [user/scratch-test "(deftest scratch-test (is (= 1 2)))"]])))))
 
-(defn- standing-of
-  "How agent b/a1's work on task tid stands (seon.context/standing) on db once the facts the source
+(defn- status-at
+  "How agent b/a1's work on task tid stands (seon.context/status) on db once the facts the source
   reads are on it: vs, {test [status failures]}, each test's :seon.test/status and
   :seon.test/failures on its var entity (seon.proofs/result-tx's), and the agent."
-  ([db tid vs] (standing-of db tid vs {}))
+  ([db tid vs] (status-at db tid vs {}))
   ([db tid vs opts]
    (let [db (d/db-with db (into [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id tid]}]
                                 (for [[t [st fs]] vs]
                                   (cond-> {:var/name t :seon.test/status st} (seq fs) (assoc :seon.test/failures (vec fs))))))]
-     (context/standing db (pdb/eid db :seon.agent/key "b/a1") opts))))
+     (context/status db (pdb/eid db :seon.agent/key "b/a1") opts))))
 
 (defn- index-of
   "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
@@ -58,7 +58,7 @@
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/g-test}}]))
         t (task/task db "demo/f")
         block (context/task-data db t)
-        st (standing-of db "demo/f" {'demo-test/f-test [:green] 'demo-test/g-test [:red [{:type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]]})
+        st (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/g-test [:red [{:type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]]})
         by (into {} (map (juxt :test identity)) (:proofs st))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (select/code? (:source (by 'demo-test/g-test))) "a red proof shows its source, as code")
@@ -85,7 +85,7 @@
     (is (nil? (:seon.print/continuation (first cuts))))))
 
 (deftest a-cut-reply-is-told-to-the-agent
-  ;; the run's head (seon.render.ui/run-head), not the work's standing: a cut reply is the conversation's
+  ;; the run's head (seon.render.ui/run-head), not the work's status: a cut reply is the conversation's
   (let [head (fn [turn] (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :turns {"t1" turn}}} 1)))]
     (is (re-find #"at the model's token limit" (head {:seon.turn/n 0 :seon.turn/truncated true})) (head {:seon.turn/n 0 :seon.turn/truncated true}))
     (is (not (re-find #"token limit" (head {:seon.turn/n 0}))))))
@@ -126,21 +126,21 @@
         index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {'demo-test/g-test #{"demo/g"}} {"demo/g" {:merged-t 1}}))
         ;; the done rule refused beyond the task's own proof: a regression and a stray red; the run named one
         ;; failing assertion of the red test
-        st (standing-of db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]} {:index index})]
+        st (status-at db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]} {:index index})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
               {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
              (:refused st)))
       (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
-      (is (not (contains? (context/standing-model {} st) :reasons)) "and the model is told each as what to do, not twice"))
+      (is (not (contains? (context/status-model {} st) :reasons)) "and the model is told each as what to do, not twice"))
     (testing "a run that failed as a whole is said, not read as tests not run"
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"]}
                               {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"] :seon.process/test-error err}])
-            st (context/standing db (pdb/eid db :seon.agent/key "b/a1") {})]
+            st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
-        (is (re-find #"did not load" (print/text (vary-meta (context/standing-model {} st) assoc :seon.print/full true))) "printed, as the page and (my.task/status) print it, it is there"))
+        (is (re-find #"did not load" (print/text (vary-meta (context/status-model {} st) assoc :seon.print/full true))) "printed, as the page and (my.task/status) print it, it is there"))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
@@ -148,18 +148,18 @@
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
       (let [dd (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/kind :design :seon.task/plan "p"
                                                                                 :seon.task/proofs #{'demo-test/f-test}}]))
-            b (standing-of dd "demo/f" {'demo-test/f-test [:red]})]
+            b (status-at dd "demo/f" {'demo-test/f-test [:red]})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
                (mapv (juxt :reason :unchanged (comp first :do)) (filter #(= :no-design (:reason %)) (:refused b)))))))
     (testing "a task with no proofs is told the form that registers one (a design writes its own)"
       (let [nd (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
-            b (standing-of nd "demo/f" {})]
+            b (status-at nd "demo/f" {})]
         (is (= ['my.task/update! :seon.task/proofs] (take 2 (:do (first (:refused b))))))))
     (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
-      (let [b (standing-of db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]} {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})]
+      (let [b (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]} {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})]
         (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
     (testing "nothing refused, nothing failed: no section"
-      (let [b (standing-of db "demo/f" {'demo-test/f-test [:green]})]
+      (let [b (status-at db "demo/f" {'demo-test/f-test [:green]})]
         (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply :unmerged]))
         (is (= [] (:reasons b)))))))
 
@@ -214,7 +214,7 @@
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
         rep (agent/test-report {:type :fail :expected '(= 9 (square 3)) :actual '(not (= 9 6))} "#'ctx-calc-test/square-test")
-        block (standing-of db "ctx/sq" {'ctx-calc-test/square-test [:red (get (proofs/failures {:reports [rep]}) 'ctx-calc-test/square-test)]})
+        block (status-at db "ctx/sq" {'ctx-calc-test/square-test [:red (get (proofs/failures {:reports [rep]}) 'ctx-calc-test/square-test)]})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
@@ -228,7 +228,7 @@
     (let [db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "ctx/sq"]}
                             {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"]
                              :seon.process/test-error {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load"}}])
-          b (context/standing db (pdb/eid db :seon.agent/key "b/a1") {})]
+          b (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
@@ -335,7 +335,7 @@
                defs)))
 
 (deftest a-function-without-a-contract-is-refused
-  ;; the standing reads the branch's diff against its base (:seon.agent/base-commit): a function the
+  ;; the status reads the branch's diff against its base (:seon.agent/base-commit): a function the
   ;; branch defined without a contract is a reason, named once
   (ts/test-branch!
     (fn [_ conn]
@@ -345,7 +345,7 @@
                         {:var/name 'demo-test/f-test :seon.test/status :green}])
       (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
       (d/transact conn [{:var/name 'demo/helper :var/kind :fn}])
-      (let [db @conn st (context/standing db (pdb/eid db :seon.agent/key "b/a1") {})]
+      (let [db @conn st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
@@ -391,11 +391,11 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(re-find % (:content (second r0))) [#"cited-\d+-demo_2Ff" #"Doubles\." #"standing-\d+"]) "the page whole, by component key: how the work stands too")
+        (is (every? #(re-find % (:content (second r0))) [#"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+"]) "the page whole, by component key: how the work stands too")
         (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
-        (is (not (re-find #"standing-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
+        (is (not (re-find #"status-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
               read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 1
@@ -406,7 +406,7 @@
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context
   ;; and again in the current block, every turn; on the page each is one part: the plan in
-  ;; [:task], a cited var's source in its own part, the proofs' statuses in the standing
+  ;; [:task], a cited var's source in its own part, the proofs' statuses in the status
   (ts/test-branch!
     (fn [_ conn]
       ;; its proof written: an unwritten one is told what to assert in the plan's words, the plan again
@@ -423,10 +423,10 @@
             page (context/drawn-parts db (ctx/build db a :b))
             text (print/text (vary-meta page assoc :seon.print/full true))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
-        (is (some #(str/starts-with? % "standing-") (keys page)) "how the work stands is on the page")
+        (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
-        (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the standing")))))
+        (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the status")))))
 
 (deftest a-cited-var-shows-at-its-citations-depth
   ;; task seon.context/a-cited-var-shows-at-its-citation-depth: the delimiter picks the depth
@@ -533,7 +533,7 @@
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
   (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
                                                                             :seon.task/proofs #{'demo-test/unwritten-test}}]))
-        b (standing-of db "demo/f" {})
+        b (status-at db "demo/f" {})
         r (first (:refused b))]
     (is (= [{:test 'demo-test/unwritten-test :status :undefined}] (:proofs b)) "a proof not written says so")
     (is (= :proof-unknown (:reason r)))
@@ -543,7 +543,7 @@
     (is (re-find #"\(my.agent/prove\)" (pr-str (:do r))) (pr-str r)))
   ;; a proof written but with no result was offered the same template, which overwrites it
   ;; (the fixture's program defines demo-test/f-test)
-  (let [r (first (:refused (standing-of (db-f (db-with-program)) "demo/f" {})))]
+  (let [r (first (:refused (status-at (db-f (db-with-program)) "demo/f" {})))]
     (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
@@ -745,7 +745,7 @@
 (deftest the-request-is-a-conversation-of-evals-and-the-page
   ;; docs/render.md: each turn's prose and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and at each model
-  ;; turn the page: whole at the first, what changed of it after (a verdict moves the standing
+  ;; turn the page: whole at the first, what changed of it after (a verdict moves the status
   ;; alone); the prefix stays byte-identical
   (ts/test-branch!
     (fn [_ conn]
@@ -775,7 +775,7 @@
             "prose as content, the reasoning as returned, the call")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (re-find #"standing-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
+        (is (re-find #"status-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not-any? #(re-find % (:content (peek r1))) [#"related-\d+" #"run-head-\d+"]) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) ":fail") "the proof's new verdict")
@@ -904,7 +904,7 @@
         db (d/db-with (db-with-program) (program-facts [['demo-test/f-test src []]]))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        state (standing-of db "demo/f" {'demo-test/f-test [:red]})
+        state (status-at db "demo/f" {'demo-test/f-test [:red]})
         text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
     (is (every? #(str/includes? text %) (str/split-lines src)) text)
     (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))
@@ -1245,7 +1245,7 @@
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
   ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"
   (let [db (db-with-program)
-        block (standing-of (db-f db) "demo/f" {})
+        block (status-at (db-f db) "demo/f" {})
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
 
@@ -1433,7 +1433,7 @@
             _ (ev! "e1")
             _ (ask! 0 {})
             _ (ev! "e2")
-            ;; a proof's verdict recorded since turn 0: the standing is a part that moved
+            ;; a proof's verdict recorded since turn 0: the status is a part that moved
             _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
             r1 (ask! 1 {})
             ;; the agent trims its context (swap! on @ctx retracts the eval on its branch)

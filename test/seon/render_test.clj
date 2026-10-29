@@ -875,7 +875,7 @@
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
   ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["standing-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["standing-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
+  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["status-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["status-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-view-that-throws-answers-its-page-with-the-error
@@ -983,9 +983,9 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "standing-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
         "the task, what is related, how the work stands, the run, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
-    (let [h (:html (unit-of task "standing-"))]
+    (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h ":fail")))
     (let [h (:html (unit-of task "task-data-"))]
@@ -1027,17 +1027,17 @@
       (is (str/includes? h ":green"))
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
-(deftest the-standing-is-drawn-from-facts-with-no-turn-of-the-reader
-  ;; task seon.render/the-status-before-any-model-turn: the standing reads the branch's facts, never a
+(deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
+  ;; task seon.render/the-status-before-any-model-turn: the status reads the branch's facts, never a
   ;; turn's record, so it is drawn for an agent whatever turns it has taken, a proof's verdict
-  ;; included; the turn count is the run's (seon.render.ui/run-head), not the standing's
+  ;; included; the turn count is the run's (seon.render.ui/run-head), not the status's
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
         branch (d/db-with branch [{:var/name 'demo/f-test :seon.test/status :green}])
         w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx)))
-        standing (try (unit-of (r/placed-units w) "standing-") (finally (r/dispose-walk! w)))
+        standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
-    (is (some? standing) "the standing is drawn")
+    (is (some? standing) "the status is drawn")
     (is (str/includes? h ":pass") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h " of ")) "and has no turn count")))
 
@@ -1254,9 +1254,9 @@
      {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
      {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
 
-(deftest the-standing-draws-what-the-merge-functions-answer
+(deftest the-status-draws-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
-  ;; moves; the standing takes main's commit as an option and the agent's base commit from its fact
+  ;; moves; the status takes main's commit as an option and the agent's base commit from its fact
   ;; (:seon.agent/base-commit), reads both from the branch's own store, and answers the merge's views
   ;; from the one diff of the branch against its base (docs/render.md#a-part-answers-data)
   (ts/test-branch!
@@ -1268,25 +1268,25 @@
             agent-on (fn [db] (d/db-with db [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
-            st (seon.context/standing ours a {:main main})
+            st (seon.context/status ours a {:main main})
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
         (is (not (contains? st :caused)) "nothing caused")
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")
         (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
-        (let [merge (h/html (ui/standing-html {} {:merge (:merge st)}))
-              carries (h/html (ui/standing-html {} {:its-merge-carries (:its-merge-carries st)}))
-              gaps (h/html (ui/standing-html {} {:without-a-contract (:without-a-contract st)}))]
+        (let [merge (h/html (ui/status-html {} {:merge (:merge st)}))
+              carries (h/html (ui/status-html {} {:its-merge-carries (:its-merge-carries st)}))
+              gaps (h/html (ui/status-html {} {:without-a-contract (:without-a-contract st)}))]
           (is (str/includes? merge "demo/k") "what main changed since the base")
           (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
           (is (str/includes? carries "demo/h") "what the branch's merge carries")
           (is (not (str/includes? carries "demo/k")) "never main's change")
           (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
           (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
-        ;; a branch that changed nothing: the standing holds none of them, not a header over an empty answer
+        ;; a branch that changed nothing: the status holds none of them, not a header over an empty answer
         (let [same (agent-on (d/commit-as-db conn base))
-              st0 (seon.context/standing same (seon.db/eid same :seon.agent/key "b1/a3") {})]
+              st0 (seon.context/status same (seon.db/eid same :seon.agent/key "b1/a3") {})]
           (is (not-any? #(contains? st0 %) [:caused :attention :without-a-contract :its-merge-carries :merge :unmerged])
               "a branch with no changes holds none of them"))))))
 
@@ -1310,7 +1310,7 @@
             tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
-            views '#{seon.render.ui/standing}
+            views '#{seon.render.ui/status}
             ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
         (try
           (r/frame! w nil)

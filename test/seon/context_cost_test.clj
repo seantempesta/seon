@@ -215,7 +215,7 @@
         opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
         e {:db/id a}
         part (fn [k text] [:section {:id k} text])
-        parts (fn [t] {"task-1" (part "task-1" "Make f.") "standing-1" (part "standing-1" (str t " of 9"))})
+        parts (fn [t] {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" (str t " of 9"))})
         db1 (d/db-with db (turn 0))
         r0 (seon.context/request e (opts db1 0 (parts 1) nil))
         db2 (d/db-with db1 (concat (sent 0 r0) (turn 1)))

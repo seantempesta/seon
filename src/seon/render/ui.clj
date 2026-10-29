@@ -855,25 +855,25 @@
       source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
       (seq others) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} others]))))
 
-(defn standing-html
-  "The work's standing as the page shows it (the declared html render of :seon.context/standing): its
+(defn status-html
+  "The work's standing as the page shows it (the declared html render of :seon.context/status): its
   data by the one printer, under the budget of a value, with the form that reads it again. See
   docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_opts v]
-  [:section [:h2 "standing"]
+  [:section [:h2 "status"]
    [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)} (with-meta (dissoc v :reasons) nil)]])
 
-(defn standing
-  "How the agent's work on its task stands (a component over ctx and the db): seon.context/standing
-  of its branch db, a part (its data, :seon.context/standing, drawn by its schema's html render for
+(defn status
+  "How the agent's work on its task stands (a component over ctx and the db): seon.context/status
+  of its branch db, a part (its data, :seon.context/status, drawn by its schema's html render for
   the page and its model render for the model: docs/render.md#a-part-answers-data). It reads main's
   commit from ctx only when the task merges itself (the merge view), so a move of main redraws it
   only then."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
-    (with-meta (context/standing db aid {:main main}) {:seon.render/schema :seon.context/standing})))
+    (with-meta (context/status db aid {:main main}) {:seon.render/schema :seon.context/status})))
 
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
@@ -894,17 +894,19 @@
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns), and
   that its last reply was cut, when it was: the conversation's part of where the agent stands (the
-  work's is seon.render.ui/standing)."
+  work's is seon.render.ui/status)."
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
   [{c :seon.ctx/ctx} _aid]
-  [:section
-   (render/html {:schema :seon.run/run-fact}
-                (cond-> (-> (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
-                                                          :seon.run/branch (:seon.agent/branch c)})
-                            (assoc :turns-taken (count (:turns c))))
-                  ;; its last reply cut at the model's token limit: what followed it was lost
-                  (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
-                  (assoc :your-last-reply {:cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."})))])
+  (let [cap (ratom/realize (:seon.agent/max-turns c)) n (count (:turns c))]
+    [:section
+     (render/html {:schema :seon.run/run-fact}
+                  (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
+                                                :seon.run/branch (:seon.agent/branch c)}))
+     ;; the run's schema render draws its declared keys only: the turns taken and a cut reply are lines of their own
+     [:p (str n (if (= 1 n) " turn" " turns") (when cap (str " of " cap)))]
+     ;; its last reply cut at the model's token limit: what followed it was lost
+     (when (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
+       [:p {:class "err"} "your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
 
 (defn own-problems
   "The open problems of the agent's newest run (a component over its branch db, seon.problems/own: its run's,
@@ -1084,7 +1086,7 @@
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
                        [#'related {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
-                       [#'standing {} aid]))
+                       [#'status {} aid]))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns c)) [#'run-head {} aid])
       (when aid [#'own-problems {} aid])

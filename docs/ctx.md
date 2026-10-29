@@ -48,7 +48,7 @@ A patch costs its change, flat in the session (at 100 and 1,000 evals): a new ev
 
 The other facts a view reads:
 - A catch-up (``seon.agent/merge-main!``) is a `:seon.catch-up/*` entity written in the merge's own transaction: the branch and t merged, what applied and what conflicted. It is no join of the agent's pull (the pull holds the agent's task, every turn and eval, and its newest messages): a reader queries it, or adds `{[:seon.catch-up/_agent :as :catch-ups] [*]}` to its pattern (`seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base`).
-- Proof results are facts on each test's var entity on the branch (`:seon.test/*`), which ctx holds under the task's proofs; how the work stands is ```seon.context/standing``` of the branch's facts, drawn by the page, never held (a turn's model call's basis is the commit it read, not what it measured). Every message the turn takes, an entry or another agent's send, is written on the branch (``seon.turn``'s `take!`, with `:seon.message/agent`) and sits under `[:messages]`.
+- Proof results are facts on each test's var entity on the branch (`:seon.test/*`), which ctx holds under the task's proofs; how the work stands is ```seon.context/status``` of the branch's facts, drawn by the page, never held (a turn's model call's basis is the commit it read, not what it measured). Every message the turn takes, an entry or another agent's send, is written on the branch (``seon.turn``'s `take!`, with `:seon.message/agent`) and sits under `[:messages]`.
 
 ## What the model reads, and what the page draws
 

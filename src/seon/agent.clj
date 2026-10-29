@@ -680,7 +680,7 @@
 (defn reconcile-index
   "The reconciler's index of db (seon.reconcile/index), advanced from the one this process held for
   the db it last asked about by what differs, at first from main's as the fork server handed it
-  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.context/standing
+  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.context/status
   asks for main's claims. It keeps the commit it is of, never the db."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]

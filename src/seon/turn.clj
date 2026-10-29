@@ -19,7 +19,7 @@
   (:require [seon.ctx :as ctx] [seon.edn :as sedn] [seon.profile :as profile] [seon.intr :as intr] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [seon.agent :as agent] [seon.repl :as repl] [seon.task :as task] [seon.reconcile :as r]
             [seon.proofs :as proofs] [seon.context :as context] [seon.merge :as pm] [seon.problems :as problems]
-            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib]
+            [seon.stage :as stage] [my.branch :as branch] [seon.reader :as reader] [seon.learn :as learn] [seon.config :as cfg] [seon.lib :as lib] [seon.print :as print]
             [seon.error :as err] [datahike.api :as d] [seon.db :as pdb]))
 
 ;; The turn loop's own facts live in the agent's one state map, under :turn: the run it
@@ -59,7 +59,7 @@
 (defn- test-error!
   "Record on this agent's branch whether its test run test-run failed as a whole: the error as data on
   its process's entity (:seon.process/test-error, \"<agent key>/<pid>\"), retracted when a run answers;
-  nothing written when it already says so (seon.context/standing reads it)."
+  nothing written when it already says so (seon.context/status reads it)."
   {:malli/schema [:=> [:cat :any] :any]}
   [test-run]
   (let [k (:key @agent/state) pk (str k "/" (lib/c-getpid))
@@ -72,8 +72,8 @@
   "What a turn starts from: the proofs run now by the test service (seon.prove: one run per branch
   and tx whoever asks, in a fork of this agent), their results facts on this branch
   (seon.agent/record-results!), a run that failed as a whole too (test-error!), and the task as the
-  branch holds it. How the work stands is the standing (seon.context/standing), drawn from those
-  facts by the agent's walk (`standing-now`): nothing here is held for it. {:test-run :tests-ms :task}."
+  branch holds it. How the work stands is the status (seon.context/status), drawn from those
+  facts by the agent's walk (`status-now`): nothing here is held for it. {:test-run :tests-ms :task}."
   {:malli/schema [:=> [:cat :seon.task/id] :map]}
   [id]
   (let [;; the branch's own texts embedded first, so the plan's vector is the plan's now
@@ -84,12 +84,12 @@
     (test-error! test-run)
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
-(defn- standing-now
-  "How the work stands now, from the agent's walk framed once (seon.repl/page-parts): the standing
-  part's data (seon.context/standing), which the page and the model read too, so a turn computes it
+(defn- status-now
+  "How the work stands now, from the agent's walk framed once (seon.repl/page-parts): the status
+  part's data (seon.context/status), which the page and the model read too, so a turn computes it
   once."
   {:malli/schema [:=> [:cat] :map]}
-  [] (or (get (nth (repl/page-parts) 2) :seon.context/standing) {}))
+  [] (or (get (nth (repl/page-parts) 2) :seon.context/status) {}))
 
 (defn- end!
   "The run's end: the live runtime staged onto the branch, the end written there (with
@@ -135,8 +135,8 @@
     (let [sends (agent/inbox)
           k (:key @agent/state)
           tx (into [] (mapcat (fn [{:keys [from body]}]
-                                ;; a send's body is the sender's value: its text is the message
-                                (update (task/message-tx (str k "/send/" (random-uuid)) :message (name from) nil (if (string? body) body (pr-str body)))
+                                ;; a send's body is the sender's value: its text, by the one printer, whole, is the message
+                                (update (task/message-tx (str k "/send/" (random-uuid)) :message (name from) nil (if (string? body) body (print/text (cond-> body (instance? clojure.lang.IObj body) (vary-meta assoc :seon.print/full true)))))
                                         0 assoc :seon.message/agent {:seon.agent/key k})))
                    (remove #(= :fx (:from %)) sends))]
       (agent/take-main!)
@@ -149,7 +149,7 @@
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
   model call's wait would), the task, run and turn. Everything the request shows is a fact of that
-  commit: how the work stands (seon.context/standing), what the turn took (take!)."
+  commit: how the work stands (seon.context/status), what the turn took (take!)."
   {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :boolean] :seon.model-call/basis]}
   [task run turn max-turns origin merge?]
   (agent/commit!)
@@ -217,7 +217,7 @@
     (if (seq moved) [(assoc moved :seon.agent/key k)] [])))
 
 (defn- act!
-  "One model turn: the agent's context (its record and its parts, the standing s among them) to the model, the reply's eval calls
+  "One model turn: the agent's context (its record and its parts, the status s among them) to the model, the reply's eval calls
   through the one REPL path, each answered as its own result, the turn's facts on the branch. Answers the loop state after it, or the
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
@@ -331,7 +331,7 @@
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.docs/resolve-ref (set (context/cited-names db t))
-                                                         'seon.context/standing (set (map :test (:proofs s)))}
+                                                         'seon.context/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
           ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
           ;; only a turn with what both sides changed still to resolve
@@ -392,7 +392,7 @@
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task run)
         _ (observe task)
-        [outcome reason] (hand-back-end stop (:reasons (standing-now)))]
+        [outcome reason] (hand-back-end stop (:reasons (status-now)))]
     (end! {:run run} outcome reason nil)))
 
 (defn work!
@@ -419,10 +419,10 @@
                :max-turns max-turns :merge? merge?}]
       (let [obs (observe task)
             ;; how the work stands, from the walk the request is drawn from (one computation a turn)
-            s (standing-now)
+            s (status-now)
             reasons (:reasons s)
             stop (get-in @agent/state [:turn :stop])
-            hairy (when merge? (r/hairy (merge merge-cfg {:conflicts (:unmerged s) :task (:task obs) :merge-turns (:merge-turns st)})))]
+            hairy (when merge? (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
         (cond
           ;; git's CI after the merge: green on the combined program; merge main again until
           ;; it brings nothing new

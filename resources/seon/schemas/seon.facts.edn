@@ -538,7 +538,7 @@
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
  ;; a test run of this process that failed as a whole (its fork refused, a namespace did not load): the
  ;; error as data (its type, message and data keys), written on the agent's branch by its turn
- ;; (seon.turn/observe) and retracted when a run answers; present only while it is so (seon.context/standing)
+ ;; (seon.turn/observe) and retracted when a run answers; present only while it is so (seon.context/status)
  :seon.process/test-error :seon.error/base
  :seon.process/process-fact [:map {:seon.db/attributes true}
                           [:seon.process/id :seon.process/id] [:seon.process/agent :seon.process/agent]

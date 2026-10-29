@@ -1207,7 +1207,7 @@
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole run whose proof is red is not merged. Its run does not end red: it
   ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
-  ;; rule's reasons as data in the standing it reads (a run root refuses at its end gets root's verdict
+  ;; rule's reasons as data in the status it reads (a run root refuses at its end gets root's verdict
   ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
   ;; ends on the run's own end, which always comes
   (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
@@ -1215,13 +1215,13 @@
                    " db @(:conn sys) r (seon.task/run db \"" % "/wr#1\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
                    " a (datahike.api/q '[:find ?a . :where [?r :seon.run/id \"" % "/wr#1\"] [?r :seon.run/agent ?a]] b)]"
-                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.context/standing b a {})))])")
+                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.context/status b a {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
         [status state reasons] (:value r)]
     (is (= :parked status) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (= [:proof-red] reasons) "the standing carries why, as data: the proof is red")))
+    (is (= [:proof-red] reasons) "the status carries why, as data: the proof is red")))
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own

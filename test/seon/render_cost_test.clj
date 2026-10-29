@@ -330,7 +330,7 @@
      :sizes [100 300 1000 4000]}))
 
 (def ^:dynamic *conn*
-  "The branch's connection the standing's proof writes its base, main and branch on (bound by its deftest)."
+  "The branch's connection the status's proof writes its base, main and branch on (bound by its deftest)."
   nil)
 
 (defn- defn-facts
@@ -343,7 +343,7 @@
      {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
 
 (defn branch-of
-  "The input at n: the standing part's arguments, [opts aid]: a base holding one function, main one
+  "The input at n: the status part's arguments, [opts aid]: a base holding one function, main one
   function later, and the branch (the base's db, with the agent whose base commit it is) with n functions
   of its own, each without a contract (so gaps and divergence have n rows each); the task merges itself,
   so main's commit is read too."
@@ -360,11 +360,11 @@
     [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}} (seon.db/eid ours :seon.agent/key "b/a1")]))
 
 ;; See docs/render.md#a-part-answers-data
-(deftest the-standing-reads-the-branchs-diff-once
+(deftest the-status-reads-the-branchs-diff-once
   (ts/test-branch!
     (fn [_ conn]
       (binding [*conn* conn]
-        (cost/proof {:of 'seon.render.ui/standing :input 'seon.render-cost-test/branch-of
+        (cost/proof {:of 'seon.render.ui/status :input 'seon.render-cost-test/branch-of
                      :n "functions the branch defined without a contract (a base and main one function apart)"
                      :work (str "the datoms that differ between the base and the branch read once (seon.merge/content-datoms), "
                                 "then the changes, the problems it caused, the gaps, what it carries and the merge section's "
