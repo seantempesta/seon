@@ -1020,8 +1020,9 @@
 
 (defn rearm!
   "Arm again, in this process, every var whose contract reaches schema keys (they, or a schema
-  naming one, on and on: schema-dependents' closure), compiled against db's schemas
-  (seon.contract/rearm!): what a registration in a running agent owes the code it holds, whose
+  naming one, on and on: schema-dependents' closure), compiled against db's schemas: one arm!
+  armed again over its raw root (seon.contract/rearm!), one the defn macro armed at its definition by
+  evaluating that definition again (its source as the REPL kept it, else as db records it): what a registration in a running agent owes the code it holds, whose
   contracts were compiled before it (my.schema/register!; md-scan #7, #8 and #11 met their own
   registered :seon.ref/block in Seon's seon.ref/sections, still checking the old one). A load of
   db's program re-arms the same by evaluating the forms again (load!). Answers the errors."
@@ -1035,8 +1036,16 @@
       (vec (for [n (all-ns) v (vals (ns-interns n))
                  :let [c (contract/contract v)]
                  :when (and c (some reached (names c)))
-                 :let [r (contract/rearm! v)]
-                 :when (contract/error? r)]
+                 :let [sym (symbol v)
+                       ;; armed by arm! (its raw root kept): wrapped again; armed at its definition (the defn
+                       ;; macro keeps no raw root): its definition evaluated again, as a load does (load!)
+                       src (when-not (:seon.contract/raw (meta v))
+                             (or (:source (meta v)) (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src)))
+                       r (if src
+                           (try (binding [*ns* (:ns (meta v))] (load-string src)) nil
+                                (catch Throwable e {:var sym :message (or (ex-message e) (str e))}))
+                           (let [r (contract/rearm! v)] (when (contract/error? r) r)))]
+                 :when r]
              r)))))
 
 (defn load-all!

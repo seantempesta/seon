@@ -128,3 +128,15 @@
                                 "(:seon.schema/key (my.schema/register! :x.rearm/state [:enum :a :b]))\n"
                                 "(held :b)\n"))]
     (is (= ":b" (last printed)) (str "the function defined before the registration checks the new form: " (pr-str printed)))))
+
+(deftest a-registration-re-arms-a-function-the-contract-macro-defined
+  ;; md-scan #13: seon.ref/scan, defined with seon.contract/defn (armed at its definition, no raw
+  ;; root kept), still checked the old :seon.ref/block after the agent registered the new one: its
+  ;; definition is evaluated again against the registered form
+  (let [[printed _] (evals (main-db)
+                           (str "(:seon.schema/key (my.schema/register! :x.rearm2/state [:enum :a]))\n"
+                                "(ns x.rearm2 (:refer-clojure :exclude [defn]) (:require [seon.contract :refer [defn]]))\n"
+                                "(defn held {:malli/schema [:=> [:cat :x.rearm2/state] :keyword]} [s] s)\n"
+                                "(:seon.schema/key (my.schema/register! :x.rearm2/state [:enum :a :b]))\n"
+                                "(held :b)\n"))]
+    (is (= ":b" (last printed)) (str "a function the contract macro armed checks the new form: " (pr-str printed)))))
