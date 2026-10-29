@@ -114,8 +114,6 @@
                  ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
                  ;; import took 3.5 s, and the first fork waited behind it
                  db' (d/commit-as-db (:store st) (:commit m))
-                 ;; a schema main gained is hashed here once, for the agents forked from now on
-                 _ (when-not (identical? (:schema db') (:schema (:db st))) (pdb/prime-commit! db'))
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
@@ -202,7 +200,6 @@
         ;; docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
         _ (when boot? (pdb/preload! db0))
-        _ (pdb/prime-commit! db0)
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout)
         kq (lib/kq-new)
         recv! (fn [] (loop []
