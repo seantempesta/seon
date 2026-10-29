@@ -225,7 +225,7 @@
                 "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
                 "flat in the turns held. A real turn also reads back its help page and its task data as of their t "
                 "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the task data's run "
-                "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
+                "sections), once: a finished turn's row is cached and never rendered again (each message it sent is a card of the page). Per held turn: the list's "
                 "query of every turn's id, its place in the sort and its slot, no render")
      :growth :linear
      ;; measured 2026-10-24: 357 / 357 calls and 1.20 / 4.37 MB at 100 / 1,000 held turns, one component

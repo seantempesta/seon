@@ -637,7 +637,7 @@
           (finally (swap! agent/state assoc :eval outer))))))
 
 (defn- numbered
-  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: an edit's refusal names its candidates by them (docs/agent.md#changing-a-definition)."
+  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: a refused edit's error names its candidates by them (docs/agent.md#changing-a-definition)."
   {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple pos-int? :string]]]}
   [text from to]
   (let [ls (clojure.string/split-lines text)]
