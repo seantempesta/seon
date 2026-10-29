@@ -246,7 +246,7 @@
     (try
       (is (str/includes? out "ROOT LISTENING") (str "the root boots: " out))
       (is (true? printed) "and the dead link is an open problem")
-      (finally (sh/sh "rm" "-rf" tmp path (str path "-in") (str path ".log") (str path "-agents"))))))
+      (finally (ts/drop-main! path main) (sh/sh "rm" "-rf" tmp (str path "-in") (str path ".log"))))))
 
 (deftest every-end-of-a-root-is-a-fact
   ;; task seon.root/every-end-of-a-root-is-a-fact: a clean stop is a fact naming its cause
