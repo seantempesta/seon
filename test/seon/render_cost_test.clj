@@ -190,24 +190,25 @@
 (defn debug-of
   "The input of size n: the render proc's state holding agent a1's debug page after a pass over n
   model turns (its shown rows rendered as units), with one turn more on the
-  branch: each turn sent the same two evals (:seon.turn/sent); and the view."
+  branch: each turn sent the same two evals (:seon.model-call/sent); and the view."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k (seon.task/agent-key "b1" :a1)
         sent [[:eval "e1"] [:eval "e2"]]
-        turn (fn [i] {:seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model :seon.turn/sent sent
-                      :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1})
+        turn (fn [i] [{:db/id (str "turn" i) :seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model}
+                      {:seon.model-call/id (str "t/x#1/" i) :seon.model-call/turn (str "turn" i) :seon.model-call/sent sent
+                       :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
         db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} % "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1" :call-id (str "c-" %) :call 0})) ["e1" "e2"])
                     [{:db/id "run" :seon.run/id "t/x#1"}]
-                    (mapv turn (range n))])
+                    (into [] (mapcat turn) (range n))])
         view [:debug :a1]
         st {:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db
             :branches {view {:db db :read [:task-x]}} :view {:agents {}}}
         [st _] (#'seon.render.proc/pass-view st view)]
-    [(assoc-in st [:branches view :db] (d/db-with db [(turn n)])) view]))
+    [(assoc-in st [:branches view :db] (d/db-with db (turn n))) view]))
 
 (deftest a-new-turn-costs-one-turns-messages
   ;; task seon.context/a-turn-records-what-it-sent (C): a pass of the debug page after one new turn
@@ -253,10 +254,12 @@
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     [{:db/id "run" :seon.run/id "t/x#1"}]
                     (into [] (mapcat (fn [i] (concat (ev (str "e" i) "a1" {:call-id (str "c" i) :call 0}) (ev (str "s" i) "screen" {})))) (range n))
-                    (vec (for [i (range n)]
-                           {:seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model
-                            :seon.turn/sent (conj (mapv #(vector :eval (str "e" %)) (range i)) [:eval (str "s" i)])
-                            :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}))])
+                    (vec (mapcat (fn [i]
+                                   [{:db/id (str "turn" i) :seon.turn/id (str "t/x#1/" i) :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n i :seon.turn/origin :model}
+                                    {:seon.model-call/id (str "t/x#1/" i) :seon.model-call/turn (str "turn" i)
+                                     :seon.model-call/sent (conj (mapv #(vector :eval (str "e" %)) (range i)) [:eval (str "s" i)])
+                                     :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
+                                 (range n)))])
         view [:debug :a1]]
     [{:rid 1 :pending {} :watch #{view} :waiting {} :kf-wanted #{} :views {} :main-db db :branches {view {:db db}} :view {:agents {}}} view]))
 

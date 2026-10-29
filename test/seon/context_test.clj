@@ -315,11 +315,12 @@
                defs)))
 
 (defn- turn-of
-  "A recorded model turn n of run demo/f#1 with basis b: one call and its answer."
+  "A recorded model turn n of run demo/f#1 with basis b: one call and its answer, and its model call
+  (the two maps of one transaction)."
   [b n]
-  {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model
-   :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1
-   :seon.turn/reply (str "reply " n) :seon.turn/calls [{:id (str "call-" n) :code (str "(+ " n " 1)") :evals (str (inc n))}]})
+  [{:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model
+    :seon.turn/reply (str "reply " n) :seon.turn/calls [{:id (str "call-" n) :code (str "(+ " n " 1)") :evals (str (inc n))}]}
+   {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
 
 (deftest the-prefix-stays-byte-identical-across-turns
   ;; task seon.context/a-stable-prefix-is-sent-once: a provider caches a byte-identical message
@@ -340,9 +341,9 @@
                                                                 :run "demo/f#1" :call-id (str "c" n) :call 0 :prose (str "Step " n ".")}}]))
             ;; as seon.turn goes: the turn recorded, its request made on the db that holds it, what it sent added
             request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed :agent "b/a1"}
-                                  _ (d/transact conn [(turn-of b n)])
+                                  _ (d/transact conn (turn-of b n))
                                   {:keys [messages sent]} (context/render @conn b)]
-                              (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
+                              (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])
                               (is (= messages (into [] (mapcat second) (context/parts-of @conn sent))) (str "turn " n " reads back as it was sent"))
                               (call! n)
                               messages))
@@ -379,9 +380,10 @@
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/g``` exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}
-                        {:seon.turn/id "demo/f#1/0" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model
-                         :seon.turn/basis {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 4 :origin :model
-                                           :observed {:results {'demo-test/f-test :fail} :reds [] :reasons []}}}])
+                        {:db/id "turn" :seon.turn/id "demo/f#1/0" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model}
+                        {:seon.model-call/id "demo/f#1/0" :seon.model-call/turn "turn"
+                         :seon.model-call/basis {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 4 :origin :model
+                                                 :observed {:results {'demo-test/f-test :fail} :reds [] :reasons []}}}])
       (let [db @conn
             a (pdb/eid db :seon.agent/key "b/a1")
             page (context/page db (ctx/build db a :b))
@@ -532,13 +534,13 @@
     (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
 
 (defn- read-back
-  "What turn entity e on db sent, read back from its records (the refs it recorded, each by its own
+  "What model call entity e on db sent, read back from its records (the refs it recorded, each by its own
   render: seon.context/parts-of), as one vector of messages."
-  [db e] (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
+  [db e] (into [] (mapcat second) (context/parts-of db (:seon.model-call/sent (d/pull db [:seon.model-call/sent] e)))))
 
 (defn- sent-turns
   "A run of two model turns as seon.turn records them (owner's ruling 2026-10-24: each turn
-  records what it sent as refs, :seon.turn/sent), with the task's plan changed after turn 0 and
+  records what it sent as refs, :seon.model-call/sent), with the task's plan changed after turn 0 and
   again after turn 1. Answers [db [r0 r1] [e0 e1]]: the requests' messages as sent, and the turns."
   [conn]
   (wiki! conn)
@@ -552,12 +554,13 @@
         turn! (fn [n more]
                 (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
                          :origin :model :observed observed :agent "b/a1"}
-                      _ (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
-                                                  :seon.turn/origin :model :seon.turn/basis b :seon.turn/forms 1
-                                                  :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}
-                                                 more)])
+                      _ (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
+                                                  :seon.turn/origin :model}
+                                                 more)
+                                          {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
+                                           :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
                       {:keys [messages sent]} (context/render @conn b)]
-                  (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
+                  (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])
                   messages))
         plan! (fn [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))
         r0 (turn! 0 {})
@@ -568,7 +571,7 @@
         ;; and the system prompt changes: a turn's system prompt is its section as of the turn's t
         _ (d/transact conn [{:db/id (seon.docs/page-top @conn context/system-page) :seon.section/text "Changed after the turns."}])
         db @conn
-        e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db id))]
+        e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.model-call/id ?id]] db id))]
     [db [r0 r1] [(e-of "demo/f#1/0") (e-of "demo/f#1/1")]]))
 
 (deftest a-sessions-next-run-reads-its-earlier-runs
@@ -615,9 +618,10 @@
             basis (fn [task run] {:commit (d/commit-id @conn) :task task :run run :turn 0 :max-turns 9 :origin :model
                                   :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"})
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
-            turn! (fn [run b] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model
-                                                 :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
-                    (let [r (context/render @conn b)] (d/transact conn [{:seon.turn/id (str run "/0") :seon.turn/sent (:sent r)}]) r))
+            turn! (fn [run b] (d/transact conn [{:db/id "turn" :seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model}
+                                                {:seon.model-call/id (str run "/0") :seon.model-call/turn "turn"
+                                                 :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
+                    (let [r (context/render @conn b)] (d/transact conn [{:seon.model-call/id (str run "/0") :seon.model-call/sent (:sent r)}]) r))
             _ (run! "demo/d#1" "demo/d")
             _ (ev! "e0" "a1" "demo/d#1")
             b0 (basis "demo/d" "demo/d#1")
@@ -657,12 +661,13 @@
                       out
                       ;; as a turn goes: its request, then its call's eval
                       (do (let [b (basis n)
-                                _ (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
-                                                     :seon.turn/origin :model :seon.turn/basis b
-                                                     :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1}])
+                                _ (d/transact conn [{:db/id "turn" :seon.turn/id (str "demo/g#1/" n) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
+                                                     :seon.turn/origin :model}
+                                    {:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b
+                                     :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
                                 warm (context/render @conn b {:printed printed})
                                 cold (context/render @conn b)]
-                            (d/transact conn [{:seon.turn/id (str "demo/g#1/" n) :seon.turn/sent (:sent warm)}])
+                            (d/transact conn [{:seon.model-call/id (str "demo/g#1/" n) :seon.model-call/sent (:sent warm)}])
                             (ev! (str "e" n) "a1" (if (odd? n) rows (vec (range (* 10 (inc n))))) {:call-id (str "c" n) :call 0 :prose (str "Step " n ".")})
                             (recur (inc n) (:printed warm) (conj out [n warm cold]))))))
             db @conn]
@@ -674,8 +679,8 @@
             (is (pos? (:page split)) "the page's")
             (is (= (pos? n) (pos? (:conversation split))) "and the conversation's, once there is one"))
           (is (= (:sent cold) (:sent warm)))
-          (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.turn/id ?id]] db (str "demo/g#1/" n))]
-            (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.turn/sent (d/pull db [:seon.turn/sent] e)))))
+          (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.model-call/id ?id]] db (str "demo/g#1/" n))]
+            (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.model-call/sent (d/pull db [:seon.model-call/sent] e)))))
                 (str "turn " n ": its read-back is the bytes it sent"))))
         (is (= 5 (count turns)))))))
 
@@ -687,7 +692,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (let [[db [r0 r1] [e0 e1]] (sent-turns conn)
-            sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))]
+            sent #(:seon.model-call/sent (d/pull db [:seon.model-call/sent] %))]
         (is (= [:section :page] (mapv first (sent e0))) "turn 0: the system prompt, the page whole")
         (is (pos-int? (second (first (sent e0)))) "the system prompt's own section, by entity")
         (is (= [:section :page :eval :page] (mapv first (sent e1))) "turn 1: turn 0's page, its call's eval, then what changed of the page")
@@ -704,7 +709,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (let [[db [_ r1] [e0 e1]] (sent-turns conn)
-            sent #(:seon.turn/sent (d/pull db [:seon.turn/sent] %))
+            sent #(:seon.model-call/sent (d/pull db [:seon.model-call/sent] %))
             bytes #(count (seon.edn/encode (sent %)))]
         (is (= (count (sent e1)) (- (count r1) (count (filter #(= "tool" (:role %)) r1)))) "one ref a record: a model eval's call and answer are one record")
         (is (< (bytes e1) (* 60 (count (sent e1)))) (str "no text in the record: " (bytes e1) " bytes for " (count (sent e1)) " refs"))))))
@@ -727,10 +732,11 @@
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
             request (fn [n more] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
                                           :origin :model :observed observed :agent "b/a1"}]
-                                   (d/transact conn [(merge {:seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model
-                                                             :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 1 :seon.turn/ms 1} more)])
+                                   (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model} more)
+                                                     {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
+                                                      :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
                                    (let [{:keys [messages sent]} (context/render @conn b)]
-                                     (d/transact conn [{:seon.turn/id (str "demo/f#1/" n) :seon.turn/sent sent}])
+                                     (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])
                                      [b messages])))
             [b0 r0] (request 0 {:seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]})
             _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :content "I call f." :reasoning "why"})

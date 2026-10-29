@@ -10,11 +10,11 @@
 (defn- main [] (pdb/head (:store-conn @agent/state) (pdb/main-branch (:cfg @agent/state))))
 
 (deftest the-stall-ended
-  ;; the stalled agent spoke or ended: main holds no :seon.agent/stall on the agent of its run
+  ;; the stalled agent spoke or ended: main holds no :seon.process/stall on a process of the agent of its run
   (let [{:keys [run agent]} (:stall (cause))
         a (:seon.run/agent (d/entity (main) [:seon.run/id run]))]
     (is (some? a) (str "main holds run " run " and its agent " agent))
-    (is (nil? (:seon.agent/stall a)) (str "agent " agent " is still stalled: " (pr-str (:seon.agent/stall a))))))
+    (is (nil? (some :seon.process/stall (:seon.process/_agent a))) (str "agent " agent " is still stalled: " (pr-str (mapv :seon.process/stall (:seon.process/_agent a)))))))
 
 (deftest its-cause-is-recorded
   ;; what the stall was, with the evidence captured while it was stuck (sample, lsof, ps)
