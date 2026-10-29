@@ -696,6 +696,29 @@
   (loop [from 0 acc []]
     (if-let [i (clojure.string/index-of text s from)] (recur (+ i (max 1 (count s))) (conj acc i)) acc)))
 
+(defn- differs
+  "Where old text stops matching src from 1-based line c, as an edit reads it: old's first line ends that
+  line (it may start mid-line), its middle lines are whole lines, its last begins its line.
+  {:line :old :source}, the first that does not, with :indent [old's source's] leading spaces when they
+  differ only by those; nil when every line holds. What an edit's :not-found names, so the writer
+  sees the one line and how it differs, never the whole source again (md-scan #23 printed its lines
+  with visible whitespace for ten evals). See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat [:vector :string] pos-int? [:vector :string]] [:maybe :map]]}
+  [src-lines c old-lines]
+  (let [n (count old-lines)
+        lead (fn [s] (count (take-while #{\space} s)))]
+    (some (fn [i]
+            (let [o (nth old-lines i) s (get src-lines (+ c -1 i))
+                  ok? (and s (cond (= 1 n) (clojure.string/includes? s o)
+                                   (zero? i) (clojure.string/ends-with? s o)
+                                   (= i (dec n)) (clojure.string/starts-with? s o)
+                                   :else (= s o)))]
+              (when-not ok?
+                (cond-> {:line (+ c i) :old o :source s}
+                  (and s (= (clojure.string/trim o) (clojure.string/trim s)) (not= (lead o) (lead s)))
+                  (assoc :indent [(lead o) (lead s)])))))
+          (range n))))
+
 (defn edit!
   "Change the definition var sym names by replacing old, exact text that occurs once in its
   recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
@@ -719,9 +742,17 @@
     (cond
       ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
       (nil? src) (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil))
-      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))]
-                    (refuse :not-found "the old text is not in its source exactly (whitespace counts); (source f) shows it as recorded"
-                            (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))))
+      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
+                        cands (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))
+                        ;; at each line that holds its first line, the one line where old stops matching, and how
+                        diffs (vec (keep (fn [[i _]] (differs (clojure.string/split-lines src) i (clojure.string/split-lines old))) cands))
+                        d (first diffs)]
+                    (cond-> (refuse :not-found (str "the old text is not in its source exactly (whitespace counts)"
+                                                    (if d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
+                                                               (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
+                                                        "; (source f) shows it as recorded"))
+                                    cands)
+                      (seq diffs) (assoc :seon.repl/differs diffs)))
       (next at) (refuse :ambiguous (str "the old text occurs " (count at) " times: give more of it, so it is one")
                         (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at))
       ;; new must leave the definition as balanced as old did: each delimiter it opens or closes more than old
