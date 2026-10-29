@@ -44,6 +44,15 @@
     (when (and line column)
       (subs code (+ (starts (dec line)) (dec column)) end))))
 
+(defn- error-kept
+  "The exception *e keeps after an eval threw e: a new one holding the error as data (agent/error-map),
+  with the original's message and no cause or frames, so *e never pins what the throw captured
+  (AGENTS 4: an error keeps data; docs/machine.md#roots-heap). ex-message,
+  ex-data and my.agent/pst read it as they read any exception."
+  {:malli/schema [:=> [:cat :seon.host/throwable] :seon.host/throwable]}
+  [e]
+  (ex-info (or (ex-message e) (str (type e))) (agent/error-map e)))
+
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
   clojure.repl/source shows what this process runs, a REPL-typed defn included."
@@ -132,7 +141,7 @@
                                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
                                                :repl/src src :top (or top k)}
                                         lead (assoc :lead lead))]
-                           (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
+                           (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
                            (when (= tag :ret) (keep-source! v (:repl/src common)))
                            (if (= tag :ret)
                              (do (reply (merge common {:repl/value v :tag :ret}))

@@ -147,4 +147,4 @@
  {:seon.task/name "an-agents-view-keeps-handles-not-values"
   :seon.task/plan "Measured 2026-10-29 (heap census): root's view of an agent keeps its last :seon.config.root/view-window evals (seon.root/set-agent, :evals-add) with their result values: 20 MB for one agent's probe evals; and root's *e reached 78 MB. AGENTS section 4: a kept value is a reference. Correct: the view keeps each eval's handle and its printed head (what a render shows), never its value; *e in root keeps the error's data, never a Throwable. Proof: root's view after evals returning a 10 MB value holds bytes independent of the value's size (a cost proof over value size)."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{seon.procs-test/root-view-of-an-agents-evals-holds-handles-not-values}}]
