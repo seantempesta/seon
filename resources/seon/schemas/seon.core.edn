@@ -72,9 +72,6 @@
  :seon.eval/repairs [:vector [:map [:near [:map [:line pos-int?] [:column pos-int?] [:text :string]]] [:dropped {:optional true} :string] [:inserted {:optional true} :string]]]
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
                       [:handle :qualified-symbol] [:value {:optional true} :any]
-                      ;; the model's earlier eval of the same code that answered the same value, in place of
-                      ;; :value: its answer is already in the conversation (seon.repl/same-as)
-                      [:same-as {:optional true} :qualified-symbol]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
                       [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)

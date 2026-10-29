@@ -30,29 +30,6 @@
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
 
-(deftest a-repeated-eval-with-the-same-answer-says-where-it-is
-  ;; 2026-10-29: a run sent one form 22 times and read its 5k-token answer whole each time; a REPL's
-  ;; user sees the same value scroll past. The model's repeat with the same value answers the eval
-  ;; that has it (:same-as) in place of the value; its own handle still holds it
-  (let [old @agent/state
-        ev #(repl/eval-string % {:origin :model})]
-    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (let [a (ev "(vec (range 3))") b (ev "(vec (range 3))") c (ev "(+ 1 1)") d (ev "(vec (range 3))")]
-           (is (= [0 1 2] (:value a)) "the first answers its value")
-           (is (= (:handle a) (:same-as b)) "the repeat names the eval that answered it")
-           (is (not (contains? b :value)) "and leaves the value out")
-           (is (= [0 1 2] (:value @(resolve (:handle b)))) "its handle still holds the value")
-           (is (str/includes? (:text b) (str ":same-as " (:handle a))) "what the model reads says so")
-           (is (= 2 (:value c)) "another form answers its own")
-           (is (= (:handle a) (:same-as d)) "a later repeat still names the first"))
-         (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (let [_ (ev "(rand-int 1000000000)") b (ev "(rand-int 1000000000)")]
-           (is (contains? b :value) "the same form answering another value answers it"))
-         (reset! agent/state {:n 0 :ns (the-ns 'user)})
-         (let [_ (repl/eval-string "(vec (range 3))" {:origin :ui}) b (repl/eval-string "(vec (range 3))" {:origin :ui})]
-           (is (contains? b :value) "a person's repeat answers the value: only the model's conversation holds it"))
-         (finally (reset! agent/state old)))))
-
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
   ;; owner, 2026-10-29: "don't some repls output a warning ... you are overwriting symbols in this
   ;; namespace?": an agent in-ns'd to seon.render.ui, whose own source shadows the REPL's, and read
