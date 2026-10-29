@@ -1381,3 +1381,12 @@
                        ["main/task-x" [:chat :main/task-x]] ["main/task-x/debug" :main/task-x] ["root" :root] ["root/debug" [:debug :root]]]]
     (is (= view (#'seon.web/view-of path)) path)
     (is (= path (java.net.URLDecoder/decode (ui/view-param view) "UTF-8")) path)))
+
+(deftest an-agents-head-names-a-pid-only-while-its-process-runs
+  ;; the browser check of 2026-10-29: a page showed an ended process's pid beside "idle"; the head names
+  ;; the current process's pid (seon.task/newest-process) only while that process has not ended
+  (let [head (fn [ps] (pr-str (ui/agent {} {:seon.agent/id :a1 :seon.agent/status :idle :processes ps})))]
+    (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0}}) "pid 7") "a running process's pid")
+    (is (not (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}}) "pid 7")) "an ended one's is not shown")
+    (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}
+                              2 {:seon.process/pid 9 :seon.process/forked-ms 3.0}}) "pid 9") "the newest process's")))
