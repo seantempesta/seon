@@ -332,6 +332,18 @@
   [st main]
   (#'p/advance-main (dissoc st :main-db) (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])))
 
+(deftest a-dropped-page-lets-go-of-its-branchs-db
+  ;; docs/machine.md#roots-heap: a branch's db read for a page is kept while a page shows it. The
+  ;; read was never dropped, so every branch ever opened kept a version of the index for root's life.
+  (let [[main branch] (paged-dbs)
+        st (proc-state main branch)]
+    (is (some? (get-in st [:branch-reads :task-demo-f :db])) "the read is held while views show the branch")
+    (let [one (#'p/drop-view st [:chat :a3])]
+      (is (some? (get-in one [:branch-reads :task-demo-f :db])) "and while another view of it remains"))
+    (let [none (#'p/drop-view (#'p/drop-view st [:chat :a3]) :a3)]
+      (is (nil? (get-in none [:branch-reads :task-demo-f])) "gone with its last view")
+      (is (= [:main-db] (map (comp first first) (ts/stale-dbs none Long/MAX_VALUE))) "so no db is held but main's"))))
+
 (deftest root-context-is-its-page-printed-at-the-budget
   ;; what root reads is its page, the render of its ctx (each component's hiccup by its id), printed once
   ;; by the one printer at :seon.config.render/root-context-budget; the cut is the printer's alone

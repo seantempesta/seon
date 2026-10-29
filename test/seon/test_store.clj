@@ -138,6 +138,27 @@
         r (d/transact conn {:tx-data tx})]
     {:t (:max-tx (:db-after r)) :prev prev :ops [] :commit (d/commit-id (:db-after r)) :ns 0}))
 
+(defn stale-dbs
+  "The db values a state holds that are older than t, as [path max-tx]: the guard of
+  docs/machine.md#roots-heap (a kept db value is a reference). The state is walked as data (maps,
+  sequences, sets, volatiles; an atom is a conn or a reaction and is not entered), and a db is
+  never entered. A proc's db of its branch's current t is free to hold (its conn holds it
+  anyway); an older one pins its own version of the index, and is kept as {:commit :t} instead
+  (seon.db/at-commit makes it again). A db held inside a closure is not seen."
+  {:malli/schema [:=> [:cat :any :int] [:vector [:tuple [:vector :any] :int]]]}
+  [state t]
+  (let [out (volatile! [])
+        walk (fn walk [path depth x]
+               (cond
+                 (or (instance? datahike.db.DB x) (instance? datahike.db.AsOfDB x))
+                 (when (< (:max-tx x) t) (vswap! out conj [path (:max-tx x)]))
+                 (> depth 12) nil
+                 (volatile? x) (walk path (inc depth) @x)
+                 (map? x) (doseq [[k v] x] (walk (conj path k) (inc depth) v))
+                 (coll? x) (doseq [[i v] (map-indexed vector x)] (walk (conj path i) (inc depth) v))))]
+    (walk [] 0 state)
+    @out))
+
 (def ^:private starter
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however
