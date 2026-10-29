@@ -2,6 +2,24 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-10-29 rulings
+The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
+
+### Seon runs on an ordinary MacBook (owner, 2026-10-29)
+"I want this to run on an average users macbook for reference. Not just servers or people like me with 128GB of ram." Ten working agents fit an 8 GB-class machine: root idle at or under 650 MB, the fork server under 300 MB, ten agents under 3 GB. Stated in: docs/plan.md (beside step 1), docs/machine.md#ten-agents-at-once.
+
+### The image keeps each frame's file:line and drops the expanded source (owner, 2026-10-29)
+Chose V2b of three measured builds over `--opt` (-419 MB, but library stack lines lose their line numbers) and dropping the bodies alone (-116 MB): about -210 MB per root, every eval error unchanged. Stated in: task seon.main/the-image-keeps-no-inspector-information.
+
+### The embedding model is a Flow proc that wakes on its work and spins down when idle (owner, 2026-10-29)
+"It should be converted into a flow process that has the channel for waking it up and working while the work is there and idle or spun down when it's not if it's cheap. Look into this don't guess." Measured: a forked process cannot load the model (Apple's runtime aborts it), so the proc runs an exec'd helper, about 0.45 s to load, ended when its queue empties. Stated in: task seon.vector/the-model-is-loaded-outside-root, docs/failure-points.md#physics-who-may-run-threads, docs/vector.md#the-model.
+
+### Config at every level, no env var switches (owner, 2026-10-29)
+"formalize config options so there is no env var magic happening. I want the config process to be documented and a standard system for configuring at any level -- init, added to an agent's entity to override on a per agent level, task wherever it needs to go"; "Everything forks from root right? So maybe it is helpful to add to the root entity?". Order: defaults < profile < --config < --set < main's root entity < model < provider < task < agent; each key's schema names the levels that may set it; an agent level beside the task's; bin/ passes --set, not env vars. Stated in: docs/plan.md (beside step 1); docs/config.md when built.
+
+### Old worktrees' run data is not kept (owner, 2026-10-29)
+"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
+
 ## 2026-10-28 rulings
 The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
 
