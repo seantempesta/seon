@@ -15,8 +15,8 @@
 # Each run writes under a directory of its own, target/prove/<run-id> (the run id: a timestamp and
 # the process's pid), or the DIR --out names; the run says where on its first line ("prove: run ID,
 # logs in DIR"), so two runs on one checkout never overwrite each other's shard files and logs, and
-# every reader takes the path from the run. The newest :seon.config.proofs/runs-kept runs are kept
-# (test-runner/prune-runs!). Each test's last measured ms is in its cached verdicts (seon.fx/last-ms).
+# every reader takes the path from the run. A green run's directory is removed with it (red, killed and --merge
+# runs keep theirs; one named by --out is its caller's). Each test's last measured ms is in its cached verdicts (seon.fx/last-ms).
 #
 # bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
 # runs every test and step with no green at its digest, the ones that
@@ -57,8 +57,9 @@ MERGE=0
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
 (( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }
+OWN=0
 if [[ -z $OUT ]]; then
-  OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$
+  OWN=1; OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$
 fi
 mkdir -p "$OUT"
 echo "prove: run ${OUT:t}, logs in $OUT"
@@ -76,5 +77,7 @@ if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
 exit $st
 ) 2>&1 | tee "$OUT/prove.log"
 st=${pipestatus[1]}
-(( MERGE )) || exit $st
+# a green run's logs are read by no one: the directory it made is reclaimed with the run (a red or
+# killed run's stays, its evidence; a --merge run's too, the merge log names it; one --out named is its caller's)
+if (( ! MERGE )); then (( st == 0 && OWN )) && rm -rf "$OUT"; exit $st; fi
 merge_verdict "$OUT" $st
