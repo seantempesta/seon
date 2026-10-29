@@ -962,6 +962,37 @@
     (is (str/includes? (:text git) ":exit 128") (str "git finds no repository: " (pr-str git)))
     (is (str/includes? (:text git) "not a git repository") (pr-str git))))
 
+(deftest an-oom-carries-its-heap
+  ;; docs/machine.md#how-to-read-an-out-of-memory-error: an agent past its heap bound (:seon.config.agent/heap-extra-bytes)
+  ;; gets OutOfMemoryError, and its error map keeps the heap by type (Jolt's :jolt/heap) as data
+  (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
+                              {:sets [":seon.config.agent/heap-extra-bytes=268435456"]})
+        heap (get-in oom [:ex :jolt/heap])]
+    (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
+    (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
+    (is (<= (+ (:static heap) (:dynamic heap)) (:live heap) (* 1.01 (+ (:static heap) (:dynamic heap)))) "static and dynamic make up the live heap")
+    (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
+    (is (str/includes? (:text after) "3") "the agent lives")))
+
+(deftest an-agent-slurps-a-child-within-its-heap
+  ;; the coordinator's reproduction, 2026-10-29: in a forked agent a ProcessBuilder child of ~3 s whose stdout and
+  ;; stderr are slurped by two futures took ~6.3 s, the agent's RSS jumped 78 MB -> 1.28 GB after the child exited
+  ;; and the next commit ran out of memory. A sampler future reads the all-asleep detector's state (locks.ss
+  ;; jolt-asleep-ids, jolt-asleep-told) and the heap while the child runs.
+  ;; docs/machine.md#how-to-read-an-out-of-memory-error
+  (let [sample (str "(mapv (fn [s] (jolt.scheme/eval-string s)) [\"(hashtable-size jolt-asleep-ids)\" \"(hashtable-size jolt-asleep-told)\" \"(quotient (bytes-allocated) 1048576)\" \"(quotient (current-memory-bytes) 1048576)\"])")
+        code (str "(let [t0 (System/nanoTime) ms (fn [] (quot (- (System/nanoTime) t0) 1000000)) log (atom []) "
+                  "stop (atom false) "
+                  "smp (future nil) "
+                  "p (.start (ProcessBuilder. [\"sleep\" \"3\"]))] "
+                  "(with-open [so (.getInputStream p) se (.getErrorStream p)] "
+                  "(let [o (future (slurp so)) e (future (slurp se)) x (.waitFor p) xo @o xe @e m (ms)] (reset! stop true) @smp {:exit x :ms m :after " sample " :hist (update (jolt.host/heap-histogram 6) :top (fn [t] (mapv (fn [r] (select-keys r [:type :count :bytes])) t)))})))")
+        rs (in-agent [code "(+ 1 2)" "(+ 1 2)"])]
+    (is (every? #(nil? (:ex %)) rs) (pr-str (mapv #(select-keys % [:ex]) rs)))
+    (is (= 0 (:exit (:value (first rs)))) (pr-str (first rs)))
+    ;; the reproduction's finding: ~1 GB of garbage during the stall, and live after a collection stays small
+    (is (< (get-in (first rs) [:value :hist :dynamic]) 268435456) (pr-str (first rs)))))
+
 (deftest each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
