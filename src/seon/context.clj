@@ -650,11 +650,14 @@
 
 (defn included
   "What agent key k's context includes beside task id now on db: `selected` over the work's focus, its
-  prior the agent's :seon.agent/included; nil when the work has no vector yet."
+  prior the agent's :seon.agent/included, never a section of the system prompt (`system-page`, the
+  request's first message); nil when the work has no vector yet."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] [:maybe [:vector [:tuple :any number?]]]]}
   [db task k]
   (let [te (pdb/eid db :seon.task/id task) a (pdb/eid db :seon.agent/key k)]
-    (when (and te a) (selected db te a (or (:seon.agent/included (d/entity db a)) [])))))
+    ;; the system prompt's own sections are the request's first message already: never again as related
+    (when (and te a) (into [] (remove (fn [[u]] (and (string? u) (str/starts-with? u (str system-page "#")))))
+                           (selected db te a (or (:seon.agent/included (d/entity db a)) []))))))
 
 (defn shown
   "Units [name chance] (`selected`'s) as `related`'s map, every one whole, for related-view."
