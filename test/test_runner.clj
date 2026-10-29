@@ -164,14 +164,19 @@
   of which the program db holds no test (a namespace with no deftest, or a program db missing
   it: never an empty selection that says OK)."
   [root names store]
-  (let [nss (set (if (seq names) (map symbol names) (test-namespaces root)))
+  (let [vars (set (keep #(when (str/includes? % "/") (symbol %)) names))
+        nss (set (if (seq names) (map #(symbol (first (str/split % #"/"))) names) (test-namespaces root)))
         tree (fx/tree-id root)
         db (program-db root store tree)
         in (fx/inputs root config/config (config/checkout) tree)
         g (reach-graph-of db (:data-refs in) store)
-        idx (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))]
+        all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
+        ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
+        whole (set (remove (set (map (comp symbol namespace) vars)) nss))
+        idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
-     :no-test (vec (sort (remove (set (map (comp symbol namespace key) idx)) nss)))
+     :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
+                                        (remove all vars))))
      :digests (update-vals idx :digest)
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
@@ -179,11 +184,12 @@
 (defn- refused-names
   "Why the arguments after --plan WHAT OUT [--all] cannot select tests, or nil: a flag this runner
   does not know (bin/test --reach ran nothing and passed: reach is the default since bin/prove),
-  or a name that is no test namespace of test/."
+  or a name that is no test namespace of test/ (NS, or NS/TEST: its namespace is checked here, the
+  deftest by tests-of, which answers it in :no-test)."
   [names]
   (let [flags (filter #(str/starts-with? % "--") names)
         nss (set (map str (test-namespaces (source-tree))))
-        unknown (remove #(or (str/starts-with? % "--") (nss %)) names)]
+        unknown (remove #(or (str/starts-with? % "--") (nss (first (str/split % #"/")))) names)]
     (cond (seq flags) (str "no flag " (str/join " " flags) " (bin/test [--all] [NS ...]: --all, the one flag, comes first)")
           (seq unknown) (str "no test namespace " (str/join " " unknown) " in test/"))))
 
@@ -363,7 +369,7 @@
         no-test (when tests? (seq no-test))
         _ (when no-test
             (println (str "prove: the program db holds no test of " (str/join " " no-test)
-                          ": a namespace with no deftest, or a program db that misses it (a store made before"
+                          ": a namespace with no deftest, a name (NS/TEST) that is no deftest, or a program db that misses it (a store made before"
                           " seon.proofs/a-failed-import-leaves-no-branch: move "
                           (config/value :seon.config.proofs/program-store) "-* aside, and the tree imports)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs))

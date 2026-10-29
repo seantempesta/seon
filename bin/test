@@ -1,6 +1,7 @@
 #!/bin/zsh
-# bin/test [--all] [NS ...] — (--all, the one flag, first; a flag it does not know, or a name that is no
-# test namespace, is TEST FAILED) test/'s deftests (every *_test namespace, or the ones named) with
+# bin/test [--all] [NS|NS/TEST ...] — (--all, the one flag, first; a flag it does not know, or a name that is no
+# test namespace or deftest, is TEST FAILED) test/'s deftests (every *_test namespace, the ones named,
+# or one deftest by its qualified name, as bin/prove prints the ones it leaves out) with
 # no green result at their reach digest, the rest reused from the results directory every
 # checkout shares (bin/prove's tests; seon.proofs/plan). --all runs every one, green or not (the
 # full run). The selected tests are dealt, a namespace at a time, into :seon.config.proofs/jobs
