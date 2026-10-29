@@ -8,7 +8,7 @@
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
-            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
+            [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.repl :as repl] [seon.ctx] [seon.turn] [test-runner :as runner] [seon.context-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
 (def ^:private await-file
@@ -670,7 +670,7 @@
                                                 " (select-keys (first (filter #(= " (pr-str task) " (:task %)) (get-in (my.root/problems sys) [:classes :failed :rows]))) [:task :reason :counterexample :open?])])")}]))]
     (is (= "the premise is refuted" (:value f)) (pr-str f))
     ;; and the run says so itself: a failed run is never reported :green
-    (is (= [:failed "the premise is refuted"] ((juxt :outcome :reason) done)) (pr-str done))
+    (is (and (str/includes? (:line done) ":outcome :failed") (str/includes? (:line done) "the premise is refuted")) (pr-str done))
     (is (= [:failed {:task (:task @names) :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}]
            (:value seen)))))
 
@@ -686,7 +686,7 @@
                                       :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
                                                  " (select-keys (get (seon.task/runs @(:conn sys)) " (pr-str run) ") [:seon.run/outcome :seon.run/reason]))")}]))
         run (:value seen)]
-    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
+    (is (str/includes? (:line done) ":outcome :red") (str "the answer is the verdict line: " (pr-str done)))
     (is (= :red (:seon.run/outcome run)) (pr-str run))
     (is (str/includes? (str (:seon.run/reason run)) "proof-unknown demo-test/t") "the end names why it is red")
     (is (not (str/includes? (str (:seon.run/reason run)) "no end")) "never read as an end nobody wrote")))
@@ -711,7 +711,7 @@
                                  "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
                   {:dirs ["src" "test"]})
         [run state] (:value seen)]
-    (is (= :red (:outcome done)) (str "the answer is the verdict: " (pr-str done)))
+    (is (str/includes? (:line done) ":outcome :red") (str "the answer is the verdict line: " (pr-str done)))
     (is (= :red (:seon.run/outcome run)) (pr-str run))
     (is (not (#{:done :merged} state)) (str "not merged: " state))
     (is (str/includes? (str (:seon.run/reason run)) (str main-test)) "its end names main's failing test")))
@@ -731,7 +731,7 @@
                                       {:own-root? true})
         [run state] (:value seen)]
     (is (str/includes? (:text t) ":value #'demo-test/t") (pr-str t))
-    (is (and (= :green (:outcome done)) (#{:done :merged} (:status done))) (str "the answer is the verdict: " (pr-str done)))
+    (is (and (str/includes? (:line done) ":outcome :green") (re-find #":status :(done|merged)" (:line done))) (str "the answer is the verdict line: " (pr-str done)))
     (is (= :green (:seon.run/outcome run)) (pr-str run))
     (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))))
 
@@ -1403,3 +1403,22 @@
                     [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
                      (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
     (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
+
+;; See docs/merging.md#main-moved-is-said-at-every-eval
+(deftest main-moved-is-said-at-every-eval
+  ;; the owner (root, 2026-10-28): "we are supposed to be telling the agent always at every eval reply
+  ;; what is different with main ... there are never any surprises": what main changed since the base,
+  ;; which of it the branch changed or calls, and what a merge of main would conflict on
+  (let [base (seon.program-test/record (ts/test-db) 'user "(ns app.md)" 'app.md "(defn f [x] x)" 'app.md "(defn g [x] (f x))" 'app.md "(defn h [x] x)")
+        branch (seon.program-test/record base 'app.md "(defn g [x] (inc (f x)))")
+        main (seon.program-test/record base 'app.md "(defn f [x] (* 2 x))" 'app.md "(defn h [x] (dec x))")
+        both (seon.program-test/record main 'app.md "(defn g [x] (dec (f x)))")]
+    (is (nil? (agent/main-line base branch base)) "main as the base: nothing to say")
+    (let [l (agent/main-line base branch main)]
+      (is (str/includes? l "2 names changed") l)
+      (is (str/includes? l "ones your changes call: [app.md/f]") l)
+      (is (not (str/includes? l "conflict")) l)
+      (is (str/includes? l "(my.branch/merge-main!)") "and the form that merges it, when the agent chooses"))
+    (let [l (agent/main-line base branch both)]
+      (is (str/includes? l "ones you changed too: [app.md/g]") l)
+      (is (str/includes? l "conflict on: [app.md/g]") l))))

@@ -104,6 +104,17 @@ Root's REPL (`seon_eval` as root, or `printf '{:op :eval :agent "root" :code "..
 
 Root's merges of worktree branches are git merges, batched by hand as above. Seon's own merges are merge tasks judged by the reconciler, one at a time: an octopus merge of several merge runs is built and off (`:seon.config.merge/max-running` 1, until one combined test run of all its members is proven). No queue on root merges main into each candidate, proves the merged result and batches the disjoint ones, and builds, tests and checks are not tasks on root (task ``seon.reconcile/a-check-step-is-a-task``).
 
+## Main moved is said at every eval
+
+Every eval answer an agent gets carries one line saying how main differs from its branch, or none when main's head is still its merge base (owner, 2026-10-28: "there are never any surprises"). ```seon.agent/main-line``` makes it from the merge base, the branch and main as the agent last heard it:
+- how many names main changed since the base (```seon.merge/readiness```, the three-way a merge of main runs, so it costs what changed on each side);
+- those of them the branch changed too;
+- those its changed functions call;
+- those a merge of main would conflict on;
+- and the form that merges main, `(my.branch/merge-main!)`.
+
+Each list is cut by the one printer. ```seon.repl/eval-string``` puts it on the answer as `:main`, live, never recorded: it is a function of the db at t. The agent merges main when it chooses; at `seon_done` the done answer (```seon.server/verdict-line```: one line, each red with its first failure, and the form that reads the whole verdict) names the same difference, so nothing in it is new. Proofs: `seon.agent-test/main-moved-is-said-at-every-eval`, `seon.server-test/the-done-answer-is-a-line-and-a-handle`.
+
 ## Verdicts are a cache
 
 A test's or a check step's verdict is derived data, a function of the code it reaches (its reach digest), so it is kept as an evictable cache by digest outside the store, and the store keeps only decisions (owner, 2026-10-28: "derived data may be cached with the understanding that it may be evicted at any time"; AGENTS §5). It replaced the result facts on the standing root's main (2026-10-27 to 2026-10-28: 250,796 datoms, 28% of main's history, and an agent's start heap +35%, the overnight audit's worst finding), which in turn had replaced the uncapped `test-results/` directory (349,131 files, 1.3 GB, which nothing reads now; the owner's to remove).

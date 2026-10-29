@@ -149,6 +149,38 @@
   {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (let [m (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))] (swap! state assoc :main m) m))
 
+(defn main-line
+  "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
+  nothing of the program since base: how many names main changed (seon.merge/readiness, the
+  three-way a merge of main runs), those of them b changed too, those b's changed functions call,
+  and those a merge of main would conflict on, each list cut by the one printer; and the form that
+  merges main (docs/merging.md#main-moved-is-said-at-every-eval)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:maybe :string]]}
+  [base b main]
+  (let [{:keys [main-moved conflicts]} (pm/readiness base b main)
+        moved (into #{} (keep (fn [[kind x]] (when (#{:var :schema} kind) x))) main-moved)
+        changed (pm/changed-vars (pm/delta-changes base b #{}))
+        ours (filter moved changed)
+        reached (remove (set ours) (filter moved (d/q '[:find [?r ...] :in $ [?v ...] :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs ?r]] b (vec changed))))
+        names #(print/text (vec (sort-by str %)) (:part print/budgets))]
+    (when (or (seq moved) (seq conflicts))
+      (str "main moved since your base: " (count moved) " names changed"
+           (when (seq ours) (str "; ones you changed too: " (names ours)))
+           (when (seq reached) (str "; ones your changes call: " (names reached)))
+           (when (seq conflicts) (str "; a merge of main would conflict on: " (names (map second conflicts))))
+           ". Merge it when you choose: (my.branch/merge-main!)"))))
+
+(defn main-difference
+  "main-line for this agent now: its merge base, its branch and main as last heard (heard-main),
+  which every eval's answer carries (seon.repl/eval-string); nil with no base, or when main's head
+  is still the base. Computed at t, never stored."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (when-let [base (:base @state)]
+    (let [main (heard-main)]
+      (when-not (= (d/commit-id base) (d/commit-id main))
+        (main-line base (db) main)))))
+
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
   names them) that its branch does not hold yet, in main's order (by transaction, then id): each {:id :kind :from :to :body}.
