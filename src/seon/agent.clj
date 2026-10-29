@@ -301,6 +301,22 @@
   (when-let [m (first (filter #(= op (:op %)) q))]
     [m (into clojure.lang.PersistentQueue/EMPTY (remove #(identical? m %)) q)]))
 
+(declare error-map)
+
+(defn- answered-anyway!
+  "Handle root's request m taken in place inside a wait (handle!), answering it however that ends:
+  its replies, or, when the eval holding the wait is stopped (its tick or byte budget) or the handling
+  throws, root's answer to m carrying the error (seon.agent/error-map), sent before the throw goes on.
+  md-scan #26 hung: an eval's (my.agent/prove) was stopped by its byte budget while it ran root's
+  :tests inline, the request was never answered, and the next prove waited behind it for good. See
+  docs/failure-points.md (an eval stopped while it holds root's request)."
+  {:malli/schema [:=> [:cat :seon.wire/seon-msg] [:maybe [:vector :seon.wire/seon-msg]]]}
+  [m]
+  (try (handle! m)
+       (catch Throwable e
+         (send! {:op (:op m) :id (:id m) :result (error-map e)})
+         (throw e))))
+
 (defn- await-op!
   "Wait for {:op op :k k} from root; a delivery lands in the inbox (arrived!), a request of op
   in-place (e.g. :tests, whose service may need this agent to run them) is taken meanwhile, one
@@ -325,7 +341,7 @@
          (or (and in-place (= in-place (:op m))) (#{::say ::ran} (:op m)))
          ;; taken inside a wait for its own answer (prove!): the wait is the loop's already, so a :tests
          ;; read here reads its child inline (*waiting*), never handed to a fiber
-         (do (doseq [r (binding [*waiting* true] (handle! m))] (send! r)) (recur))
+         (do (doseq [r (binding [*waiting* true] (answered-anyway! m))] (send! r)) (recur))
          :else (do (swap! state update :pending conj m) (recur)))))))
 
 
