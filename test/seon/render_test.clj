@@ -228,7 +228,7 @@
   ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
   ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
   (let [forms (seon.program/live-forms (src-program))
-        doc (let [t (slurp "docs/render.md")] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
+        doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
         named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
         printer? #(not (str/starts-with? (str %) "seon.print"))
@@ -866,7 +866,7 @@
   (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
         html (h/html (r/html {} {:screen {:seon.render/html page} :n 1}))]
     (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
-    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render #'r/nested-html}))
+    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render @#'r/nested-html}))
                        "[:section [:h2 \"agents\"]")
         "a value's text names its hiccup as the data it is")))
 

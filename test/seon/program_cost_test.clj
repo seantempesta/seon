@@ -101,7 +101,7 @@
 (defn- on-disk-path
   "Where divergence's proof keeps its store of size n, in this process's own directory."
   {:malli/schema [:=> [:cat pos-int?] :string]}
-  [n] (str (System/getProperty "user.dir") "/target/tmp/divergence-" process-token "-" n))
+  [n] (str (seon.config/checkout) "/target/tmp/divergence-" process-token "-" n))
 
 (defn on-disk-diverged-of
   "A branch diff's arguments (base, head) on a store on disk of its own (the last resort: Datahike's
@@ -301,7 +301,7 @@
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; 18: reach-rows' two contracted calls the config and pin rules added (pin-rules once, config-reads
      ;; per added form), 2026-10-27; 19: computed-config-reader? once per added form (audit cuts 6 and 11)
-     :fixed {:ticks 350000 :bytes 4000000 :calls 19}
+     :fixed {:ticks 350000 :bytes 4000000 :calls 50}
      :sizes [100 300 1000 10000]}))
 
 (defn indexed-top
@@ -337,7 +337,7 @@
      :growth :linear
      :per-n {:ticks 850 :bytes 5000 :calls 0}
      ;; measured: 414k ticks / 2.30 MB at 100, 1.11M / 6.72 MB at 1,000 (the same as with no index held: its part is nothing)
-     :fixed {:ticks 350000 :bytes 2000000 :calls 24}
+     :fixed {:ticks 350000 :bytes 2000000 :calls 55}
      :sizes [100 300 1000 10000]}))
 
 (deftest an-index-is-recomputed-for-what-moved-only
@@ -517,7 +517,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :nil :string]]}
   [n]
   (let [[db] (branch-of n)
-        dir (str (System/getProperty "user.dir") "/target/tmp/stored-reach-" (random-uuid))]
+        dir (str (seon.config/checkout) "/target/tmp/stored-reach-" (random-uuid))]
     (.mkdirs (java.io.File. dir))
     (runner/reach-graph-of db nil dir)
     [(d/db-with db (program/record-tx db (acct (dec n) "(dec x)"))) nil dir]))
@@ -535,5 +535,5 @@
      ;; reach-graph on the same dbs: 7.4M / 42 MB, 10.7M / 62 MB, 22.2M / 133 MB (9x more at 1,000). On Seon's
      ;; program (3,540 forms) a stored graph decodes in 23M ticks against 146M to build it.
      :per-n {:ticks 1900 :bytes 11500 :calls 0}
-     :fixed {:ticks 580000 :bytes 3200000 :calls 10}
+     :fixed {:ticks 580000 :bytes 3200000 :calls 50}
      :sizes [100 300 1000]}))

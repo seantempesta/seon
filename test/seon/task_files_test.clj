@@ -160,7 +160,7 @@
   ;; changed (the same declarations loaded from one db twice, in order, fail: Conflicting upsert). A load
   ;; takes the lock the other loaders take, so a second waits for the first's write: here the lock is held
   ;; and a load started on another thread must be blocked on it, never past it
-  (let [checkout (.getCanonicalPath (java.io.File. "."))
+  (let [checkout (seon.config/checkout)
         path (ts/process-store checkout)
         main (str "load-lock-" (random-uuid))
         runs (str checkout "/target/runs/" main "-runs")

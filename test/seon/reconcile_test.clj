@@ -495,7 +495,7 @@
   production and as the test store is; a seeded store of its own per size cost 366 MB of allocation each, a
   gigabyte under the quadratic schema transaction), and its nodes are at addresses, which is why these proofs
   are not on the in-memory test store. Removed when the process ends."
-  (delay (let [path (str (System/getProperty "user.dir") "/target/tmp/observed-" (random-uuid))]
+  (delay (let [path (str (seon.config/checkout) "/target/tmp/observed-" (random-uuid))]
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
            path)))
 

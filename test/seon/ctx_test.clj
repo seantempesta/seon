@@ -378,7 +378,7 @@
      :n "recorded errors in the store, half of them last raised in the agent's task"
      :work "the agent's pull as ever, and the task's errors join: an index seek of the task's id on :seon.error/last-task, the newest :seon.config.ctx/errors members pulled, whatever the history holds"
      :growth :constant
-     :fixed {:calls 298 :bytes 2550000}
+     :fixed {:calls 334 :bytes 2550000}
      :sizes [10 100 1000]}))
 
 (deftest the-patch-costs-the-change-not-the-session
@@ -571,7 +571,7 @@
     {:of 'seon.ctx/patch :input 'seon.ctx-test/new-caller
      :n "evals in the session's record"
      :work "the form's :form/refs datom touches the var's :callers watch: its callers read and ordered by when each was written (a form's id is its content's, not in time order), the newest five kept, a new one pulled whole, the path copied up"
-     :growth :constant :fixed {:calls 22 :bytes 135000} :sizes [100 300 1000 3000]})
+     :growth :constant :fixed {:calls 24 :bytes 135000} :sizes [100 300 1000 3000]})
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/plan-edited
      :n "evals in the session's record"
@@ -590,7 +590,7 @@
      :work "the new form's :form/refs datom touches the var's :callers watch: every form naming the var read from :avet and sorted by its ref's transaction, the newest five kept, the new one pulled whole, the path copied up"
      :growth :linear
      :per-n {:bytes 8800 :ticks 2600}
-     :fixed {:calls 25 :bytes 500000 :ticks 100000}
+     :fixed {:calls 27 :bytes 500000 :ticks 100000}
      :sizes [100 300 1000 3000]}))
 
 (defn one-eval-diff
@@ -945,7 +945,7 @@
                 "ref-of for its value, and edits' own return); measured 5 calls, 2,709 ticks and 23,280 bytes "
                 "at 100 and at 1,000 evals")
      :growth :constant
-     :fixed {:calls 5}
+     :fixed {:calls 6}
      :sizes [100 300 1000 3000]}))
 
 (defn swap-input
@@ -983,7 +983,7 @@
                 "rebuilt where it is held), the record installed, and one-swap itself; measured 39 calls, 117k-122k ticks and "
                 "400-409 KB at 100, 300, 1,000 and 3,000 evals")
      :growth :constant
-     :fixed {:calls 39}
+     :fixed {:calls 40}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (reset! seon.agent/state nil))

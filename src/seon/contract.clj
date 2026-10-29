@@ -383,6 +383,13 @@
   [nss]
   (vec (sort-by str (for [n nss v (vals (ns-interns n)) :when (and (function-var? v) (nil? (contract v)))] (symbol v)))))
 
+(def boot-nss
+  "The namespaces that carry contracts in metadata and are armed once their callers exist, at a
+  process's start: root's boot, and each test shard before its tests (a cost proof's contracted
+  calls count these too, so one count in every mode: bin/test, an agent's test child, the
+  binary). See docs/cost.md#counting-calls."
+  '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+
 (defn instrument!
   "Arm every contracted var of namespaces nss (symbols). Answers {:armed n :unchanged n
   :uncontracted [sym] :invalid [error] :ms}."

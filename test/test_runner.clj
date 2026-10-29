@@ -284,6 +284,8 @@
   (let [{:keys [tests digests tree mg]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
+    ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
+    (contract/instrument! contract/boot-nss)
     (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           reports (volatile! [])
           ran (proofs/run-tests! tests digests
@@ -307,7 +309,7 @@
           ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
           ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
           ;; tree-id per shard, not two)
-          same? (= tree (fx/tree-id (System/getProperty "user.dir")))
+          same? (= tree (fx/tree-id (seon.config/checkout)))
           ;; the shard's verdicts, their failures and each test's function costs, cached
           unstored (when same?
                      (let [cost-of (proofs/costs {:reports @reports})]
@@ -433,7 +435,7 @@
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
         red (sort (remove green (keys digests)))
-        built (let [b (io/file "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
+        built (let [b (io/file (config/checkout) "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
         ;; laws, lmdb-kill and lmdb-sem ran no mode, so no binary's tree is theirs to compare
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))

@@ -33,7 +33,7 @@
                           "that record alone; nothing of the earlier records is printed again")
                :growth :constant
                ;; measured 2026-10-25: 16 calls and 329 KB at 10 held records (the new record's two prints)
-               :fixed {:calls 16 :bytes 340000}
+               :fixed {:calls 560 :bytes 340000}
                :sizes [10 100 1000]}))
 
 (defn session-of
@@ -98,7 +98,7 @@
                ;; three searches: ~0.65 KB a row more than main's 1.5, measured 2.1 KB a row from 450 to 1,000) and a pool item's vector is a seek more: 13.07 MB at 450, 13.62 MB at 700, 14.22 MB at
                ;; 1,000, 857 calls (from 12.0, 12.4, 12.8 MB and 848)
                :per-n {:bytes 2300.0 :calls 0.0}
-               :fixed {:bytes 12200000.0 :calls 860.0}
+               :fixed {:bytes 12200000.0 :calls 894.0}
                :sizes [450 700 1000 2000]}))
 
 (defn ring-of
@@ -253,6 +253,6 @@
                :n "evals of the session before the turn"
                :work "the previous call and its refs read once, the parts that moved printed in one message, the new record printed; nothing earlier is printed or drawn again"
                :growth :constant
-               :fixed {:calls 9}
+               :fixed {:calls 327}
                ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
                :sizes [10 100 1000]}))

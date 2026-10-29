@@ -12,7 +12,7 @@
 (deftest steps-are-branches-of-one-store
   ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
   ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
-  (let [path (str (System/getProperty "user.dir") "/target/check-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/check-test-" (random-uuid))
         seed (pdb/open! :lmdb path 300 :db)
         a (pdb/open! :lmdb path 300 :smoke-1)
         b (pdb/open! :lmdb path 300 :drain-1)]
@@ -61,7 +61,7 @@
   ;; green; a test's branch of the test store is deleted by its fixture (seon.test-store/test-branch!);
   ;; neither makes a store. The store given is this test's own (the last resort: what is
   ;; proved is what a run leaves in the store it is given); removed at the end.
-  (let [dir (System/getProperty "user.dir")
+  (let [dir (seon.config/checkout)
         path (str dir "/target/runs/check-test-given-" (random-uuid))
         _ (d/release (:conn (pdb/open! :lmdb path 300 :db)))
         branches #(let [c (d/connect (pdb/store-cfg :lmdb path))] (try (d/branches c) (finally (d/release c))))
@@ -114,7 +114,7 @@
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/root or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line
-  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. "test")) :when (.endsWith (.getName f) ".clj")]
+  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. (seon.config/checkout) "test")) :when (.endsWith (.getName f) ".clj")]
                          [(.getPath f) (slurp f)]))
         db (d/db-with (ts/test-db) (seon.source/import-tx (ts/test-db) files))
         launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/form ?f]
@@ -133,7 +133,7 @@
   ;; or is terminated; SIGKILL runs nothing, so the next starter reclaims it (bin/held --reclaim):
   ;; the fifo of a pid that is no process goes, a live pid's (this test process) and any file not
   ;; named <who>-starter-<pid>.fifo stay
-  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/reclaim-" (random-uuid))
+  (let [dir (str (.getCanonicalPath (java.io.File. (seon.config/checkout) "target/tmp")) "/reclaim-" (random-uuid))
         _ (.mkdirs (java.io.File. dir))
         dead-pid (str/trim (:out (ts/binary-sh "sh" "-c" "echo $$")))   ; a process that has ended
         live-pid (str (seon.lib/c-getpid))
@@ -144,7 +144,7 @@
         other (mk "something-else.fifo")
         exists? #(.exists (java.io.File. ^String %))]
     (try
-      (clojure.java.shell/sh "bin/held" "--reclaim" dir)
+      (clojure.java.shell/sh (str (seon.config/checkout) "/bin/held") "--reclaim" dir)
       (is (not (exists? dead-check)) "a gone check's fifo is reclaimed")
       (is (not (exists? dead-test)) "a gone test runner's fifo is reclaimed")
       (is (exists? live) "a live starter's fifo stays")
@@ -158,7 +158,7 @@
   ;; life: its status line, or its last writer closing (the holder's end). A holder that is gone
   ;; has no writer, so the wait ends at once; a path that is not a fifo (a holder from before the
   ;; done fifo) is refused at once. A hang here is the bug.
-  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/end-" (random-uuid))
+  (let [dir (str (.getCanonicalPath (java.io.File. (seon.config/checkout) "target/tmp")) "/end-" (random-uuid))
         _ (.mkdirs (java.io.File. dir))
         sh clojure.java.shell/sh
         started (volatile! [])
@@ -166,12 +166,12 @@
                (let [ready (str dir "/ready-" (random-uuid)) done (str dir "/done-" (random-uuid))]
                  (sh "mkfifo" ready done)
                  ;; a command that says it is up, then reads its stdin until the holder closes it
-                 (sh "bin/held" "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
+                 (sh (str (seon.config/checkout) "/bin/held") "--detach" "--log" (str dir "/log") "--ready" ready "--done" done
                      "sh" "-c" "echo ROOT LISTENING 1; exec cat")
                  (let [[h c] (str/split (str/trim (slurp ready)) #" ")]
                    (vswap! started conj h c)
                    {:holder h :cmd c :done done})))
-        end (fn [{:keys [holder done]}] (sh "bin/held" "--end" "TERM" holder done "1"))]
+        end (fn [{:keys [holder done]}] (sh (str (seon.config/checkout) "/bin/held") "--end" "TERM" holder done "1"))]
     (try
       (let [live (held) r (end live)]
         (is (= [0 "0\n"] [(:exit r) (:out r)]) "a live holder: TERM closes its command's stdin, and the status is its answer"))
@@ -182,7 +182,7 @@
           (is (= [0 ""] [(:exit r) (:out r)]) "a holder that is gone answers at once, with no status")))
       (let [f (str dir "/plain")]
         (spit f "")
-        (is (= 2 (:exit (sh "bin/held" "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
+        (is (= 2 (:exit (sh (str (seon.config/checkout) "/bin/held") "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
       ;; the holders this test started end with it, by their own pids, whatever an assertion threw
       (finally (doseq [p @started] (sh "kill" "-9" p)) (sh "rm" "-rf" dir)))))
 
@@ -191,7 +191,7 @@
 (deftest a-failed-seed-says-failed
   ;; a single mode's seed that fails (its store a regular file, which no store opens) prints why
   ;; and the mode's verdict line; before, `run seed 2000 > /dev/null || exit 1` exited 1 with nothing
-  (let [dir (System/getProperty "user.dir")
+  (let [dir (seon.config/checkout)
         path (str dir "/target/runs/check-test-not-a-store-" (random-uuid))
         _ (spit path "not a store")
         run (ts/binary-sh "env" (str "SEON_STORE=" path) "SEON_WEB_PORT=0" "bin/check" "config" :dir dir)
@@ -207,7 +207,7 @@
   ;; bin/, a git repository of its own) whose target/seon.tree names another tree, a mode is
   ;; refused, naming both trees, before the binary runs (main's binary in a worktree whose config
   ;; differs died reading that config, unseen)
-  (let [dir (System/getProperty "user.dir")
+  (let [dir (seon.config/checkout)
         tmp (str dir "/target/runs/check-test-stale-" (random-uuid))]
     (try
       (clojure.java.shell/sh "zsh" "-c" (str "mkdir -p '" tmp "/target' && cp -R '" dir "/bin' '" tmp "/' && git -C '" tmp "' init -q"
@@ -275,7 +275,7 @@
   ;; seon.fx/base-commit in a repository of its own: a branch is held to its merge base with main;
   ;; main's own commit to the previous main when clean, to itself when changed; a branch with no
   ;; commits of its own to its own start; main's first commit has none
-  (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-base-" (random-uuid))
+  (let [dir (str (seon.config/checkout) "/target/runs/check-test-base-" (random-uuid))
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
         commit! (fn [f] (spit (str dir "/" f) f) (git "add" "-A") (git "commit" "-qm" f) (git "rev-parse" "HEAD"))]
     (try
@@ -300,7 +300,7 @@
   ;; skips every file that did not move (0.2 s against 1.1 s on this repository), and answers the tree a fresh index
   ;; of HEAD plus `add -A` would: for a clean tree, an edit, a new file, a deleted file, a staged and an ignored one;
   ;; the repository's index is not touched
-  (let [dir (str (System/getProperty "user.dir") "/target/runs/tree-id-test-" (random-uuid))
+  (let [dir (str (seon.config/checkout) "/target/runs/tree-id-test-" (random-uuid))
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
         write! (fn [f t] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) t))
         fresh (fn [] (let [idx (str dir "/.git/ref-index") run #(apply clojure.java.shell/sh "env" (str "GIT_INDEX_FILE=" idx) "git" "-C" dir %&)]
@@ -343,7 +343,7 @@
 (deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
   ;; task seon.fx/the-tree-id-is-what-is-read: claude_scratch/ is no input (every merge appends its log line
   ;; there), so a notes-only commit moves no digest and rebuilds nothing; a source commit does
-  (let [dir (str (System/getProperty "user.dir") "/target/runs/check-test-tree-" (random-uuid))
+  (let [dir (str (seon.config/checkout) "/target/runs/check-test-tree-" (random-uuid))
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args))))
         write! (fn [f] (.mkdirs (.getParentFile (java.io.File. (str dir "/" f)))) (spit (str dir "/" f) (str f (random-uuid))))
         commit! (fn [f] (write! f) (git "add" "-A") (git "commit" "-qm" f))]
@@ -362,7 +362,7 @@
         (is (not= (seon.fx/tree-id dir) (do (commit! "src/a.clj") (seon.fx/tree-id dir))) "and so is a source file")
         (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it")
         (testing "bin/tree reads the same exclusions from the shipped config (its sed against cfg/value)"
-          (let [me (System/getProperty "user.dir")]
+          (let [me (seon.config/checkout)]
             (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/resources/seon/config")))
             (clojure.java.shell/sh "cp" (str me "/bin/tree") (str dir "/bin/tree"))
             (clojure.java.shell/sh "cp" (str me "/resources/seon/config/default.edn") (str dir "/resources/seon/config/default.edn"))
@@ -376,7 +376,7 @@
 (deftest bin-tree-names-the-tree-tree-id-names
   ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
   ;; root decides whether its source's inputs are its binary's with seon.fx/tree-id: one tree
-  (let [dir (System/getProperty "user.dir")]
+  (let [dir (seon.config/checkout)]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
 
 (deftest a-stalled-test-is-named-and-the-run-goes-on
@@ -387,7 +387,7 @@
   ;; releases only once one is named: the test whose bound is 200 ms is named, once; the one whose
   ;; bound is 600 s is not (a healthy slow test), nor is one whose test ended (the shard quiet after
   ;; it); both go on and end, and the watcher with them
-  (let [root (System/getProperty "user.dir")
+  (let [root (seon.config/checkout)
         d (str root "/target/stalls-test-" (random-uuid))
         _ (.mkdirs (java.io.File. d))
         script (str "cd " d "; printf 'started seon.x-test/hangs\\n' > a.log; printf 'started seon.x-test/slow\\n' > b.log; printf 'started seon.x-test/done\\nended seon.x-test/done\\n' > c.log\n"
@@ -406,8 +406,8 @@
   ;; its run: task seon.proofs/the-merge-runs-no-step-twice), names each red from its log, and prints
   ;; its line for the merge commit's message (so a line cannot say green over a red exit; git keeps
   ;; every merge's numbers, docs/merging.md); bin/prove --merge-verdict runs that part alone
-  (let [dir (str (.getCanonicalPath (java.io.File. "target/tmp")) "/merge-verdict-" (random-uuid))
-        run (fn [st] (clojure.java.shell/sh "bin/prove" "--merge-verdict" dir (str st)))
+  (let [dir (str (.getCanonicalPath (java.io.File. (seon.config/checkout) "target/tmp")) "/merge-verdict-" (random-uuid))
+        run (fn [st] (clojure.java.shell/sh (str (seon.config/checkout) "/bin/prove") "--merge-verdict" dir (str st)))
         line-of (fn [r] (first (filter #(str/includes? % " bin/prove --merge ") (str/split-lines (:out r)))))]
     (.mkdirs (java.io.File. dir))
     (spit (str dir "/prove.log") (str "prove: 12 keys (10 tests, 2 check steps), 4 green at their digest (reused), 8 tests to run in 2 shards, 0 steps to run; selected in 5 ms\n"

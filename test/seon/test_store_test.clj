@@ -105,7 +105,7 @@
         [pid-b _ branches agents] (:value b)]
     (is (int? pid-a) (pr-str a))
     (is (= pid-a pid-b) "one root answered both tests")
-    (is (= (.getCanonicalPath (java.io.File. ".")) source) "it runs the checkout's source")
+    (is (= (seon.config/checkout) source) "it runs the checkout's source")
     (is (not= (:task @first-names) (:value task)) "each test has a task of its own")
     (is (re-find #"^t[0-9a-f]{8}/t$" (str (:value task))) (pr-str task))
     (is (not (contains? agents (:agent @first-names))) (str "the first test's agent has ended (live: " agents ")"))

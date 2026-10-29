@@ -132,7 +132,7 @@
   each run's span: under a second needs seon.merge/program-cost-follows-what-changed."
   [dir]
   (let [t0 (now)
-        repo (.getParent (java.io.File. (System/getProperty "user.dir")))
+        repo (.getParent (java.io.File. (seon.config/checkout)))
         tree (str dir "/tree")
         git (fn [& args] (let [r (apply sh/sh "git" "-C" tree args)] (str/trim (str (:out r) (:err r)))))
         cloned (sh/sh "git" "clone" "-q" "--local" repo tree)

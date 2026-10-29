@@ -980,7 +980,7 @@
             t1 (profile/now-ns)
             program (program/load-all! @conn {:tests? false})
             program-ms (profile/ms-since t1)
-            contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])]
+            contracts (contract/instrument! contract/boot-nss)]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)

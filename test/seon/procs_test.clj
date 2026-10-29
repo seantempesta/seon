@@ -156,7 +156,7 @@
   ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
   ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
   ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
-  (let [path (str (System/getProperty "user.dir") "/target/procs-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/procs-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
    (try (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
@@ -167,7 +167,7 @@
       (is (= :seon.writer/refused (:seon.error/type (answers 1))) (pr-str (answers 1)))
       (is (true? (:ok (answers 2))) "the batch's other transaction commits")
       (testing "the writer goes on, and a plain map of pins (what the source read answers) reads back"
-        (let [pins (:pins (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))
+        (let [pins (:pins (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"]}}))
               [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source pins)] :dest {:rid 3}})]
           (is (true? (:ok (:r (first (:to-api outs))))))
           (is (seq pins))
@@ -181,7 +181,7 @@
   ;; Root's api is stood in for by a loop that answers the source read with the inputs given
   ;; and steps the real writer proc on a store of its own (the in-memory test store has no
   ;; codec) for each write; the same inputs as a plain map are the control, and close the cause.
-  (let [path (str (System/getProperty "user.dir") "/target/procs-test-" (random-uuid))
+  (let [path (str (seon.config/checkout) "/target/procs-test-" (random-uuid))
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
     (try (let [st (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)}))
                env (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])
