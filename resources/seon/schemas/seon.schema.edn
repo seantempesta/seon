@@ -16,12 +16,18 @@
  :seon.schema.usage/check [:map [:checked nat-int?] [:refused nat-int?]]
  :seon.schema/registration [:map {:description "A registered schema: its key and its form, and for a stored attribute how many stored values the form refuses."}
                              [:seon.schema/key :seon.schema/key] [:seon.schema/definition :seon.schema/definition]
-                             [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]]
+                             [:seon.schema.usage/check {:optional true} :seon.schema.usage/check]
+                             ;; the contracts reaching it that did not compile again against it (seon.program/rearm!)
+                             [:seon.schema/rearm-errors {:optional true} [:vector :map]]]
  :seon.schema/refused-because [:enum {:description "Why a registration is refused: its form is no EDN data, does not compile against the population (a name resolving to nothing, or a key other schemas still name), or declares an attribute Datahike cannot store."}
                                 :unreadable :invalid :unstorable]
  :seon.schema/registration-refused [:and :seon.error/base
                                      [:map [:seon.error/type [:enum :seon.schema/registration-refused]]
                                       [:seon.schema/key :seon.schema/key] [:seon.schema/refused-because :seon.schema/refused-because]]]
+ ;; a key no schema registers, asked of my.schema/forms or my.agent/callers: the nearest registered keys
+ :seon.schema/unknown-key [:and :seon.error/base
+                           [:map [:seon.error/type [:enum :seon.schema/unknown-key]] [:seon.schema/key :qualified-keyword]
+                            [:seon.schema/nearest [:vector :qualified-keyword]]]]
  :seon.schema/unstorable [:and :seon.error/base
                            [:map [:seon.error/type [:enum :seon.schema/unstorable]]
                             [:seon.schema/attribute :qualified-keyword] [:seon.schema/reason :seon.schema/reason]

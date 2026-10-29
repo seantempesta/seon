@@ -121,7 +121,12 @@
 .seon-print-val { min-width: 0; }
 .seon-print-node > .seon-print-grid { margin-left: 1rem; }
 .seon-print-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-.seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.125rem 0.5rem; text-align: left; vertical-align: top; }
+.seon-print-table { font-size: 0.72rem; line-height: 1.35; }
+.seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.05rem 0.35rem; text-align: left; vertical-align: top; }
+/* a cell one line, cut by its column's width only; hovered, whole */
+.seon-print-table td { max-width: 22rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seon-print-table td:hover { white-space: normal; overflow: visible; }
+.seon-print-table td .seon-print-grid { display: inline; }
 .seon-print-table th { font-weight: normal; }
 .seon-print-prose { white-space: pre-wrap; font-family: var(--font-prose); color: var(--color-text-200); margin: 0; }
 /* highlight.js's Clojure tokens in the page's palette */
@@ -144,11 +149,19 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-eval > div { border-left: 0; padding-left: 0; }
 /* an eval's collapsed line (seon.render.ui/eval-item; the 2026-10-24 mockup's "▸ (form) · 12 ms"):
    the prose above, then its code's first line, its time and its handle */
-.seon-eval > summary { flex-wrap: wrap; }
 .seon-eval > summary::before { content: "▸"; color: var(--color-text-500); }
 .seon-eval[open] > summary::before { content: "▾"; color: var(--color-signal); }
-.seon-eval > summary > .seon-prose { flex-basis: 100%; order: -1; }
 .seon-form { min-width: 0; flex: 1 1 0; overflow-wrap: anywhere; color: var(--color-text-200); }
 .seon-ms { font-size: 0.7rem; color: var(--color-text-500); font-variant-numeric: tabular-nums; }
 .seon-handle { font-size: 0.7rem; color: var(--color-eval); }
+.seon-turn .seon-eval { border: 0; background: transparent; }
+.seon-md-inline > div, .seon-md-inline p { display: inline; margin: 0; }
+.seon-md-inline code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
+.seon-message, .seon-message p, .seon-message li { font-family: var(--font-prose); font-size: 0.9rem; line-height: 1.55; }
+.seon-steps > summary { list-style: none; cursor: pointer; }
+.seon-steps > summary::-webkit-details-marker { display: none; }
+.seon-steps > summary::before { content: "▸ "; }
+.seon-steps[open] > summary::before { content: "▾ "; }
+.seon-turn .seon-eval > summary { padding: 0.15rem 0.3rem; }
+.seon-turn .seon-eval[open] > summary { border-bottom: 0; }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }

@@ -108,3 +108,35 @@
         rep (d/with main (:tx (schema/registration main :seon.run/status (read-string paused-status) false)))]
     (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
     (is (= :paused (status-of :paused)) "re-armed against main's :seon.run/status")))
+
+(deftest an-unquoted-predicate-is-refused-naming-it
+  ;; 2026-10-29: the md-scan bench's run registered [:vector [:tuple nat-int? nat-int?]] unquoted,
+  ;; was refused :unreadable, and spent its last turns finding which part did not read back
+  (let [r (schema/registration (main-db) :x.schema-test/pairs [:vector [:tuple nat-int? 'nat-int?]] false)]
+    (is (= :unreadable (:seon.schema/refused-because r)))
+    (is (str/includes? (:seon.error/message r) "at [1 1]") "where the value that is no EDN is")
+    (is (str/includes? (:seon.error/message r) "quote the form") "and how to write it as data")))
+
+(deftest a-registration-re-arms-the-contracts-its-process-holds
+  ;; md-scan #7, #8 and #11, 2026-10-29: an agent registered :seon.ref/block with its new list keys,
+  ;; and seon.ref/sections, defined before, still checked the old form; a registration compiles the
+  ;; contracts that reach its key again (seon.program/rearm!), as a load of the branch would
+  (let [[printed _] (evals (main-db)
+                           (str "(:seon.schema/key (my.schema/register! :x.rearm/state [:enum :a]))\n"
+                                "(ns x.rearm)\n"
+                                "(defn held {:malli/schema [:=> [:cat :x.rearm/state] :keyword]} [s] s)\n"
+                                "(:seon.schema/key (my.schema/register! :x.rearm/state [:enum :a :b]))\n"
+                                "(held :b)\n"))]
+    (is (= ":b" (last printed)) (str "the function defined before the registration checks the new form: " (pr-str printed)))))
+
+(deftest a-registration-re-arms-a-function-the-contract-macro-defined
+  ;; md-scan #13: seon.ref/scan, defined with seon.contract/defn (armed at its definition, no raw
+  ;; root kept), still checked the old :seon.ref/block after the agent registered the new one: its
+  ;; definition is evaluated again against the registered form
+  (let [[printed _] (evals (main-db)
+                           (str "(:seon.schema/key (my.schema/register! :x.rearm2/state [:enum :a]))\n"
+                                "(ns x.rearm2 (:refer-clojure :exclude [defn]) (:require [seon.contract :refer [defn]]))\n"
+                                "(defn held {:malli/schema [:=> [:cat :x.rearm2/state] :keyword]} [s] s)\n"
+                                "(:seon.schema/key (my.schema/register! :x.rearm2/state [:enum :a :b]))\n"
+                                "(held :b)\n"))]
+    (is (= ":b" (last printed)) (str "a function the contract macro armed checks the new form: " (pr-str printed)))))

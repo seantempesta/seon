@@ -77,26 +77,31 @@
   ;; printer's contracts check maps, and a map's validator allocates: measured 2026-10-23, armed
   ;; minus unarmed, 62 B a call per entry (3,020 against 2,460 B an entry, nine calls) and ~170 B
   ;; a call of the print's fixed part (19.8 against 7.8 KB at 100, 71 calls). Wall time is judged
-  ;; unarmed above.
-  (contract/instrument! '[seon.print seon.print.select seon.print.emit])
-  (let [armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
-    (cost/proof
-      {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
-       :n "entries of a flat map, all shown, armed as at boot"
-       :work (str work ". Armed, per entry exactly nine contracted calls: classify and scalar for the key "
-                  "and the value (4), child, entry and member-indent (3), and leaf-op for the key and the "
-                  "value (2)")
-       :growth :linear
-       :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
-       ;; the functions a print calls once or twice whatever its size (show, select, allot, the
-       ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 79 calls
-       ;; (71 until an entry of two leaves was charged its flat width, 2026-10-25: the least form,
-       ;; seon.print.select/minimal, then checks one more member whole, seven calls; and estimate
-       ;; became chars-tokens over a text's length, its rule shared with seon.context/messages-tokens:
-       ;; one call more; 80 with seon.print.select/lifted-namespace, the one decision of a map's
-       ;; #:ns{ lift, made once per map over its keys with no call per key)
-       :fixed (dissoc (armed fixed 80 170) :ns)
-       :sizes [100 300 1000 10000]})))
+  ;; unarmed above. The printer is left as this test found it: an armed seon.print stayed armed for
+  ;; every test after it in the process, and a debug page's pass printed through it with 189 more
+  ;; contracted calls (seon.render-cost-test/a-new-turn-costs-one-turns-messages: 420 alone, 609 after this test)
+  (let [armed? (contract/armed? #'seon.print/print-value)
+        armed (fn [own calls per-call] (round (assoc own :bytes (+ (:bytes own) (* calls per-call)) :calls calls)))]
+    (contract/instrument! '[seon.print seon.print.select seon.print.emit])
+    (try
+      (cost/proof
+        {:of 'seon.print/print-value :input 'seon.print-cost-test/entries
+         :n "entries of a flat map, all shown, armed as at boot"
+         :work (str work ". Armed, per entry exactly nine contracted calls: classify and scalar for the key "
+                    "and the value (4), child, entry and member-indent (3), and leaf-op for the key and the "
+                    "value (2)")
+         :growth :linear
+         :per-n (dissoc (armed (priced per-entry) 9 62) :ns)
+         ;; the functions a print calls once or twice whatever its size (show, select, allot, the
+         ;; root's node and sizing, tree, emit-both, node-ops, layout and their helpers): 79 calls
+         ;; (71 until an entry of two leaves was charged its flat width, 2026-10-25: the least form,
+         ;; seon.print.select/minimal, then checks one more member whole, seven calls; and estimate
+         ;; became chars-tokens over a text's length, its rule shared with seon.context/messages-tokens:
+         ;; one call more; 80 with seon.print.select/lifted-namespace, the one decision of a map's
+         ;; #:ns{ lift, made once per map over its keys with no call per key)
+         :fixed (dissoc (armed fixed 80 170) :ns)
+         :sizes [100 300 1000 10000]})
+      (finally (when-not armed? (require 'seon.print.emit 'seon.print.select 'seon.print :reload))))))
 
 (def ^:private shown-budget
   "The budget the cut inputs print under, stated here so a proof's input does not move with the

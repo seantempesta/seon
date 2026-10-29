@@ -18,7 +18,7 @@ is judged from the compiler's facts at merge (the vars of `seon.program/banned` 
 
 The sites that resolve a name held in data to a var by design, each with its reason.
 
-- `seon.contract/arm!`: arming a contract is Malli's instrument model, the Var's root replaced once by its checked wrapper at definition.
+- `seon.contract/wrap!`: arming a contract is Malli's instrument model, the Var's root replaced by its checked wrapper: once at definition (`seon.contract/arm!`), and again over the raw root it kept when a schema the contract reaches is registered after it was armed (`seon.contract/rearm!`, docs/source.md#schemas-at-the-repl), the definition unchanged.
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.render/model-of`: a schema's declared model render (`:seon.render/model`) is a symbol in data, resolved when a request sends the part, as `render-of` is for its html render ([a part answers data](render.md#a-part-answers-data)).
@@ -32,6 +32,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.program/account`, `seon.program/macro-uses`, `seon.context/callees`, `seon.source/head-var`, `seon.source/analyze-form`, `seon.repl/ns-form?`, `seon.program/definition-form?`: the compiler's facts, what a form's head or a method's multi names in its namespace; read, never defined.
 - `seon.model/scripted`: the scripted provider's `:seon.config.ai/script` names its reply function as data (a test fixture in `test/`, loaded by name; one not found is `:seon.model/no-script`).
 - `seon.repl/equip-ns!`: the clojure.repl helpers an agent's namespace refers are looked up by name (`ns-resolve`) and referred into the namespace an eval ends in, where the agent's REPL carries `*ns*`.
+- `seon.repl/shadowed`: the clojure.repl helpers an agent's namespace holds a var of its own for are looked up by name (`ns-resolve`) to name that var in the move's `:helper-shadowed` finding: a lookup, no definition made.
 - `seon.main/driver!`: the check driver (`seon.check`, in `test/`, outside the release binary: task `seon.main/drivers-leave-src`) is loaded from the checkout's source when a check mode runs, so its `-main` is resolved by name then; the program never names it.
 - `my.agent/asked`, `my.agent/no-var`: a name an agent asks its navigation functions about (`callers`, `callees`, `source`) is read as its REPL reads it, in the agent's namespace (an alias resolved to the var's full name), and one that resolves to nothing is said so (`:my.agent/no-var`, the one answer for a missing name), never answered as no callers.
 - `seon.repl/eval-string`: each response's handle (``result/eN``, named by its eval), the agent REPL's own `*1`, defined by the REPL as it answers.

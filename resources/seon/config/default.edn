@@ -259,11 +259,22 @@
  ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
  ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
  :seon.config.agent/form-ticks 20000000000
+ ;; Unit: bytes. What one form the model, an outside agent or the page sends may allocate before it
+ ;; stops with :seon.repl/bytes-spent (jolt.host/run-interruptible's byte budget, checked at its tick
+ ;; polls, so a stop can land one poll's allocation past it). Provenance: md-scan #9's 17 model evals
+ ;; (the optimization session, 2026-10-29): median 1.5 MB, p90 ~66 MB, max 90 MB; 1 GiB is ~11x the
+ ;; largest. The agent's own loop (seon.turn/work!) has none. 0: none.
+ :seon.config.agent/form-bytes 1073741824
  ;; Unit: functions. How many of a form's costliest contracted functions (seon.profile/top)
  ;; its reply item and evaluation record keep, each with its exact calls and estimated ms.
  ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
  ;; bound the rest are left out of the item; the record says nothing of them.
  :seon.config.agent/form-top-fns 10
+ ;; Unit: lines. How many lines before and after the changed text seon.repl/edit! answers, so the
+ ;; agent sees its edit land without reading the definition again. Provenance: the md-scan bench,
+ ;; 2026-10-29 (run 5 reread a 250-line scan after each change); two, as a diff's context reads. At
+ ;; the bound the rest of the definition is left out of the answer, its (source f) whole.
+ :seon.config.agent/edit-context-lines 2
  ;; Unit: engine ticks ONE test (its :each fixtures included) may run, wherever it runs: an
  ;; agent's turn, the judge, bin/test (seon.proofs/run-tests!). One bound, per test, so a test's
  ;; verdict is a function of the test alone and the same in every place, and a green reused by

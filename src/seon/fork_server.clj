@@ -39,12 +39,14 @@
 (declare main)
 
 (defn- fork-carrying!
-  "lib/fork! of a request whose socket came with it (SCM_RIGHTS): the child closes this
-  server's descriptors and runs (child fd)."
-  {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
-  [st child refused parent]
-  (let [{:keys [conn]} st fd (sock/take-fd! conn)]
-    (lib/fork! {:fd fd :refused refused :parent parent
+  "lib/fork! of a request whose socket came with it (SCM_RIGHTS), fd (taken from the request's frame when the step began,
+  so a step that throws before it forks can close it: server-step): the child closes this
+  server's descriptors and runs (child fd). open, a volatile holding fd, is cleared once fork! has
+  closed it here (before refused or parent runs)."
+  {:malli/schema [:=> [:cat :map :seon.lib/fd :seon.host/volatile :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
+  [st fd open child refused parent]
+  (let [{:keys [conn]} st done (fn [f] (fn [x] (vreset! open nil) (f x)))]
+    (lib/fork! {:fd fd :refused (done refused) :parent (done parent)
                 :child #(do (sock/close! (:fd conn)) (sock/close-pending-fds! conn) (child fd))})))
 
 (defn graph-at-fork
@@ -110,6 +112,79 @@
   [st]
   (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
 
+(defn- step-failed
+  "The event for a step that threw on message m: the error, naming the op and the message's agent or
+  generation, so root answers the asker it belongs to (seon.fork-server/fork-server-proc)."
+  {:malli/schema [:=> [:cat :map :seon.host/throwable] :map]}
+  [m ^Throwable e]
+  {:ev :step-failed :op (:op m) :agent (:agent m) :gen (:gen m)
+   :error (seon.contract/error :seon.fork-server/step-failed #'step-failed
+                               (str "the fork server's step threw on " (:op m) ": " (step/error-msg e))
+                               {:op (:op m)})})
+
+(defn- serve
+  "The fork server's answer to one command m (server-step's :cmd): [st' outputs]. open is a volatile
+  the fork steps hold their request's descriptor in until fork! has closed it."
+  {:malli/schema [:=> [:cat :map :map :seon.host/volatile] [:tuple :map [:maybe :map]]]}
+  [st m open]
+   (case (:op m)
+     :exit (let [[st evs] (reaped st (:pid m))] [st {:ev evs}])
+     :tx (if (<= (:t m) (:max-tx (:db st)))
+           [st nil] ; already in the db this server was forked with
+           (let [t0 (profile/now-ns)
+                 ;; main at t is the commit the writer made, read from the store (lazy over its
+                 ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
+                 ;; import took 3.5 s, and the first fork waited behind it
+                 db' (d/commit-as-db (:store st) (:commit m))
+                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
+                      ;; the program moved: the reach graph is brought to it at the next fork
+                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
+                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled
+                 errs (seq (program/load-changes! db' (:tx-data m)))]
+             [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
+                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
+                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
+     :fork (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
+                 t0 (profile/now-ns)
+                 st (graph-at-fork st)
+                 tg (profile/now-ns)
+                 st (-> st index-at-fork warm-first-write)
+                 ;; the heap made static when it is due (static-due?), so the agent's collections never
+                 ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
+                 ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
+                 ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
+                 ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
+                 t1 (profile/now-ns)
+                 due? (static-due? st)
+                 _ (when due? (lib/static!))
+                 st (dissoc st :static-due)
+                 static-ms (profile/ms-since t1)
+                 ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
+                 marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
+             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :marks marks) (:db st) (:ns m))
+                             (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
+                             (fn [pid] (let [[st evs] (adopt st pid)]
+                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                          :fork-ms (- (profile/ms-since t0) static-ms) :static-ms static-ms
+                                                          :t (:max-tx (:db st))}]
+                                                        evs)}]))))
+     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
+                       :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
+                       :active-threads (lib/active-threads)}]}]
+     :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
+     ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
+     ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
+     ;; The previous standby is killed: one standby at a time.
+     ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
+     :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
+                    st (-> st graph-at-fork index-at-fork)]
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index]))
+                              (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
+                              (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
+                                (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
+                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
+     [st nil]))
+
 (defn server-step
   "The fork server's step-fn. In :cmd ({:op :tx|:fork|:stats|:static|:exit}: :exit is a child
   that exited, by its pid); out :ev (events for root). The fork is this process's own
@@ -141,61 +216,14 @@
      (doseq [pid (:children st)] (lib/c-kill pid 9) (lib/c-waitpid pid (:status-buf st) 0)))
    st)
   ([st _ m]
-   (case (:op m)
-     :exit (let [[st evs] (reaped st (:pid m))] [st {:ev evs}])
-     :tx (if (<= (:t m) (:max-tx (:db st)))
-           [st nil] ; already in the db this server was forked with
-           (let [t0 (profile/now-ns)
-                 ;; main at t is the commit the writer made, read from the store (lazy over its
-                 ;; persistent indexes), never its datoms replayed here: replaying a 42,942-datom
-                 ;; import took 3.5 s, and the first fork waited behind it
-                 db' (d/commit-as-db (:store st) (:commit m))
-                 st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
-                      ;; the program moved: the reach graph is brought to it at the next fork
-                      (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
-                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled
-                 errs (seq (program/load-changes! db' (:tx-data m)))]
-             [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
-                        true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
-                                    :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
-     :fork (let [t0 (profile/now-ns)
-                 st (graph-at-fork st)
-                 tg (profile/now-ns)
-                 st (-> st index-at-fork warm-first-write)
-                 ;; the heap made static when it is due (static-due?), so the agent's collections never
-                 ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
-                 ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
-                 ;; where it left 333). Not every fork: what a fork replaced (main's db, the graph, the
-                 ;; index) stays in static for this server's life (docs/machine.md#what-a-process-owns-in-memory)
-                 t1 (profile/now-ns)
-                 due? (static-due? st)
-                 _ (when due? (lib/static!))
-                 st (dissoc st :static-due)
-                 static-ms (profile/ms-since t1)
-                 ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
-                 marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :marks marks) (:db st) (:ns m))
-                             (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
-                             (fn [pid] (let [[st evs] (adopt st pid)]
-                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                          :fork-ms (- (profile/ms-since t0) static-ms) :static-ms static-ms
-                                                          :t (:max-tx (:db st))}]
-                                                        evs)}]))))
-     :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
-                       :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
-                       :active-threads (lib/active-threads)}]}]
-     :static (let [t0 (profile/now-ns)] (lib/static!) [st {:ev [{:ev :static :ms (profile/ms-since t0)}]}])
-     ;; a standby (session F2): a fork of this server, idle on its own named pipes until root
-     ;; promotes it, so that no fork after boot ever comes from root (multithreaded).
-     ;; The previous standby is killed: one standby at a time.
-     ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
-     :standby (let [st (-> st graph-at-fork index-at-fork)]
-               (fork-carrying! st #(main (:db st) (:cfg st) % false (select-keys st [:graph :index]))
-                              (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
-                              (fn [pid] (when-let [old (:standby-pid st)] (lib/c-kill old 9))
-                                (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
-                                  [st {:ev (into [{:ev :standby :gen (:gen m) :pid pid :t (:max-tx (:db st))}] evs)}]))))
-     [st nil])))
+   ;; a step that throws changes nothing (st as it was) and answers what it took with the error: the asker's
+   ;; reply or the event root records, never a server that goes on silent or one that dies for a request
+   ;; (docs/processes.md#a-step-that-throws)
+   (let [open (volatile! nil)]
+     (try (serve st m open)
+          (catch Throwable e
+            (some-> @open lib/c-close)
+            [st {:ev [(step-failed m e)]}])))))
 
 (defn- dev-classpath!
   "The source root's deps.edn roots added to the loader (jolt.deps/add-deps, the twin of
@@ -416,6 +444,18 @@
            :eof (if (or (:stopping st) (not= (:pid m) (:pid st)))
                   [st nil]
                   (promote st))
+           ;; the server's step threw on a request (seon.fork-server/server-step): its state is as it was, and the
+           ;; request's asker is answered the error: a stats or static waiter by its rid, a fork or a standby as it
+           ;; fails; the error goes on to root's problems
+           :step-failed (case (:op m)
+                          (:stats :static) (if-let [{:keys [rid]} (peek (:waiters st))]
+                                             [(update st :waiters pop) {:to-api [{:dest {:rid rid} :r (:error m)} m]}]
+                                             [st {:to-api [m]}])
+                          :fork (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)
+                                    [(update st :in-flight dissoc (:agent m))
+                                     {:to-api [{:ev :fork-failed :agent (:agent m) :reason (:seon.error/message (:error m))} m]}])
+                          :standby (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
+                          [st {:to-api [m]}])
            (:forked :fork-failed) (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)
                                       [(update st :in-flight dissoc (:agent m)) {:to-api [m]}])
            [st {:to-api [m]}]))))

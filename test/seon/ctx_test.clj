@@ -74,10 +74,12 @@
                                                    {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
                                                     :seon.task/references #{'app.x/f0 'app.x/f1} :seon.task/sections #{"docs/x.md#the-x"}
+                                                    ;; the citations its plan's write derives (seon.task/references-of): the page draws one part each
+                                                    :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil "Make `app.x/f0` pass, then `app.x/f1`; see [the x](docs/x.md#the-x)."))))
                                                     :seon.task/execution :running :seon.task/branch :main/lab-ctx}
                                                    {:db/id "f0" :form/id "app.x/f0-1" :form/src "(defn f0 [x] x)"} {:var/name 'app.x/f0 :var/form "f0"}
                                                    {:form/id "app.x/c-1" :form/src "(defn c [] (f0 1))" :form/refs #{'app.x/f0}}
-                                                   {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/text "What x does."}
+                                                   {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does." :seon.section/text "What x does."}
                                                    {:db/id "t0" :form/id "app.x-test/t0-1" :form/src "(deftest t0 (is (= 1 (f0 1))))" :form/refs #{'app.x/f0 'clojure.test/is}}
                                                    {:var/name 'app.x-test/t0 :var/kind :test :var/form "t0"}]
                                                   (run-tx "lab/ctx#1" 0))))]
@@ -634,29 +636,33 @@
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x/g :var/form "g"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
-        part (fn [prefix] (some (fn [[id h]] (when (str/starts-with? id prefix) h)) page))
-        cited (part "cited-")
-        task (pr-str (part "task-data-"))]
+        part (fn [suffix] (some (fn [[id h]] (when (str/ends-with? id suffix) h)) page))
+        cited (part "app.x_2Ff0")
+        ;; the section is a part of its own, keyed by its page (a cited part per thing the plan cites)
+        section (pr-str (part "docs_2Fx.md"))]
     (is (some #(and (= '[app.x-test/t0 app.x-test/t1] (:tests %)) (= ['app.x/g] (:callers %))) (tree-seq coll? seq cited))
         (str "the cited var's tests, then its other callers: " (pr-str cited)))
-    (is (str/includes? task "What x does.") "the cited section's text, not only its address")
-    (is (str/includes? task "docs/x.md#the-x") "under its heading and address")))
+    (is (str/includes? section "What x does.") "the cited section's lead, not only its address")
+    (is (str/includes? section "docs/x.md#the-x") "under its heading and address")
+    (is (not (str/includes? (pr-str (part "task-data-")) "What x does.")) "and the task's own part holds it once, not again")))
 
 (deftest a-cited-part-shows-its-source-beside-its-tests
-  ;; the second context audit (F1, F2): the cited part printed one map at one budget, so a long source
-  ;; crowded its tests out; and a var whose form was also another cited var's caller printed its source
-  ;; blank, with no cut (ctx holds an entity whole at its first path, {:db/id e} at the others). Its
-  ;; source and the rest are each a call of the printer under its own budget, the source read by id
+  ;; the cited var is one part: its source, its tests, its callers and the form that reads every test
+  ;; reaching it, one call of the printer (a cut names the cited call that makes the part whole again).
+  ;; A form that is also another cited var's caller (f1's is f0's) shows its source in its own part, and
+  ;; is among f0's callers, never blank (ctx holds an entity whole at its first path, {:db/id e} at the others)
   (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x/f1 :var/form "f1"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
-        calls (fn [h] (filterv #(and (vector? %) (= #'seon.render/html (first %))) h))]
-    (is (= "(defn f1 [] (f0 1))" (:seon.print/code (nth (first (calls (part "app.x_2Ff1"))) 2)))
+        ;; a cited part is one call of the printer: [#'seon.render/html opts value]
+        value (fn [h] (when (= #'seon.render/html (first h)) (nth h 2)))]
+    (is (= "(defn f1 [] (f0 1))" (:seon.print/code (:source (value (part "app.x_2Ff1")))))
         (str "the source of a form ctx holds at another path (f1's form is f0's caller): " (pr-str (part "app.x_2Ff1"))))
-    (is (= 2 (count (calls (part "app.x_2Ff0")))) "the source and the tests, each its own call")
-    (is (= "(defn f0 [x] x)" (:seon.print/code (nth (first (calls (part "app.x_2Ff0"))) 2))) "the source first")
-    (is (contains? (nth (second (calls (part "app.x_2Ff0"))) 2) :tests) "then the tests, under their own budget")
+    (is (= "(defn f0 [x] x)" (:seon.print/code (:source (value (part "app.x_2Ff0"))))) "the source, in the one call")
+    (is (= '[app.x-test/t0] (:tests (value (part "app.x_2Ff0")))) "and the tests beside it")
+    (is (some #{'app.x/f1} (:callers (value (part "app.x_2Ff0")))) "and its callers, f1 among them")
+    (is (= "app.x/f0" (last (:handle (second (part "app.x_2Ff0"))))) "the cut reads the rest through the cited part's form")
     (is (not-any? #(= "ctx-keys" (first %)) page) "no part for keys the agent never added")))
 
 (deftest a-component-is-styled-by-its-renders-name
@@ -667,10 +673,13 @@
         as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
+        ;; task-data is a part (the model reads its data); chat-ask is hiccup, its root the render's name
         task-id (some #(when (str/starts-with? % "task-data-") %) (keys hiccup))
+        ask-id (some #(when (str/starts-with? % "chat-ask-") %) (keys hiccup))
         style (:seon.render/style (meta #'seon.render.ui/task-data))]
     (is (string? style) "the render's var states its style")
-    (is (= "task-data" (:class (second (hiccup task-id)))) "its root's one class is its render's name")
+    (is (= "chat-ask" (:class (second (hiccup ask-id)))) "its root's one class is its render's name")
+    (is (not (str/includes? (pr-str (hiccup ask-id)) (:seon.render/style (meta #'seon.render.ui/chat-ask)))) "the model reads no style")
     (is (not (str/includes? (pr-str hiccup) style)) "the model reads no style")
     (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) (str "class=\"task-data " (first (str/split style #" "))))
         "the page's html has the name, then its var's classes")))

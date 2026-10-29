@@ -361,7 +361,7 @@
                                                                     :else :changed)]))}]))))))
           plan)))
 
-;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
+;; ---- a citation as its depth shows it (docs/references.md#resolving-and-showing): ----
 ;; what the model's context and every page pull of what a text cites
 
 (defn source-of
@@ -575,10 +575,10 @@
                  second)))))))
 
 (defn resolve-ref
-  "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
+  "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
   :code its source (from the db), whole: the printer cuts it where it is shown, with the form
-  that reads its rest; at :doc a var with no doc shows its source. A name that resolves to
+  that reads its rest, and the form that changes a part of it (seon.repl/edit!); at :doc a var with no doc shows its source. A name that resolves to
   nothing says so. A var the db holds is read from its facts (its doc, its contract, its
   recorded source and the arglists it declares), so what it shows changes as the db does; a
   library var the db does not hold, from the process's var meta, which its build fixes."
@@ -603,8 +603,9 @@
       (and (nil? v) (nil? m)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      ;; its source is code, printed as in its file (seon.print/code)
-      :else {:symbol sym :source (print/code src)})))
+      ;; its source is code, printed as in its file (seon.print/code), and how a part of it changes
+      :else {:symbol sym :source (print/code src)
+             :change (print/code (str "(seon.repl/edit! '" sym " \"old text, exactly once\" \"new text\")"))})))
 
 (defn- reached
   "What citation c asks to see, at its depth, and what that is: a wiki section from main's
@@ -630,22 +631,45 @@
   [db c] (second (reached db c)))
 
 (defn citation-kind
-  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :view, a
-  namespace, a task, or a path with no problem (cited-view); nil, nothing pulled (a keyword, a
-  path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :view]]]}
+  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :schema, a
+  qualified keyword the db holds a schema entry of (schema-view); :view, a namespace, a task, or a
+  path with no problem (cited-view); nil, nothing pulled (any other keyword, a path:N line reference)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :schema :view]]]}
   [db {:seon.ref/keys [name path problem-kind]}]
   (cond (and (qualified-symbol? name) (not (ref/task? db name))) :var
+        (and (qualified-keyword? name) (pdb/eid db :schema/key name)) :schema
         (or (symbol? name) (and path (not problem-kind))) :view))
+
+(defn schema-view
+  "Schema key k as its citation's depth shows it (docs/references.md#resolving-and-showing),
+  read from the db's schema entry (:schema/form), so it changes as the db does: :summary the form
+  that reads it; :doc and :code its form as written (code), the form of each other key it names
+  (one level: the agent of the md-scan bench read them one a turn), and how it changes
+  at the REPL (my.schema/register!). Never the resource file it merges into: an agent's working
+  directory holds no checkout, and the file sent three runs to slurp it."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.ref/depth] :map]}
+  [db k depth]
+  (let [form (:schema/form (d/entity db (pdb/eid db :schema/key k)))
+        named (when form
+                (->> (tree-seq coll? seq (sedn/decode form))
+                     (filter qualified-keyword?) distinct
+                     (keep #(when-let [f (and (not= k %) (:schema/form (d/entity db (pdb/eid db :schema/key %))))] [% (print/code f)]))
+                     (into (sorted-map))))]
+    (if (or (= :summary depth) (nil? form))
+      {:schema k :read (list 'my.schema/forms k)}
+      (cond-> {:schema k :form (print/code form) :change (print/code (str "(my.schema/register! " k " '[...its new form])"))}
+        (seq named) (assoc :keys-it-names named)))))
 
 (defn cited
   "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
-  by resolve-ref ([:unresolved view] when it resolves to nothing), anything else by reached; nil
-  when it reaches nothing pulled (a keyword, a path:N line reference)."
+  by resolve-ref ([:unresolved view] when it resolves to nothing), [:schema view] by schema-view,
+  anything else by reached; nil when it reaches nothing pulled (a keyword the db holds no schema of,
+  a path:N line reference)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:tuple :seon.render/kind :map]]]}
   [db c]
   (case (citation-kind db c)
     :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
+    :schema [:schema (schema-view db (:seon.ref/name c) (:seon.ref/depth c))]
     :view (reached db c)
     nil))
 
@@ -670,11 +694,21 @@
   [nv]
   (when-let [b (seq (:seon.ref/below nv))] (str/join "\n" (map #(str ";; " (:seon.ref/heading %)) b))))
 
+(defn namespace-source
+  "Namespace sym as db records it: its ns form as written (its requires and aliases), then each
+  definition, privates included, a line each in file order (`definition-lines`); nil when db
+  records no ns form for it. What `(source ns)` and a namespace's citation at code depth show
+  (docs/references.md#resolving-and-showing)."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]]}
+  [db sym]
+  (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
+    (str head (some->> (definition-lines (ref/namespace-view db sym :doc)) (str "\n")))))
+
 (defn cited-code
   "What the page shows of citation c on db, as Clojure is written in a file (DECISIONS,
   code is shown as code): a var as its definition's head (seon.reader/definition-head: name, docstring as
   written, attribute map, arglist; its body marked `…)` with the form that reads it whole), a
-  namespace as its ns form's head, its docstring as written, then its public names; each as code
+  namespace as its ns form as recorded (`namespace-source`), then its definitions; each as code
   (seon.print/code), printed verbatim; a var whose source db does not record, as a `declare` with
   its arglists and doc as comments; a task, a section, a file or a citation that reaches nothing as
   its address and lead in comment lines, then the form that reads it whole (never its view's map). nil when it reaches nothing pulled."
@@ -693,9 +727,11 @@
                                      (when-let [as (seq (:arglists v))] (str "\n;; " (str/join " " (map str as))))
                                      (when-let [d (:seon.print/prose (:doc v))] (str "\n" (names-lines (str/split d #"\s+"))))))))
       (and (= :namespace kind) (symbol? nm))
-      (let [nv (ref/namespace-view db nm :doc)]
-        (print/code (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
-                         (some->> (definition-lines nv) (str "\n")))))
+      ;; its ns form as recorded; a namespace only this process has loaded, its name, doc and public names
+      (print/code (or (namespace-source db nm)
+                      (let [nv (ref/namespace-view db nm :doc)]
+                        (str "(ns " nm (when-let [d (:seon.ref/lead nv)] (str "\n  " (emit/string-literal d))) ")"
+                             (some->> (definition-lines nv) (str "\n"))))))
       ;; a task, a section, a file, or what reaches nothing: its address and lead as prose (comment
       ;; lines), then the form that reads it whole; never its view's map
       hit

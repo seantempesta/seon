@@ -147,6 +147,31 @@
       (agent/taken! (count sends))))
   nil)
 
+(defn- tell-error!
+  "Error map em given to the agent as a message from seon on its branch, saying what Seon was doing
+  (what): its next request reads it as any message. nil."
+  {:malli/schema [:=> [:cat :seon.error/base :string] :nil]}
+  [em what]
+  (let [k (:key @agent/state)
+        body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
+    (agent/transact! (update (task/message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body) 0 assoc :seon.message/agent {:seon.agent/key k}))
+    (agent/commit!)
+    nil))
+
+(defn- turn-error!
+  "A turn Seon could not draw (st, its state; em, the error map: what it threw, seon.agent/error-map,
+  or the walk's missing status, :seon.turn/no-status) given to the agent as data: em as a message
+  from seon on its branch, which its
+  next turn reads as any message, counted in :threw. A walk that drew no status still makes its model
+  call that turn, the message in its request; a throw counts the turn, and work! ends the agent's
+  work :error on the second throw in a row with no model turn between (its request cannot be drawn,
+  so no model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
+  Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
+  {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
+  [st em]
+  (tell-error! em "drawing your turn: Seon's code called the program on your branch, as it stands now, and it threw")
+  (-> st (update :threw (fnil inc 0)) (assoc :error em)))
+
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
@@ -236,7 +261,13 @@
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
                                   {:db/id "turn" :seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}
                                   {:seon.model-call/id id :seon.model-call/turn "turn" :seon.model-call/basis basis}]
-                                 (included-tx (:seon.task/id t))))
+                                 ;; what is related is read with the program the agent may be changing (the parser): a throw is
+                                 ;; the agent's to read, this turn includes nothing, and its model call is made
+                                 (try (included-tx (:seon.task/id t))
+                                      (catch Throwable e
+                                        (tell-error! (agent/error-map e 'seon.turn/included-tx)
+                                                     "choosing what is related for your turn: Seon's code called the program on your branch, as it stands now, and it threw; this turn includes nothing related")
+                                        []))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
@@ -424,26 +455,44 @@
     (branch/merge-main!)
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
-      (let [obs (observe task)
-            ;; how the work stands, from the walk the request is drawn from (one computation a turn)
-            s (status-now)
-            reasons (:reasons s)
-            stop (get-in @agent/state [:turn :stop])
-            hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
-        (cond
-          ;; no status is no done rule: the run ends on that error, never green
-          (contract/error? s) (end! st :error (:seon.error/message s) s)
-          ;; git's CI after the merge: green on the combined program; merge main again until
-          ;; it brings nothing new
-          (and (empty? reasons) merge?)
-          (let [m (branch/merge-main!)]
-            (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
-          (empty? reasons) (end! st :green nil nil)
-          ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
-          ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
-          (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
-          hairy (end! st :merge-failed (:reason hairy) nil)
-          (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
-          stop (end! st (:outcome stop) (:reason stop) nil)
-          :else (let [st' (act! st obs s model)]
-                  (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
+      ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
+      ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
+      ;; values against (md-scan #7: its new list blocks met the old :seon.ref/block in seon.ref/sections and
+      ;; ended the loop); a turn answers its end, or [::next st] to go on
+      (let [step (repl/with-branch-schemas
+                  (fn []
+              ;; the draw is the one place Seon's code calls the agent's program (its walk, its status): a throw
+              ;; there is the agent's to read, as data, and the loop goes on (turn-error!); root's interrupt is a
+              ;; stop, not the agent's error. act! and end! are outside it: their throws are Seon's
+              (let [drawn (try [(observe task) (status-now)]
+                               (catch Throwable e (if (:interrupted (ex-data e)) (throw e) [::undrawn (agent/error-map e 'seon.turn/work!)])))]
+                (if (= ::undrawn (first drawn))
+                  ;; the second in a row, with no model turn between, ends its work with that error
+                  (let [st' (update (turn-error! st (second drawn)) :turn inc)]
+                    (if (< 1 (:threw st'))
+                      (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
+                      [::next st']))
+              (let [[obs s] drawn
+                    reasons (:reasons s)
+                    stop (get-in @agent/state [:turn :stop])
+                    hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
+                (cond
+                  ;; no status is no done rule: the run ends on that error, never green
+                  ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
+                  (contract/error? s) (let [st (turn-error! st s) st' (act! st obs s model)]
+                                        (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))
+                  ;; git's CI after the merge: green on the combined program; merge main again until
+                  ;; it brings nothing new
+                  (and (empty? reasons) merge?)
+                  (let [m (branch/merge-main!)]
+                    (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) [::next st]))
+                  (empty? reasons) (end! st :green nil nil)
+                  ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
+                  ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
+                  (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
+                  hairy (end! st :merge-failed (:reason hairy) nil)
+                  (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
+                  stop (end! st (:outcome stop) (:reason stop) nil)
+                  :else (let [st' (act! st obs s model)]
+                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))))]
+        (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))

@@ -225,7 +225,7 @@
                 "(seon.context/sent-split: system, conversation, screen), and rendered once: the contracted calls, "
                 "flat in the turns held. A real turn also reads back its help page and its task data as of their t "
                 "(seon.context/parts-of: 2.24M ticks, 9.3 MB on context-test's fixture, mostly the task data's run "
-                "sections), once: a finished turn's row is cached and never rendered again. Per held turn: the list's "
+                "sections), once: a finished turn's row is cached and never rendered again (each message it sent is a card of the page). Per held turn: the list's "
                 "query of every turn's id, its place in the sort and its slot, no render")
      :growth :linear
      ;; measured 2026-10-24: 357 / 357 calls and 1.20 / 4.37 MB at 100 / 1,000 held turns, one component
@@ -240,6 +240,9 @@
      ;; the sizer is not additive across pieces; measured per function, 2026-10-25); 500 with the bar's
      ;; toggle between a page and what its model reads (its tabs' elements and attributes serialized,
      ;; seon.web.html: 41 calls, measured per function against main, 2026-10-26)
+     ;; 580 on jolt/ref-depth (seon.render.ui/sent-request shows every message the request sent as a card, nothing
+     ;; hidden: each card's elements and attributes serialized by seon.web.html, 152 raw?, 136 attr-name, 84 escape
+     ;; calls in the pass; the bytes did not grow: 1.21 MB)
      :fixed {:calls 500 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 300 1000 4000]}))
@@ -396,7 +399,7 @@
     (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id tid] :seon.run/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
     (doseq [i (range n)]
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
-                         :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5))} :line (str i) :run run :call-id (str "c" i) :call 0 :prose (str "Step " i ".")}}])
+                         :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :line (str i) :run run :call-id (str "c" i) :call 0 :prose (str "Step " i ".")}}])
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" run (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
@@ -416,7 +419,12 @@
                        :growth :linear
                        ;; measured 2026-10-29: 371 calls / 2.33 MB at 10 evals, 572 / 4.50 MB at 80 (what the layout's own render
                        ;; reads of the evals and messages, seon.render.ui/render-ctx's conversation); drawing every list: 2,974 calls /
-                       ;; 10.2 MB at 80 (about 27 calls and 0.1 MB an eval)
-                       :per-n {:calls 3 :bytes 32000}
-                       :fixed {:calls 345 :bytes 2100000}
+                       ;; 10.2 MB at 80 (about 27 calls and 0.1 MB an eval).
+                       ;; jolt/ref-depth: 521 calls / 3.54 MB at 10, 641 / 4.60 MB at 40. The fixed part grew by the parts the list now
+                       ;; draws (the namespaces part with each namespace's definitions, a cited part for each thing the plan cites,
+                       ;; the run head); an eval costs one call more (seon.render.ui/turn-evals reads each eval's call id to place it
+                       ;; in its model turn, the chat's grouping) and its fixture response now carries :ns, as every REPL response does
+                       ;; (seon.context/current-ns reads the newest eval's, not every record: 11 KB an eval before)
+                       :per-n {:calls 4 :bytes 35000}
+                       :fixed {:calls 485 :bytes 3200000}
                        :sizes [10 40 80]}))))))

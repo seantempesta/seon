@@ -55,16 +55,26 @@
                 (or (str/starts-with? (str n) "def")
                     (and (= 'clojure.core (ns-name s)) (contains? env-forms n))))))))))
 
-(defn edn-value?
-  "Is v plain data that EDN prints and reads back equal: nil, booleans, numbers, strings,
-  keywords, symbols, and lists, vectors, maps and sets of them."
-  {:malli/schema [:=> [:cat :any] :boolean]}
+(defn non-edn
+  "The first value in v that is no EDN, depth first, as [path value] (path the keys and indices that
+  reach it, a set member by its place in the set's seq), or nil when v is plain data that EDN prints
+  and reads back equal (nil, booleans, numbers, strings, keywords, symbols, and lists, vectors, maps
+  and sets of them): what a refused registration names, so its reader fixes that value (a predicate written
+  unquoted, nat-int?, is a function value, its symbol 'nat-int? the data). See docs/references.md#resolving-and-showing."
+  {:malli/schema [:=> [:cat :any] [:maybe [:tuple [:vector :any] :any]]]}
   [v]
-  (boolean (cond (record? v) false
-                 (or (nil? v) (boolean? v) (number? v) (string? v) (keyword? v) (symbol? v)) true
-                 (map? v) (every? (fn [[k x]] (and (edn-value? k) (edn-value? x))) v)
-                 (coll? v) (every? edn-value? v)
-                 :else false)))
+  (letfn [(walk [path x]
+            (cond (record? x) [path x]
+                  (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) nil
+                  (map? x) (some (fn [[k y]] (or (walk path k) (walk (conj path k) y))) x)
+                  (coll? x) (some (fn [[i y]] (walk (conj path i) y)) (map-indexed vector x))
+                  :else [path x]))]
+    (walk [] v)))
+
+(defn edn-value?
+  "Is v plain data that EDN prints and reads back equal (`non-edn` finds none in it)?"
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v] (nil? (non-edn v)))
 
 ;; ---- the compiler's account of one form ------------------------------------------------
 
@@ -1007,6 +1017,36 @@
   (load-forms! db (loadable db (vec (vals (into {} (map (juxt :id identity))
                                            (concat changed (dependents db changed) (schema-dependents db schema-keys)))))
                             tests?)))
+
+(defn rearm!
+  "Arm again, in this process, every var whose contract reaches schema keys (they, or a schema
+  naming one, on and on: schema-dependents' closure), compiled against db's schemas: one arm!
+  armed again over its raw root (seon.contract/rearm!), one the defn macro armed at its definition by
+  evaluating that definition again (its source as the REPL kept it, else as db records it): what a registration in a running agent owes the code it holds, whose
+  contracts were compiled before it (my.schema/register!; md-scan #7, #8 and #11 met their own
+  registered :seon.ref/block in Seon's seon.ref/sections, still checking the old one). A load of
+  db's program re-arms the same by evaluating the forms again (load!). Answers the errors. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
+  [db keys]
+  ;; the keys reached: keys, and every schema naming one, on and on (schema-dependents' closure)
+  (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
+                       {} (merge contract/forms (schema-changes db)))
+        reached (into (set keys) (closure keys naming))]
+    (binding [mr/*registry* (schema-registry (schema-changes db))]
+      (vec (for [n (all-ns) v (vals (ns-interns n))
+                 :let [c (contract/contract v)]
+                 :when (and c (some reached (names c)))
+                 :let [sym (symbol v)
+                       ;; armed by arm! (its raw root kept): wrapped again; armed at its definition (the defn
+                       ;; macro keeps no raw root): its definition evaluated again, as a load does (load!)
+                       src (when-not (:seon.contract/raw (meta v))
+                             (or (:source (meta v)) (some->> (pdb/eid db :var/name sym) (d/entity db) :var/form :form/src)))
+                       r (if src
+                           (try (binding [*ns* (:ns (meta v))] (load-string src)) nil
+                                (catch Throwable e {:var sym :message (or (ex-message e) (str e))}))
+                           (let [r (contract/rearm! v)] (when (contract/error? r) r)))]
+                 :when r]
+             r)))))
 
 (defn load-all!
   "Load db's program where this binary runs: every live form it does not hold, with what

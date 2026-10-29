@@ -34,6 +34,12 @@
 
 (defchecked ^:private outer-frames [:=> [:cat] :any] @#'jolt.nrepl/outer-frames)
 
+(def ^:private budgeted
+  "The origins whose forms run under the config's budgets of ticks and bytes (an agent's model, an
+  outside agent, the page): root's own platform requests and the agent's loop run unbounded. See
+  docs/processes.md#interrupts."
+  #{:model :outside :ui})
+
 (defn- form-src
   "The exact text of form in code, from its reader position (:line, :column; 1-based) to end,
   the offset where the reader stopped after it, or nil for a form that carries no position (a
@@ -62,6 +68,11 @@
   [v src]
   (when (and (var? v) src) (alter-meta! v assoc :source src)))
 
+(def ^:private repl-helpers
+  "The clojure.repl names an agent's REPL keeps in every namespace it moves to (`equip-ns!`), and
+  warns of when the namespace's own var hides one (`shadowed`; docs/render.md#a-part-answers-data)."
+  '[source apropos dir pst doc find-doc])
+
 (defn- equip-ns!
   "Namespace ns as an agent's REPL has its helpers wherever it goes: the clojure.repl names the
   agent's own namespace refers (source, doc, dir, apropos, find-doc, pst) referred into ns where
@@ -74,9 +85,21 @@
   {:malli/schema [:=> [:cat :seon.host/namespace] :seon.host/namespace]}
   [ns]
   (let [held (ns-publics (find-ns 'clojure.repl))
-        free (vec (for [s '[source apropos dir pst doc find-doc] :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
+        free (vec (for [s repl-helpers :when (and (contains? held s) (not (ns-resolve ns s)))] s))]
     (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
     ns))
+
+(defn- shadowed
+  "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
+  there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
+  referred var (an agent in seon.render.ui called its source with a function and read an nth
+  error four times). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
+  [ns]
+  (not-empty (into {} (for [s repl-helpers
+                            :let [v (ns-resolve ns s)]
+                            :when (and (var? v) (not= 'clojure.repl (ns-name (:ns (meta v)))))]
+                        [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
 
 (defn- do-parts
   "The inner forms of a top-level form written as (do ...), each as [text lead]: its exact text and the
@@ -116,8 +139,11 @@
         ;; the form's budget of work (engine ticks): the request's, else the config key for an
         ;; agent's model and an outside agent; root's own platform requests run unbounded
         ticks (let [t (or (:ticks req)
-                          (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
+                          (when (budgeted (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
+        ;; and of allocation (bytes), for the same requests (seon.intr/run): root's and work!'s run unbounded
+        alloc (let [b (or (:bytes req) (when (budgeted (:origin req)) (cfg/value :seon.config.agent/form-bytes)))]
+                (when (and b (pos? b)) b))
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
         ;; before the do leading the first of them
@@ -133,7 +159,7 @@
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
                        [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
-                                                (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
+                                                (let [v (intr/run ticks alloc #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                        common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
@@ -142,7 +168,9 @@
                    (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
                    (when (= tag :ret) (keep-source! v (:repl/src common)))
                    (if (= tag :ret)
-                     (do (reply (merge common {:repl/value v :tag :ret}))
+                     (do (reply (cond-> (merge common {:repl/value v :tag :ret})
+                                  ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
+                                  (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
                          [(equip-ns! ns') :ok])
                      (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
@@ -212,6 +240,23 @@
           sym (assoc :seon.error/in sym)))
       {})))
 
+(defn- clojure-message
+  "Error map em's message as Clojure's REPL says it (clojure.main/ex-str): for an error in reading,
+  macroexpanding or compiling, the phase, the symbol and the position before the cause, \"Syntax error
+  macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is. md-scan
+  #11: Jolt's cond failed on an odd number of forms, the message said only \"index out of
+  bounds\", and the agent bisected its runtime code for 40 evals. See docs/errors.md#an-eval-errors-diagnostics."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:clojure.error/keys [phase line column] sym :clojure.error/symbol msg :seon.error/message}]
+  (let [what (case phase
+               (:macroexpansion :macro-syntax-check) "macroexpanding"
+               :compile-syntax-check "compiling"
+               :read-source "reading source"
+               nil)]
+    (if (and what msg (not (clojure.string/starts-with? msg "Syntax error")))
+      (str "Syntax error " what (when sym (str " " sym)) (when line (str " at (" line (when column (str ":" column)) ")")) ". " msg)
+      msg)))
+
 (defn- error-data
   "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
   terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
@@ -219,8 +264,10 @@
   long as the reply is held (AGENTS 4, a kept value is a reference; docs/errors.md#an-error-keeps-data)."
   {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
   [e m]
-  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
-    (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)))
+  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
+        em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
+    ;; its message as Clojure's REPL says it: where it failed (reading, macroexpanding, compiling) first
+    (cond-> em (:seon.error/message em) (assoc :seon.error/message (clojure-message em)))))
 
 (defn wrap-caught
   "An eval error also as the one error map (made with the reply: `error-data`, the answer's :err: its
@@ -335,10 +382,12 @@
           r)))
     {}))
 
-(defn- with-branch-schemas
+(defn with-branch-schemas
   "f called with malli's dynamic registry bound to this branch's population (branch-registry),
   read now: what a form compiles against, and the renders its values' schemas name
-  (seon.contract/properties reads it)."
+  (seon.contract/properties reads it). Each eval binds it, and so does each turn of the turn loop
+  (seon.turn/work!), so Seon's own code checks the agent's values against the schemas the agent
+  registered since the loop began (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)."
   {:malli/schema [:=> [:cat :seon.host/fn] :any]}
   [f] (binding [mr/*registry* (branch-registry)] (f)))
 
@@ -443,7 +492,12 @@
                           :uncontracted (vec (sort-by str left)) :count (count left)})
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
-                   (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)}))]
+                   (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
+                   (some :shadowed fs)
+                   (conj (let [sh (some :shadowed fs)]
+                           {:seon.repl/finding :helper-shadowed :shadowed sh
+                            :seon.repl/fix (str "In this namespace " (clojure.string/join ", " (map (fn [[k v]] (str k " is " v)) sh))
+                                                ", not the REPL's: call " (clojure.string/join " or " (map #(str "clojure.repl/" (key %)) sh)) " qualified")})))]
     (cond-> {:handle handle}
       (next tops) (assoc :forms (count tops)
                          :value (into [] (comp (map last) (filter #(contains? % :repl/value)) (map :repl/value)) tops))
@@ -495,7 +549,7 @@
   functions and what it recorded."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :string :map :map [:maybe :string]] :seon.eval/record]}
   [db code r req run]
-  (let [cites (when db (some->> (:prose req) (ref/references db)))
+  (let [cites (if (contains? req :cites) (:cites req) (when db (some->> (:prose req) (ref/references db))))
         resp (dissoc r :text :recorded :fns :record)
         ;; a value that names its basis (@ctx: the branch's record at t, seon.ctx/build) is
         ;; recorded as that basis and its schema: the page renders it from what exists, and a
@@ -528,7 +582,8 @@
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (name (:handle r))]
     (swap! agent/state dissoc :defs)
-    (if (and contract/record? (= :agent (:mode @agent/state)))
+    ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
+    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
                                                  (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
           (assoc r :record id))
@@ -543,7 +598,8 @@
   agent-step's; a model's call: its :prose and :call-id). The request's entrant boundary: a
   defect past a form's own (a middleware's, the printer's) ends the request with its error as
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
-  forms ran, so what the model reads of it never changes in a later turn."
+  forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
+  namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
   {:malli/schema [:function [:=> [:cat :string] :seon.eval/response] [:=> [:cat :string :map] :seon.eval/response]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]
@@ -553,9 +609,17 @@
          ;; eval inside it (a context read's) names its own, then this one's again
          outer (:eval @agent/state)]
      (swap! agent/state assoc :eval (name handle))
-     (try (let [answered (fn [] (let [r (repaired (response @answers handle) req)] [r (print/response-text r render/summarized)]))
+     (try (let [;; with the namespace the REPL is in after it (:ns, as every nREPL response carries): the prompt
+                answered (fn [] (let [r (cond-> (repaired (response @answers handle) req)
+                                          (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state))))]
+                                  [r (print/response-text r render/summarized)]))
+                ;; what the call's prose cites, read after its forms ran (the parser is program the agent may
+                ;; have just changed: a defect in it is this eval's error, never the turn loop's)
+                cites (volatile! nil)
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
+                              (when (and (:prose req) contract/record? (= :agent (:mode @agent/state)))
+                                (vreset! cites (ref/references (agent/db) (:prose req))))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
@@ -567,10 +631,61 @@
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
-                               code req)
+                               code (assoc req :cites @cites))
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
           (finally (swap! agent/state assoc :eval outer))))))
+
+(defn- numbered
+  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each: a refused edit's error names its candidates by them (docs/agent.md#changing-a-definition)."
+  {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple pos-int? :string]]]}
+  [text from to]
+  (let [ls (clojure.string/split-lines text)]
+    (vec (for [i (range (max 1 from) (inc (min (count ls) to)))] [i (nth ls (dec i))]))))
+
+(defn- offsets
+  "Every offset at which s occurs in text, in order (an occurrence may not overlap the one before): where `edit!` finds its old text (docs/agent.md#changing-a-definition)."
+  {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]}
+  [text s]
+  (loop [from 0 acc []]
+    (if-let [i (clojure.string/index-of text s from)] (recur (+ i (max 1 (count s))) (conj acc i)) acc)))
+
+(defn edit!
+  "Change the definition var sym names by replacing old, exact text that occurs once in its
+  recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
+  namespace through the one REPL path (`eval-string`): it is recorded as program, its contract
+  armed, read by the forgiving reader as a model's call is (seon.reader/forgive: a delimiter
+  repaired, and said in :repaired), as a typed defn would be. Answers that
+  eval's response with :edited, the var and the lines around the change; or
+  :seon.repl/edit-refused, nothing changed: no recorded source, old not in it (with the lines that
+  hold old's first line, ignoring indentation), or old there more than once (each candidate's line).
+  Exact text and one occurrence, as file editors converged on (docs/agent.md#changing-a-definition):
+  the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]}
+  [sym old new]
+  (let [src (my.agent/source-fn sym)
+        refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
+                                                   (cond-> {:seon.repl/var sym :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
+        line-of (fn [i] (inc (count (filter #{\newline} (subs src 0 i)))))
+        at (when src (offsets src old))]
+    (cond
+      ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
+      (nil? src) (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil))
+      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))]
+                    (refuse :not-found "the old text is not in its source exactly (whitespace counts); (source f) shows it as recorded"
+                            (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))))
+      (next at) (refuse :ambiguous (str "the old text occurs " (count at) " times: give more of it, so it is one")
+                        (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at))
+      :else (let [i (first at)
+                  ;; the new definition read as the turn reads a model's call (seon.reader/forgive): an
+                  ;; unbalanced delimiter in new is repaired, and the repair said
+                  {text :text repairs :repairs} (reader/forgive (str (subs src 0 i) new (subs src (+ i (count old)))))
+                  r (eval-string text (cond-> {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}
+                                        (seq repairs) (assoc :repaired (context/repaired text repairs))))
+                  from (line-of i) k (cfg/value :seon.config.agent/edit-context-lines)]
+              ;; the response as data: its printed text and costliest functions are the outer eval's to print
+              (cond-> (dissoc r :text :fns :record)
+                (not (:ex r)) (assoc :edited {:var sym :lines (numbered text (- from k) (+ from (count (filter #{\newline} new)) k))}))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
@@ -581,7 +696,8 @@
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
     (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-    (record! (assoc r :text (print/response-text r render/summarized)) code req)))
+    ;; its prose cites nothing it ran: the parser is not asked (a defect in it is no unrun call's)
+    (record! (assoc r :text (print/response-text r render/summarized)) code (assoc req :cites nil))))
 
 (defn- layout
   "The layout this branch renders its ctx with: the var :seon.render/render-ctx declares, an agent's own

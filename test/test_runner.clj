@@ -475,7 +475,11 @@
   (seon.task/load-tx, then seon.docs/load-dir-tx: a prose word is a citation when it names a task
   too). A task file that does not read throws its error: no tasks is no answer."
   [db dir]
-  (let [tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
+  ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),
+  ;; so a kept tree's db may lack an attribute a task or a page holds (:seon.task/citations): the ones it
+  ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
+  (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
+        tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
         _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))
         db (d/db-with db tx)]
     (d/db-with db (docs/load-dir-tx db dir "docs" {}))))

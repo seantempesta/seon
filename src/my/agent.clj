@@ -32,7 +32,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -93,11 +93,18 @@
   (seon.docs/callers): a var's callers (x a qualified symbol, or the var: named), or the functions
   operating on a qualified keyword, an attribute, config key or schema entry (its :form/keywords).
   A symbol through an alias reads as the var it resolves to; one that names no var answers so
-  (:my.agent/no-var), never []. A keyword nothing names answers [] (no use is the true answer)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
+  (:my.agent/no-var), never []. A keyword that is a schema, an attribute or a key the program
+  names answers its callers ([] when none uses it: the true answer); any other answers
+  :seon.schema/unknown-key with the nearest registered keys (my.schema/unknown-key: a typo is no
+  \"nothing calls it\", the md-scan bench)."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var :qualified-keyword]] [:or [:vector :qualified-symbol] :my.agent/no-var :seon.schema/unknown-key]]}
   [x]
-  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))]
-    (or (when (symbol? x) (no-var db x)) (docs/callers db x))))
+  (let [db (agent/db) x (cond (keyword? x) x (var? x) (named x) :else (asked x))
+        fs (when (keyword? x) (schema/forms))]
+    (or (when (symbol? x) (no-var db x))
+        (when (and (keyword? x) (not (or (contains? fs x) (contains? (d/schema db) x) (seq (d/datoms db :avet :form/keywords x)))))
+          (schema/unknown-key fs x))
+        (docs/callers db x))))
 
 (defn tests-reaching
   "The tests whose reach includes var x on this branch, nearest first, each {:test}: the tests a change to
@@ -161,8 +168,8 @@
       (if (contract/error? r) r (first (:vectors (:value r))))))))
 
 (defn search
-  "The best matches on this branch for q, a text, a var's name or a schema key, over code, wiki sections, tasks and
-  schema keys at once: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
+  "The best matches on this branch for q, a text, a var's name or a schema key, over code and wiki
+  sections, and tests, tasks and schema keys when :kinds asks for them: [{:kind :name :score :by :line} ...] best first (seon.context/search), so a
   caller filters it with plain Clojure, e.g. (filter #(= :section (:kind %)) (search \"rrf\")). :kind is
   one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :by
   the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
@@ -287,7 +294,7 @@
   in this process kept (seon.repl), else what this branch records for it, else the form at its
   :file and :line (a library's). A namespace's name answers its ns form as this branch records
   it (its requires and aliases), then each definition, privates included, a line each in file
-  order (seon.docs/definition-lines), which clojure.repl's does not (pipeline 1's F4: a design
+  order (seon.docs/namespace-source), which clojure.repl's does not (pipeline 1's F4: a design
   that asked (source ns) saw the ns form alone, took it for all that was recorded, and spent five
   turns finding the namespace's private functions). sym is a symbol or the var (named)."
   {:malli/schema [:=> [:cat [:or :symbol :seon.host/var]] [:maybe :string]]}
@@ -299,9 +306,7 @@
         (file-source v))
     (when-not (namespace sym)
       ;; the branch's record is the answer: a namespace it does not record has no ns form or privates to list
-      (let [db (agent/db)]
-        (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]
-          (str head (some->> (docs/definition-lines (ref/namespace-view db sym :doc)) (str "\n"))))))))
+      (docs/namespace-source (agent/db) sym))))
 
 (defn deferred
   "The process tests this branch's change reaches, a proof among them: an agent's turn and
@@ -337,8 +342,10 @@
 
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address holds a word of it (four letters or more), then the nearest by Jolt's did-you-mean
-  ranking (as no-var): a few addresses, never the page ((my.agent/help) lists it)."
+  whose address holds a word of it (four letters or more), the sections whose text the search finds
+  for it (`search`: \"schema\" named no address, though the help page says how a schema changes;
+  md-scan #6), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
+  addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (docs/page db context/help-page :summary)
@@ -347,7 +354,9 @@
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
         holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
         ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
-    (vec (distinct (concat (filter holds? pages) (filter holds? addresses) ranked)))))
+    (vec (distinct (concat (filter holds? pages) (filter holds? addresses)
+                           (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
+                           ranked)))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help

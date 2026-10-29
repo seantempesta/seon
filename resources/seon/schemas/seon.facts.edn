@@ -211,6 +211,10 @@
  ;; the wiki sections the plan and instructions cite, by address (seon.ref/addresses): the
  ;; section-address twin of :seon.task/references, written by the same producer from the same text
  :seon.task/sections [:set :string]
+ ;; its text's citations, each at its depth (seon.ref/references), written by the same producer
+ ;; when its plan or instructions are written: what each draw of the agent's page reads, so no draw
+ ;; parses the plan with the program the agent may be changing (seon.task/references-of)
+ :seon.task/citations [:vector :seon.ref/citation]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -248,7 +252,7 @@
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
-                          [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections]
+                          [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/citations {:optional true} :seon.task/citations]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]

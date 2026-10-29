@@ -35,7 +35,7 @@
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
-  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
+  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). A work task's steps (reproduce what is wrong, or make the new namespace; the proof first, and only those proofs its status lists with no source) are docs/agent.md#what-you-read."
   {:design (str "Your task: turn the plan below into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
                 "backticks, and the proofs that will show the change are written, registered "
@@ -59,9 +59,10 @@
                "both sides need, or keeping one side (``(my.branch/resolve! 'ns/var :theirs)``), and running the proofs. Then end "
                "your turn with prose.")
    :work (str "Your task: do what the plan below asks: design it and build it. You are done when its proofs pass on your "
-              "branch. First reproduce what the plan says is wrong in one eval and read its output: if the output is already "
-              "right, the premise is false, so fail the task with that output at once (``(my.task/fail! \"why\" evidence)``). "
-              "Once the output is wrong, stop reading: write it as a deftest beside the function's existing tests, in their "
+              "branch. When the plan says something is wrong, first reproduce it in one eval and read its output: if the output "
+              "is already right, the premise is false, so fail the task with that output at once (``(my.task/fail! \"why\" evidence)``); "
+              "once the output is wrong, stop reading. When the plan asks for something new, there is nothing to reproduce: make its "
+              "namespace (``(ns …)``, so its proof can refer to it), then start with its proof. A proof your status shows with its source is written already: go on from proving it. Write each proof your status lists with no source as a deftest beside the function's existing tests, in their "
               "namespace (``(my.agent/tests-reaching 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, then the deftest: you write no file), "
               "its input built as theirs are (their helpers and fixtures, never the live db, vector literals where order matters), "
               "register it (``(my.task/update! :seon.task/proofs conj 'ns.x-test/a-proof)``) and run it red (``(my.agent/prove)``). Then make it pass "
@@ -69,9 +70,10 @@
               "(``seon.cost/proof``) for a function whose input grows. Never loosen a contract or a proof to make it pass. Its "
               "merge task brings main's work in after you.")
    :whole (str "Your task: do what the plan below asks, whole. You are done when its proofs pass on your branch with main's "
-               "work merged in. First reproduce what the plan says is wrong in one eval and read its output: if the output is "
-               "already right, the premise is false: fail the task with that output at once "
-               "(``(my.task/fail! \"why\" evidence)``). Once the output is wrong, stop reading: write it as a deftest beside the "
+               "work merged in. When the plan says something is wrong, first reproduce it in one eval and read its output: if the "
+               "output is already right, the premise is false: fail the task with that output at once "
+               "(``(my.task/fail! \"why\" evidence)``); once the output is wrong, stop reading. When the plan asks for something new, "
+               "there is nothing to reproduce: make its namespace (``(ns …)``, so its proof can refer to it), then start with its proof. A proof your status shows with its source is written already: go on from proving it. Write each proof your status lists with no source as a deftest beside the "
                "function's existing tests, in their namespace (``(my.agent/tests-reaching 'ns/f)`` lists them; ``(in-ns 'ns.x-test)``, "
                "then the deftest: no file), its input built as theirs (their helpers and fixtures, never the live db, "
                "vector literals where order matters), register "

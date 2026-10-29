@@ -7,10 +7,10 @@
   Platform code compiled into the binary keeps the built schemas until the next generation."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.contract :as contract :refer [defn defn-]] [seon.agent :as agent] [seon.program :as program] [seon.db :as pdb] [seon.config :as config]
-            [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m] [seon.schema.datahike :as sd]))
+            [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m] [seon.schema.datahike :as sd] [clojure.string :as str] [jolt.analyzer]))
 
 (defn- refused
-  "The registration-refused error for k: why, and the message of what refused it."
+  "The registration-refused error for k: why, and the message of what refused it (a form that is no EDN names its value, seon.program/non-edn; docs/references.md#resolving-and-showing)."
   {:malli/schema [:=> [:cat :qualified-keyword :keyword :string] :seon.schema/registration-refused]}
   [k why message]
   (contract/error :seon.schema/registration-refused #'my.schema/refused (str k ": " message)
@@ -72,7 +72,9 @@
   (let [text (binding [*print-namespace-maps* false] (sedn/encode v))
         judged (if (program/edn-value? v)
                 (judged db k (assoc (merge contract/forms (program/schema-changes db)) k (sedn/decode text)))
-                (refused k :unreadable "a schema form is EDN data: it must print and read back equal"))]
+                (let [[path x] (program/non-edn v)]
+                  (refused k :unreadable (str "a schema form is EDN data, and " (pr-str x) (when (seq path) (str " at " (pr-str path)))
+                                              " is no EDN: a predicate is its symbol, so quote the form ('[:vector nat-int?]) or the predicate ('nat-int?)"))))]
     (if (contract/error? judged)
       judged
       (let [e (some->> (pdb/eid db :schema/key k) (d/entity db))
@@ -83,14 +85,29 @@
          :registration (cond-> {:seon.schema/key k :seon.schema/definition v}
                          (contains? (d/schema db) k) (assoc :seon.schema.usage/check (usage-check db k (:registry judged))))}))))
 
+(declare unknown-key)
+
 (defn forms
   "The schema population this agent's branch sees, {key form}: the binary's forms with the
-  branch's registrations; (keys (forms)) are every key. With a key, that key's form, or nil
-  (agents asked (forms k) four times in step E's paid runs)."
+  branch's registrations; (keys (forms)) are every key. With a key, that key's form (agents asked
+  (forms k) four times in step E's paid runs), or, for a key no schema registers,
+  :seon.schema/unknown-key naming the nearest registered keys (`unknown-key`): unknown is no nil (md-scan #6,
+  asked for :seon.ref/names twenty times and read nil each time). See docs/references.md#resolving-and-showing."
   {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
                   [:=> [:cat :qualified-keyword] :any]]}
   ([] (merge contract/forms (program/schema-changes (agent/db))))
-  ([k] (get (forms) k)))
+  ([k] (let [fs (forms)] (if (contains? fs k) (get fs k) (unknown-key fs k)))))
+
+(defn unknown-key
+  "The answer for k, a key no schema of population fs registers: :seon.schema/unknown-key naming
+  the nearest registered keys by Jolt's did-you-mean ranking (jolt.analyzer/suggestions-for, as
+  my.agent/no-var ranks names). What (forms k) and my.agent/callers answer of one, never nil or []. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any] :qualified-keyword] :seon.schema/unknown-key]}
+  [fs k]
+  (contract/error :seon.schema/unknown-key #'unknown-key (str k " is no registered schema: the nearest registered keys are named")
+                  {:seon.schema/key k
+                   :seon.schema/nearest (vec (keep #(let [s (if (str/starts-with? % ":") (subs % 1) %)] (when (str/includes? s "/") (keyword s)))
+                                                   (jolt.analyzer/suggestions-for (str k) (map str (keys fs)))))}))
 
 (defn register!
   "Register form v as schema k on this agent's branch. Answers {:seon.schema/key k
@@ -110,4 +127,8 @@
         r (registration (agent/db) k v (or (= "user" (namespace k)) (boolean (and n (program/scratch-ns? n)))))]
     (if (contract/error? r)
       r
-      (do (agent/transact! (:tx r)) (:registration r)))))
+      (do (agent/transact! (:tx r))
+          ;; the code this process holds whose contracts reach k, compiled again against it (program/rearm!): a
+          ;; registration is in effect for the program as it is when the branch's program loads
+          (let [errors (program/rearm! (agent/db) #{k})]
+            (cond-> (:registration r) (seq errors) (assoc :seon.schema/rearm-errors errors)))))))

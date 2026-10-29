@@ -9,7 +9,7 @@
   reaches: the node kinds it builds, its cuts and their continuation forms. Keys keep
   Seon's names (`:seon.print/*`, `:seon.render.data/*`); a cut is read as its text.
   Dropped mechanisms are listed in notes BAGGAGE (proto/BAGGAGE.md)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str] [seon.config :as config]))
 
 (def default-options
   "Seon's shipped print options (the `:seon.print/default` properties of `:seon.print/options`
@@ -79,13 +79,31 @@
         (seq? form) (str "(" (str/join " " (map form-text form)) ")")
         :else (literal form)))
 
+(def ^:private chars-per-token
+  "The characters a token is taken to hold, the config's prior (docs/render.md#cut-where-a-value-is-made)."
+  (config/value :seon.config.ai/chars-per-token-prior))
+
+(defn chars-tokens
+  "Estimated tokens of n characters: the one sizer's rule (seon.print.select/estimate is it over a
+  text's length; docs/render.md#cut-where-a-value-is-made), what every count a reader sees is in (owner: \"only report tokens
+  (estimates are fine) not characters\")."
+  {:malli/schema [:=> [:cat nat-int?] :int]}
+  [n] (long (Math/floor (/ n chars-per-token))))
+
+(defn tokens-text
+  "A count of tokens as every reader is shown one, estimated and short: ~840 tok, ~12.4k tok (owner,
+  \"only report tokens (estimates are fine) not characters\"). The one wording of a size,
+  beside the one sizer (`chars-tokens`) and the cut that names what it left (`cut-words`): docs/render.md#cut-where-a-value-is-made."
+  {:malli/schema [:=> [:cat nat-int?] :string]}
+  [n] (if (< n 1000) (str "~" n " tok") (str "~" (/ (Math/round (/ n 100.0)) 10.0) "k tok")))
+
 (defn cut-words
   "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
-  `…+N chars` and, when lines begin in what it omitted, `in M more lines`, then the form that
-  reads the rest when there is one."
+  `…+~N tokens` of what it omitted (omitted, its characters, sized by `chars-tokens`, at least one)
+  and, when lines begin in it, `in M more lines`, then the form that reads the rest when there is one."
   {:malli/schema [:=> [:cat nat-int? nat-int? :any] :string]}
   [omitted lines continuation]
-  (str "…+" omitted " chars" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
+  (str "…+~" (max 1 (chars-tokens omitted)) " tokens" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
        (when continuation (str " " (form-text continuation)))))
 
 (defn elided-text
@@ -186,7 +204,13 @@
         (if (= "result" (namespace value))
           (text-op :seon.print/symbol text [:a {:class (css-class :seon.print/symbol) :href (str "#eval-" (name value))} text])
           {:op :text :text text :seon.print/class :seon.print/symbol}))
-      (:seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/char)
+      ;; a float on the page three decimals, its whole text its title: the text a model reads is whole
+      :seon.print/number
+      (let [text (or (:seon.print/text node) (literal value))]
+        (if (and (double? value) (not (:seon.print/text node)) (< (Math/abs ^double value) 1.0e6))
+          (text-op :seon.print/number text [:span {:class (css-class :seon.print/number) :title text} (str (/ (Math/round (* ^double value 1000.0)) 1000.0))])
+          {:op :text :text text :seon.print/class :seon.print/number}))
+      (:seon.print/boolean :seon.print/keyword :seon.print/char)
       {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])

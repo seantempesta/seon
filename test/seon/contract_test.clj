@@ -83,7 +83,7 @@
                                                        :clojure.core.async.flow/ex (ex-info "boom" {:v big :s text :a live})}))]
             (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq flowed)) "no live object is kept, only its print")
             (is (string? (:seon.print/code (:a flowed))) "the atom is kept as its print")
-            (is (or (= n 1000) (re-find #"\+\d+ chars" (:s flowed))) "a value past the budget is kept as the printer's cut, which says what it omitted")
+            (is (or (= n 1000) (re-find #"\+~[\d,]+ tokens" (:s flowed))) "a value past the budget is kept as the printer's cut, which says in tokens what it omitted")
             (count (pr-str flowed))))
         sizes (map kept-bytes [1000 100000 10000000])]
     ;; a small value is kept whole (1 KB), anything past the budget as its bounded print: the
@@ -98,3 +98,10 @@
         made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})]
     (is (= {:v big :s text :a live} (:data mapped)) "an eval error's ex-data is its :data, whole")
     (is (= {:big big :took text :held live} (select-keys made [:big :took :held])) "a built error carries its members whole")))
+
+(deftest a-contract-error-says-where-and-what
+  ;; md-scan #14, 2026-10-29: "its value does not satisfy its contract" sent the agent through
+  ;; ex-data for twelve evals to find one nil key; the message names the first problem
+  (let [f (contract/wrap 'x.c/blocks (contract/schema [:=> [:cat] [:map [:from :int] [:to :int]]]) (fn [] {:from 0 :to nil}))
+        msg (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
+    (is (clojure.string/includes? (str msg) "at [:to]: nil, expected :int") (str "where, what it got, what was expected: " msg))))

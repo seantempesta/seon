@@ -93,21 +93,30 @@
   true)
 
 (defn run
-  "(thunk) under its own token, stopped by root's SIGUSR1 or once it has run ticks engine
-  ticks (nil: no budget). Throws ex-info {:interrupted true} when root stopped it, or the
-  typed :seon.repl/ticks-spent {:ticks n} when its budget ran out."
-  {:malli/schema [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]}
-  [ticks thunk]
+  "(thunk) under its own token, stopped by root's SIGUSR1, once it has run ticks engine ticks, or
+  once it has allocated bytes (nil: no budget of that kind). Throws ex-info {:interrupted true} when
+  root stopped it, or the typed :seon.repl/ticks-spent {:ticks n} or :seon.repl/bytes-spent {:bytes
+  n} when a budget ran out."
+  {:malli/schema [:function [:=> [:cat [:maybe pos-int?] :seon.host/fn] :any]
+                  [:=> [:cat [:maybe pos-int?] [:maybe pos-int?] :seon.host/fn] :any]]}
+  ([ticks thunk] (run ticks nil thunk))
+  ([ticks bytes thunk]
   ;; an enclosing eval already stopped, or root's interrupt is pending: this one does not start
   (when (or @pending (some #(deref (:cause %)) @stack))
     (throw (ex-info "interrupted by root" {:interrupted true})))
   (let [tok (jolt.host/make-interrupt)
         e {:token tok :cause (volatile! nil) :thread (Thread/currentThread)}]
     (swap! stack conj e)
-    (try (if ticks (jolt.host/run-interruptible tok thunk ticks) (jolt.host/run-interruptible tok thunk))
+    (try (if (or ticks bytes) (jolt.host/run-interruptible tok thunk ticks bytes) (jolt.host/run-interruptible tok thunk))
          (catch Throwable ex
            (let [d (ex-data ex)]
              (cond
+               (:jolt/bytes-spent d)
+               (throw (ex-info "the form spent its byte budget"
+                               (contract/error :seon.repl/bytes-spent #'seon.intr/run
+                                               (str "the form allocated " (:jolt/bytes-spent d) " bytes, its budget of " bytes
+                                                    ", and was stopped: a value growing without end, or more data than one form should make")
+                                               {:bytes (:jolt/bytes-spent d) :budget bytes})))
                (:jolt/ticks-spent d)
                (throw (ex-info "the form spent its tick budget"
                                (contract/error :seon.repl/ticks-spent #'seon.intr/run
@@ -122,4 +131,4 @@
          (finally
            (swap! stack (fn [s] (doall (remove #(identical? % e) s))))
            ;; the flag on-usr1 set is this eval's: never the next request's
-           (Thread/interrupted)))))
+           (Thread/interrupted))))))

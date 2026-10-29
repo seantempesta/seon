@@ -134,6 +134,26 @@
           ;; `:value "seon.print.select"` for a symbol, and the agent sent the same call again)
           :value (print/code (print/text value (:part print/budgets)))})))
 
+(clojure.core/defn- first-problem
+  "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
+  what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
+  missing or refused key; and how many reasons more. md-scan #14: \"its value does not
+  satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key.
+  See docs/errors.md#errors."
+  {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
+  [s v]
+  (let [[{:keys [in schema value type]} :as es] (:errors (m/explain s v))]
+    (if-not schema
+      ""
+      ;; the value and the form it was held to, each by the one printer at a shown-inside budget (its cut says what it left)
+      (let [expected (print/text (m/form schema) (:part print/budgets))]
+        (str " at " (pr-str in) ": "
+             (case type
+               :malli.core/missing-key "a key it must hold is missing"
+               :malli.core/extra-key "a key its closed map does not admit"
+               (str (print/text value (:part print/budgets)) ", expected " expected))
+             (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
+
 (clojure.core/defn- invalid
   "Malli's report for fn-sym, as the thrown error map."
   {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :map] :any]}
@@ -144,8 +164,8 @@
                    :seon.error/operation fn-sym
                    :seon.error/member kind
                    :seon.error/message (str fn-sym " " (name kind)
-                                            (case arm :input ": its arguments do not satisfy its contract"
-                                                  :output ": its value does not satisfy its contract"
+                                            (case arm :input (str ": its arguments do not satisfy its contract" (first-problem (:input data) (:args data)))
+                                                  :output (str ": its value does not satisfy its contract" (first-problem (:output data) (:value data)))
                                                   :arity (str ": called with " (:arity data) " arguments")
                                                   ""))
                    :seon.error/fix (case arm
@@ -298,6 +318,22 @@
   {:malli/schema [:=> [:cat :seon.host/var] :boolean]}
   [v] (identical? @v (::wrapper (meta v))))
 
+(defn- wrap!
+  "Var v's root made raw wrapped by its contract c, compiled now (the registry in force): :armed, its
+  wrapper and the raw root it wraps kept on v (a changed schema re-arms it, `rearm!`), or the
+  :seon.contract/invalid error map, by-var asking, when the contract does not compile. The one arm
+  `arm!` and `rearm!` share. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/var :any :any :seon.host/var] [:or [:enum :armed] :seon.contract/invalid]]}
+  [v c raw by]
+  (let [s (try (schema c) (catch Throwable e e))]
+    (if (instance? Throwable s)
+      (error :seon.contract/invalid by (str (symbol v) ": its contract does not compile: " (ex-message s))
+             {:seon.contract/var (symbol v)})
+      (let [w (wrap (symbol v) s raw)]
+        (alter-var-root v (constantly w))
+        (alter-meta! v assoc ::wrapper w ::raw raw)
+        :armed))))
+
 (defn arm!
   "Instrument var v by its contract: inputs and arity checked on entry, the output on
   exit. Answers :armed, :unchanged (its root already is its wrapper), :off (instrumentation
@@ -310,15 +346,19 @@
       (nil? c) :uncontracted
       (not on?) :off
       (armed? v) :unchanged
-      :else
-      (let [s (try (schema c) (catch Throwable e e))]
-        (if (instance? Throwable s)
-          (error :seon.contract/invalid #'seon.contract/arm! (str (symbol v) ": its contract does not compile: " (ex-message s))
-                 {:seon.contract/var (symbol v)})
-          (let [w (wrap (symbol v) s @v)]
-            (alter-var-root v (constantly w))
-            (alter-meta! v assoc ::wrapper w)
-            :armed))))))
+      :else (wrap! v c @v #'seon.contract/arm!))))
+
+(defn rearm!
+  "Arm var v again by its contract, compiled now (under the registry in force: a branch's changed
+  schemas, seon.program/rearm!), over the root its arm wrapped: what a schema registered since it
+  was armed owes it. Answers :armed, :unarmed (no arm to redo), or the :seon.contract/invalid
+  error map. See docs/source.md#schemas-at-the-repl."
+  {:malli/schema [:=> [:cat :seon.host/var] [:or [:enum :armed :unarmed] :seon.contract/invalid]]}
+  [v]
+  (let [c (contract v) raw (::raw (meta v))]
+    (if (and c on? raw (armed? v))
+      (wrap! v c raw #'seon.contract/rearm!)
+      :unarmed)))
 
 (defn function-var?
   "Is v a var holding a function that needs a contract: not a macro, a test, a dynamic

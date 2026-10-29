@@ -11,7 +11,8 @@
   rev42.md §2). Selection, first match wins, and nothing else (DECISIONS, Renders attach to
   schemas; the UI and the context are renders, ported not reinvented):
     1. the value's own override key (:seon.render/html, in the map or its metadata): a render
-       symbol, or already-rendered hiccup;
+       symbol (the value rendered itself, never one nested in another: there it is a schema's
+       properties, data), or already-rendered hiccup;
     2. the render its schema declares: a schema's property {:seon.render/html sym} in
        resources/seon/schemas/*.edn (seon.contract/forms), the
        schema then its parents ([:and p ...], [:merge p ...]). The value's schema is never
@@ -133,10 +134,13 @@
   "The printer's :render: a nested value whose schema declares a render, as a call of that render
   inline ({:text, the value in one line; :html, the call}), else nil. Its render is looked up by
   render-of (seon.render/schema-of: one metadata read or one map lookup per key, never a
-  validation)."
+  validation). A nested map holding a render symbol under :seon.render/html is data, printed as it
+  is: it is what a schema's properties look like inside a printed schema form, and drawing it by
+  that render called the render with the properties (an agent's registered :lab.ctx/steps form,
+  its lab.ui/steps called with {:seon.render/html lab.ui/steps}, killed the agent drawing it)."
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [v]
-  (when-let [h (render-of v nil)]
+  (when-let [h (when-not (symbol? (own-key v :seon.render/html)) (render-of v nil))]
     {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline} v]}))
 
 (defn- nested-html
@@ -306,10 +310,18 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id id :class (name (first k))})
+                      ;; a component that throws is a part of its own: its error as data (what threw, and the
+                      ;; thrown error's own data: a contract's problems), which the page draws by the error's
+                      ;; render and the model reads as the map it is, every other component drawn
                       (catch Throwable e
-                        (with-id [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
-                                                                               (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]
-                                 {:id id})))
+                        (vreset! data nil)
+                        (with-id (part (with-meta (contract/error :seon.render/component-defect #'render!
+                                                                  (str (symbol f) " threw: " (or (ex-message e) (str e)))
+                                                                  (cond-> {:seon.error/in (symbol f)}
+                                                                    (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))
+                                                  {:seon.render/schema :seon.render/component-defect})
+                                       data)
+                                 {:id id :class "err"})))
             draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (if-let [rx (:rx prev)]

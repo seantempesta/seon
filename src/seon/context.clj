@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -46,11 +46,25 @@
     (cond-> {:assert (code (:expected r)) :got (code (or (:got r) (:actual r)))}
       (:message r) (assoc :message (:message r)))))
 
+(defn failures
+  "A test's failing assertions as the agent reads them (`failure`), those that got the same value
+  with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
+  assertions that each threw one NullPointerException are one cause, read once (the md-scan bench). See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
+  [fs]
+  (let [ms (mapv failure fs)
+        k (juxt :got :message)
+        order (distinct (map k ms))
+        by (group-by k ms)]
+    (vec (for [g order :let [[m :as same] (by g)]]
+           (if (next same) (-> m (dissoc :assert) (assoc :asserts (mapv :assert same))) m)))))
+
 (defn callees
   "The program functions proof p calls directly (one level: its recorded form's :form/refs,
   the compiler's resolved references), each at summary level from its own facts on db: its
-  contract and doc, never its body; a var is program when db holds it (a branch's callee
-  this process never loaded included)."
+  contract and doc, and for a helper of p's own namespace its source too (what the proof means:
+  the md-scan bench's agent read its proofs' block-of first); a var is program when db
+  holds it (a branch's callee this process never loaded included). See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
@@ -58,7 +72,8 @@
              :when (and v (not= :test (:var/kind v)))]
          (cond-> {:var q}
            (:var/contract v) (assoc :contract (clojure.edn/read-string (:var/contract v)))
-           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})))))
+           (:var/doc v) (assoc :doc {:seon.print/prose (:var/doc v)})
+           (= (namespace p) (namespace q)) (merge (some->> (docs/source-of db q) print/code (hash-map :source)))))))
 
 (defn- refused
   "The done rule's reasons as the agent reads them, beyond its own red proofs (shown with
@@ -80,7 +95,7 @@
              (case reason
                (:regression :stray-red) (cond-> {:reason reason :test symbol}
                                           (seq (filter #(= symbol (:test %)) reds))
-                                          (assoc :failures (mapv failure (filter #(= symbol (:test %)) reds)))
+                                          (assoc :failures (failures (filter #(= symbol (:test %)) reds)))
                                           ;; a red test the agent wrote is a proof it has not registered, or one to delete
                                           (and (= :stray-red reason) (defined? symbol))
                                           (assoc :do (list 'my.task/update! :seon.task/proofs 'conj (list 'quote symbol)))
@@ -132,6 +147,14 @@
            (seq dropped) (assoc :dropped dropped)
            (seq inserted) (assoc :inserted inserted)))))
 
+
+(defn plan-citations
+  "The references task t's texts make, read on db: the citations their writes derived
+  (:seon.task/citations, along its needs: seon.task/references-of), once each at their strongest
+  depth, those db holds (seon.ref/kept). What every part reads of what the plan cites; none parses
+  the plan again with the program the agent may be changing. See docs/references.md#task-references."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
+  [db t] (ref/kept db (ref/cited (vec (:citations (:seon.task/accumulated t))))))
 
 (defn- program-vars
   "Of citations, those of the program's vars (seon.program/program-names), in their order: what a
@@ -402,8 +425,10 @@
        (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary :seon.config.render/relevance-doc] te)
              depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
                     :doc (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)})}
-             {:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
-             cites (ref/references db plan)
+             ;; what the plan cites, as its write derived it (seon.task/references-of): no draw parses it
+             tk (task/task db (:seon.task/id t))
+             {:keys [plan]} (:seon.task/accumulated tk)
+             cites (plan-citations db tk)
              fns (into #{} (keep :seon.ref/name) (program-vars db cites))
              ;; a wiki page's section only: a cited file is read whole by its view
              secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
@@ -650,11 +675,14 @@
 
 (defn included
   "What agent key k's context includes beside task id now on db: `selected` over the work's focus, its
-  prior the agent's :seon.agent/included; nil when the work has no vector yet."
+  prior the agent's :seon.agent/included, never a section of the system prompt (`system-page`, the
+  request's first message); nil when the work has no vector yet."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] [:maybe [:vector [:tuple :any number?]]]]}
   [db task k]
   (let [te (pdb/eid db :seon.task/id task) a (pdb/eid db :seon.agent/key k)]
-    (when (and te a) (selected db te a (or (:seon.agent/included (d/entity db a)) [])))))
+    ;; the system prompt's own sections are the request's first message already: never again as related
+    (when (and te a) (into [] (remove (fn [[u]] (and (string? u) (str/starts-with? u (str system-page "#")))))
+                           (selected db te a (or (:seon.agent/included (d/entity db a)) []))))))
 
 (defn shown
   "Units [name chance] (`selected`'s) as `related`'s map, every one whole, for related-view."
@@ -707,6 +735,85 @@
 
 (declare cited)
 
+(defn cite-key
+  "Citation c's one key on a page: the name it cites, else its address (docs/references.md#resolving-and-showing)."
+  {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
+  [c] (str (or (:seon.ref/name c) (:seon.ref/address c) (:seon.ref/path c))))
+
+(defn current-ns
+  "The namespace agent a's REPL is in on db: the one its newest eval left it in (its response's :ns,
+  as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
+  [db a]
+  ;; newest eval first: eval ids are the store's counter, so the index read backward from a's last datom is
+  ;; time order (seon.ctx's rseek), and it stops at the first record that carries the ns (every response does)
+  (some (fn [dt] (get-in (d/pull db [:seon.eval/record] (:e dt)) [:seon.eval/record :response :ns]))
+        (take-while #(and (= :seon.eval/agent (:a %)) (= a (:v %))) (d/rseek-datoms db :avet :seon.eval/agent a))))
+
+(defn namespace-data
+  "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
+  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns): its
+  aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
+  and its deftests, how many are green and which are red: its datoms, never its forms read (a
+  definition's arglists are (doc f)'s, asked of the one at hand). nil when db records no such
+  namespace. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :map]]}
+  [db nsym]
+  (when-let [e (pdb/eid db :ns/name nsym)]
+    (let [src (d/q '[:find ?src . :in $ ?n :where [?f :form/defines ?n] [?f :form/src ?src]] db e)
+          ;; its vars in one pass over the index of :var/ns, each read for the attributes it shows: its
+          ;; definitions, and its deftests
+          vars (for [dt (d/datoms db :avet :var/ns e) :let [x (d/entity db (:e dt))]]
+                 {:var/name (:var/name x) :var/kind (:var/kind x) :seon.test/status (:seon.test/status x)
+                  :var/form {:form/order (:form/order (:var/form x))}})
+          {tests true defs false} (group-by #(= :test (:var/kind %)) vars)
+          defs (->> defs
+                    (sort-by (fn [{v :var/name {o :form/order} :var/form}] [(or o Long/MAX_VALUE) (str v)]))
+                    (mapv #(symbol (name (:var/name %)))))
+          tests (for [{v :var/name st :seon.test/status} tests] [v (or st :none)])
+          by (group-by second tests)]
+      (cond-> {:ns nsym}
+        src (assoc :aliases (into (sorted-map) (learn/aliases [src])))
+        (seq defs) (assoc :defines defs)
+        (seq tests) (assoc :tests (cond-> {:deftests (count tests) :green (count (by :green))}
+                                    (seq (by :red)) (assoc :red (vec (sort (map first (by :red)))))))))))
+
+(defn namespaces-of
+  "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
+  (`current-ns`) first, marked :here, then those of what the plan
+  cites (a var's, a namespace itself) and of the task's proofs, once each, those db records. What
+  the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:map-of :symbol :map]]}
+  [db t a]
+  (let [{:keys [proofs]} (:seon.task/accumulated t)
+        cited (for [{n :seon.ref/name} (plan-citations db t)
+                    :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
+    (let [here (current-ns db a)]
+      ;; the one the REPL is in first; a map by name, in
+      ;; that order (a part answers a map: a vector is hiccup)
+      (->> (concat (some-> (some->> here (namespace-data db)) (assoc :here true) vector)
+                   (keep #(namespace-data db %) (remove #{here} (distinct (concat cited (map (comp symbol namespace) proofs))))))
+           (mapcat (fn [d] [(:ns d) (dissoc d :ns)]))
+           (apply array-map)))))
+
+(defn citations
+  "The citations of task t's plan and instructions as their write derived them (:seon.task/citations,
+  seon.task/references-of: no draw parses the plan with the program the agent may be changing), one per
+  name, in first-mention order, each at the depth its delimiter asks
+  (docs/references.md#the-delimiter-picks-the-depth): each that pulls something
+  (seon.docs/citation-kind), the task's own proofs left out (the status shows them). What the page and
+  the model are shown of what the task cites, one part each (seon.render.ui/cited)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
+  [db t]
+  (let [{:keys [proofs]} (:seon.task/accumulated t)
+        proof? (set proofs)]
+    (let [cs (into [] (comp (filter #(docs/citation-kind db %)) (remove #(proof? (:seon.ref/name %))))
+                   (plan-citations db t))
+          by (group-by cite-key cs)]
+      ;; a name cited twice is shown once, at the deepest depth it is cited at
+      (mapv (fn [k] (apply max-key #(get {:summary 0 :doc 1 :code 2} (:seon.ref/depth %) 0) (by k)))
+            (distinct (map cite-key cs))))))
+
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
@@ -720,7 +827,7 @@
   ([db t] (task-data db t true))
   ([db t write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
+        cites (plan-citations db t)
         refs (program-vars db cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)
@@ -834,7 +941,7 @@
                                       calls (when (and src (not= :pass st)) (callees db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
-                              (seq fs) (assoc :failures (mapv failure fs))
+                              (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq (refused reasons reds defined?)) (assoc :refused (refused reasons reds defined?))
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
@@ -851,8 +958,7 @@
   charges a form reading again to (seon.learn/waste, producer seon.docs/resolve-ref)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :symbol]]}
   [db t]
-  (let [{:keys [plan]} (:seon.task/accumulated t)]
-    (mapv :seon.ref/name (program-vars db (ref/references db (str plan "\n" (:seon.task/instructions t)))))))
+  (mapv :seon.ref/name (program-vars db (plan-citations db t))))
 
 (defn status-model
   "The status as the model is sent it (the declared model render of :seon.context/status): its
@@ -1049,7 +1155,11 @@
   (let [e (:db/id a)
         model? (= :model (:origin basis))
         id (str (:run basis) (if model? "/" "/read-") (:turn basis))
-        [_ prev-tx prev-m] (peek (filterv #(not= id (first %)) (calls-of db e (:origin basis))))
+        ;; this turn's own tx: the request is the turn's as it was, whatever came after it on db (a read of
+        ;; history on a later db answered the newest turn's request), so the call before it is the last one
+        ;; below it and the records are those at or before it
+        now (or (when model? (d/q '[:find ?tx . :in $ ?id :where [?t :seon.turn/id ?id] [?t :seon.turn/origin _ ?tx]] db id)) (:max-tx db))
+        [_ prev-tx prev-m] (last (filter #(and (not= id (first %)) (< (second %) now)) (calls-of db e (:origin basis))))
         prev (when prev-m (sent-of db prev-m))
         cut? (boolean (and prev (trimmed? db e prev)))
         old (when-not cut? (some #(when (= :hashes (first %)) (second %)) prev))
@@ -1060,13 +1170,12 @@
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
         ref [:parts e (d/commit-id db) whole? ids id]
-        now (or (when model? (d/q '[:find ?tx . :in $ ?id :where [?t :seon.turn/id ?id] [?t :seon.turn/origin _ ?tx]] db id)) (:max-tx db))
         current [[:parts id] (delay {:ref ref :whole (parts-message live ids)}) nil (if whole? 0 now)]
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
         before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes} (first %))) prev))
         base (when before
                (if (= before (mapv #(:ref (get-in printed [:parts %])) (:ids printed))) printed (cache-of db before)))
-        rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e (when before prev-tx))) [])
+        rs (if model? (into [] (comp (filter (fn [[tx]] (<= tx now))) (map (fn [[tx v k]] [(ref-of v) v k tx]))) (records db e (when before prev-tx))) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs [current]))
         cache (printed-run items base)
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]
@@ -1082,7 +1191,7 @@
   "Refs (as :seon.model-call/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), an eval by eval-messages, a
   message or a prose reply by its render, the parts of a turn ([:parts a c whole? ids], drawn cold from
-  the branch at commit c, the ids' hiccup: what the request sent, the same bytes), without the hashes (a request's, for the next to compare: no part of it). No request is built again: the same records, rendered. See docs/render.md#the-branchs-views."
+  the branch at commit c, the ids' hiccup: what the request sent, the same bytes), without the hashes (a request's, for the next to compare: no part of it). No request is built again: the same records, rendered. See docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
   [db refs]
   (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])]
