@@ -1469,7 +1469,7 @@
   ;; the agent out of memory or hung it (in 3 of 6 runs). The readers' wait to enter the io poller's monitor made
   ;; the main carrier's wake, itself an entry of that monitor, again and again from inside its own wait; a wait to
   ;; enter a monitor no longer tells the loop it fell asleep (Jolt's locks.ss jolt-asleep-silent). The work done is bytes
-  ;; allocated, never time. docs/forks.md (Jolt: a thread waiting to enter a monitor), docs/processes.md
+  ;; allocated, never time. docs/forks.md (Jolt: a thread waiting to enter a monitor)
   (let [bytes "(jolt.scheme/eval-string \"(lambda () (sstats-bytes (statistics)))\")"
         code (str "(let [bytes " bytes " b0 (bytes) rs (vec (repeatedly 4 #(clojure.java.shell/sh \"sleep\" \"1\")))] "
                   "{:exits (mapv :exit rs) :mb (quot (- (bytes) b0) 1048576)})")
