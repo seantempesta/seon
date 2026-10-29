@@ -50,6 +50,9 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 "Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
 
+### Agents at once: ten to twenty on a small machine, no ceiling on big iron (owner, 2026-10-29)
+"Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running), task seon.config/agents-at-once-follow-the-machine.
+
 ### Fix every major optimization issue; memory is the thread to pull (owner, 2026-10-29)
 "Your job is to priortize fixing ALL major optimization issues that you see. Memory problems seem like a good way to finding real system / platform / core issues so it's not a bad thread to pull on. Blockers of course." and "I don't see why hundreds of mb are being used for anything right now so I think there's a lot of headroom". The machine session works beside step 1: blockers first, then every large cost found, each measured before and after. Stated in: docs/plan.md (beside step 1).
 

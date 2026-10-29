@@ -199,11 +199,13 @@
  ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
  ;; window it replaced. At the bound: the free memory is read.
  :seon.config.check/pages-ms 500
- ;; Unit: runs running at once (v1's :seon.config.agent/max-running, same value and
- ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
+ ;; Unit: runs running at once. Provenance: owner, 2026-10-29 ("10-20 should be fine for users
+ ;; with small machines"): an agent costs ~20.6 MB of real memory (bin/check scale, 2026-10-29), so
+ ;; ten fit an 8 GB machine beside the user's work (was 4, v1's, when an agent was counted by its
+ ;; footprint); task seon.config/agents-at-once-follow-the-machine sizes it from the RAM. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
- :seon.config.agent/max-running 4
+ :seon.config.agent/max-running 10
  ;; Unit: turns a run may take when its task sets none (a task's own
  ;; :seon.config.agent/max-turns wins). At the bound the run ends and the done rule judges it.
  ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
