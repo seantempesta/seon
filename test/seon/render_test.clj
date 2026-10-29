@@ -1220,7 +1220,7 @@
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
-            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
+            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)"))
             [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
