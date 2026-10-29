@@ -467,6 +467,8 @@
       ;; end! is outside it, run once on the turn's answer, so a failing end is never taken for a turn
       (let [ended (fn [st outcome reason err] [::end st outcome reason err])
             next-of (fn [st'] (if (contract/error? st') [::end st :error (:seon.error/message st') st'] [::next (dissoc st' :threw :error)]))
+            ;; the request the last answered model call sent: a turn whose own call answered replaces it
+            asked (get-in @agent/state [:requests run])
             step (repl/with-branch-schemas
                    (fn []
                      (try
@@ -495,8 +497,11 @@
                        (catch Throwable e
                          (if (:interrupted (ex-data e))
                            (throw e)
-                           ;; the second in a row, with no model turn between, ends its work with that error
-                           (let [st' (update (turn-error! st (agent/error-map e 'seon.turn/work!)) :turn inc)]
+                           ;; the second in a row with no model turn between ends its work with that error: a turn
+                           ;; whose model call answered before it threw was the agent's turn, so the count starts again
+                           (let [called? (not (identical? asked (get-in @agent/state [:requests run])))
+                                 st' (cond-> (update (turn-error! st (agent/error-map e 'seon.turn/work!)) :turn inc)
+                                       called? (assoc :threw 1))]
                              (if (< 1 (:threw st'))
                                (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
                                [::next st'])))))))]

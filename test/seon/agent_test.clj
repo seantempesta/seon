@@ -1041,7 +1041,15 @@
         end (:value end)]
     (is (= :error (:outcome end)) (pr-str end))
     (is (str/starts-with? (str (:reason end)) "two turns in a row threw") (pr-str end))
-    (is (str/includes? (str (:reason end)) "boom: Seon's own render, changed") "naming its cause")))
+    (is (str/includes? (str (:reason end)) "boom: Seon's own render, changed") "naming its cause"))
+  ;; a turn that threw after its model call answered was the agent's turn: it read the last error and acted, so
+  ;; the count starts again, and the work goes on to its cap (here seon.turn/usage, read after the reply)
+  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
+                            ["(in-ns 'seon.turn) (clojure.core/defn usage [& _] (throw (ex-info \"boom: after the reply\" {})))"
+                             (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#after")) " :max-turns 3})")])
+                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        end (:value end)]
+    (is (= :cap (:outcome end)) (str "each turn reached its model, so none ended the work: " (pr-str end)))))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
