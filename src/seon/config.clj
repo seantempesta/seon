@@ -220,12 +220,15 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]}
   [args] (:rest (overrides args)))
 
+(declare config)
+
 (defn profile
-  "The aero profile the config file is read under: --profile NAME on args (default: this
-  process's command line, argv) as a keyword, else :default. Recorded as
-  :seon.config.root/profile. See docs/config.md#layers."
+  "The aero profile the config file is read under: --profile NAME on args as a keyword, else
+  :default; with no args, the profile of the config in force (:seon.config.root/profile, read
+  once from this process's command line when the config loaded: *command-line-args* is unbound
+  in an eval's thread). See docs/config.md#layers."
   {:malli/schema [:function [:=> [:cat] :keyword] [:=> [:cat [:sequential :string]] :keyword]]}
-  ([] (profile (argv)))
+  ([] (or (get config :seon.config.root/profile) (profile (argv))))
   ([args] (if-let [p (:profile (overrides args))] (keyword p) :default)))
 
 (defn- read-layer

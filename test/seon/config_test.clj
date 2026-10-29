@@ -264,6 +264,9 @@
   (is (= :scripted (config/profile ["root" "--profile" "scripted" "--set" ":seon.config.web/port=1"])))
   (is (= ["root"] (config/without-overrides ["--profile" "scripted" "root"])))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/overrides ["--profile"])))))
+  ;; with no args it answers the profile in force, even where *command-line-args* is unbound (an
+  ;; eval's thread in root answered :default under --profile deepseek)
+  (is (= (:seon.config.root/profile config/config) (binding [*command-line-args* nil] (config/profile))))
   (let [under #(config/layered (config/load-layers (config/checkout) %))
         none (under [])
         scripted (under ["--profile" "scripted"])
