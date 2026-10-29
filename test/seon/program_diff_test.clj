@@ -54,7 +54,10 @@
       (is (= [[:var 'app.pc/f5]] (:remove (program/diff-plan db (get cases "a definition removed")))))
       (is (= #{:app.pc/s} (:schemas (program/diff-plan db (get cases "a schema entry registered"))))))))
 
-(def ^:private diff-sizes "The sizes diff-plan's proof measures." [10 100 1000])
+;; sizes 5, 50, 500, a decade apart (see the proof): on Jolt 546c3d1f the bytes at 10, 100 and 1,000 read 655k,
+;; 699k and 972k, +44k then +273k, an index depth step between 100 and 1,000 that seon.cost/growth fitted as
+;; n^0.86 against the n^0.60 log allows, with every size at 0.4x to 0.7x of its estimate
+(def ^:private diff-sizes "The sizes diff-plan's proof measures." [5 50 500])
 
 (deftest a-diff-costs-the-change-never-the-program
   (try
@@ -66,7 +69,7 @@
                   "entry, log n), then the candidate entities' own datoms and the one changed form's row; the "
                   "whole read before was four live-form scans and one entity read a definition on each side")
        :growth :log
-       ;; sizes 10, 100, 1,000, not 100, 300, 1,000: the index's depth steps, so between sizes 3x
+       ;; sizes a decade apart, not 100, 300, 1,000: the index's depth steps, so between sizes 3x
        ;; apart the bytes are not log-shaped (2026-10-29: 895k at 100, 976k at 300, 1.22M at 1,000, +80k
        ;; then +245k: n^1.16 against the n^0.91 log allows over those two increments, which
        ;; seon.cost/growth fitted right from a measure that is a step); a decade apart the steps
