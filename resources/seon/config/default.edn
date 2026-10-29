@@ -171,9 +171,11 @@
 
  ;; Unit: MB. The memory Seon itself may use on the machine it targets: a 16 GB MacBook M1
  ;; (owner, 2026-10-22: "run well on a 16GB Macbook M1"), a quarter of it, leaving the rest to
- ;; the OS, the user's work and what agents run (builds, tests). At the bound: seon.check/scale
- ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
- ;; (each agent charged the system's measured free-memory drop per agent).
+ ;; the OS, the user's work and what agents run (builds, tests); owner, 2026-10-29: root plus ten
+ ;; working agents under about 4 GB. At the bound: seon.check/scale fails when root and the fork
+ ;; server (their footprints) and :seon.config.agent/max-running agents would exceed it, each agent
+ ;; charged the machine's drop in free plus inactive memory (host_statistics64) from before the
+ ;; agents started to their peak, per agent, never the sum of their footprints (docs/cost.md#how-we-measure).
  :seon.config.machine/memory-mb 4096
  ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
  ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
@@ -196,8 +198,8 @@
  ;; Load only makes what it measures likelier. At the bound: the measurement is read.
  :seon.config.check/hold-ms 500
  ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
- ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
- ;; window it replaced. At the bound: the free memory is read.
+ ;; returns (:system-available-returned-mb-per-agent, reported, not checked). Provenance: the
+ ;; window it replaced. At the bound: the available memory is read.
  :seon.config.check/pages-ms 500
  ;; Unit: runs running at once (v1's :seon.config.agent/max-running, same value and
  ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
