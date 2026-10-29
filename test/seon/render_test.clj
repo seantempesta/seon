@@ -196,7 +196,9 @@
   "Main's db with every file of src imported (each form analyzed, never run: the running
   generation's namespaces), as seon.source-test imports it."
   []
-  (let [files (:value (seon.fx/read-source {:req {:root (System/getProperty "user.dir") :dirs ["src"]}}))]
+  ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
+  ;; and a test of it was red in every agent's run (md-scan #23)
+  (let [files (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"]}}))]
     (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
     (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))))
 
