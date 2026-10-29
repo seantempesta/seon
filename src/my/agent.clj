@@ -254,7 +254,7 @@
 
 (defn process-test?
   "Whether test t reaches a process of its own on this branch (an agent, a root, a fork, the binary:
-  seon.program/reach-index's :process?), so it runs at the judge's merge gate and never in this
+  seon.program/graph-index's :process?), so it runs at the judge's merge gate and never in this
   agent's fork; with why ({:uses :through}: the process var it reaches and the calls to it,
   seon.program/process-path), or nil when it does not."
   {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :map]]}

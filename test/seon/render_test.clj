@@ -206,7 +206,7 @@
   ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
   ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
   ;; as reaching a process and was left out of bin/prove. A render runs no process
-  (let [idx (seon.program/reach-index (src-program) {:env "e" :tree "t" :config {}}
+  (let [idx (ts/reach-index (src-program) {:env "e" :tree "t" :config {}}
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
     (is (= {"agent" false "root" false "root-ctx" false "render-ctx" false} (update-vals idx :process?))
         "no render reaches a process var (:seon.config.source/process-vars)")))
@@ -1223,7 +1223,7 @@
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
-            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
+            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)"))
             [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
