@@ -712,9 +712,11 @@
   ;; 2026-10-25: 163 MB of the fork server's heap sat in generations 3 and 4 at fork, and one
   ;; full collect in a fresh agent raised its footprint by 98 MB; made static, 106 MB after a
   ;; work that left today's agent at 333 MB. The bytes in Chez's collected generations are
-  ;; work done (what the fork server held live), not load.
-  (let [[r] (in-agent ["(vec (for [g (range 1 5)] (jolt.scheme/eval-string (str \"(bytes-allocated \" g \")\"))))"])
-        mb (/ (reduce + (:value r)) 1048576.0)]
+  ;; work done (what the fork server held live), not load. Measured as the agent found them at
+  ;; its start (:inherited-bytes, seon.lib/generation-bytes): its own start-up promotes 2 MB more
+  ;; into them, which the fork server's rule (:seon.config.agent/inherited-bytes) does not bound.
+  (let [[r] (in-agent ["(:inherited-bytes @seon.agent/state)"])
+        mb (/ (:value r) 1048576.0)]
     (is (< mb 16) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
 
 (deftest an-agents-collect-trip-is-the-configured-one

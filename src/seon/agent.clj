@@ -1415,7 +1415,8 @@
        marks0 :marks} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
-  (let [marks (volatile! (conj (vec marks0) [:child-init (profile/now-ns) (profile/alloc-bytes)]))
+  (let [inherited (lib/generation-bytes)
+        marks (volatile! (conj (vec marks0) [:child-init (profile/now-ns) (profile/alloc-bytes)]))
         mark! (fn [k] (vswap! marks conj [k (profile/now-ns) (profile/alloc-bytes)]))]
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
@@ -1465,7 +1466,7 @@
                    :base base :main db0 :store-conn store-conn :cfg cfg :results {} :n 0
                    :load-errors (vec load-errors) :misaligned misaligned :unwatched (sock/signal-at-input! fd)
                    :pending clojure.lang.PersistentQueue/EMPTY :inbox [] :tx-seq 0 :mode :agent
-                   :ns nsx :interrupt-ok intr-ok :serve serve}
+                   :ns nsx :interrupt-ok intr-ok :serve serve :inherited-bytes inherited}
                    ;; main's reach graph as the fork server keeps it, for db0: test-plan's base
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
