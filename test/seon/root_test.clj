@@ -236,8 +236,13 @@
         path (test-store)
         main (str "root-test-wiki-" (random-uuid))
         _ (.mkdirs (java.io.File. (str tmp "/docs")))
-        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git"} n))]
+        _ (doseq [f (.listFiles (java.io.File. checkout)) :let [n (.getName f)] :when (not (#{"docs" ".git" "target"} n))]
             (sh/sh "ln" "-s" (.getPath f) (str tmp "/" n)))
+        ;; target/ is this fixture's own directory of links to the checkout's target/ entries but runs/ (where
+        ;; this fixture lives): a link to the whole of target/ is a cycle (docs/failure-points.md, a directory walk)
+        _ (.mkdirs (java.io.File. (str tmp "/target")))
+        _ (doseq [f (.listFiles (java.io.File. checkout "target")) :when (not= "runs" (.getName f))]
+            (sh/sh "ln" "-s" (.getPath f) (str tmp "/target/" (.getName f))))
         _ (doseq [f (.listFiles (java.io.File. checkout "docs"))] (sh/sh "cp" (.getPath f) (str tmp "/docs/")))
         _ (spit (str tmp "/docs/zz-broken.md") "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n")
         out (root-answers path main [{:op :eval :agent "root" :code "(boolean (re-find #\"links to docs/agent.md#nowhere\" (pr-str (my.root/problems sys))))"}]

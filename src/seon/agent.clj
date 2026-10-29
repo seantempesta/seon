@@ -993,6 +993,9 @@
                ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
                (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
                (swap! state assoc :mode :test :evaluating false)
+               ;; the test's own working directory: what a test writes relative to it is this run's, removed
+               ;; below when the child has ended (docs/failure-points.md, a directory walk)
+               (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
                (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks tests)
                               (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
                  ;; the reports went as their tests ended: this line is the run's end and its counts
@@ -1003,6 +1006,7 @@
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (lib/wait-status pid)]
                   (lib/c-close r)
+                  (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
                     (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
