@@ -37,20 +37,23 @@
   a test defines (ready-ev, t-before-done) are its own while it runs.
   opts: :dirs, the source dirs root imports (default [\"src\"]); :proofs, the task's proofs;
   :sets, more --set config overrides for the root (e.g. its scripted model): a root per distinct
-  :dirs and :sets; :decls, more task declarations in the task's file beside t (a function of
+  :dirs and :sets; :config, the tasks' own settings (their :seon.task/config: a test's scripted
+  model, :seon.config.ai/script, rides the task, so the root's arguments stay alike and the shard's
+  tests share one root: docs/config.md#the-resolver); :decls, more task declarations in the task's file beside t (a function of
   {:ns :task}, or a vector); :own-root?, a root of its own for this test (its main dropped with
   it): a test whose agent merges into main, which would move the program every later test runs;
   :client, the client its attach names (seon.server: then only that client's requests, or ones
   naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
-  ([forms {:keys [dirs proofs sets decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
+  ([forms {:keys [dirs proofs sets config decls own-root? client] :or {dirs ["src"] proofs '#{demo-test/t}}}]
   (let [checkout (.getCanonicalPath (java.io.File. "."))
         tns (str "t" (subs (str (random-uuid)) 0 8))
         names {:ns tns :task (str tns "/t")}
         tasks (str checkout "/target/runs/" tns "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         decls (if (fn? decls) (decls names) decls)
-        _ (spit (str tasks "/" tns ".edn") (pr-str (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls)))
+        with-config #(cond-> % config (assoc :seon.task/config config))
+        _ (spit (str tasks "/" tns ".edn") (pr-str (mapv with-config (into [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs proofs}] decls))))
         args (into ["--set" (str ":seon.config.source/root=" (pr-str checkout)) "--set" (str ":seon.config.source/dirs=" (pr-str dirs))]
                    (mapcat (fn [x] ["--set" x])) sets)
         ;; its store and main named (seon.test-store/start-root!), never inherited
@@ -854,7 +857,7 @@
                                        " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
                                        "                                       :turn 2 :max-turns 2 :origin :model :agent (:key @seon.agent/state)}))"
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
-                             {:sets [":seon.config.ai/script=seon.fixtures/two-calls"]})
+                             {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)
         [a0 r0 a1 r1 :as ms] (:value msgs)]
     (is (= [:cap 2] [(:outcome end) (:model-calls end)]) "two model calls (the proof stays red), then the cap")
@@ -875,7 +878,7 @@
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
                                      "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
-                           {:sets [":seon.config.ai/script=seon.fixtures/calls-one-throws"]})
+                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
         [r0 r1 r2 :as rs] (:value msgs)]
     (is (= ["call-0-0" "call-0-1" "call-0-2"] (mapv :tool-call-id rs)) (str "every call has its result, by its id: " (pr-str msgs)))
     (is (str/includes? (:content r1) "boom") "the second call's error")
@@ -899,7 +902,7 @@
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
                                      "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (mapv :content)))")]))
-                           {:sets [":seon.config.ai/script=seon.fixtures/two-forms-in-a-call"]})
+                           {:config {:seon.config.ai/script 'seon.fixtures/two-forms-in-a-call}})
         [r0 r1 :as rs] (:value msgs)]
     (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
     (is (not (str/includes? r0 "invalid-call")) "the two-form call runs")
@@ -1207,7 +1210,7 @@
                                       " (let [a (datahike.api/q '" (q ns) " (seon.root/await-db sys #(datahike.api/q '" (q ns) " %)))]"
                                       " [(:seon.run/outcome a) (:seon.error/type (:seon.run/error a))"
                                       " (mapv #(get-in % [:error :seon.error/type]) (get-in (my.root/problems sys) [:classes :error :rows]))]))")}])
-                        {:sets [":seon.config.ai/provider=:none"]
+                        {:config {:seon.config.ai/provider :none}
                          :decls [{:seon.task/name "m" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:error :seon.model/no-provider [:seon.model/no-provider]] (:value r)) (pr-str r))))
 
@@ -1216,13 +1219,13 @@
   ;; so test for it": through my.root/request! (the default, one whole task) and the reconciler, a
   ;; run whose proof passes on its branch ends green, and root merges its branch into main: the
   ;; agent does nothing beyond its work
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wg\" :seon.task/plan \"Make wg.\"})"
+  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wg\" :seon.task/plan \"Make wg.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-green}})"
                    " _ (seon.root/await-db sys \"the run ended\" #(or (= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"" % "/wg\"))"
                    "                                    (#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"" % "/wg#1\"])))))"
                    " db @(:conn sys) r (seon.task/run db \"" % "/wg#1\")]"
                    " [(:seon.task/kind (seon.task/task db \"" % "/wg\")) (:seon.run/outcome r) (:seon.run/status r) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        {:sets [":seon.config.ai/script=seon.fixtures/whole-green"] :own-root? true})]
+                        {:own-root? true})]
     (is (= [:whole :green :merged true] (:value r)) (pr-str r))))
 
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
@@ -1231,14 +1234,14 @@
   ;; rule's reasons as data in the status it reads (a run root refuses at its end gets root's verdict
   ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
   ;; ends on the run's own end, which always comes
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
+  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wr\" :seon.task/plan \"Make wr.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-red}})"
                    " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"" % "/wr#1\"]))))"
                    " db @(:conn sys) r (seon.task/run db \"" % "/wr#1\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
                    " a (datahike.api/q '[:find ?a . :where [?r :seon.run/id \"" % "/wr#1\"] [?r :seon.run/agent ?a]] b)]"
                    " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.context/status b a {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
+                        {})
         [status state reasons] (:value r)]
     (is (= :parked status) (pr-str r))
     (is (not= :merged state) "not merged")
@@ -1251,7 +1254,7 @@
   ;; the reconciler, the implement's first turn, on the design's session, sends the design's task data
   ;; where the design's requests did, the design's last request whole as its prefix, then root's
   ;; boundary message (seon.reconcile/stage-boundary), read off the turns as the branch recorded them
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"st\" :seon.task/plan \"Make st.\"} seon.template/stages)"
+  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"st\" :seon.task/plan \"Make st.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/stages}} seon.template/stages)"
                   ;; the implement parked, or a stage ended without it: its run judged (past :ended), the design's
                   ;; stopped short of done (parked, dead, lost), or a stage's task is held; a fact either way,
                   ;; so a red answers red rather than waiting
@@ -1269,7 +1272,7 @@
                   " {:ended ended :design (sent \"" % "/st#1\") :implement (sent \"" % "/st-implement#1\") :boundary boundary})")
         names (volatile! nil)
         [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])
-                        {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
+                        {})
         {:keys [ended design implement boundary]} (:value r)
         last-design (pop (peek design)) first-implement (first implement)]
     (is (= :parked (get-in ended [(str (:ns @names) "/st-implement#1") :status])) (str "the implement parked; the stages' runs: " (pr-str ended)))
@@ -1299,7 +1302,7 @@
                                          " @(seon.root/message! sys ag \"carry on\") " (parked w 2)
                                          " {:runs (sort (datahike.api/q '" (q w) " @(:conn sys))) :pid1 pid1 :pid2 (get-in (c/state sys) [:agents ag :pid])"
                                          " :turns (sort (datahike.api/q '[:find [?id ...] :where [_ :seon.turn/id ?id]] (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))))}))")}]))
-                        {:sets [":seon.config.ai/script=seon.fixtures/wait-call"]
+                        {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
         {:keys [runs pid1 pid2 turns]} (:value r)
         w (str (:ns @names) "/w")
@@ -1328,7 +1331,7 @@
                                          "   @(seon.root/message! sys ag \"carry on\") " (parked w 2)
                                          "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
                                          "     {:prose (sort (keep (comp :prose :seon.eval/record) (map #(datahike.api/pull db '[:seon.eval/record] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/record]] db))))})))")}]))
-                        {:sets [":seon.config.ai/script=seon.fixtures/prose-reply"]
+                        {:config {:seon.config.ai/script 'seon.fixtures/prose-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
 
@@ -1338,7 +1341,7 @@
   ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
   (let [outcome (fn [script max-turns]
                   (:outcome (:value (first (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :run " (pr-str (str (:ns %) "/t#cap")) " :max-turns " max-turns "})"))
-                                                     {:sets [(str ":seon.config.ai/script=seon.fixtures/" script)]})))))]
+                                                     {:config {:seon.config.ai/script (symbol "seon.fixtures" script)}})))))]
     (is (= :cap (outcome "wait-call" 1)) "a wait on the last turn: the budget spent")
     (is (= :waiting (outcome "wait-call" 2)) "a wait with turns left: waiting")
     (is (= :failed (outcome "fail-call" 1)) "fail! on the last turn: the agent's verdict")))
@@ -1352,7 +1355,7 @@
                                    "      m (datahike.api/pull db '[:seon.model-call/sent] [:seon.model-call/id " (pr-str (str ns "/t#fail/0")) "])]"
                                    "  {:sent (mapv first (:seon.model-call/sent m)) :error (:seon.error/type (:seon.turn/error t))"
                                    "   :read (mapv :content (mapcat second (seon.context/parts-of db (:seon.model-call/sent m))))})")])
-                             {:sets [":seon.config.ai/provider=:none"]})]
+                             {:config {:seon.config.ai/provider :none}})]
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= [:section :parts :hashes] (:sent (:value turn))) "the help page, then the page's parts whole, then their hashes")
     (is (= 2 (count (:read (:value turn)))) "read back from its records")
@@ -1364,7 +1367,7 @@
   ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
   ;; whole task's turn is a merge turn only while what both sides changed is unresolved
   (let [[end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (str (:ns %) "/w")) " :run " (pr-str (str (:ns %) "/w#1")) " :max-turns 4})"))
-                        {:sets [":seon.config.ai/script=seon.fixtures/same-call"]
+                        {:config {:seon.config.ai/script 'seon.fixtures/same-call}
                          :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
 
@@ -1391,7 +1394,7 @@
                                    "      n (fn [db] (count (datahike.api/q '[:find ?e :where [?e :seon.eval/id]] db)))"
                                    "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))]"
                                    "  (vec (distinct (map n (take 30 (take-while some? (iterate back db)))))))")])
-                             {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})
+                             {:config {:seon.config.ai/script 'seon.fixtures/same-call}})
         ns (:value counts)]
     (is (< 3 (count ns)) (pr-str ns))
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
@@ -1418,7 +1421,7 @@
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/to ?r] [?r :seon.run/id ?to] [(= ?to " (pr-str run) ")] [?m :seon.message/body ?b]] @(:conn sys))")}])
-                                       {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
+                                       {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
         {:keys [calls on-branch committed prose reply agent-key basis-keys]} (:value turn)
         [[mid from to body] :as facts] (vec (:value on-main))]
