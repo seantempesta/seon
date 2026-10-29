@@ -273,10 +273,12 @@
   idle, busy since), its run and a message to the run; the branch, forked from main before the
   agent turned busy, adds what only it records: a model turn whose two calls each ran one eval
   (named by each call's :eval), then an eval the owner asked for from the page, an error.
-  Answers [main branch agent-eid]."
-  []
+  Answers [main branch agent-eid]. With a conn (a test branch), main's transactions are committed on it,
+  so main's dbs are commits a notice can name; otherwise they are values (d/db-with)."
+  ([] (paged-dbs nil))
+  ([conn]
   (let [k (seon.task/agent-key "b1" :a3)
-        main0 (reduce d/db-with (ts/test-db)
+        main0 (reduce (if conn (fn [_ tx] (:db-after (d/transact conn {:tx-data tx}))) d/db-with) (if conn @conn (ts/test-db))
                       [[{:seon.root/id :root :seon.root/boot "b1"}]
                        [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                          :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}
@@ -306,8 +308,8 @@
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e3" "user"
                                              {:code "(g)" :text "{:handle result/e3, :ex {:seon.error/message \"boom\"}}"
                                               :response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
-        main (d/db-with main0 (seon.task/agent-tx "b1" :a3 {:status :busy}))]
-    [main branch (eid-of main [:seon.agent/key k])]))
+        main (if conn (:db-after (d/transact conn {:tx-data (seon.task/agent-tx "b1" :a3 {:status :busy})})) (d/db-with main0 (seon.task/agent-tx "b1" :a3 {:status :busy})))]
+    [main branch (eid-of main [:seon.agent/key k])])))
 
 (defn- proc-state
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
@@ -463,20 +465,22 @@
 
 (deftest a-transaction-touching-no-page-walks-nothing
   ;; task seon.render/a-view-renders-once-per-change-of-its-reads (C): main's commits come from
-  ;; the writer ({:t :ops :db}); the pass walks only the pages whose reads a commit's datoms touch, and
+  ;; the writer ({:t :prev :ops :commit}, read with d/commit-as-db); the pass walks only the pages whose reads a commit's datoms touch, and
   ;; root's, which its walk marks (root-walk) when main moved
-  (let [[main0 branch eid] (paged-dbs)
+  (ts/test-branch! (fn [_ conn]
+  (let [[main0 branch eid] (paged-dbs conn)
+        main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
         o (volatile! {})
-        st (#'p/pass (root-state (proc-state main0 branch) main0) o)
+        st (#'p/pass (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn) o)
         main (:main-db st)
         walked #(get-in % [:counts :walked] 0)
-        commit (fn [st tx-data] (let [r (d/with (:main-db st) tx-data)]
-                                  (first (#'p/render-proc st :main {:t (:max-tx (:db-after r)) :db (:db-after r)
+        commit (fn [st tx-data] (let [prev (:max-tx @conn) r (d/transact conn {:tx-data tx-data})]
+                                  (first (#'p/render-proc st :main {:t (:max-tx (:db-after r)) :prev prev :commit (d/commit-id @conn)
                                                                     :ops (mapv (fn [d] [(if (:added d) :db/add :db/retract) (:e d) (:a d) (:v d)]) (:tx-data r))}))))]
     (is (= 2 (walked st)) "the first pass walks each watched page")
     (let [unread (first (remove #(some (fn [v] (contains? (get-in st [:views v :reads]) [:e %])) [:root :a3]) (d/q '[:find [?e ...] :where [?e :ns/name]] main)))
           ;; a commit's datoms as the writer reports them, on an entity of main the page did not read
-          st' (first (#'p/render-proc st :main {:t (:max-tx main) :db main :ops [[:db/add unread :ns/name 'unrelated.ns]]}))]
+          st' (first (#'p/render-proc st :main {:t (:max-tx main) :prev (dec (:max-tx main)) :commit (d/commit-id main) :ops [[:db/add unread :ns/name 'unrelated.ns]]}))]
       (is (= (walked st) (walked st')) "a commit on an entity no page read walks nothing")
       (is (empty? (:last-walked st'))))
     (let [st' (commit st [{:db/id eid :seon.agent/status :idle}])]
@@ -485,7 +489,7 @@
       (let [[st' _] (#'p/render-proc st :from-web {:op :views :views #{:root} :tabs 1})]
         (is (empty? (#'p/touched st' [{:e eid :a :seon.agent/status :v :idle}])) "root's page reads no datom: its walk marks it")
         (is (not (some (fn [[_ vs]] (contains? vs :a3)) (:read-index st'))))))
-    (r/dispose-walk! (get-in st [:root-walk :w]))))
+    (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (deftest a-branch-commit-touches-its-page-by-its-datoms-diff
   ;; an agent's commit: its branch read again, and what moved is the datoms-diff of the held and

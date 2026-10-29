@@ -8,6 +8,21 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 ### An eval call holds one or more forms (owner, 2026-10-29)
 "remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
 
+### Seon runs on an ordinary MacBook (owner, 2026-10-29)
+"I want this to run on an average users macbook for reference. Not just servers or people like me with 128GB of ram." Ten working agents fit an 8 GB-class machine: root idle at or under 650 MB, the fork server under 300 MB, ten agents under 3 GB. Stated in: docs/plan.md (beside step 1), docs/machine.md#ten-agents-at-once.
+
+### The image keeps each frame's file:line and drops the expanded source (owner, 2026-10-29)
+Chose V2b of three measured builds over `--opt` (-419 MB, but library stack lines lose their line numbers) and dropping the bodies alone (-116 MB): about -210 MB per root, every eval error unchanged. Stated in: task seon.main/the-image-keeps-no-inspector-information.
+
+### The embedding model is a Flow proc that wakes on its work and spins down when idle (owner, 2026-10-29)
+"It should be converted into a flow process that has the channel for waking it up and working while the work is there and idle or spun down when it's not if it's cheap. Look into this don't guess." Measured: a forked process cannot load the model (Apple's runtime aborts it), so the proc runs an exec'd helper, about 0.45 s to load, ended when its queue empties. Stated in: task seon.vector/the-model-is-loaded-outside-root, docs/failure-points.md#physics-who-may-run-threads, docs/vector.md#the-model.
+
+### Config at every level, no env var switches (owner, 2026-10-29)
+"formalize config options so there is no env var magic happening. I want the config process to be documented and a standard system for configuring at any level -- init, added to an agent's entity to override on a per agent level, task wherever it needs to go"; "Everything forks from root right? So maybe it is helpful to add to the root entity?". Order: defaults < profile < --config < --set < main's root entity < model < provider < task < agent; each key's schema names the levels that may set it; an agent level beside the task's; bin/ passes --set, not env vars. Stated in: docs/plan.md (beside step 1); docs/config.md when built.
+
+### Old worktrees' run data is not kept (owner, 2026-10-29)
+"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
+
 ## 2026-10-28 rulings
 The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
 

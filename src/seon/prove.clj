@@ -26,7 +26,7 @@
   at each program commit, whoever asks."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg]
-            [clojure.core.async.flow :as flow] [clojure.string :as str]))
+            [clojure.core.async.flow :as flow] [clojure.string :as str] [seon.db :as pdb]))
 
 (defn run-key
   "The key of the run of branch whose program has digest dg (seon.program/program-digest of its
@@ -214,12 +214,12 @@
   :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding
   buffer of one, a notice replaced by the next."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
+  ([] {:params {:conn "the store main's commit notices are read from (seon.db/at-commit)"} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
        :ping-map-fn (fn [st] {:running (some-> st :running :key) :full (some-> st :full :key) :waiting (count (:waiters (:running st))) :next (count (:next st))
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
-  ([_args] {:rid 0 :pending {} :next {} :done {}})
+  ([args] {:rid 0 :pending {} :next {} :done {} :conn (:conn args)})
   ([st _tr] st)
   ([st0 in m]
    (let [st st0
@@ -228,7 +228,7 @@
                      :answers (let [[st v] (step/answered st (:tag m))] (if v (answered st v (:r m)) [(update st :stale (fnil inc 0)) []]))
                      :main (let [st (assoc st :main-t (:t m))]
                              (if (and (cfg/value :seon.config.proofs/prove-main-on-commit) (program/moves-program? (:ops m)))
-                               (request st {:branch :main :t (:t m) :digest (program/program-digest (:db m)) :mode :main})
+                               (request st {:branch :main :t (:t m) :digest (program/program-digest (pdb/at-commit (:conn st) (:commit m))) :mode :main})
                                [st []])))]
      (let [outs (cond-> (vec outs) (not= (state-view st) (state-view st0)) (conj {:op :prove-state :r (state-view st)}))]
        [st (if (seq outs) {:to-api outs} {})]))))
