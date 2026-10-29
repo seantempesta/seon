@@ -258,7 +258,8 @@
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
 (defn- env-class
-  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps, /bin or /schemas, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
+  "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin, /schemas or /src (the .clj
+  files, which env-input? leaves to the program facts: a class only for a reach that reads the program's text), each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
   [p]
@@ -266,7 +267,9 @@
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
         (str/starts-with? p "bin/") :seon.env/bin
-        (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas))
+        (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas
+        ;; the program's text, which a test reading the whole program (a docstring, a form's source) reads
+        (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))) :seon.env/src))
 
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
@@ -398,7 +401,7 @@
   ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
   ([root cfg checkout tree]
    (let [runtime-pins (set (:seon.config.source/runtime-pins cfg))
-         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (or (env-input? p) (env-class p))]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
