@@ -75,7 +75,7 @@
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot
   reach a new task), or nil."
-  {:malli/schema [:=> [:cat [:map-of :seon.task/id :seon.task/needs]] [:maybe :seon.task/id]]}
+  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :seon.task/id :seon.task/needs]] [:maybe :seon.task/id]]}
   [graph]
   (let [visit (fn visit [seen id]
                 (cond (contains? seen id) id
@@ -90,7 +90,7 @@
 (defn- needs-problem
   "Why graph (task id -> needs) cannot be written: a need known? does not hold, or a cycle;
   nil when neither."
-  {:malli/schema [:=> [:cat [:map-of :seon.task/id :seon.task/needs] ifn?] [:maybe :string]]}
+  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :seon.task/id :seon.task/needs] ifn?] [:maybe :string]]}
   [graph known?]
   (if-let [missing (seq (for [[_ ns] graph n ns :when (not (known? n))] n))]
     (str "needs name no task: " (str/join ", " missing))

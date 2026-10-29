@@ -70,7 +70,7 @@
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   every one of each (expected and actual as the test child printed them)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/failures]}
   [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
@@ -81,7 +81,7 @@
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/costs]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/costs]}
   [test-run]
   (into {} (for [{:keys [var cost]} (:reports test-run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
@@ -176,7 +176,7 @@
   "Each function's cost per call over the tests of details ({test {var row}}, seon.fx/details): {var {:calls n :ticks
   :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls. A
   recursive function's inclusive ticks and bytes count its inner calls again; its self ones do not."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
+  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :qualified-symbol [:map-of {:gen/max 4} :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
   [detail]
   (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
     (into {} (for [[v [calls ticks self-ticks bytes self-bytes]] sums :when (pos? calls)]
@@ -315,7 +315,7 @@
   judges red again, with its failures; a flaky one is red, so it is selected and never run). So an
   unchanged tree runs nothing.
   Cost: one lookup per key, then a sort of what is selected."
-  {:malli/schema [:=> [:cat [:maybe [:map-of :any :string]] [:map-of :any :string] [:map-of :string :map] [:set :any]]
+  {:malli/schema [:=> [:cat [:maybe [:map-of {:gen/max 4} :any :string]] [:map-of {:gen/max 4} :any :string] [:map-of {:gen/max 4} :string :map] [:set {:gen/max 4} :any]]
                   [:map [:selected [:vector :any]] [:run [:vector :any]] [:reused [:map-of :any :map]]]]}
   [base cand found proofs]
   (let [selected (vec (sort-by str (distinct (concat (filter cand proofs)
