@@ -217,3 +217,28 @@
     (is (= :seon.model/no-provider (:seon.error/type none)) "the request's :none beats root's scripted boot provider")
     (is (= :seon.model/no-provider (:seon.error/type boot)) "no provider named: root's")))
 
+
+(deftest a-walk-of-a-tree-with-a-link-cycle-counts-each-file-once
+  ;; docs/failure-points.md, a directory walk: file-seq follows a link to a directory, so a link back
+  ;; to an ancestor (a checkout's target/ holding a link to itself, measured 2026-10-29) made an
+  ;; agent's cache count walk 13 minutes at full CPU. fx/files-under enters no linked directory:
+  ;; its work is the entries the tree holds, each file once, wherever a link points. The cache
+  ;; count (evict!) is the walk that hung: a cache with a loop in it is counted by its files.
+  (let [d (scratch-dir)
+        mk (fn [rel text] (let [f (java.io.File. d rel)] (.mkdirs (.getParentFile f)) (spit f text)))
+        link (fn [rel to] (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. d rel)) (.toPath (java.io.File. to)) (into-array java.nio.file.attribute.FileAttribute [])))]
+    (try
+      (mk "a/one.edn" "1") (mk "b/c/two.edn" "22") (mk "three.txt" "333")
+      (link "a/loop" d)              ;; a link back to the root
+      (link "b/up" (str d "/b"))     ;; a link to its own parent
+      (link "b/c/out" "/tmp")        ;; a link out of the tree
+      (link "a/file-link.edn" (str d "/three.txt"))
+      (let [names (mapv #(.getName ^java.io.File %) (fx/files-under d))]
+        (is (= ["file-link.edn" "one.edn" "three.txt" "two.edn"] (sort names)) "each file once, a link to a file as a file"))
+      (testing "the cache count sees each verdict once"
+        (let [r (fx/write-verdicts! d {:id "run" :tree "t"} {'a/t {:test 'a/t :digest "d1" :pass 1 :fail 0 :error 0}} {} 1)]
+          (is (= {:recorded 1} r))
+          ;; a bound of 1 byte evicts every verdict not just written: the walk ended and removed the three old .edn files
+          (is (not (.exists (java.io.File. d "a/one.edn"))))
+          (is (not (.exists (java.io.File. d "b/c/two.edn"))))))
+      (finally (fx/remove-tree! d)))))

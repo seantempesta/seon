@@ -47,6 +47,7 @@ The failure points whose edge function catches, each with the one variant it dec
 | The wiki's history cannot be read from git: the checkout is no git repository, a page is untracked, git cannot show a file at a commit (a file the commit lacks is not a failure: `git ls-tree` says so, and the var is absent), an old file does not read, or it mentions a var that no form of a head `seon.source/defining-ids` knows defines | `seon.fx/wiki-history` (git blame and show, one `try` per page and one for the whole read) and `seon.docs/baseline-reads` (one `try` per old file) | `:seon.fx/io-error` for the whole read; for a page, an `:error` under its sections; for a (commit, file), an entry under `:errors` (every git call goes through `seon.fx`'s `git!`); for an unknown defining head, the section's `:unread` | each section affected is recorded as of today with `:seon.section/baseline-unread` naming why, shown as an attention row of `:stale-section`; nothing is refused ([health](health.md#a-stale-section)) |
 | The test service's run cannot finish: no prove agent can be spawned (too many agents), or the prove agent dies; the agent that holds the branch is gone or cannot fork | `seon.prove/prove-proc` (no `catch`: the api's answers to its requests are the edge) | the api's own error (`:seon.root/refused`, `:seon.agent/died`, `:seon.root/no-agent`, `:seon.root/ended`, `:seon.test/fork-refused`) | every waiter is answered the error, it is recorded as a `:platform` problem (but `:seon.root/ended`: the agent it asked ended, and that end is its run's record), and it is never remembered: asking again runs again ([merging](merging.md#the-test-service)) |
 | An interrupt or a tick budget stops a running form (root's SIGUSR1; Jolt's `run-interruptible` past its ticks, `:seon.config.agent/form-ticks`: work done, never time). Interrupts live in `seon.intr`, from two sources: root's SIGUSR1 (`seon.intr/install!`), and SIGIO from the agent's own socket to root (`seon.intr/exit-at-eof!`), which ends the process when that socket reads EOF. A form blocked in a wait (a channel take) is reached too: the signal wakes Chez's condition-wait, which runs the handler before the waiter waits again (Chez ``jolt/signal-wakes-wait``), and root's interrupt also sets the thread's interrupt flag, which ends a blocked `<!!` as `Thread.interrupt` does | `seon.intr/run` | ex-info `{:interrupted true}`, or the typed `:seon.repl/ticks-spent` `{:ticks :budget}` | `seon.repl/eval-code` answers the form `interrupted` or its typed error and goes on |
+| A contract the generative check cannot run (`seon.proofs/mg-run`: its arguments do not generate, or `malli.generator/check` throws on them; [checks](checks.md#the-generative-check-is-per-function)) | `seon.proofs/mg-run` | `:skipped` for arguments that do not generate (nothing to fail), a `:failed` result carrying the throw's message for a throw in the check | the key is red (a throw) or green with nothing checked (a skip) at its digest; the run goes on to the next key |
 | A test that does more work than its tick budget (`:seon.config.agent/test-ticks`, per test; Jolt's `run-interruptible`) | `seon.proofs/test-vars` | `:seon.test/ticks-spent` `{:ticks :budget}` on that test's `:error` report, naming it | that test is red; the run goes on to the next test |
 
 Whatever an edge or boundary raises is data, and the requester gets it whole; root bounds only what it keeps of other processes for its life: [an error keeps data](errors.md#an-error-keeps-data).
@@ -253,6 +254,22 @@ a function first called on two threads at once can be missed from `touched`. Roo
 are approximate and nothing reads them as proof. A measurement nested inside another (a
 cost proof run inside an eval form) restarts the epoch, so the outer form records only the
 calls after it.
+
+## A directory walk enters no linked directory
+
+`file-seq` follows a symbolic link to a directory, so a link back to an ancestor is a walk with no end
+(measured 2026-10-29: an agent held 99.9% CPU for 13 minutes in `getcwd`/`stat` after its `:tests`, counting
+a verdict cache that lay in a tree whose `target/runs/root-test-wiki-*/target` linked to the `target/` above
+it, 63,886 files of leftover test output). The walk of a tree is `seon.fx/files-under`: every regular file
+under a directory, each once, a linked directory not entered and a link to a file a file, so its work is the
+entries the tree holds (`seon.fx-test/a-walk-of-a-tree-with-a-link-cycle-counts-each-file-once`). `read-source`
+and the verdict cache's count (`evict!`) use it; a new walk of a tree that may hold links uses it too.
+
+The leftover came from tests writing relative to the working directory, which in an agent is the one
+directory every agent shares (`:seon.config.agent/cwd`). A test child now works in a directory of its own
+(`seon.fx/run-dir`, named by its pid), removed by its agent when the child has ended
+(`seon.fx/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
+the wiki fixture of `seon.root-test` links the checkout's `target/` entries but `runs/`, not `target/`.
 
 ## LMDB robust locks
 

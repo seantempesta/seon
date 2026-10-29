@@ -106,7 +106,7 @@
     (testing "a step reading the whole tree is keyed by the tree; the others by their functions"
       (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
             sd (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b1"})]
-        (is (= (set (keys proofs/check-steps)) (set (keys (:digests sd)))))
+        (is (= (set (keys (remove (comp #{:mg} val) proofs/check-steps))) (set (keys (:digests sd)))) "every step but mg-check, whose keys are its contracts' (mg-roots), has a digest")
         (is (= [] (:missing sd)))
         (is (not= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t2" :config {} :base "b1"})) "laws")))
         (testing "health reads what the tree caused since its base: another base is another key, and no base no key"
@@ -126,6 +126,61 @@
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
+
+(deftest each-pure-contract-is-a-key-of-the-generative-check
+  ;; owner, 2026-10-29: the contract check is per function, keyed by digest like a test. A pure
+  ;; contracted function's key is its reach (its form, what it calls, the schemas its contract
+  ;; names); a change re-checks only the contracts it reaches (docs/checks.md#the-generative-check-is-per-function)
+  ;; the namespaces are the real ones (mg-roots' purity is by namespace); the functions are new
+  (let [db (-> (record (ts/test-db) 'user "(ns seon.template)"
+                       'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                       'seon.template "(defn mgk-b {:malli/schema [:=> [:cat :int] :int]} [x] (inc (mgk-a x)))"
+                       'seon.template "(defn mgk-c {:malli/schema [:=> [:cat :seon.cost/row] :int]} [x] (dec x))"
+                       'seon.template "(defn mgk-d [x] (inc x))"
+                       'seon.template "(defn mgk-step {:malli/schema :seon.step/step-fn} [& args] args)"
+                       'user "(ns seon.sock)"
+                       'seon.sock "(defn kill {:malli/schema [:=> [:cat :int] :int]} [pid] pid)")
+               (schema :seon.step/step-fn "map?") (schema :seon.cost/row "map?"))
+        inputs {:env "e" :tree "t" :config {}}
+        keys-of (fn [db] (proofs/mg-roots (program/reach-graph db nil)))
+        dg (fn [db] (ts/reach-digests db inputs (keys-of db)))
+        before (dg db)
+        after-a (dg (record db 'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))"))
+        after-n (dg (schema db :seon.cost/row "some?"))]
+    (is (= #{"mg/seon.template/mgk-a" "mg/seon.template/mgk-b" "mg/seon.template/mgk-c"} (set (keys (keys-of db))))
+        "a pure contracted function is a key; an uncontracted one, a proc's step-fn and a host namespace's function are not")
+    (is (= 'seon.template/mgk-a (proofs/mg-fn "mg/seon.template/mgk-a")))
+    (is (not-any? #(= (before %) (after-a %)) ["mg/seon.template/mgk-a" "mg/seon.template/mgk-b"])
+        "mgk-a changed: its key and its caller's move")
+    (is (= (before "mg/seon.template/mgk-c") (after-a "mg/seon.template/mgk-c")) "a contract that does not reach it keeps its digest")
+    (is (not= (before "mg/seon.template/mgk-c") (after-n "mg/seon.template/mgk-c")) "the schema its contract names changed: it moves")
+    (is (= (select-keys before ["mg/seon.template/mgk-a" "mg/seon.template/mgk-b"]) (select-keys after-n ["mg/seon.template/mgk-a" "mg/seon.template/mgk-b"]))
+        "and the contracts not naming it keep theirs")
+    (testing "the plan runs only the contracts whose digest has no green verdict"
+      (let [found (into {} (for [dg (vals before)] [dg {:pass 1 :fail 0 :error 0}]))
+            p (proofs/plan nil after-a found #{})]
+        (is (= ["mg/seon.template/mgk-a" "mg/seon.template/mgk-b"] (:run p)))
+        (is (= ["mg/seon.template/mgk-c"] (keys (:reused p))))
+        (is (= [] (:run (proofs/plan nil before found #{}))) "an unchanged tree runs nothing")))
+    (testing "a contract key runs in a test shard: it needs no binary"
+      (is (every? #(and (proofs/mg-key? %) (not (proofs/step-needs-binary? %))) (keys before)))
+      (is (proofs/mg-key? proofs/mg-registry))
+      (is (not (proofs/mg-key? "mg-check"))))
+    (testing "the registry's key is the schema registry: a schema change moves it, a function's change does not"
+      (let [g #(program/reach-graph % nil)
+            rd #(proofs/mg-registry-digest (g %) "e")]
+        (is (not= (rd db) (rd (schema db :seon.cost/row "some?"))) "a schema entry changed")
+        (is (= (rd db) (rd (record db 'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))"))) "a function changed")))
+    (testing "contracts are dealt among the shards that run, by their measured ms; with no test shard, one"
+      (let [mg {"mg/a" "1" "mg/b" "2" "mg/c" "3"}]
+        (is (= [[[] mg]] (runner/deal-mg [] mg {} {})) "no test shard: one process for all")
+        (is (= [] (runner/deal-mg [] {} {} {})))
+        (let [dealt (runner/deal-mg '[[t1 t2] [t3]] mg '{t1 100 t2 100 t3 1} {"mg/a" 50 "mg/b" 50 "mg/c" 1})]
+          (is (= 2 (count dealt)) "the contracts start no shard")
+          (is (= mg (apply merge (map second dealt))) "each in exactly one")
+          (is (= #{"mg/a" "mg/b" "mg/c"} (set (mapcat (comp keys second) dealt))))
+          (is (= 3 (count (mapcat (comp keys second) dealt))))
+          (is (= #{"mg/a" "mg/b" "mg/c"} (set (keys (second (second dealt))))) "the lighter shard takes them: t3's has 1 ms of tests"))))))
 
 (deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A

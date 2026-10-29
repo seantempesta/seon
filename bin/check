@@ -188,16 +188,12 @@ u-test-inputs() { echo "== test-inputs (every test read of a clock, random, envi
 u-mg-check() {
   echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
   want mg-check || return 0
-  # in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
-  # each shard's exit status counts
-  local K=$JOBS CP=() ok=1 i st
-  # each contract's seed is derived from the step's reach digest (bin/prove's plan), or, in a run
-  # that stores no result, from the binary's tree (seon.check/mg-check)
-  local base
-  if [[ -n $SEL ]]; then
-    base=$(sed -n 's/.*"mg-check" "\([0-9a-f]*\)".*/\1/p' "$SEL/steps.edn")
-    [[ -n $base ]] || { failed "mg-check (no digest for it in $SEL/steps.edn)"; echo "FAILED mg-check (no digest in steps.edn)"; return 0 }
-  else base=$(cat "$ROOT/target/seon.tree"); fi
+  # bin/prove runs the generative check's keys in bin/test's shards beside the tests (no binary: seon.proofs/mg-run);
+  # this step is the whole set in the binary, in K shards at once, each a process checking every Kth
+  # contracted var (seon.check/mg-check, the same mg-run); each shard's exit status counts. Seeds are of the
+  # binary's tree. bin/check mg-check FN ... checks just those functions.
+  local K=$JOBS CP=() ok=1 i st base
+  base=$(cat "$ROOT/target/seon.tree")
   # its K shards take K of the run's JOBS tokens: one is the unit's own, the others are waited for
   for i in $(seq 2 $K); do read -u 3 tok; done
   for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $base > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
