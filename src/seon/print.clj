@@ -33,19 +33,17 @@
   (:seon.config.render.agent/max-depth); :width (:seon.config.render/width); :outputs, a
   subset of #{:text :hiccup} (#{:text}); :render, a nested value's own render (seon.render's
   default renders pass it: a value inside the printed one whose schema declares a render shows
-  as that render, one line, in its place); :seen, values earlier responses showed, each printed
-  as the form that reads it again (seon.print.select/seen-form). Answers {:text :tokens :truncated? :elisions}
+  as that render, one line, in its place). Answers {:text :tokens :truncated? :elisions}
   plus :html (hiccup) when asked, or the insufficient-budget error (an error map) when the
   budget cannot show the value's first part."
   {:malli/schema [:function [:=> [:cat :any] :seon.print/result] [:=> [:cat :any :seon.print/opts] :seon.print/result]]}
   ([v] (print-value v {}))
-  ([v {:keys [handle budget max-depth width outputs render seen]
+  ([v {:keys [handle budget max-depth width outputs render]
        :or {budget default-budget max-depth (config/value :seon.config.render.agent/max-depth)
             width (config/value :seon.config.render/width) outputs #{:text}}}]
    ;; without a handle a cut names no form (its reader would hold no such result)
    (select/show v (cond-> {:handle handle :budget budget :max-depth max-depth :width width :outputs outputs}
-                    render (assoc :render render)
-                    seen (assoc :seen seen)))))
+                    render (assoc :render render)))))
 
 (defn code
   "Source text s (a form's :form/src, a test's source, an assertion as written) as code: the
@@ -71,38 +69,14 @@
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
-  rest, `(get-in result/e43 [:value ..])`, and a value an earlier response showed (seen: {:strings
-  :colls}, `seen`) prints as the form that reads it again, `(:value result/e12)`. Made when r is
+  rest, `(get-in result/e43 [:value ..])`. Made when r is
   sent or shown, never stored (seon.repl/record-details keeps the value). render (seon.render/summarized):
   a value whose schema declares a summary prints as that summary, the printer's own values."
-  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]
-                  [:=> [:cat :map [:maybe :map] [:maybe :seon.host/fn]] :string]]}
-  ([r] (response-text r nil nil))
-  ([r seen] (response-text r seen nil))
-  ([r seen render]
-   (let [p (print-value r
-                        (cond-> {:handle (:handle r)} (seq seen) (assoc :seen seen) render (assoc :render render)))]
+  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :seon.host/fn]] :string]]}
+  ([r] (response-text r nil))
+  ([r render]
+   (let [p (print-value r (cond-> {:handle (:handle r)} render (assoc :render render)))]
      (or (:text p) (:seon.error/message p)))))
-
-(defn seen
-  "seen with response r's value and output, each that prints longer than the form that reads it
-  again ((:value result/e12)): what later responses print as that form. A string by its text,
-  a collection by identity (seon.print.select/seen-form), so nothing hashes a value's contents."
-  {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
-  [seen r]
-  (reduce (fn [m k]
-            (let [v (get r k)
-                  form (list k (:handle r))
-                  n (count (pr-str form))]
-              (cond (not (contains? r k)) m
-                    (string? v) (cond-> m (and (> (count v) n) (not (get-in m [:strings v]))) (assoc-in [:strings v] form))
-                    (and (or (map? v) (set? v) (vector? v)) (seq v)
-                         ;; cut, or not even its first part fits: longer than the form
-                         (let [p (print-value v {:budget (max 1 (select/estimate (pr-str form)))})]
-                           (or (:truncated? p) (nil? (:text p)))))
-                    (update-in m [:colls (System/identityHashCode v)] (fnil conj []) [v form])
-                    :else m)))
-          (or seen {}) [:value :out]))
 
 (defn read-rest
   "What a cut's continuation form (seon.print.emit/continuation: get-in, nth, seq, key, val, a
@@ -123,12 +97,10 @@
                   (when (keyword? op) (get x op))))))
 
 (defn record-text
-  "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`, with
-  seen): its stored value printed; a value that is not plain data was printed as it was recorded
+  "An eval's record (:seon.eval/record) as its response reads, printed now (`response-text`): its stored value printed; a value that is not plain data was printed as it was recorded
   (:printed), and reads so."
-  {:malli/schema [:function [:=> [:cat :map] :string] [:=> [:cat :map [:maybe :map]] :string]]}
-  ([rec] (record-text rec nil))
-  ([rec seen] (or (:printed rec) (response-text (:response rec) seen))))
+  {:malli/schema [:=> [:cat :map] :string]}
+  [rec] (or (:printed rec) (response-text (:response rec))))
 
 ;;; Prose: text read as itself (a message, a form's source, a plan, a printed value), not as
 ;;; a string literal. The one string cutter's (seon.print.select/break-at, its words

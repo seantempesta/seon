@@ -72,6 +72,8 @@
  :seon.eval/repairs [:vector [:map [:near [:map [:line pos-int?] [:column pos-int?] [:text :string]]] [:dropped {:optional true} :string] [:inserted {:optional true} :string]]]
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
                       [:handle :qualified-symbol] [:value {:optional true} :any]
+                      ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
+                      [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)
                       [:repaired {:optional true} :seon.eval/repairs]
                       ;; each existing var whose contract or docstring this eval changed, its before and

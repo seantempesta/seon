@@ -29,9 +29,8 @@
 (deftest a-turn-prints-its-new-records-flat-in-the-history
   (cost/proof {:of 'seon.context/printed-run :input 'seon.context-cost-test/held-of
                :n "records of the run printed before (the cache)"
-               :work (str "the new record printed whole, once, by the one printer, its fold looked up "
-                          "among the values the earlier records showed (a hash map by value and type); nothing of the "
-                          "earlier records is printed again")
+               :work (str "the new record printed whole, once, by the one printer, a function of "
+                          "that record alone; nothing of the earlier records is printed again")
                :growth :constant
                ;; measured 2026-10-25: 16 calls and 329 KB at 10 held records (the new record's two prints)
                :fixed {:calls 16 :bytes 340000}

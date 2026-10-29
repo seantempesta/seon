@@ -805,13 +805,13 @@
     (is (str/includes? (:content r2) "call-0-1") "naming the call that threw")
     (is (not (str/includes? (:content r2) ":value 2")) "(inc a) never ran")))
 
-(deftest a-call-is-prose-and-one-form
-  ;; owner, 2026-10-28: a call is prose and exactly one form; one that is not answers a typed
-  ;; error as its one result and runs nothing, and the calls after it are not run (docs/prompt.md)
+(deftest a-call-is-prose-and-its-forms
+  ;; owner, 2026-10-29: a call is prose and one or more forms, run in order; one with no prose or
+  ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.turn/call-problem]
     (is (nil? (problem "Add them." "(+ 1 2)")) "prose and one form")
     (is (= :no-prose (:problem (problem " " "(+ 1 2)"))) "no prose")
-    (is (= [:forms 2] ((juxt :problem :forms) (problem "Two." "(def a 1) (inc a)"))) "two forms")
+    (is (nil? (problem "Two." "(def a 1) (inc a)")) "two forms")
     (is (= [:forms 0] ((juxt :problem :forms) (problem "None." "  "))) "no form")
     (is (nil? (problem "Unread." "(+ 1")) "code that does not read is left to the REPL, which says where"))
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
@@ -824,10 +824,10 @@
                            {:sets [":seon.config.ai/script=seon.fixtures/two-forms-in-a-call"]})
         [r0 r1 :as rs] (:value msgs)]
     (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
-    (is (str/includes? r0 "invalid-call") "the two-form call's result is its error")
-    (is (str/includes? r0 "holds 2 forms"))
-    (is (not (str/includes? r0 ":value")) "and nothing of it ran")
-    (is (str/includes? r1 "not-run") "the call after it is not run")))
+    (is (not (str/includes? r0 "invalid-call")) "the two-form call runs")
+    (is (str/includes? r0 ":forms 2") "each of its two forms ran")
+    (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
+    (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
@@ -893,10 +893,12 @@
                "in a merge commit that names its runtime (task seon.db/each-commit-names-its-runtime)")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
                "made on the agent's branch, of what it merged from main: a caught-up fact reads as main's (task seon.ctx/a-change-names-its-eval)")
-           (let [c (seon.ctx/build (agent/db) (:db/id (d/entity (agent/db) [:seon.agent/key "test/a1"])) ab)
-                 [cu] (vals (:catch-ups (:tree c)))]
+           ;; a fact on the agent's branch, no join of its pull (task seon.agent/the-agent-is-the-unit-not-the-run)
+           (let [db (agent/db)
+                 [cu] (for [e (d/q '[:find [?c ...] :in $ ?a :where [?c :seon.catch-up/agent ?a]] db (:db/id (d/entity db [:seon.agent/key "test/a1"])))]
+                        (d/pull db '[*] e))]
              (is (= [(:branch cfg) (:max-tx @conn)] [(:seon.catch-up/from cu) (:seon.catch-up/from-t cu)])
-                 "the catch-up a fact of the agent's record, in its ctx (task seon.ctx/one-derivation)")
+                 "the catch-up a fact of the agent's branch (task seon.ctx/one-derivation)")
              (is (some #{[:var 'app.m0/f1]} (:seon.catch-up/applied cu)) "with what it applied")))
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db))))
              "and is main's, not the agent's: its base is the merge base")
@@ -994,15 +996,16 @@
            member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
-         (is (nil? (:seon.run/outcome (member :runs :seon.run/id "demo/w#1"))) "before the take, nothing of main's")
+         (is (nil? (:seon.run/outcome (d/entity (agent/db) [:seon.run/id "demo/w#1"]))) "before the take, nothing of main's")
          (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
          (is (= [] (agent/take-main!)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
          (is (= [nil :waiting "waiting for a message"]
-                (mapv (member :runs :seon.run/id "demo/w#1") [:seon.run/status :seon.run/outcome :seon.run/reason]))
-             "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
+                (mapv (d/entity (agent/db) [:seon.run/id "demo/w#1"]) [:seon.run/status :seon.run/outcome :seon.run/reason]))
+             ;; read from the branch: the agent's record no longer pulls runs (the-agent-is-the-unit-not-the-run, cut 1)
+             "the run's outcome and reason on main are on its branch after the take; its status is not taken")
          (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
          (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")
@@ -1216,19 +1219,6 @@
     (is (= 2 (count (:read (:value turn)))) "read back from its records")
     (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
-
-(deftest code-sent-again-is-told-on-its-answer
-  ;; the live runs of 2026-10-25/26 (39 repeats of a turn's calls): each followed an answer that
-  ;; said too little, 9 of them a value folded to an earlier record's form; no count of repeats
-  ;; ends a run. A model that sends the same call every turn runs to its cap, and from its second
-  ;; turn on each answer it reads says it is the earlier one's, whole beside that one's handle
-  (let [[end sent] (in-agent (fn [{:keys [task ns]}]
-                              [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#loop")) " :max-turns 3})")
-                               (str "(:seon.turn/sent (datahike.api/pull (seon.agent/db) [:seon.turn/sent] [:seon.turn/id " (pr-str (str ns "/t#loop/2")) "]))")])
-                             {:sets [":seon.config.ai/script=seon.fixtures/same-call"]})]
-    (is (= [:cap 3] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))
-    (is (some #(and (= :eval (first %)) (symbol? (:same-as (get % 2)))) (:value sent))
-        (str "turn 2 sent turn 1's answer marked :same-as turn 0's: " (pr-str (:value sent))))))
 
 (deftest a-whole-tasks-work-turns-are-no-merge-turns
   ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work

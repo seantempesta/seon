@@ -5,6 +5,9 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
+### An eval call holds one or more forms (owner, 2026-10-29)
+"remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
+
 ### Seon runs on an ordinary MacBook (owner, 2026-10-29)
 "I want this to run on an average users macbook for reference. Not just servers or people like me with 128GB of ram." Ten working agents fit an 8 GB-class machine: root idle at or under 650 MB, the fork server under 300 MB, ten agents under 3 GB. Stated in: docs/plan.md (beside step 1), docs/machine.md#ten-agents-at-once.
 
@@ -23,13 +26,13 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 ## 2026-10-28 rulings
 The owner's rulings of 2026-10-28, each with where it is now stated; they stand over earlier entries where they differ.
 
-### An eval call is prose and one form; its result is data with Clojure's value (owner, 2026-10-28)
+### An eval call is prose and one form; its result is data with Clojure's value (owner, 2026-10-28; one form superseded 2026-10-29)
 "we can also just require both fields and be explicit"; "Okay match clojure for the eval output (4)"; "I mean the full data output with timing and result too. Not just the value". A call with no prose, or not exactly one form, is not run and answers `:seon.turn/invalid-call`; a `;` comment is code, never the description. The response is the full data map, its `:value` the one Clojure answers ((do (+ 1 1) (+ 2 2)) is 4): no `:values`. Supersedes the 2026-10-25 "each form's value" ruling. Stated in: docs/prompt.md, docs/agent.md, `seon.repl/response`, `seon.turn/call-problem`.
 
 ### The model is sent the whole conversation; no history budget (owner, 2026-10-28)
 "who made a 32k history budget? Remove it I never approved that". A session chose 32,000 tokens on 2026-10-21; it dropped the agent's own evals while page re-renders filled the request. Every request now sends every record whole. Stated in: `seon.context/request`, docs/render.md.
 
-### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28)
+### The eval protocol: tool calls by id; one form per call; a top-level do is its forms, as in Clojure (owner, 2026-10-28; one form superseded 2026-10-29)
 A reply's text heads its block of evals; each eval is one tool call with `prose` and one form, its result a tool message matched by the provider's call id; calls run in order and stop at the first throw, each later call answered "not run"; a reply with no call is the message to the user. "Match Clojure: unroll a top-level do so its definitions are program, and tighten the system text to one definition per call." Stated in: docs/prompt.md, `seon.turn` (the calls), `seon.repl/eval-code`.
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)

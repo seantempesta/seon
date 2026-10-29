@@ -6,24 +6,29 @@
             [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
-  ;; owner, 2026-10-28: match Clojure for the eval's output: forms run in order and the response
-  ;; is the last one's value (as load-string answers, *1 holds it), with the evaluation's facts
-  ;; as data; (do (+ 1 1) (+ 2 2)) answers 4, never each form's value. A form that throws ends it.
+  ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
+  ;; order and each one's value is answered, as a REPL prints them (:forms, :value their vector),
+  ;; with the evaluation's facts as data; (do (+ 1 1) (+ 2 2)) is one form and answers 4. A form
+  ;; that throws ends it, after the values of those before it.
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
                            (repl/eval-string code {})
                            (finally (reset! agent/state old))))
         r (ev "(+ 1 2) (str \"a\" \"b\") [:x]")]
-    (is (= [:x] (:value r)) "the last, as *1 holds it")
-    (is (not (contains? r :values)) "no list of each form's value")
-    (is (= [:x] (:value @(resolve (:handle r)))) "and its handle reads it")
+    (is (= [3 "ab" [:x]] (:value r)) "each top-level form's value, in order")
+    (is (= 3 (:forms r)) "and how many ran")
+    (is (= [3 "ab" [:x]] (:value @(resolve (:handle r)))) "and its handle reads it")
+    (is (= {:value 3} (select-keys (ev "(+ 1 2)") [:value :forms])) "one form: its value, no :forms")
     (is (contains? r :ms) "the evaluation's facts: its cost")
-    (is (= 4 (:value (ev "(do (+ 1 1) (+ 2 2))"))) "a do answers its last form's value")
+    (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
     (let [rec (repl/record-details nil "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
       (is (:printed rec) "a value that is no plain data: the response as it printed"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
-      (is (not (contains? e :value)) "and the forms after it never ran"))))
+      (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
+    (let [e (ev "(+ 1 1) (+ 2 2) (oops")]
+      (is (contains? e :ex) "a read error stops it")
+      (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
 
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
@@ -56,7 +61,7 @@
                                     " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
-    (is (= 6 (:value nested)) "a do inside a top-level do is its forms too")
+    (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
     (is (str/includes? (str (:text stopped)) "boom") "an error inside the do is the request's")
     (is (= [true false] (:value after)) "the forms after the error never ran")
     (is (= [true true] (:value branch)) "the branch's program holds c and d")))
@@ -103,10 +108,9 @@
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
-              ;; the same source a row above printed: an earlier response's output prints as the form
-              ;; that reads it again, never twice (docs/render.md)
-              ["(clojure.repl/source root-causes)" :text "(:out result/e"]
-              ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(:out result/e"]
+              ;; the same source twice: each answer prints it whole, whatever came before (docs/render.md)
+              ["(clojure.repl/source root-causes)" :text "(defn root-causes"]
+              ["(with-out-str (clojure.repl/source seon.reconcile/root-causes))" :text "(defn root-causes"]
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]
@@ -444,17 +448,19 @@
 
 (deftest a-call-is-one-response
   ;; docs/render.md: one response per eval call, {:handle :value :out
-  ;; :err :ex}, each key only when present; its forms run in order as load-string runs them,
-  ;; and the first exception stops them; its handle result/e<n> holds it
+  ;; :err :ex}, each key only when present; its forms run in order as a REPL runs them, each
+  ;; one's value answered (:forms, :value their vector), and the first exception stops them; its
+  ;; handle result/e<n> holds it
   (let [r (repl/eval-string "(println \"a\") (+ 1 2) (str \"x\")" {"ns" "user" :origin :outside})]
-    (is (= "x" (:value r)) (pr-str r))
+    (is (= [nil 3 "x"] (:value r)) (pr-str r))
+    (is (= 3 (:forms r)))
     (is (= "a\n" (:out r)))
     (is (not-any? #(contains? r %) [:ex :err]) "keys only when present")
-    (is (= "x" (:value @(find-var (:handle r)))) "the handle holds the response")
+    (is (= [nil 3 "x"] (:value @(find-var (:handle r)))) "the handle holds the response")
     (is (str/starts-with? (:text r) (str "{:handle " (:handle r))) "printed under its handle"))
   (let [r (repl/eval-string "(+ 1 2) (/ 1 0) (def a-call-is-one-response-never 1)" {"ns" "user" :origin :outside})]
     (is (= "Divide by zero" (:seon.error/message (:ex r))) (pr-str r))
-    (is (not (contains? r :value)) "an exception is the response: no value")
+    (is (= {:forms 2 :value [3]} (select-keys r [:forms :value])) "the value of the form before the exception, and the exception")
     (is (nil? (resolve 'user/a-call-is-one-response-never)) "a form after the exception never ran")))
 
 (deftest an-uncontracted-definition-is-told-on-its-answer
