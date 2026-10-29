@@ -150,18 +150,20 @@
 (defn- turn-error!
   "A turn that threw (st, its state; e, what it threw) given to the agent as data: the one error map
   (seon.agent/error-map, operation seon.turn/work!) as a message from seon on its branch, which its
-  next turn reads as any message, and the turn counted, so a throw that comes back each turn ends at
-  the cap. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
+  next turn reads as any message, the turn counted and the throw counted in :threw (work! ends the
+  agent's work :error on the second turn in a row that throws: its request cannot be drawn, so no
+  model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
   Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
   {:malli/schema [:=> [:cat :map :seon.host/throwable] :map]}
   [st e]
   (let [k (:key @agent/state)
+        em (agent/error-map e 'seon.turn/work!)
         body (print/text (vary-meta {:seon-threw "drawing your turn: Seon's code called the program on your branch, as it stands now, and it threw"
-                                     :error (agent/error-map e 'seon.turn/work!)}
+                                     :error em}
                                     assoc :seon.print/full true))]
     (agent/transact! (update (task/message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body) 0 assoc :seon.message/agent {:seon.agent/key k}))
     (agent/commit!)
-    (update st :turn inc)))
+    (-> st (update :turn inc) (update :threw (fnil inc 0)) (assoc :error em))))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -468,7 +470,12 @@
                   (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
                   stop (end! st (:outcome stop) (:reason stop) nil)
                   :else (let [st' (act! st obs s model)]
-                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next st']))))))
-                      ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!)
-                      (catch Throwable e [::next (turn-error! st e)]))]
+                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))
+                      ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!); the
+                      ;; second in a row, with no model turn between, ends its work with that error
+                      (catch Throwable e
+                        (let [st' (turn-error! st e)]
+                          (if (< 1 (:threw st'))
+                            (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
+                            [::next st']))))]
         (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))
