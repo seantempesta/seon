@@ -103,7 +103,7 @@ Your task is done when every proof passes and the done rule refuses nothing; the
 - Each run of your tests also records its results as `:seon.test/*` facts on your branch (`seon.agent/record-results!`, `seon.proofs/result-tx`), which `@ctx` holds under your task's proofs and the task part draws; `bin/test` and `bin/prove` keep the shared verdict cache, so a test green at its digest for anyone is reused by you ([merging](merging.md#verdicts-are-a-cache)).
 - The judge counts exactly (`seon.cost/slack`): allocated bytes may reach 1.25x the estimate, contracted calls 1.0x and ticks (the counted time dimension) 3x. CPU time (`:ns`) is measured and shown ("TIME OVER") but never red. A dimension whose growth exponent exceeds `:growth`'s by more than `seon.cost/steeper-by` (0.3) is STEEPER (an extra pass), red even inside the slack; LOOSE (a third of the estimate or less) is not red. Its failure message prints measured over estimate per size.
 
-An agent's run records no `:ms` (```seon.proofs/answer-ran``` carries none), so ```seon.fx/last-ms``` knows only `bin/test`'s durations. The judge's test selection follows reach: a print-only change to five keys selected 991 tests and ran 363, because `seon.print.select` is the printer core every test reaches.
+An agent's run records no `:ms` (```seon.proofs/answer-ran``` carries none), so ```seon.fx/typical-ms``` knows only `bin/test`'s durations. The judge's test selection follows reach: a print-only change to five keys selected 991 tests and ran 363, because `seon.print.select` is the printer core every test reaches.
 
 ## Merging
 

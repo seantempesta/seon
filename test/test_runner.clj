@@ -233,21 +233,23 @@
     (if (contract/error? r) [{:key :all :message (:seon.error/message r)}] [])))
 
 (defn- measured-ms
-  "{test ms} of tests: the most ms each one's cached verdicts measured (seon.fx/last-ms): what the deal
+  "{test ms} of tests: the median of the ms each one's cached verdicts measured (seon.fx/typical-ms): what the deal
   orders by, never what a test proves."
   [tests]
-  (if (seq tests) (fx/last-ms (vec tests)) {}))
+  (if (seq tests) (fx/typical-ms (vec tests)) {}))
 
 (defn shards
   "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
   never measured counts as the mean of those measured), so the shards end together: a
-  namespace's tests (and so its fixtures) in one, unless the namespace alone is more than a
-  shard's share, when it is split into share-sized parts (its fixtures run in each); the
+  namespace's tests (and so its fixtures) in one, unless the namespace alone is more than half a
+  shard's share, when it is split into parts of at most that (its fixtures run in each); the
   longest part first into the shard with least so far; no empty shard."
   [tests jobs ms]
   (let [mean (if (seq ms) (quot (reduce + (vals ms)) (count ms)) 1)
         cost #(get ms % mean)
-        share (max 1 (quot (reduce + (map cost tests)) (max 1 jobs)))
+        ;; a part at most half a shard's share, so the parts of one large namespace (root-test: 13 tests, ~500 s
+        ;; in one shard while three others ended at 340-390 s, 2026-10-29) fill the gaps the largest leave
+        share (max 1 (quot (reduce + (map cost tests)) (* 2 (max 1 jobs))))
         parts (mapcat (fn [[_ ts]]
                         (let [ts (vec (sort-by (juxt (comp - cost) str) ts))]
                           (if (<= (reduce + (map cost ts)) share)

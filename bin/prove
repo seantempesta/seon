@@ -4,7 +4,7 @@
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
 # tree runs nothing. Tests run in :seon.config.proofs/jobs shards at once (bin/test); the steps to run go
-# through bin/check's own bodies (bin/check --steps target/prove), on target/seon built from this tree first
+# through bin/check's own bodies (bin/check --steps target/prove, started by bin/test beside the shards), on target/seon built from this tree first
 # (bin/test builds it only when a selected test or step reaches the binary: the plan's out/binary).
 # With no namespace named, the tests and steps that reach a process of their own (a root, an
 # agent, a fork, the binary: seon.program/graph-index's :process?) are left out; they run when
@@ -16,7 +16,7 @@
 # the process's pid), or the DIR --out names; the run says where on its first line ("prove: run ID,
 # logs in DIR"), so two runs on one checkout never overwrite each other's shard files and logs, and
 # every reader takes the path from the run. A green run's directory is removed with it (red, killed and --merge
-# runs keep theirs; one named by --out is its caller's). Each test's last measured ms is in its cached verdicts (seon.fx/last-ms).
+# runs keep theirs; one named by --out is its caller's). Each test's last measured ms is in its cached verdicts (seon.fx/typical-ms, their median).
 #
 # bin/prove --merge — a merge's verification, the one command (docs/merging.md#main-goes-first):
 # runs every test and step with no green at its digest, the ones that
@@ -69,8 +69,8 @@ PLAN=(); (( MERGE )) && PLAN=(--merge)
 (
 nice -n 15 "$ROOT/bin/test" --prove $WHAT "$OUT" $PLAN "$@" || st=1
 if [[ $WHAT != tests && -s $OUT/steps ]]; then
-  # bin/test built target/seon from this tree: a step's result is keyed by the source it reaches
-  "$ROOT/bin/check" --steps "$OUT" || st=1
+  # bin/test built target/seon from this tree and ran the steps beside its shards (bin/check --steps);
+  # a step's result is keyed by the source it reaches
   nice -n 15 "$ROOT/bin/test" --store-steps "$OUT" || st=1
 fi
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
