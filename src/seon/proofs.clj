@@ -217,8 +217,8 @@
       (and (not= :green status) (or failure (and same? (:seon.test/failure old)))) (assoc :seon.test/failure (or failure (:seon.test/failure old))))))
 
 (defn result-tx
-  "The transaction that records a test run's results on the branch that ran it (task
-  seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
+  "The transaction that records a test run's results on the branch that ran it (docs/merging.md#verdicts-are-a-cache,
+  task seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
   :ticks :bytes) its digest, status, first failure (failures, {test [assertion]}) and sums; and for each of
   reused ({test result}, a result the cache held at its digest) its digest and status, so a freshly branched
   agent's proofs show their reused status. old is {test entity} as the branch holds each now
