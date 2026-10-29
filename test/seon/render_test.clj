@@ -1410,6 +1410,18 @@
     (is (= [:ol {:class "list-decimal pl-5"} [:li "first\n   - nested"] [:li "second"]] (last nums))
         "a numbered list is an ol of its items, a nested line inside its parent item")))
 
+(deftest markdown-reads-no-text-again
+  ;; docs/render.md#prose-and-the-one-string-cutter: markdown draws what the scan found, and no regex reads the text
+  ;; again (task seon.ref/markdown-reads-the-scan: md-scan #17 went green on the scan's proofs alone, its markdown
+  ;; still splitting and replacing by regex). What the definition calls, as the compiler's facts say
+  ;; (seon.source/accounts: its :refs), never a pattern over its text
+  (let [src (my.agent/source-fn 'seon.render.ui/markdown)
+        refs (into #{} (mapcat :refs) (:accounts (seon.source/accounts 'seon.render.ui src)))]
+    (is (some? src) "its source, as the process runs it")
+    (is (empty? (filter refs '[clojure.core/re-find clojure.core/re-seq clojure.core/re-matches clojure.core/re-pattern
+                               clojure.core/re-matcher clojure.string/split clojure.string/replace clojure.string/replace-first]))
+        (str "a regex function in markdown: " (pr-str (filter #(#{"clojure.core" "clojure.string"} (namespace %)) refs))))))
+
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's or a run's id as its title
   (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
