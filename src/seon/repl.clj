@@ -573,7 +573,8 @@
                 cites (volatile! nil)
                 ;; printing is inside the boundary: a value that throws as it is realized is the error
                 [r text] (try (@the-handler (assoc req "code" code :reply #(vswap! answers conj %)))
-                              (when-let [db (agent/db)] (vreset! cites (some->> (:prose req) (ref/references db))))
+                              (when (and (:prose req) contract/record? (= :agent (:mode @agent/state)))
+                                (vreset! cites (ref/references (agent/db) (:prose req))))
                               (answered)
                               (catch Throwable e
                                 (let [em (agent/error-map e)]
