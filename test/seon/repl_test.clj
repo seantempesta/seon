@@ -51,14 +51,20 @@
   ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
   ;; spent 39 turns finding out why (docs/prompt.md)
   (let [[r nested stopped after branch]
-        (at/in-agent (fn [{:keys [ns task]}]
+        (at/in-agent (fn [{:keys [ns task agent]}]
                        [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
                         (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
                         (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
                         (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
                         {:op :eval :agent "root"
-                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
+                         ;; the agent's records are applied ahead of its commit (seon.agent/transact!): read at its
+                         ;; :commit events, the tap first (seon.check/await-records's order)
+                         :code (str "(let [ev (c/events sys) a :" agent
+                                    " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d])))"
+                                    " r (loop [] (let [v (read)] (if (every? true? v) v"
+                                    " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                    " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
     (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
