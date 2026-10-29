@@ -635,11 +635,12 @@
                          (let [want (-> (merge (dissoc d :seon.task/ns :seon.task/name :seon.task/config) (:seon.task/config d) (references-of db d))
                                         (update :seon.task/branch #(or % (default-branch id)))
                                         (assoc :seon.task/needs (into #{} (map #(or (pdb/eid db :seon.task/id %) %)) (:seon.task/needs d))))]
-                           (cond-> (conj (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want) (declared id d))
+                           (cond-> (conj (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want)
+                                         [:db/add [:seon.task/id id] :seon.task/declared (sedn/encode d)])
                              ;; declared again after its removal: revived
                              (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
-                             (conj {:seon.task/id id :seon.task/execution :held}))))
+                             (conj [:db/add [:seon.task/id id] :seon.task/execution :held]))))
                        changed)
-               (mapcat (fn [id] [{:seon.task/id id :seon.task/execution :cancelled}
+               (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
                        removed)))))))

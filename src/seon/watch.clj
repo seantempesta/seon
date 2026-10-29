@@ -45,12 +45,14 @@
 
 (defn start!
   "Start target/watch over roots (absolute directories) and its reading edge thread. Each
-  batch of [kind path] records goes to (on-batch batch); when the stream ends without stop!,
+  batch of [kind path] records goes to (on-batch batch). A batch handler that throws is that batch's
+  failure, never the watch's end: (on-error e) gets :seon.watch/batch-failed (the batch's size and
+  the throw's words) and the thread reads the next batch. When the stream ends without stop!,
   (on-exit e) gets :seon.watch/died, the child's exit status and stderr in it. Answers the
   watcher {:process :ready} once the stream has started (its :ready record), or the error map
   :seon.watch/died when the child could not start or ended before it was ready."
-  {:malli/schema [:=> [:cat [:sequential :string] :seon.host/fn :seon.host/fn] :any]}
-  [roots on-batch on-exit]
+  {:malli/schema [:=> [:cat [:sequential :string] :seon.host/fn :seon.host/fn :seon.host/fn] :any]}
+  [roots on-batch on-error on-exit]
   (let [bin (str (cfg/checkout) "/target/watch")
         died (fn [p why]
                (contract/error :seon.watch/died #'seon.watch/start! why
@@ -71,11 +73,18 @@
                                   (fn []
                                     (loop []
                                       (if-let [b (read-batch! in)]
-                                        ;; a throw in the batch's handler ends the watch as a death, recorded by on-exit
-                                        ;; (the failure point docs/failure-points.md names): never a silent thread end
-                                        (if-let [t (try (on-batch b) nil (catch Throwable t t))]
-                                          (do (.destroy p)
-                                              (on-exit (died p (str "its batch handler threw: " (.getMessage ^Throwable t) ": root no longer watches what its loaders read"))))
+                                        (do
+                                          ;; the one catch of a batch handler's throw (docs/failure-points.md, the watcher's
+                                          ;; batch): the batch's failure is an error value to on-error, and the next batch is read
+                                          (when-let [t (try (on-batch b) nil (catch Throwable t t))]
+                                            (let [e (contract/error :seon.watch/batch-failed #'seon.watch/start!
+                                                                    (str "its batch handler threw: " (or (.getMessage ^Throwable t) (str (class t)))
+                                                                         ": the records of that batch were not loaded; root goes on watching")
+                                                                    {:records (count b)})]
+                                              ;; recording it can fail too (the store refused the write): the edge's last word is
+                                              ;; stderr, and the next batch is read all the same
+                                              (when-let [t2 (try (on-error e) nil (catch Throwable t2 t2))]
+                                                (.println System/err (str "seon.watch: " (:seon.error/message e) "; recording it threw: " (.getMessage ^Throwable t2))))))
                                           (recur))
                                         (when-not (realized? stopped)
                                           (on-exit (died p (str bin " ended: root no longer watches what its loaders read")))))))
