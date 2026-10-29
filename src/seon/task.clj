@@ -190,16 +190,12 @@
    :forked-ms :seon.process/forked-ms :ended-ms :seon.process/ended-ms :stalled :seon.process/stall})
 
 (defn newest-process
-  "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse), by when
-  it forked, or nil: the agent's current process, whose telemetry the agent's record no longer
-  holds (docs/ctx.md#the-record-is-the-agents-work). An agent has one process per spawn."
+  "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse) by when
+  it forked, or nil when none says when: the agent's current process, whose telemetry the agent's
+  record no longer holds (docs/ctx.md#the-record-is-the-agents-work). An agent has one process per
+  spawn, written with its pid and fork time together (agent-tx)."
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
-  [ps] (when (seq ps) (apply max-key #(:seon.process/forked-ms % 0) ps)))
-
-(defn current-process
-  "Agent entity a's current process (newest-process of its :seon.process/_agent), or nil."
-  {:malli/schema [:=> [:cat :any] [:maybe :any]]}
-  [a] (newest-process (seq (:seon.process/_agent a))))
+  [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
 (defn session-key
   "The agent key of task id's session on db, or nil when none of its runs has had an agent: the
@@ -230,8 +226,8 @@
   "What root observes of agent id in its boot, as facts: on the agent's entity the root that
   started it and its status, task's id or description and branch; on its process's entity
   (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
-  forked and ended and a stall it shows; each member m holds of root's view. A member m holds as nil is
-  no longer true, and retracted (the form running, once it returned). Root writes it when its
+  forked and ended and a stall it shows: each member of root's view m, written when set and retracted
+  when m holds it as nil (the form running, once it returned). Root writes it when its
   view of the agent changes (seon.root/record-agents)."
   {:malli/schema [:function [:=> [:cat :string :keyword :map] [:vector :any]]
                   [:=> [:cat :string :keyword :map [:maybe :string]] [:vector :any]]]}

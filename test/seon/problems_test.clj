@@ -276,7 +276,7 @@
 
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
   (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1}
-                                    {:seon.process/id "b1/a1/77" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 77
+                                    {:seon.process/id "b1/a1/77" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
                                      :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
                                     {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
         rows (get-in (problems/health db) [:classes :stalled :rows])]
@@ -285,7 +285,11 @@
     (is (empty? (get-in (problems/health (d/db-with db [[:db.fn/retractAttribute [:seon.process/id "b1/a1/77"] :seon.process/stall]])) [:classes :stalled :rows]))
         "closed once the fact is retracted")
     (is (empty? (get-in (problems/health (d/db-with db (seon.task/earlier-agents-tx db))) [:classes :stalled :rows]))
-        "and by a new boot: an earlier boot's stall ended with its process")))
+        "and by a new boot: an earlier boot's stall ended with its process")
+    ;; a stall left on an earlier process of the agent is no row: only its current process's counts
+    (is (empty? (get-in (problems/health (d/db-with db [{:seon.process/id "b1/a1/78" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 78 :seon.process/forked-ms 20.0}]))
+                        [:classes :stalled :rows]))
+        "a respawned agent's old process's stall is no row")))
 
 (defn- gone-ended? [r] (= :seon.root/ended (:seon.error/type r)))
 
