@@ -118,6 +118,14 @@
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (nil? (:value branch)) (str "the branch records no definition of it: " (pr-str branch)))))
 
+(deftest an-eval-that-printed-answers-its-value
+  ;; since an eval's :out is shown verbatim (md-scan #20), the printed answer is no EDN once it printed, and a reader
+  ;; that read the value back from the text got nil (seon.source-test's restart read nil of a turn that printed); the
+  ;; agent's reply carries a plain value as data beside the text (seon.repl, seon.server)
+  (let [[r] (at/in-agent ["(do (println \"a ] b\") {:n 42})"])]
+    (is (= {:n 42} (:value r)) (pr-str r))
+    (is (str/includes? (str (:text r)) "a ] b") "and its text still shows what it printed, verbatim")))
+
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
   ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns). The agent
