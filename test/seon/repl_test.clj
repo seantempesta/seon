@@ -58,7 +58,7 @@
                                     " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
-    (is (= 6 (:value nested)) "a do inside a top-level do is its forms too")
+    (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
     (is (str/includes? (str (:text stopped)) "boom") "an error inside the do is the request's")
     (is (= [true false] (:value after)) "the forms after the error never ran")
     (is (= [true true] (:value branch)) "the branch's program holds c and d")))

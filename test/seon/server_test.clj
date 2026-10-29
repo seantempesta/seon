@@ -293,7 +293,7 @@
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
-    (is (true? (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
+    (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (= {:path true :old true :new true :handle true :record false :agent-id false} (dissoc (:value told) :tokens)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value, each eval by its handle, never its record")
     ;; the :ctx part of the message, which is what the diff owns: about 90 tokens (630 when an eval was
