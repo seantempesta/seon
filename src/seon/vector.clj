@@ -56,32 +56,69 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword] :any]}
   [db e a] (:v (first (d/datoms db :eavt e a))))
 
+(defn- vector-e
+  "The vector entity of entity e on db (its :seon.vector/of identity, docs/vector.md#a-vector-is-its-own-entity), or nil: one AVET seek."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
+  [db e] (:e (first (d/datoms db :avet :seon.vector/of e))))
+
+(defn- stored-of
+  "Attribute a of the vector entity of e on db, or nil: two seeks."
+  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword] :any]}
+  [db e a] (when-let [ve (vector-e db e)] (stored db ve a)))
+
+(defn- vectors-of
+  "{vector entity e} of every vector on db: one scan of :seon.vector/of, the join `near` and `due`
+  make from a scan of another vector attribute back to the entity embedded."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :int :int]]}
+  [db] (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/of)))
+
 (defn vector-of
   "Entity e's vector on db, or nil when it has none."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:vector number?]]]}
-  [db e] (some-> (stored db e :seon.vector/f16) unpack))
+  [db e] (some-> (stored-of db e :seon.vector/f16) unpack))
+
+(defn- fine-scores
+  "The cosine of vector q with the vector of each vector entity of ves on db (the fine level over the
+  first fd dims), nil where ves holds nil: `scores`' work, for callers that hold the vector entities."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential [:maybe :int]] pos-int?] [:vector [:maybe number?]]]}
+  [db q ves fd]
+  (let [dims (count q) fd (min fd dims)
+        rows (mapv #(when % (stored db % :seon.vector/f16)) ves)
+        have (filterv some? rows) m (count have)]
+    (if (zero? m)
+      (mapv (constantly nil) ves)
+      (ffi/with-arena [a]
+        (let [fp (ffi/alloc a (* m 2 dims)) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (* 4 m))]
+          (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (nth have j)))
+          (ffi/write-array qf :float (float-array q) 0)
+          (c-fine fp m dims fd qf fs)
+          (let [ss (ffi/read-array fs :float m 0)]
+            (first (reduce (fn [[out j] r] (if r [(conj out (double (nth ss j))) (inc j)] [(conj out nil) j])) [[] 0] rows))))))))
 
 (defn scores
   "The cosine of vector q with the vector of each entity of es on db, in es's order (the fine level,
   c-fine, over their first fd dims, each prefix renormalized: all of q's unless given), nil for an
   entity with no vector: `near`'s ranking of its shortlist, and seon.context/relevance's of a pool.
-  Cost: one EAVT seek an entity."
+  Cost: two seeks an entity (its vector entity by :seon.vector/of, then the vector), one contracted call in all."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int]] [:vector [:maybe number?]]]
                   [:=> [:cat :seon.host/db [:vector {:min 1} number?] [:sequential :int] pos-int?] [:vector [:maybe number?]]]]}
   ([db q es] (scores db q es (count q)))
-  ([db q es fd]
-   (let [dims (count q) fd (min fd dims)
-         rows (mapv #(stored db % :seon.vector/f16) es)
-         have (filterv some? rows) m (count have)]
-     (if (zero? m)
-       (mapv (constantly nil) es)
-       (ffi/with-arena [a]
-         (let [fp (ffi/alloc a (* m 2 dims)) qf (ffi/alloc a (* 4 dims)) fs (ffi/alloc a (* 4 m))]
-           (dotimes [j m] (ffi/write-bytes (ffi/slice fp (* j 2 dims)) (nth have j)))
-           (ffi/write-array qf :float (float-array q) 0)
-           (c-fine fp m dims fd qf fs)
-           (let [ss (ffi/read-array fs :float m 0)]
-             (first (reduce (fn [[out j] r] (if r [(conj out (double (nth ss j))) (inc j)] [(conj out nil) j])) [[] 0] rows)))))))))
+  ([db q es fd] (fine-scores db q (mapv #(:e (first (d/datoms db :avet :seon.vector/of %))) es) fd)))
+
+(defn- coarse-rows
+  "The coarse rows of db, [[e ve coarse] ...]: each vector entity's coarse bytes with the entity it
+  embeds (e: one keep? accepts and self is not), joined from the two scans of :seon.vector/of and
+  :seon.vector/coarse, both in vector-entity order, in one pass (a vector left on another entity has no
+  :seon.vector/of, and is no row)."
+  {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int]] [:vector :any]]}
+  [db keep? self]
+  (loop [os (seq (d/datoms db :aevt :seon.vector/of)) cs (seq (d/datoms db :aevt :seon.vector/coarse)) out (transient [])]
+    (if (and os cs)
+      (let [o (first os) c (first cs) oe (:e o) ce (:e c)]
+        (cond (< oe ce) (recur (next os) cs out)
+              (< ce oe) (recur os (next cs) out)
+              :else (recur (next os) (next cs) (if (and (keep? (:v o)) (not= self (:v o))) (conj! out [(:v o) oe (:v c)]) out))))
+      (persistent! out))))
 
 (defn near
   "The k entities of db nearest q, [[e score] ...] best first, score the cosine: a Datalog
@@ -101,23 +138,24 @@
    (let [self (when (int? q) q)
          qv (if self (vector-of db self) q)
          keep? (if of (into #{} (map :e) (d/datoms db :aevt of)) any?)
-         rows (into [] (filter #(and (keep? (:e %)) (not= self (:e %)))) (d/datoms db :aevt :seon.vector/coarse))]
-     (if (or (empty? rows) (empty? qv) (zero? k))
+         rows (coarse-rows db keep? self)]
+    (if (or (empty? rows) (empty? qv) (zero? k))
        []
-       (let [n (count rows) w (count (:v (first rows))) cd (- w 4) dims (count qv)
-             stored-dims (quot (count (stored db (:e (first rows)) :seon.vector/f16)) 2)
+       (let [n (count rows) w (count (peek (first rows))) cd (- w 4) dims (count qv)
+             stored-dims (quot (count (stored db (nth (first rows) 1) :seon.vector/f16)) 2)
              _ (when (not= dims stored-dims)
                  (throw (ex-info (str "seon.vector/near: a query of " dims " dims over vectors of " stored-dims) {:dims dims :stored stored-dims})))
              sl (min n (max k (or shortlist (cfg/value :seon.config.vector/shortlist))))
              fd (min dims (or fine-dims (cfg/value :seon.config.vector/fine-dims)))]
          (ffi/with-arena [a]
            (let [cp (ffi/alloc a (* n w)) qp (ffi/alloc a w) ip (ffi/alloc a (* 8 sl)) sp (ffi/alloc a (* 4 sl))]
-             (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (:v (nth rows i))))
+             (dotimes [i n] (ffi/write-bytes (ffi/slice cp (* i w)) (peek (nth rows i))))
              (ffi/write-bytes qp (:seon.vector/coarse (pack-dims qv cd)))
              (let [m (c-coarse cp n cd qp sl ip sp)
-                   es (mapv #(:e (nth rows %)) (ffi/read-array ip :int64 m 0))]
+                   hit (mapv #(nth rows %) (ffi/read-array ip :int64 m 0))
+                   es (mapv first hit)]
                ;; best first; the entity id breaks a tie, so one db answers one order
-               (->> (map (fn [e s] [(- s) e]) es (scores db qv es fd))
+               (->> (map (fn [e s] [(- s) e]) es (fine-scores db qv (mapv second hit) fd))
                     sort (take k) (mapv (fn [[s e]] [e (- (double s))])))))))))))
 
 (defmacro fused
@@ -212,12 +250,14 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]
                   [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :int]]]]}
   ([db model]
-   (let [made (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/text-t))
-         of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.vector/model))]
+   (let [on (vectors-of db)
+         by-e (fn [a] (into {} (keep (fn [d] (when-let [e (on (:e d))] [e (:v d)]))) (d/datoms db :aevt a)))
+         made (by-e :seon.vector/text-t)
+         of (by-e :seon.vector/model)]
      (let [title-of (titles db)]
        (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among (filter (comp texts :a) ds) #(stored db % :seon.vector/text-t) #(stored db % :seon.vector/model) #(title db %) model)))
+   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text-t) #(stored-of db % :seon.vector/model) #(title db %) model)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
@@ -226,13 +266,22 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :any]]}
   [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
 
+(defn fact
+  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t,
+  that text's whole tokens n (past :seon.config.vector/max-tokens its first were embedded), made by
+  model. Its identity is :seon.vector/of, so a vector written again replaces e's
+  (docs/vector.md#a-vector-is-its-own-entity)."
+  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :int :string] :map]}
+  [e t v n model]
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n))
+
 (defn tx-data
-  "The facts of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
+  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], that
   text's whole tokens ns[i] (past :seon.config.vector/max-tokens its first were embedded), made by
-  model."
+  model (`fact`)."
   {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] [:sequential :int] :string] [:vector :map]]}
   [es ts vs ns model]
-  (mapv (fn [e t v n] (assoc (pack v) :db/id e :seon.vector/model model :seon.vector/text-t t :seon.vector/tokens n)) es ts vs ns))
+  (mapv (fn [e t v n] (fact e t v n model)) es ts vs ns))
 
 ;; ---- the model (native/embed.c over llama.cpp: root's :embed worker alone loads it) ------
 ;; Bound here, resolved on the first call: the library is loaded by `open`, in the worker, so an
