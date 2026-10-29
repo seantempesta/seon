@@ -5,6 +5,9 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
+### The verdict cache holds 512 MB, least recently used out first (owner, 2026-10-29)
+"least recently used automatic eviction if max capacity is reached"; the capacity: 512 MB (chosen over 256 MB; the main tree's cache held 121 MB in 27,034 files that day). One capacity for the whole cache, greens and reds alike; a verdict for a test no longer in the program goes by the same rule; nothing goes below the bound ("don't drop cache work that other agents may need"). Stated in: :seon.config.proofs/results-max-bytes, seon.proofs/the-verdict-cache-empties-itself.
+
 ### An eval call holds one or more forms (owner, 2026-10-29)
 "remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
 
@@ -46,6 +49,9 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 "Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
+
+### Agents at once: ten to twenty on a small machine, no ceiling on big iron (owner, 2026-10-29)
+"Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running), task seon.config/agents-at-once-follow-the-machine.
 
 ### Fix every major optimization issue; memory is the thread to pull (owner, 2026-10-29)
 "Your job is to priortize fixing ALL major optimization issues that you see. Memory problems seem like a good way to finding real system / platform / core issues so it's not a bad thread to pull on. Blockers of course." and "I don't see why hundreds of mb are being used for anything right now so I think there's a lot of headroom". The machine session works beside step 1: blockers first, then every large cost found, each measured before and after. Stated in: docs/plan.md (beside step 1).

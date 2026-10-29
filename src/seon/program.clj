@@ -1103,14 +1103,18 @@
   "The vars that read one class of the checkout's files that have no program facts
   (seon.fx/inputs' :seon.env/* entries of :config, one digest each): a test reaching one takes
   that class's digest. The bin/ scripts, web/ and resources/public, system.edn, deps.edn and the
-  schema resources are classes; the rest (native/, the pins, test fixtures) is every test's
+  schema resources (read whole only by the two vars that filter a db's schema by namespace) are classes; the rest (native/, the pins, test fixtures) is every test's
   (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
   takes every class, which graph-index adds from its flags, not this map."
   '{seon.fx/declared-refs :seon.env/system
     seon.system/read-decl :seon.env/system
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
-    clojure.java.shell/sh :seon.env/bin})
+    clojure.java.shell/sh :seon.env/bin
+    ;; the vars that walk every attribute a db's schema declares (the schema resources' entries)
+    ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
+    seon.reconcile/index :seon.env/schemas
+    seon.merge/content-datoms :seon.env/schemas})
 
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the

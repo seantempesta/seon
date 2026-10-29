@@ -1,10 +1,10 @@
 (ns seon.results-test
   "Verdicts are a cache by digest outside the store (docs/merging.md#verdicts-are-a-cache): one file a
-  key, digest and status, flaky kept across writers, a red never evicted, the cost a test spent per
+  key, digest and status, flaky kept across writers, the least recently used evicted past a capacity, the cost a test spent per
   function kept with its verdict, and nothing written to the store; each test on a cache directory of
   its own under target/tmp."
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
-            [seon.fx :as fx] [seon.proofs :as proofs]))
+            [seon.fx :as fx] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
 
@@ -65,21 +65,103 @@
        (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r)))
      (is (nil? (fx/read-verdict (str dir "/a/t/gone.pass.edn"))) "a file that is not there (never written, or evicted meanwhile) is a miss"))))
 
+;; A green's file is about this big (two lines of EDN); the proofs below size their cache in these.
+(defn- file-of [dir k dg st] (java.io.File. (str dir "/" (namespace k) "/" (name k) "/" dg "." (name st) ".edn")))
+
+(defn- age!
+  "Set the mtime of key k's verdict at digest dg and status st to age-s seconds ago."
+  [dir k dg st age-s]
+  (.setLastModified (file-of dir k dg st) (- (System/currentTimeMillis) (* 1000 age-s))))
+
+(defn- bytes-in
+  "Bytes of the verdict files under dir."
+  [dir] (reduce + (map #(.length ^java.io.File %) (filter #(and (.isFile ^java.io.File %) (.endsWith (.getName ^java.io.File %) ".edn")) (file-seq (java.io.File. ^String dir))))))
+
+(defn- size-of [dir k dg st] (.length (file-of dir k dg st)))
+
+(defn- present [dir ks dgs]
+  (set (for [k ks dg dgs :when (or (.exists (file-of dir k dg :pass)) (.exists (file-of dir k dg :red)))] dg)))
+
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-test-holds-at-most-its-bound-of-digests-and-a-red-is-never-evicted
+(deftest past-capacity-the-least-recently-used-goes
   (with-dir
    (fn [dir]
-     (let [bound (cfg/value :seon.config.proofs/results-per-test)
-           ;; "d000" sorts lowest, so it is the first evicted were it green: a red never is
-           _ (rec! dir {'a/t {:test 'a/t :digest "d000" :pass 0 :fail 1 :error 0}} {'a/t [{:type :fail :message "red"}]})
-           _ (doseq [i (range 1 (+ bound 3))]
-               (rec! dir {'a/t {:test 'a/t :digest (format "d%03d" i) :pass 1 :fail 0 :error 0}}))
-           held (->> (.listFiles (java.io.File. (str dir "/a/t"))) (map #(re-find #"^d\d+" (.getName %))) distinct sort)
-           kept (fx/stored-results dir {'a/t "d000"})]
-       (is (= bound (count held)) (pr-str held))
-       (is (some #{"d000"} held) "the red stays")
-       (is (some #{(format "d%03d" (+ bound 2))} held) "the digest just written stays")
-       (is (= 1 (:fail (get kept "d000"))) (str "and reads back red: " (pr-str kept)))))))
+     (let [red {'a/r {:test 'a/r :digest "old-red" :pass 0 :fail 1 :error 0}}
+           one (fn [dg] (rec! dir {'a/t {:test 'a/t :digest dg :pass 1 :fail 0 :error 0}}))
+           _ (rec! dir red {'a/r [{:type :fail :message "red"}]})
+           _ (doseq [dg ["g1" "g2" "g3"]] (one dg))
+           [r g1 g2 g3] [(size-of dir 'a/r "old-red" :red) (size-of dir 'a/t "g1" :pass) (size-of dir 'a/t "g2" :pass) (size-of dir 'a/t "g3" :pass)]
+           _ (doseq [[k dg st s] [['a/r "old-red" :red 400] ['a/t "g1" :pass 300] ['a/t "g2" :pass 100] ['a/t "g3" :pass 200]]] (age! dir k dg st s))
+           ;; a bound the new green (about g3's size) fits under only once two are evicted: the red (oldest), then g1
+           cap (+ g2 g3 g3 4)
+           _ (is (= (+ r g1 g2 g3) (bytes-in dir)) "the four files are all the cache holds")
+           w (fx/write-verdicts! dir {:id "w" :tree "t"} {'a/t {:test 'a/t :digest "new" :pass 1 :fail 0 :error 0}} {} cap)
+           held (present dir ['a/t 'a/r] ["old-red" "g1" "g2" "g3" "new"])]
+       (is (= {:recorded 1} w))
+       (is (= #{"g2" "g3" "new"} held) "the oldest, a red among them, went first; the one just written stays")
+       (is (<= (bytes-in dir) cap) "and the cache is under its bound")))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest under-capacity-nothing-goes
+  (with-dir
+   (fn [dir]
+     (doseq [i (range 5)]
+       (fx/write-verdicts! dir {:id "w"} {'a/t {:test 'a/t :digest (str "u" i) :pass 1 :fail 0 :error 0}} {} 1000000))
+     (is (= (set (map #(str "u" %) (range 5))) (present dir ['a/t] (map #(str "u" %) (range 5)))))
+     ;; exactly at the bound is not past it
+     (let [now (bytes-in dir)]
+       (fx/write-verdicts! dir {:id "w"} {'a/t {:test 'a/t :digest "u5" :pass 1 :fail 0 :error 0}} {} (+ now (size-of dir 'a/t "u0" :pass)))
+       (is (= 6 (count (present dir ['a/t] (map #(str "u" %) (range 6))))))))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-read-keeps-a-verdict
+  (with-dir
+   (fn [dir]
+     (doseq [dg ["k1" "k2" "k3"]] (rec! dir {'a/t {:test 'a/t :digest dg :pass 1 :fail 0 :error 0}}))
+     (doseq [[dg s] [["k1" 300] ["k2" 200] ["k3" 100]]] (age! dir 'a/t dg :pass s))
+     (is (contains? (fx/stored-results dir '{a/t "k1"}) "k1"))
+     ;; k1 was the oldest, but the read made it the newest: k2 goes first
+     (fx/write-verdicts! dir {:id "w"} {'a/t {:test 'a/t :digest "k4" :pass 1 :fail 0 :error 0}} {}
+                         (inc (bytes-in dir)))
+     (is (= #{"k1" "k3" "k4"} (present dir ['a/t] ["k1" "k2" "k3" "k4"]))))))
+
+(defn cache-write
+  "write-verdicts!'s arguments at n: a cache directory (under target/tmp) holding n verdicts of one
+  test each, a new verdict to write, and the bound: with room for it (over? false) or one verdict
+  short (over? true), so the write evicts."
+  {:malli/schema [:=> [:cat pos-int? :boolean] [:tuple :string :map :map :map :int]]}
+  [n over?]
+  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-cost-" (random-uuid))
+        t (fn [i] (symbol "a" (str "t" i)))
+        rec (fn [i] {(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}})]
+    (doseq [i (range n)] (fx/write-verdicts! dir {:id "w"} (rec i) {} Long/MAX_VALUE))
+    [dir {:id "w"} (rec n) {} (if over? (bytes-in dir) Long/MAX_VALUE)]))
+
+(defn cache-write-under [n] (cache-write n false))
+(defn cache-write-over [n] (cache-write n true))
+
+(defn- clean-costs! [] (sh/sh "sh" "-c" (str "rm -rf " (cfg/checkout) "/target/tmp/verdicts-cost-*")))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-write-under-capacity-costs-nothing-of-the-cache
+  (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-under
+                    :n "verdicts already in the cache"
+                    :work "the one verdict written, and the size file read and rewritten; no verdict already there is looked at"
+                    :growth :constant
+                    :fixed {:calls 15 :bytes 60000}
+                    :sizes [10 100 1000]})
+       (finally (clean-costs!))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-write-past-capacity-counts-the-cache-once
+  (try (cost/proof {:of 'seon.fx/write-verdicts! :input 'seon.results-test/cache-write-over
+                    :n "verdicts in the cache"
+                    :work "one count of the verdict files by metadata, one removal of the least recently used"
+                    :growth :linear
+                    :per-n {:bytes 11500}
+                    :fixed {:calls 20 :bytes 60000}
+                    :sizes [10 100 1000]})
+       (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-verdict-keeps-what-its-test-spent-per-function

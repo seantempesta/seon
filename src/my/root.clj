@@ -389,7 +389,11 @@
   (let [co (config/checkout)
         refs (fx/git-refs co)
         src (or (source-root) co)
-        own (into #{} (keep #(some-> % fx/head-ref)) [co (source-root)])
+        ;; a source root follows main's ref, never co's checked-out branch (seon.fx/follow-main),
+        ;; so main's ref moving is this root's; without one, root reads co's own branch
+        own (if-let [s (source-root)]
+              (into #{} (remove nil?) [(some-> refs (str "/heads/main")) (fx/head-ref s)])
+              (into #{} (keep fx/head-ref) [co]))
         roots (vec (distinct (remove nil? (concat (mapcat val (sort-by key (loader-dirs co src))) [refs]))))
         fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
         fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
