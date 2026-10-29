@@ -535,7 +535,8 @@
   :seon.agent/eval-error variant, with the exception's class, its ex-data's diagnostic keys
   (Jolt's :jolt.error/* : line, column, symbol, ns, kind, suggestions; and
   :clojure.error/*) as keys, the suggestions as the fix, any other ex-data as :data, and its cause chain (each cause's class
-  and message)."
+  and message), and an OutOfMemoryError's heap by type as :jolt/heap (jolt.host/heap-histogram's shape:
+  what holds the memory, docs/machine.md#what-a-process-owns-in-memory)."
   {:malli/schema [:function [:=> [:cat :seon.host/throwable] :seon.error/base]
                   [:=> [:cat :seon.host/throwable :qualified-symbol] :seon.error/base]]}
   ([e] (error-map e 'seon.repl/eval-code))
@@ -545,7 +546,9 @@
      (let [d (ex-data e)
            diag? (comp #{"jolt.error" "clojure.error"} namespace key)
            jd (into {} (filter (every-pred (comp qualified-keyword? key) diag?)) d)
-           other (not-empty (into {} (remove (every-pred (comp qualified-keyword? key) diag?)) d))
+           ;; an OutOfMemoryError's heap by type (Jolt: :jolt/heap): data on the map, never the Throwable
+           heap (:jolt/heap d)
+           other (not-empty (into {} (remove (some-fn (every-pred (comp qualified-keyword? key) diag?) (comp #{:jolt/heap} key))) d))
            sym (:jolt.error/symbol jd)
            unresolved? (and sym (= :analyze/unresolved-symbol (:jolt.error/kind jd)))
            m (if unresolved? (unresolved-message sym) (step/error-msg e))
@@ -554,6 +557,7 @@
                        (cond-> (assoc jd :class (str (type e)))
                          (seq (:jolt.error/suggestions jd)) (assoc :seon.error/fix (str "did you mean " (str/join ", " (:jolt.error/suggestions jd))))
                          other (assoc :data other)
+                         heap (assoc :jolt/heap heap)
                          (seq causes) (assoc :causes causes)))))))
 
 (defn write-end!
