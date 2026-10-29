@@ -1476,3 +1476,14 @@
                                      :seon.turn/truncated true}])
         a (:db/id (d/entity db [:seon.agent/key "b/a1"]))]
     (is (= ["Done: f0 is green."] (keep (comp :seon.turn/reply second) (context/records db a))) "the whole reply is a record, the cut one is not")))
+
+(deftest failures-that-got-the-same-value-are-one-entry
+  ;; 2026-10-29, the md-scan bench: nine assertions that each threw one NullPointerException were
+  ;; sent as nine entries, the same error nine times
+  (let [npe "#error {:via [{:type java.lang.NullPointerException}]}"
+        fs (context/failures [{:expected "(= 1 (f 1))" :actual npe} {:expected "(= 2 (f 2))" :actual npe}
+                              {:expected "(= 3 (g))" :actual "(= 3 4)"}])]
+    (is (= 2 (count fs)) "one entry per value got, in first-failure order")
+    (is (= ["(= 1 (f 1))" "(= 2 (f 2))"] (mapv :seon.print/code (:asserts (first fs)))) "the assertions that got it")
+    (is (= npe (:seon.print/code (:got (first fs)))))
+    (is (= "(= 3 (g))" (:seon.print/code (:assert (second fs)))) "a failure of its own keeps its one assertion")))
