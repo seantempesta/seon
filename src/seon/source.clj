@@ -56,6 +56,10 @@
   (let [nsx (program/ensure-ns! nsym)]
     (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym)) form))))
 
+(def ^:private defining-heads
+  "The heads of the top-level forms that define a var by their second element."
+  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
+
 (defn analyze-form
   "The compiler's account units of form in namespace nsym, analyzed without running it. A
   form that sets up its namespace's environment is run first (the ns form, a defmacro whose
@@ -64,7 +68,10 @@
   are the file's, whatever the namespace held before (a binary's own namespace, one of
   test/'s that main's program loaded with its old ns form, or one another namespace's
   require marked loaded), and running it again on the namespace it set up changes nothing.
-  Answers {:units [...] :ns-form? b}."
+  A var the image already holds takes the privacy this definition gives it (defn-, ^:private), so a
+  file analyzed after it in load order may name a var the same import makes public: root's main
+  held test-runner/tree-branch private while the tree made it public, and every import of main
+  failed (docs/failure-points.md). Answers {:units [...] :ns-form? b}."
   {:malli/schema [:=> [:cat :symbol :any] :map]}
   [nsym form]
   (let [nsx (program/ensure-ns! nsym)
@@ -74,6 +81,14 @@
     (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
+    ;; a var the image holds takes the privacy its new definition gives it, so a file analyzed
+    ;; after this one (in load order) may name a var made public by the same import
+    (when-let [v (and (seq? form) (symbol? (second form))
+                      (contains? defining-heads (symbol (name (first form))))
+                      (get (ns-interns nsx) (second form)))]
+      (let [private? (boolean (or (= "defn-" (name (first form))) (:private (meta (second form)))))]
+        (when (not= private? (boolean (:private (meta v))))
+          (alter-meta! v assoc :private private?))))
     {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
 
 (defn accounts
@@ -95,10 +110,6 @@
                           (or (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
-
-(def ^:private defining-heads
-  "The heads of the top-level forms that define a var by their second element."
-  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
 
 (defn defining-ids
   "The form id of the form defining each var in text, the file of namespace nsym: {qualified var
@@ -409,7 +420,8 @@
 (defn tx-of
   "The facts that bring db's program up to date with files ({relative path text}): refresh-tx of them
   when changed? (they are the files that changed), else replace-tx of them (they are the tree). A
-  file the running image cannot analyze (a form names a var the image holds as private or not at all)
+  file the running image cannot analyze (a form names a var the image holds as private and the
+  import does not make public, or a var it lacks)
   answers :seon.source/unanalyzable, its message the analyzer's, never a throw: root's watcher goes on
   and the next batch tries again (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] :boolean] [:or :seon.db/tx-data :map]]}
