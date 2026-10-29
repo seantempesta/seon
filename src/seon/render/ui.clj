@@ -758,6 +758,14 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] [:maybe :string]]}
   [db f] (or (:form/src f) (some->> (:db/id f) (d/pull db [:form/src]) :form/src)))
 
+(defn task-model
+  "The task as the model is sent it (the declared model render of :seon.context/task): its data
+  without what only the page draws (the cited sections' whole text, which the model reads at the depth
+  its plan's delimiters ask under :sections; the id and kind, which :task holds). See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [_opts v] (dissoc v :sections-cited :id :kind :execution))
+
 (defn task-html
   "The task as the page shows it (the declared html render of :seon.context/task; the model is sent the
   value): its name as a title, its namespace above it, how its kind is worked (folded), its plan as

@@ -14,7 +14,7 @@
  ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
  ;; the task an agent works (seon.context/task-data, with its proofs' sources and verdicts), a part of its page:
  ;; the page draws it (task-html), the model is sent the value
- :seon.context/task [:map {:seon.render/html seon.render.ui/task-html}]
+ :seon.context/task [:map {:seon.render/html seon.render.ui/task-html :seon.render/model seon.render.ui/task-model}]
  ;; a var the plan cites (seon.render.ui/cited-of: its source, tests and callers), a part of the page
  :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
