@@ -30,6 +30,7 @@ The sites where time decides because the owner allowed it, the provider's delaye
 ## Time decides (a check's measurement, and a check's ping)
 
 `bin/laws clocks` reads `src` and `test`: the check harness (`seon.check`, a driver in `test/`, and `seon.e2e`) and every test, so a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
+- `seon.check/scale-work`: the window between its readings of the machine's available memory and its processes' footprints while ten agents work (`:seon.config.check/sample-ms`); the readings are the measurement, nothing waits on one.
 - `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen or what it costs (`:seon.config.check/hold-ms`: a paused agent's request unanswered, a paused proc's flood and a paused writer's commits held; `:seon.config.check/pages-ms`: memory the kernel returns after the kill; idle's window, bin/check's argument). The measurement, never a dependency: load only makes what it measures likelier.
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping takes a bound (`:seon.config.check/ping-ms`); a proc that has not taken its control message by then is mid-step that long, and the check records it `:blocked` (an expected proc missing from a graph ping is reported under `:no-answer`), never reads it as nil.
 
