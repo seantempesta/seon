@@ -26,6 +26,10 @@
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
       (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
+    ;; md-scan #11: an error in macroexpanding says so, where, as Clojure's REPL does (clojure.main/ex-str)
+    (let [e (ev "(cond true 1 false)")]
+      (is (str/starts-with? (str (get-in e [:ex :seon.error/message])) "Syntax error macroexpanding clojure.core/cond at (1:1). ")
+          (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message]))))
     (let [e (ev "(+ 1 1) (+ 2 2) (oops")]
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))

@@ -231,6 +231,23 @@
           sym (assoc :seon.error/in sym)))
       {})))
 
+(defn- clojure-message
+  "Error map em's message as Clojure's REPL says it (clojure.main/ex-str): for an error in reading,
+  macroexpanding or compiling, the phase, the symbol and the position before the cause, \"Syntax error
+  macroexpanding clojure.core/cond at (6:3). index out of bounds\"; else its message as it is. md-scan
+  #11, 2026-10-29: Jolt's cond failed on an odd number of forms, the message said only \"index out of
+  bounds\", and the agent bisected its runtime code for 40 evals."
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:clojure.error/keys [phase symbol line column] msg :seon.error/message}]
+  (let [what (case phase
+               (:macroexpansion :macro-syntax-check) "macroexpanding"
+               :compile-syntax-check "compiling"
+               :read-source "reading source"
+               nil)]
+    (if (and what msg (not (clojure.string/starts-with? msg "Syntax error")))
+      (str "Syntax error " what (when symbol (str " " symbol)) (when line (str " at (" line (when column (str ":" column)) ")")) ". " msg)
+      msg)))
+
 (defn- error-data
   "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
   terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
@@ -238,8 +255,10 @@
   long as the reply is held (AGENTS 4, a kept value is a reference; docs/errors.md#an-error-keeps-data)."
   {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
   [e m]
-  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
-    (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)))
+  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
+        em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
+    ;; its message as Clojure's REPL says it: where it failed (reading, macroexpanding, compiling) first
+    (cond-> em (:seon.error/message em) (assoc :seon.error/message (clojure-message em)))))
 
 (defn wrap-caught
   "An eval error also as the one error map (made with the reply: `error-data`, the answer's :err: its
