@@ -201,6 +201,14 @@
   (let [das (data-attr? db data-attrs)]
     (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
 
+(defn- content-attr?
+  "Whether attribute a is one a key's content reads on base or db: the program's (program/attr-namespaces) or declared
+  data (das-b, das-d), never :db/txInstant unless declared data, which every transaction asserts and no key's content reads (a
+  transaction's entity bears no key: reading it cost a descent and two seeks a transaction, 87 of them for
+  a branch of 18 evals)."
+  [das-b das-d a]
+  (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (program/attr-namespaces (namespace a))) (das-b a) (das-d a)))))
+
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ
   between them (what datahike.api/datoms-diff answers, joined; a caller that holds them reads
@@ -213,7 +221,7 @@
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
                          (fn [a] (or (program/attr-namespaces (namespace a)) (das a)))]))
         b (read base) d (read db)
-        content? (fn [{:keys [a]}] (or ((nth b 3) a) ((nth d 3) a)))]
+        content? (fn [{:keys [a]}] (content-attr? (nth b 2) (nth d 2) a))]
     (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
                     [side many das] [b d]
                     k (entity-keys side many e das)]
@@ -227,16 +235,23 @@
   22,000 embedding datoms of a main that embedded after an agent forked: 313M ticks and 640 MB for
   no key); for :all (every attribute the store declares) the one :eavt diff. Cost: a set, one
   descent per content attribute and the datoms of those that differ; :all, the datoms that differ.
-  Read once, a vector, so every reader it is passed to reads the same datoms
-  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:vector :seon.host/datom]]}
-  [base db data-attrs]
-  (if (= :all data-attrs)
-    (into [] cat (d/datoms-diff base db :eavt []))
-    (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)
-          content? (fn [a] (and (keyword? a) (or (program/attr-namespaces (namespace a)) (das-b a) (das-d a))))]
-      (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
-            (filter content? (set (concat (keys (:schema base)) (keys (:schema db)))))))))
+  Given diff, the datoms that differ in any attributes that a caller read already (one :eavt diff),
+  none is read: the content ones among them, one filter. Read once, a vector, so every reader it
+  is passed to reads the same datoms
+  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:vector :seon.host/datom]]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :seon.host/datom]] [:vector :seon.host/datom]]]}
+  ([base db data-attrs]
+   (if (= :all data-attrs)
+     (into [] cat (d/datoms-diff base db :eavt []))
+     (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
+       (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
+             (filter #(content-attr? das-b das-d %) (set (concat (keys (:schema base)) (keys (:schema db)))))))))
+  ([base db data-attrs diff]
+   (if (= :all data-attrs)
+     (vec diff)
+     (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
+       (into [] (filter #(content-attr? das-b das-d (:a %))) diff)))))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over
