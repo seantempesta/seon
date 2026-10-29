@@ -1028,8 +1028,10 @@
   {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (let [;; its cap: the agent's own (raised to extend it), else its run's, as the turn loop reads it; the run by
-        ;; the agent, a fact written when a run begins
-        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db aid) seq (apply max) (d/entity db))
+        ;; the agent's current one: the run its newest turn is of (never the highest entity id: a merge of main
+        ;; brings an earlier run's record in after the current one began, with a higher id and no cap)
+        run (some->> (d/q '[:find ?tx ?r :in $ ?a :where [?t :seon.turn/agent ?a] [?t :seon.turn/run ?r ?tx]] db aid)
+                     seq (apply max-key first) second (d/entity db))
         cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
         n (count (:turns c))
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
