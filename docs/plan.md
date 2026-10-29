@@ -95,4 +95,6 @@ Beside these, the missing and partial rows of [parity](parity.md) are the backlo
 
 ## Waiting on the owner
 
+The decisions only the owner can make, each with its evidence and the task that holds it.
+
 - **An eval moves main** (seon.root/an-eval-never-moves-main, measured 2026-10-30): every eval of any agent writes main two or three times (the form running and the status as main facts, most transactions with no datom), so every agent hears main moved after any agent's eval, work in agents squared. Proposed: per-eval :running and :status stay root's live view, never main facts (main keeps spawn, end, death, stall), and no all-no-op transaction is committed (our Datahike fork's transact-batch!). Both change a design rule or a dependency.
