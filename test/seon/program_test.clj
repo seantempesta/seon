@@ -664,8 +664,9 @@
         g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
         a (update-vals (program/graph-index g in nil) :digest)
         all-tests (set (keys a))
-        moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
-                        (set (for [[t d] a :when (not= d (b t))] t))))]
+        ;; each class once: the checks below ask the same sets several times, a graph-index of the whole program each
+        moved (memoize (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
+                                 (set (for [[t d] a :when (not= d (b t))] t)))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
     ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
