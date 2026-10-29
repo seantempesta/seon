@@ -1389,4 +1389,5 @@
     (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0}}) "pid 7") "a running process's pid")
     (is (not (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}}) "pid 7")) "an ended one's is not shown")
     (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}
-                              2 {:seon.process/pid 9 :seon.process/forked-ms 3.0}}) "pid 9") "the newest process's")))
+                              2 {:seon.process/pid 9 :seon.process/forked-ms 3.0}}) "pid 9") "the newest process's")
+    (is (str/includes? (head [{:seon.process/pid 9 :seon.process/forked-ms 3.0}]) "pid 9") "root's own pull holds them as a vector")))
