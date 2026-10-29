@@ -23,7 +23,7 @@
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds
- ;; beside the program's forms (seon.program/reach-digests)
+ ;; beside the program's forms (seon.program/graph-index)
  :seon.program/inputs [:map [:env :string] [:tree :string] [:config [:map-of :qualified-keyword :string]] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]
  :seon.program/error [:map [:ns :symbol] [:message [:maybe :string]] [:form {:optional true} :string] [:lead {:optional true} :string]]
  :seon.program/load-report [:map [:loaded nat-int?] [:errors [:vector :seon.program/error]]]

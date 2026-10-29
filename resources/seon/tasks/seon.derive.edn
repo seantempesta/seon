@@ -10,7 +10,7 @@ The owner's third ruling (2026-10-23): \"if it's fast enough we don't need cachi
 
 Scope: every pure, immutable result that is proven the same by content and measured as expensive, in src, test or bin. A render of an immutable value is pure, so renders count too. A result is not reused when its work reads the clock, the network or a model, or launches a process; the reach walk's own classification refuses it (what it marks as reaching a process), never a hand list.
 
-The key is the digest of exactly what the work reads: content ids (global-ids), reach digests (seon.program/reach-digests: one Merkle digest per strongly connected component), and a file's content digest. It comes from the machinery we already compute; there is no second hasher.
+The key is the digest of exactly what the work reads: content ids (global-ids), reach digests (seon.program/graph-index: one Merkle digest per strongly connected component), and a file's content digest. It comes from the machinery we already compute; there is no second hasher.
 
 Where a result lives:
 - Across checkouts, sessions and worktrees: the shared directory, generalized. It is already content-addressed (git's objects and Bazel's CAS are the same idea): a test result's file is named by its reach digest, is immutable, and every checkout reads it with no coordination. It becomes the tier for every kind, at <dir>/<kind>/<digest>.edn, written once by an atomic rename and never rewritten. A digest names exactly one value, so concurrent writers cannot conflict; a race costs one duplicate computation, never a wrong answer. Its path stays a config key (:seon.config.source/test-results-dir, renamed :seon.config.derive/dir), since self-contained's step A moves it into the main tree.
@@ -43,17 +43,17 @@ The cold costs, measured by pure-tests on 2026-10-23 (main 1343c920 with Datahik
 | ts/test-db | 566 ms | 675 MB | |
 | seon.source/import-tx | 2.2 s | 3.5 GB | 626k contracted calls (analyze 2,489, quoted-vars 137k); about 1.3 MB a form, where Jolt's analyzer is about 0.1 ms a form: a defect suspect |
 | d/db-with of its 11,860 ops (75,683 datoms) | 5.4-6.3 s | 3.6 GB | linear, about 24.7k ticks and 48 KB a datom: a defect suspect |
-| program/reach-index | 650 ms each | 0.9 GB each | runs twice a plan, once for tests (533 keys) and once for check steps; one walk could serve both |
+| program/graph-index | 650 ms each | 0.9 GB each | runs twice a plan, once for tests (533 keys) and once for check steps; one walk could serve both |
 | the greens lookup / fx/inputs | 2 ms / 29 ms | | |
 
-Inside an agent's turn, test-plan computed reach-digests twice a turn (3.1 s and 7.4 GB each), before brief3 and reach-update; this was not re-measured on main.
+Inside an agent's turn, test-plan computed graph-index twice a turn (3.1 s and 7.4 GB each), before brief3 and reach-update; this was not re-measured on main.
 
 The reuse code in test and bin today is the result store by digest (proofs/greens, store-greens!, test-results) plus target/prove/ms: about 25 lines, of test_runner's 257, bin/prove's 28 and bin/test's 55. Nothing caches the analysis or the plan.
 
 So the cold defects come first, each fixed at its cause by its owner, then measured again:
 - the 48 KB a datom in d/db-with;
 - import-tx's allocation;
-- reach-index run twice a plan.
+- graph-index run twice a plan.
 
 pure-tests is on the first two now. Its tasks the-plan-reuses-each-files-analysis-by-its-digest (on no branch, dropped from jolt/divergence) and the test-plan caching (in its notes only) fold into this one. Only what is still expensive after those fixes is admitted as a kind.
 

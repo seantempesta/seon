@@ -270,7 +270,7 @@
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration at p names
   (its procs' step-fns, its effects' performers), which root resolves by name at boot: reach
-  edges of the function that reads the declaration (seon.program/reach-digests' :data-refs),
+  edges of the function that reads the declaration (seon.program/graph-index' :data-refs),
   so a test booting root reaches its procs. None when there is no file at p."
   {:malli/schema [:=> [:cat :string] [:map-of :qualified-symbol [:set :qualified-symbol]]]}
   [p]

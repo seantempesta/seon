@@ -55,6 +55,22 @@
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
            path)))
 
+(defn reach-index
+  "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):
+  seon.program/graph-index over a graph built from db (seon.program/reach-graph). A test's helper: production
+  reads a stored graph (test-runner/reach-graph-of) or the fork's, and never builds one only for an index."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] :map]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]]}
+  ([db inputs] (reach-index db inputs nil))
+  ([db inputs roots] (program/graph-index (program/reach-graph db (:data-refs inputs)) inputs roots)))
+
+(defn reach-digests
+  "{key digest} of reach-index."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] :map]
+                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]]}
+  ([db inputs] (reach-digests db inputs nil))
+  ([db inputs roots] (update-vals (reach-index db inputs roots) :digest)))
+
 (defn program-store
   "The path of this process's store of kept program dbs (program-store-path)."
   {:malli/schema [:=> [:cat] :string]}
