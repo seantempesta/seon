@@ -414,25 +414,18 @@
 
 ;; ---- the mg/check gate (v1's survey of ~/src/seon, 2026-10-20) ------------------
 
-(defn- fn-without-gen
-  "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
-  [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
-
 (defn mg-check
-  "The mg/check gate: no [:fn pred] schema without :gen anywhere in the registry or a
-  contract, and every contract whose arguments generate and whose namespace is pure
-  (seon.proofs/pure-nss, pure-fns) passes malli.generator/check (100 runs each). Prints the counts, the
-  contracts it checked and, for each contracted function that holds, a line MG-OK <fn> (what
-  bin/prove stores as that function's verdict, docs/checks.md#the-generative-check-is-per-function).
-  selected, {fn digest}, limits it to those functions (nil: every one), each drawing from its own
-  seed, (seon.proofs/seed fn digest), the digest bin/prove's plan keyed it by; a selected function
-  that is not contracted fails the gate (a renamed one never reads as green). Without a digest the
-  seed is of base, bin/check's tree in a run that stores nothing. With shard \"I/K\" (0 <= I < K) it checks only the
-  contracted vars at positions I, I+K, ... of the platform's contracted vars (the selected ones) sorted by
-  symbol (the registry's own forms in shard 0), so K shards in K processes check exactly
-  what one run does. By var, not namespace: seon.reconcile alone holds 36 of the 82
-  checked contracts, so a namespace split cannot go below its share. A failure names its seed and the
-  form that reproduces it."
+  "The mg/check gate by the one check bin/test's shards run (seon.proofs/mg-run), in the release binary: no
+  [:fn pred] schema without :gen in the registry (seon.proofs/mg-registry, in shard 0), and every
+  pure contract (seon.proofs/pure-nss, pure-fns) passes malli.generator/check (100 runs each). Prints the
+  counts and the contracts it checked. selected, {fn digest}, limits it to those functions (nil: every
+  one), each drawing from its own seed, (seon.proofs/seed fn digest); a selected function that is not
+  contracted fails the gate (a renamed one never reads as green). Without a digest the seed is of base,
+  bin/check's tree. With shard \"I/K\" (0 <= I < K) it checks only the contracted vars at positions I,
+  I+K, ... of the platform's, sorted by symbol, so K shards in K processes check exactly what one run
+  does. By var, not namespace: seon.reconcile alone holds 36 of the 82 contracts, so a namespace split
+  cannot go below its share. A failure names its seed and the form that reproduces it. See
+  docs/checks.md#the-generative-check-is-per-function."
   [& [shard base selected]]
   (run-check "MG-CHECK" nil
    (fn [_]
@@ -441,43 +434,16 @@
         unknown (vec (sort (remove (set (map symbol contracted)) (keys selected))))
         vs (keep-indexed #(when (= i (mod %1 k)) %2)
                          (cond->> contracted selected (filter #(contains? selected (symbol %)))))
-        no-gen (vec (concat (when (zero? i) (for [[k f] contract/forms :when (seq (fn-without-gen f))] k))
-                            (for [v vs :when (seq (fn-without-gen (contract/contract v)))] (symbol v))))
-        ;; its arguments generate (every arity's input)
-        generates? (fn [v] (try (let [s (m/deref (contract/schema (contract/contract v)))]
-                                  (every? #(some? (mg/generator (:input (m/-function-info %)) {:registry contract/registry}))
-                                          (m/-function-schema-arities s)))
-                                (catch Throwable _ false)))
-        ;; the functions a check holds for: pure ones (seon.proofs/mg-roots' rule)
         pure? #(or (seon.proofs/pure-nss (ns-name (:ns (meta %)))) (seon.proofs/pure-fns (symbol %)))
-        ;; a proc's step-fn is tested as a plain function on its own states (seon.procs-test):
-        ;; its contract accepts any map as state
-        pure (filter #(and (pure? %) (not= :seon.step/step-fn (contract/contract %)) (generates? %)) vs)
-        seed-of #(seon.proofs/seed (symbol %) (or (get selected (symbol %)) base))
-        checked (for [v pure
-                      :let [t0 (profile/now-ns)
-                            r (try (mg/check (m/deref (contract/schema (contract/contract v))) @v {:registry contract/registry ::mg/=>seed (seed-of v)})
-                               (catch Throwable e {:smallest :threw :problem (ex-message e)}))]]
-                  [(symbol v) r (lib/r2 (profile/ms-since t0))])
-        ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
-        such-that (set (for [[sym r] checked :when (= ":malli.generator/such-that-failure" (:problem r))] sym))
-        checked (remove (comp such-that first) checked)
-        failed (vec (for [[sym r] checked :when (some? r)]
-                      [sym (if (= :threw (:smallest r)) r
-                             (let [c (:check (first (:errors r)))]
-                               {:smallest (:smallest c) :problem (some-> (:malli.core/result c) ex-message) :seed (::mg/seed c)
-                                :reproduce (list 'malli.generator/check (list 'm/deref (list 'seon.contract/schema (list 'seon.contract/contract (list 'var sym))))
-                                                 sym {:registry 'seon.contract/registry ::mg/=>seed (::mg/seed c)})}))]))
-        failed-syms (set (map first failed))
-        ;; a pure function holds unless its check failed or the shard's registry gate did not: one that does
-        ;; not generate (a proc's step-fn, a such-that argument) has nothing to fail
-        ok (when (and (empty? unknown) (empty? no-gen)) (for [v vs :when (and (pure? v) (not (failed-syms (symbol v))))] (symbol v)))]
-      (doseq [s ok] (out! "MG-OK " s))
-      {:report {:shard [i k] :contracts (count vs) :fn-without-gen no-gen :unknown-selected unknown
-                :generated-and-checked (count checked) :failed failed
-                :checked (vec (sort (map first checked))) :ms (into (sorted-map) (map (juxt first #(nth % 2))) checked) :such-that (vec (sort such-that))
-                :not-generated (count (remove generates? vs))}
-       :checks {:every-fn-schema-generates (empty? no-gen) :every-pure-contract-holds (empty? failed) :every-selected-fn-is-contracted (empty? unknown)}}))))
+        runs (concat (when (zero? i) [(seon.proofs/mg-run seon.proofs/mg-registry nil)])
+                     (for [v vs :when (pure? v)] (seon.proofs/mg-run (str "mg/" (symbol v)) (or (get selected (symbol v)) base))))
+        by (group-by :status runs)
+        failed (vec (for [r (:failed by)] [(:key r) (:failure r)]))]
+      {:report {:shard [i k] :contracts (count vs) :unknown-selected unknown
+                :generated-and-checked (count (:ok by)) :failed failed
+                :checked (vec (sort (map :key (:ok by)))) :ms (into (sorted-map) (map (juxt :key :ms)) (:ok by))
+                :not-generated (count (:skipped by))}
+       :checks {:registry-and-contracts-hold (empty? failed) :every-selected-fn-is-contracted (empty? unknown)}}))))
 
 (defn- mg-check-mode
   "mg-check's command line (bin/check): \"I/K [BASE [FILE]]\", a shard of K, BASE the seed's base and FILE the

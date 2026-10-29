@@ -9,7 +9,7 @@
   loop and root's judge."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.config :as cfg] [seon.program :as program] [seon.edn :as sedn] [seon.error :as error] [seon.profile :as profile] [seon.print :as print]
-            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t]))
+            [clojure.edn :as edn] [clojure.string :as str] [clojure.test :as t] [malli.core :as m] [malli.generator :as mg]))
 
 (defn test-symbol
   "The qualified symbol of a report's :var (\"#'ns/name\" or \"ns/name\"), or nil."
@@ -100,8 +100,9 @@
   forks (bin/forks: the forks' own suites on Jolt) and the lmdb steps run no function: their key
   is :pins, :env and every submodule's pin (the :seon.pin classes of seon.fx/inputs' :config), so
   a pin bump selects them and a change to Seon's .clj program does not. mg-check (:mg) has no key of
-  its own: it is a step made of keys, one per pure contracted function (mg-roots), each digested by
-  that function's reach and carrying its own verdict (docs/checks.md#the-generative-check-is-per-function)."
+  its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
+  each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
+  them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
   '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
@@ -132,7 +133,7 @@
      seon.proofs/plan})
 
 (defn mg-key?
-  "Is k a key of the generative check, \"mg/<qualified-fn>\" (mg-roots)?"
+  "Is k a key of the generative check: \"mg/<qualified-fn>\" (mg-roots) or mg-registry? See docs/checks.md#the-generative-check-is-per-function."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [k] (boolean (and (string? k) (str/starts-with? k "mg/"))))
 
@@ -152,9 +153,73 @@
           [(str "mg/" v) [v]])))
 
 (defn mg-fn
-  "The qualified symbol an mg key names (\"mg/seon.merge/f\" -> seon.merge/f)."
+  "The qualified symbol an mg key names (\"mg/seon.merge/f\" -> seon.merge/f). See docs/checks.md#the-generative-check-is-per-function."
   {:malli/schema [:=> [:cat :string] :qualified-symbol]}
   [k] (symbol (subs k 3)))
+
+(def mg-registry
+  "The generative check's key of the schema registry: no [:fn pred] schema lacks a :gen
+  (mg-registry-gaps). Its digest is the registry (mg-registry-digest), so a schema change selects it and
+  nothing else does. See docs/checks.md#the-generative-check-is-per-function."
+  "mg/registry")
+
+(defn mg-registry-digest
+  "The digest of the schema registry of reach graph g (its schema entries: key and text, in key order) under env. See docs/checks.md#the-generative-check-is-per-function."
+  {:malli/schema [:=> [:cat [:map [:schemas :map]] :string] :string]}
+  [g env]
+  (error/digest (str mg-registry "\n" env "\n"
+                     (str/join "\n" (for [[k text] (sort-by (comp str key) (:schemas g))] (str k " " text))))))
+
+(defn- fn-without-gen
+  "The [:fn ...] schemas without a :gen property in form f, anywhere in it."
+  [f] (filter #(and (vector? %) (= :fn (first %)) (not (:gen (when (map? (second %)) (second %))))) (tree-seq coll? seq f)))
+
+(defn mg-registry-gaps
+  "The keys of the platform's schema forms (seon.contract/forms) that hold a [:fn pred] without :gen: none can be generated. See docs/checks.md#the-generative-check-is-per-function."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
+  [] (vec (for [[k f] contract/forms :when (seq (fn-without-gen f))] k)))
+
+(declare seed)
+
+(defn mg-run
+  "Run the generative check's key k (\"mg/<fn>\" or mg-registry) at digest: {:key :digest :status :ms}, :status :ok, :skipped
+  (a proc's step-fn, which is tested as a plain function on its own states, or a contract whose arguments do
+  not generate: nothing to fail) or :failed, with :failure {:problem ...} and, from malli.generator/check, its
+  :smallest, :seed and the :reproduce form. A function is loaded (its namespace required) and checked by
+  malli.generator/check, 100 runs, from the seed (seed fn digest): the same digest checks the same cases. The one
+  check bin/test's shards and bin/check mg-check run (docs/checks.md#the-generative-check-is-per-function)."
+  {:malli/schema [:=> [:cat :string [:maybe :string]] [:map [:key :string] [:status [:enum :ok :skipped :failed]] [:ms :int]]]}
+  [k digest]
+  (let [t0 (profile/now-ns)
+        done (fn [status failure] (cond-> {:key k :digest digest :status status :ms (max 1 (long (profile/ms-since t0)))}
+                                    failure (assoc :failure failure)))]
+    (if (= k mg-registry)
+      (let [gaps (mg-registry-gaps)]
+        (done (if (seq gaps) :failed :ok) (when (seq gaps) {:problem (str "[:fn] schemas without :gen: " (sedn/encode gaps))})))
+      (let [sym (mg-fn k)
+            v (do (require (symbol (namespace sym))) (ns-resolve (symbol (namespace sym)) (symbol (name sym))))
+            c (when v (contract/contract v))]
+        (cond
+          (nil? c) (done :failed {:problem (str sym " is not a contracted function of the program")})
+          (seq (fn-without-gen c)) (done :failed {:problem (str sym "'s contract holds a [:fn] without :gen")})
+          (= :seon.step/step-fn c) (done :skipped nil)
+          :else
+          (let [schema (m/deref (contract/schema c))
+                generates? (try (every? #(some? (mg/generator (:input (m/-function-info %)) {:registry contract/registry}))
+                                        (m/-function-schema-arities schema))
+                                (catch Throwable _ false))]
+            (if-not generates?
+              (done :skipped nil)
+              (let [r (try (mg/check schema @v {:registry contract/registry :malli.generator/=>seed (seed sym digest)})
+                           (catch Throwable e {:smallest :threw :problem (ex-message e)}))]
+                (cond (nil? r) (done :ok nil)
+                      ;; malli could not generate an [:and ...] argument (such-that): not generated, not failed
+                      (= ":malli.generator/such-that-failure" (:problem r)) (done :skipped nil)
+                      (= :threw (:smallest r)) (done :failed r)
+                      :else (let [ch (:check (first (:errors r)))]
+                              (done :failed {:smallest (:smallest ch) :problem (some-> (:malli.core/result ch) ex-message) :seed (:malli.generator/seed ch)
+                                             :reproduce (list 'malli.generator/check (list 'm/deref (list 'seon.contract/schema (list 'seon.contract/contract (list 'var sym))))
+                                                              sym {:registry 'seon.contract/registry :malli.generator/=>seed (:malli.generator/seed ch)})}))))))))))) 
 
 (def binary-free
   "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
@@ -166,7 +231,7 @@
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
   does but binary-free's, so a run of only those builds nothing and seeds nothing."
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [step] (boolean (or (mg-key? step) (and (contains? check-steps step) (not (binary-free step))))))
+  [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -391,7 +456,7 @@
         mg (when checks? (mg-roots graph))
         step-idx (when checks? (program/graph-index graph inputs (merge mg (into {} (filter (comp vector? val)) check-steps))))
         {steps :digests missing :missing} (when checks? (step-digests #(update-vals (select-keys step-idx (keys %)) :digest) (assoc inputs :base base)))
-        steps (merge steps (update-vals (select-keys step-idx (keys mg)) :digest))
+        steps (when checks? (assoc (merge steps (update-vals (select-keys step-idx (keys mg)) :digest)) mg-registry (mg-registry-digest graph (:env inputs))))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)

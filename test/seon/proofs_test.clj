@@ -162,9 +162,25 @@
         (is (= ["mg/seon.template/mgk-a" "mg/seon.template/mgk-b"] (:run p)))
         (is (= ["mg/seon.template/mgk-c"] (keys (:reused p))))
         (is (= [] (:run (proofs/plan nil before found #{}))) "an unchanged tree runs nothing")))
-    (testing "a contract key is a step of the binary"
-      (is (every? #(and (proofs/mg-key? %) (proofs/step-needs-binary? %)) (keys before)))
-      (is (not (proofs/mg-key? "mg-check"))))))
+    (testing "a contract key runs in a test shard: it needs no binary"
+      (is (every? #(and (proofs/mg-key? %) (not (proofs/step-needs-binary? %))) (keys before)))
+      (is (proofs/mg-key? proofs/mg-registry))
+      (is (not (proofs/mg-key? "mg-check"))))
+    (testing "the registry's key is the schema registry: a schema change moves it, a function's change does not"
+      (let [g #(program/reach-graph % nil)
+            rd #(proofs/mg-registry-digest (g %) "e")]
+        (is (not= (rd db) (rd (schema db :seon.cost/row "some?"))) "a schema entry changed")
+        (is (= (rd db) (rd (record db 'seon.template "(defn mgk-a {:malli/schema [:=> [:cat :int] :int]} [x] (+ 1 x))"))) "a function changed")))
+    (testing "contracts are dealt among the shards that run, by their measured ms; with no test shard, one"
+      (let [mg {"mg/a" "1" "mg/b" "2" "mg/c" "3"}]
+        (is (= [[[] mg]] (runner/deal-mg [] mg {} {})) "no test shard: one process for all")
+        (is (= [] (runner/deal-mg [] {} {} {})))
+        (let [dealt (runner/deal-mg '[[t1 t2] [t3]] mg '{t1 100 t2 100 t3 1} {"mg/a" 50 "mg/b" 50 "mg/c" 1})]
+          (is (= 2 (count dealt)) "the contracts start no shard")
+          (is (= mg (apply merge (map second dealt))) "each in exactly one")
+          (is (= #{"mg/a" "mg/b" "mg/c"} (set (mapcat (comp keys second) dealt))))
+          (is (= 3 (count (mapcat (comp keys second) dealt))))
+          (is (= #{"mg/a" "mg/b" "mg/c"} (set (keys (second (second dealt))))) "the lighter shard takes them: t3's has 1 ms of tests"))))))
 
 (deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A

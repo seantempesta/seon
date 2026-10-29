@@ -264,22 +264,38 @@
     (vec (remove empty? (reduce (fn [sh p] (update sh (apply min-key #(reduce + (map cost (sh %))) (range n)) into p))
                                 (vec (repeat n [])) parts)))))
 
+(defn deal-mg
+  "The generative check's keys (mg, {key digest}) added to shards sh (shards' answer: vectors of tests), each longest
+  first (by its median measured ms, ms; one never measured counts as the mean of those measured, else 1) to the
+  shard with the least work so far (tests' ms from tms): the contracts ride in shards that already run, so a
+  change that reaches 5 costs 5 contracts' work and no process start. With no test shard, one: every key in a
+  process of its own. Answers [[tests {key digest}] ...], the shards' contents."
+  [sh mg tms ms]
+  (let [mean (if (seq ms) (max 1 (quot (reduce + (vals ms)) (count ms))) 1)
+        cost #(get ms % mean)
+        base (if (seq sh) (mapv (fn [ts] [ts {}]) sh) (if (seq mg) [[[] {}]] []))
+        load (fn [[ts m]] (+ (reduce + (map #(get tms % 1) ts)) (reduce + (map cost (keys m)))))]
+    (reduce (fn [acc k] (let [i (apply min-key #(load (acc %)) (range (count acc)))] (update-in acc [i 1] assoc k (mg k))))
+            base (sort-by (juxt #(- (cost %)) identity) (keys mg)))))
+
 (defn- write-shards!
-  "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), each written as
-  out/shard-<i>.edn ({:tests [...] :digests {test digest} :tree t}, t the planned tree's id)
-  for bin/test to run, one process each (bin/test removes the last run's first), and each
-  measured test's stall bound as out/stall-bounds (\"<test> <ms>\" lines, for bin/stalls). Answers
-  the shard count."
-  [out tests digests tree]
+  "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), the generative check's keys mg
+  ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
+  :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
+  removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
+  lines, for bin/stalls). Answers the shard count."
+  [out tests digests tree mg]
   (let [ms (measured-ms tests)
         sh (shards tests (config/value :seon.config.proofs/jobs) ms)
-        floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)]
-    (doseq [[i ts] (map-indexed vector sh)]
-      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :digests (select-keys digests ts) :tree tree})))
+        mg-ms (measured-ms (keys mg))
+        floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
+        dealt (deal-mg sh mg ms mg-ms)]
+    (doseq [[i [ts m]] (map-indexed vector dealt)]
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree})))
     ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
     ;; record takes the floor, out/stall-ms)
     (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
-    (count sh)))
+    (count dealt)))
 
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
@@ -291,7 +307,7 @@
   nothing is kept, and the run stays as reported). A shard that dies midway stores nothing.
   Then SHARD n green m red. Answers the exit status."
   [file]
-  (let [{:keys [tests digests tree]} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree mg]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
@@ -323,12 +339,22 @@
                        (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
                                     (into {} (for [[t r] ran] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
                                     (proofs/failures {:reports @reports}))))
-          red (count (remove proofs/green? (vals ran)))]
+          ;; the generative check's keys of this shard (seon.proofs/mg-run), cached as steps at their digests; a red
+          ;; one with its failure, so it reads as a red test does
+          mgs (for [[k dg] (sort-by key mg)] (let [r (proofs/mg-run k dg)] (println (if (= :failed (:status r)) "RED" "ok") k (:ms r) "ms") r))
+          mg-ran (into {} (for [r mgs] [(:key r) {:step (:key r) :digest (:digest r) :ms (:ms r) :pass (if (= :failed (:status r)) 0 1) :fail (if (= :failed (:status r)) 1 0) :error 0}]))
+          mg-failures (into {} (for [r mgs :when (= :failed (:status r))]
+                                 [(:key r) [{:type :fail :message (str (:key r) ": " (or (get-in r [:failure :problem]) "the generative check failed"))
+                                             :actual (print/text (:failure r) (:part print/budgets))}]]))
+          _ (doseq [[k fs] mg-failures] (println (:message (first fs)) (:actual (first fs))))
+          unstored-mg (when (and same? (seq mg-ran))
+                        (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} mg-ran mg-failures))
+          red (+ (count (remove proofs/green? (vals ran))) (count mg-failures))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
-      (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
-      (println (str "SHARD " (count ran) " tests, " (- (count ran) red) " green, " red " red, in "
+      (doseq [u (concat unstored unstored-mg)] (println "UNRECORDED" (:key u) (:message u)))
+      (println (str "SHARD " (+ (count ran) (count mg-ran)) " tests, " (- (+ (count ran) (count mg-ran)) red) " green, " red " red, in "
                     (quot (- (profile/now-ns) t0) 1000000) " ms"))
-      (if (and (zero? red) (empty? unstored)) 0 1))))
+      (if (and (zero? red) (empty? unstored) (empty? unstored-mg)) 0 1))))
 
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
@@ -375,13 +401,13 @@
                           ": a namespace with no deftest, a name (NS/TEST) that is no deftest, or a program db that misses it (a store made before"
                           " seon.proofs/a-failed-import-leaves-no-branch: move "
                           (config/value :seon.config.proofs/program-store) "-* aside, and the tree imports)")))
-        n (write-shards! out (if no-test [] run-tests) digests (:tree inputs))
+        ;; the generative check's keys (one per function, and the schema registry) run in the shards beside the
+        ;; tests (shard!, seon.proofs/mg-run): no binary, no process of their own
+        {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
+        mg-run (vec mg-run) run-steps (vec run-steps)
+        n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
-        ;; the generative check's keys (one per function) are run by one step, mg-check, in one run of the
-        ;; binary: bin/check reads the selected functions and their digests from out/mg-fns
-        {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
-        mg-run (vec mg-run) run-steps (cond-> (vec run-steps) (seq mg-run) (conj "mg-check"))
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
@@ -406,14 +432,13 @@
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))
       (run! println flaky))
     (println (str "prove: " (count cand) " keys (" (if tests? (count digests) 0) " tests, " (count (remove proofs/mg-key? (keys steps))) " check steps, " (count (filter proofs/mg-key? (keys steps))) " contracts), "
-                  (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count flaky) " flaky, " (count run-tests) " tests to run in " (if (seq run-tests) n 0)
+                  (count (remove (comp :flaky val) reused)) " green at their digest (reused), " (count flaky) " flaky, " (count run-tests) " tests to run in " (if (or (seq run-tests) (seq mg-run)) n 0)
                   " shards, " (count run-steps) " steps and " (count mg-run) " contracts to run; selected in " (quot (- (profile/now-ns) t0) 1000000) " ms; results " dir))
     (when checks?
-      (write! (str out "/mg-fns") (apply str (for [k mg-run] (str (proofs/mg-fn k) " " (steps k) "\n"))))
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
-      (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps (concat run-steps mg-run))}))
+      (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
-                                     (when (seq mg-run) (str "(mg-check: " (count mg-run) " of " (count (filter proofs/mg-key? (keys steps))) " contracts)"))))
+                                     ))
       (when (seq missing)
         (println "prove: check steps naming a function the program does not define (seon.proofs/check-steps):" (str/join " " missing))))
     (if (or (seq missing) no-test)

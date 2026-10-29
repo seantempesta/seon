@@ -188,25 +188,18 @@ u-test-inputs() { echo "== test-inputs (every test read of a clock, random, envi
 u-mg-check() {
   echo "== mg-check (no [:fn] without :gen; mg/check on every pure contract, in the release binary)"
   want mg-check || return 0
-  # in K shards at once, each a process checking every Kth contracted var (seon.check/mg-check);
-  # each shard's exit status counts. A selected run (bin/prove's) checks the contracts its plan
-  # named, SEL/mg-fns ("<fn> <digest>" a line each: each contract is a key of its own, keyed by its
-  # function's reach), each from the seed its digest gives; the shards are no more than the contracts.
-  # Every function that holds prints MG-OK <fn>, which is its green (check-mg/<fn>, stored by
-  # bin/test --store-steps at its digest). A run with no plan checks every contract, from the binary's tree.
-  local K=$JOBS CP=() ok=1 i st base= FILE= N
-  if [[ -n $SEL ]]; then
-    FILE=$SEL/mg-fns; N=$(wc -l < "$FILE" 2>/dev/null | tr -d ' ')
-    (( ${N:-0} > 0 )) || { failed "mg-check (no contracts in $FILE)"; echo "FAILED mg-check (no contracts in $FILE)"; return 0 }
-    (( N < K )) && K=$N
-  else base=$(cat "$ROOT/target/seon.tree"); fi
+  # bin/prove runs the generative check's keys in bin/test's shards beside the tests (no binary: seon.proofs/mg-run);
+  # this step is the whole set in the binary, in K shards at once, each a process checking every Kth
+  # contracted var (seon.check/mg-check, the same mg-run); each shard's exit status counts. Seeds are of the
+  # binary's tree. bin/check mg-check FN ... checks just those functions.
+  local K=$JOBS CP=() ok=1 i st base
+  base=$(cat "$ROOT/target/seon.tree")
   # its K shards take K of the run's JOBS tokens: one is the unit's own, the others are waited for
   for i in $(seq 2 $K); do read -u 3 tok; done
-  for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K "${base:-none}" $FILE > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
+  for i in $(seq 0 $((K-1))); do { time (run mg-check $i/$K $base > "$OUT/mg-check-$i.log" 2>&1) } 2> "$OUT/mg-check-$i.time" & CP+=($!); done
   for i in $(seq 0 $((K-1))); do
     wait ${CP[$((i+1))]}; st=$?
     grep -E ":generated|^MG-CHECK " "$OUT/mg-check-$i.log"
-    sed -n 's/^MG-OK /check-mg\//p' "$OUT/mg-check-$i.log" >> "$OUT/green"
     (( st == 0 )) || { ok=0; failed "mg-check-$i (exit $st, expected 0, $OUT/mg-check-$i.log)"; echo "FAILED mg-check-$i (exit $st, expected 0)"; }
   done
   for i in $(seq 2 $K); do print -u 3 x; done
