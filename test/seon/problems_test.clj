@@ -1219,6 +1219,7 @@
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
         (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
   by (spec i) -> {:src :doc :kind}."

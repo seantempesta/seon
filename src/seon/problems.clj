@@ -502,7 +502,7 @@
   namespace of the program's own source and has a docstring citing no docs/ section, or none, as
   an :uncited-var row: a function states its mechanism by citing the wiki section that describes
   it (docs/references.md#the-delimiter-picks-the-depth), and does not restate it. A private var
-  (defn-, ^:private) and a test are not judged. Closed by citing a section in the docstring.
+  (defn-) and a test are not judged. Closed by citing a section in the docstring.
   Cost: one seek per named var, and its form's text for a var with no citation."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
   [db ans names]
