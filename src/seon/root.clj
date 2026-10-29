@@ -769,6 +769,13 @@
   {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
   [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
 
+(defn- source-digest
+  "The digest of what read-source's answer r read: its git tree id (or, with none, the files) and the pins, the
+  same whether the tree was read whole or by its changes, so a result keyed by the inputs stays shared."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [r]
+  (err/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r)])))
+
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (first brought to the main checkout's branch, seon.fx/read-source: fast-forwarded
@@ -805,7 +812,7 @@
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
         changed (when (:paths r) changed)
         files (:value r)
-        digest (when files (err/digest (sedn/encode [(or (:tree r) files) (:pins r)])))
+        digest (when files (source-digest r))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
         this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
                                built? (assoc :inputs (:inputs r))
@@ -842,6 +849,19 @@
           (cond (contract/error? f) f (contract/error? c) c :else refused)))))))
 
 
+(defn baseline-of
+  "wiki-baseline's answer for db: the plan read from db, the history asked of (ask {:root :sections}), the effect owner's
+  answer (seon.fx/wiki-history), as root asks it through its api and a seed asks it directly."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :string :string] :map]}
+  [db ask checkout dir]
+  (let [plan (docs/baseline-plan db (docs/pages checkout dir))]
+    (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
+      {}
+      (let [r (ask {:root checkout :sections plan})]
+        (if (contract/error? r)
+          (docs/baseline-failed db plan (:seon.error/message r))
+          (docs/baseline-reads db plan (:value r)))))))
+
 (defn wiki-baseline
   "What each wiki section lacking a :seon.section/read was last written against, from git (the
   :history effect, seon.fx/wiki-history), as the loader takes it: {address {:read :unread}} (seon.docs/baseline-reads).
@@ -850,14 +870,7 @@
   :seon.section/baseline-unread, which health shows as a :stale-section row."
   {:malli/schema [:=> [:cat :seon.root/sys :string :string] :map]}
   [sys checkout dir]
-  (let [db @(:conn sys)
-        plan (docs/baseline-plan db (docs/pages checkout dir))]
-    (if (or (empty? plan) (not (cfg/value :seon.config.root/wiki-baseline)))
-      {}
-      (let [r @(call! sys {:op :fx :kind :history :req {:root checkout :sections plan}})]
-        (if (contract/error? r)
-          (docs/baseline-failed db plan (:seon.error/message r))
-          (docs/baseline-reads db plan (:value r)))))))
+  (baseline-of @(:conn sys) #(deref (call! sys {:op :fx :kind :history :req %})) checkout dir))
 
 (defn wiki-tx
   "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
@@ -876,6 +889,50 @@
    (let [dirs (cfg/value :seon.config.root/wiki-dirs)]
      (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
              [] (concat dirs dirs)))))
+
+(defn seed-program!
+  "Bring the program and the wiki on :db of the store at path (made when missing) up to the tree
+  root would import (source-root and dirs from the config, as import-source! reads them): the
+  tree's files analysed (seon.source/tx-of), the wiki loaded with its baseline (wiki-tx), and the
+  :seon.root/source fact written with the tree's digest, so a root whose main is made from :db
+  finds its program, its wiki and a digest equal to the tree's, and imports and loads nothing: a
+  boot once per root cost 5-12 s of analysis and 2 s of wiki per fresh main (docs/machine.md#a-root-boots-from-a-seeded-store).
+  A :db whose fact already holds the tree's digest is left as it is. Answers {:digest :forms :ms :imported?}
+  or the error that stopped it (a source the image cannot analyze, a read that failed)."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [path]
+  (let [t0 (profile/now-ns)
+        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        root (get cfg/config :seon.config.source/root)
+        r (fx/read-source {:req {:root root :dirs (cfg/value :seon.config.source/dirs) :binary-tree (str (cfg/checkout) "/target/seon.tree")}})
+        files (:value r)
+        digest (when files (source-digest r))
+        held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+        out (cond
+              (nil? files) (assoc (if (contract/error? r) r (contract/error :seon.root/seed-unread #'seon.root/seed-program! "the source could not be read" {:path root})) :imported? false)
+              (= digest (:digest held)) {:digest digest :imported? false}
+              :else
+              ;; in root's own order: the wiki first (the boot fact's), the program after (import-source!)
+              (let [db0 @conn
+                    wiki (wiki-tx db0 (cfg/checkout) (baseline-of db0 #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))
+                    db1 (:db-after (d/transact conn {:tx-data wiki}))
+                    tx (source/tx-of db1 files false)]
+                (if (contract/error? tx)
+                  tx
+                  (let [db2 (:db-after (d/transact conn {:tx-data (conj (vec tx) {:seon.root/id :root
+                                                                                  :seon.root/source (cond-> {:root root :files (count files) :forms (count (d/datoms (d/db-with db1 tx) :aevt :form/id))
+                                                                                                             :digest digest :ms (lib/r2 (profile/ms-since t0))}
+                                                                                                      (:commit r) (assoc :commit (:commit r))
+                                                                                                      (seq (:pins r)) (assoc :pins (:pins r)))})}))
+                        ;; the wiki's citations now resolve to the program: loaded again until it states nothing more (its fixpoint,
+                        ;; which a root's second boot reached by itself, 41 s of git history at the first)
+                        db3 (loop [db db2]
+                              (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
+                                (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))]
+                    {:digest digest :forms (count (d/datoms db3 :aevt :form/id)) :imported? true}))))]
+    (pdb/sync! cfg)
+    (d/release conn)
+    (assoc out :ms (lib/r2 (profile/ms-since t0)))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
