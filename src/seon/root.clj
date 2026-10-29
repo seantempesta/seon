@@ -903,7 +903,7 @@
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         ;; before the boot's full collection, so its free pages go back to the OS
-        (lib/heap-reserve! (cfg/value :seon.config.root/heap-reserve-ratio))
+        (lib/max-heap-free-ratio! (cfg/value :seon.config.root/max-heap-free-ratio))
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)

@@ -73,13 +73,14 @@
  ;; found waiting, so root's count drifted with load (0, 5, 15 across identical runs); A/B at
  ;; 0/2/4/8 gave the same GC real time, GC CPU rising with n, threads 37/39/41/45. At the bound: none.
  :seon.config.root/gc-sweepers 0
- ;; Unit: a ratio of root's non-static heap in use, the free memory Chez keeps after a full
- ;; collection (seon.lib/heap-reserve!, set at boot and inherited by the fork server; an agent's
- ;; heap ceiling fits its own). Root collects in full at boot and at each quiescence (the writer's
- ;; :collect), and returns the rest. Provenance: jolt/root-memory (Chez's default 1.0 kept
- ;; 300-450 MB free in an idle root; 0.1 and a full collection returned 195-253 MB). At the bound:
- ;; 0 returns every free page, and the next allocation maps them again.
- :seon.config.root/heap-reserve-ratio 0.1
+ ;; Unit: percent, the most of root's heap kept free after a full collection (Jolt's
+ ;; JOLT_MAX_HEAP_FREE_RATIO, the JVM's -XX:MaxHeapFreeRatio: P% free is P/(100-P) of the heap in
+ ;; use), set at boot (seon.lib/max-heap-free-ratio!) and inherited by the fork server and agents;
+ ;; it bounds the nursery's headroom over the live set by the same share. Root collects in full at
+ ;; boot and at each quiescence (the writer's :collect), which is when Chez returns pages.
+ ;; Provenance: jolt/root-reserve-cap (Jolt's default 50 kept 1x, 234-450 MB free in an idle
+ ;; root). At the bound: 1 returns nearly every free page and keeps the nursery at its floor.
+ :seon.config.root/max-heap-free-ratio 10
 
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
  ;; bin/root exports SEON_RUNS (<this tree>/runs).
