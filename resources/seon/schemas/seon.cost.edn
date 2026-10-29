@@ -52,21 +52,21 @@
                       [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
  ;; one size measured: n, what it cost, what the estimate allows there
  ;; (a generated case: n its place, :args the arguments that reproduce it)
- :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector :any]]]
+ :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector {:gen/max 3} :any]]]
  :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
  ;; how a measured dimension grew over the sizes, against what the estimate's growth allows
  :seon.cost/fit [:map {:closed true} [:dim :seon.cost/dim] [:exponent :double] [:allowed :double]]
  :seon.cost/verdict [:map {:closed true :seon.render/html seon.render.ui/verdict-box}
                      [:ok? :boolean]
                      ;; a size whose measure exceeds its slack times the estimate
-                     [:over [:vector :seon.cost/over]]
+                     [:over [:vector {:gen/max 3} :seon.cost/over]]
                      ;; a dimension that grew faster than the estimate's growth allows
-                     [:steeper [:vector :seon.cost/fit]]
+                     [:steeper [:vector {:gen/max 3} :seon.cost/fit]]
                      ;; the largest size under a third of its estimate: the estimate is loose (a finding, not red)
-                     [:under [:vector :seon.cost/over]]
+                     [:under [:vector {:gen/max 3} :seon.cost/over]]
                      ;; a dimension the estimate states that was not measured (contracts off: no calls)
-                     [:unmeasured [:vector :seon.cost/dim]]
+                     [:unmeasured [:vector {:gen/max 3} :seon.cost/dim]]
                      ;; no counted dimension (ticks, bytes, calls) both estimated and measured: red, the proof could not fail
                      [:uncounted {:optional true} :boolean]
                      ;; the over and steeper findings an open overrun task accepts (still shown, not red)
-                     [:accepted {:optional true} [:map [:task :string] [:over [:vector :seon.cost/over]] [:steeper [:vector :seon.cost/fit]]]]]}
+                     [:accepted {:optional true} [:map [:task :string] [:over [:vector {:gen/max 3} :seon.cost/over]] [:steeper [:vector {:gen/max 3} :seon.cost/fit]]]]]}

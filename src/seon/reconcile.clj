@@ -593,7 +593,7 @@
 (defn- unfiled-error
   "The commit-error of a merged member r (seon.writer/octopus-merge's result) for its changed forms
   that name no source file (:unfiled): each namespace and the definitions it changed."
-  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of :symbol [:vector :seon.merge/def-key]]]]] :string]}
+  {:malli/schema [:=> [:cat [:map [:tx :int] [:unfiled [:map-of {:gen/max 3} :symbol [:vector {:gen/max 3} :seon.merge/def-key]]]]] :string]}
   [r]
   (str "merged at t " (:tx r) "; these changed forms name no source file to write back: "
        (str/join "; " (for [[n ds] (:unfiled r)] (str n " " (str/join ", " (map sedn/encode ds)))))))
