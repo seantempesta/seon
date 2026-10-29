@@ -62,7 +62,9 @@
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
  ;; them): drawn in its place; :seon.error/in the render
- :seon.render/component-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]]]
+ ;; a component that threw, as its part: which render, and the thrown error's own data (seon.render/render!)
+ :seon.render/component-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]
+                                                      [:seon.render/threw {:optional true} :map]]]
  ;; a view whose render threw (seon.render.proc/view-pass, a failure point: renders are code, and agents
  ;; write them): its page is this error, recorded as a platform problem; :seon.error/in the function it threw in
  :seon.render/view-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/view-defect]] [:view :string]

@@ -1484,3 +1484,30 @@
     (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}
                               2 {:seon.process/pid 9 :seon.process/forked-ms 3.0}}) "pid 9") "the newest process's")
     (is (str/includes? (head [{:seon.process/pid 9 :seon.process/forked-ms 3.0}]) "pid 9") "root's own pull holds them as a vector")))
+
+(defn throwing-view "A component (it reads the db) that throws an error with data, as a broken parser does."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts]
+  (throw (ex-info "seon.ref/scan invalid-output" {:seon.error/type :seon.instrument/contract-error :problems [{:in [:seon.ref/blocks 3]}]})))
+(defn fine-view "A component (it reads the db) that draws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts] [:p "drawn"])
+(defn two-part-layout "A list of two components, one that throws (a component itself: the walk's root)."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts]
+  ;; its list inside its root element, as render-ctx's #p-task is (the walk gives a component's root its own id)
+  [:div [:div {:id "parts"} [#'throwing-view {}] [#'fine-view {}]]])
+
+(deftest a-component-that-throws-is-a-part-holding-its-error
+  ;; owner, 2026-10-29: "the UI components are all separately rendered so it's okay if some are
+  ;; errors just make sure it's visible to the agent": the error is the part's data, and the model
+  ;; reads that map, the thrown error's own data in it; every other part draws
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
+    (try (r/frame! w nil)
+         (let [placed (r/placed-hiccup w ["#parts"])
+               [[_ broken] [_ fine]] placed]
+           (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
+           (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
+           (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
+           (is (= "drawn" (last fine)) "the other part draws"))
+         (finally (r/dispose-walk! w)))))

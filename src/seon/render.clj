@@ -306,10 +306,18 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id id :class (name (first k))})
+                      ;; a component that throws is a part of its own: its error as data (what threw, and the
+                      ;; thrown error's own data: a contract's problems), which the page draws by the error's
+                      ;; render and the model reads as the map it is, every other component drawn
                       (catch Throwable e
-                        (with-id [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
-                                                                               (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]
-                                 {:id id})))
+                        (vreset! data nil)
+                        (with-id (part (with-meta (contract/error :seon.render/component-defect #'render!
+                                                                  (str (symbol f) " threw: " (or (ex-message e) (str e)))
+                                                                  (cond-> {:seon.error/in (symbol f)}
+                                                                    (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))
+                                                  {:seon.render/schema :seon.render/component-defect})
+                                       data)
+                                 {:id id :class "err"})))
             draw #(if db? (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (if-let [rx (:rx prev)]
