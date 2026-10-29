@@ -962,22 +962,25 @@
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
 (defn- test-child
-  "Fork this agent to run tests in a child (run-tests-here) and read it to its end: {:answer
+  "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
   :streamed (the reports of the tests that ended, in order), :ended (their vars, as strings),
   :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names) through say, the loop's send! or what
   hands the loop a message to send."
-  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
-  [plan ticks budgets tests forked say]
+  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn :any] [:or :map :seon.test/fork-refused]]}
+  [plan ticks budgets tests forked say fds]
   (let [[r w] (sock/socketpair)
-        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})]
+        lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
+        ;; fds: the pipe ends open in this agent for the run's children (an atom, a set), each child closes every
+        ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
+        _ (swap! fds conj r w)]
     (lib/fork!
-     {:refused (fn [n] (lib/c-close r) (lib/c-close w)
+     {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
                                  (str "cannot fork the tests: " n " Chez threads active (a running future?)") {:active-threads n}))
       :child (fn []
-               (lib/c-close r)
+               (run! lib/c-close (disj @fds w))
                ;; nothing this child forks (a test's own child, a root it starts) holds the
                ;; write end, so its exit is the pipe's end of file
                (sock/clofork! w)
@@ -1001,11 +1004,11 @@
                  ;; the reports went as their tests ended: this line is the run's end and its counts
                  (sock/write-line! w (sedn/encode (assoc res :reports [])))))
       :parent (fn [pid]
-                (lib/c-close w)
+                (lib/c-close w) (swap! fds disj w)
                 (forked pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
                       st (lib/wait-status pid)]
-                  (lib/c-close r)
+                  (lib/c-close r) (swap! fds disj r)
                   (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
@@ -1115,26 +1118,50 @@
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
-        run-all (fn [say]
-            (if (empty? run)
-              {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              ;; a child that dies loses the test it was running (its :error stays) and the rest
-              ;; run in a new child: the death of one test never costs the run its other results
-              (loop [todo run reports [] fns {} heap {} measured {}]
-                (let [c (test-child plan ticks budgets todo forked say)]
+        ;; one child's run of todo: a child that dies loses the test it was running (its :error stays) and the
+        ;; rest of its todo run in a new child: the death of one test never costs the run its other results
+        run-child (fn [todo say fds]
+              (loop [todo todo reports [] fns {} heap {} measured {}]
+                (let [c (test-child plan ticks budgets todo forked say fds)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))
                           reports (-> reports (into (:streamed c)) (into (:reports (:answer c))))
                           done (into (:ended c) (keep :var) died)
-                          rest-todo (filterv #(not (done (str "#'" %))) todo)
-                          counts (frequencies (map :type reports))]
+                          rest-todo (filterv #(not (done (str "#'" %))) todo)]
                       ;; a death with something to show for it (a test ended, or the one it died in is
-                      ;; named) leaves the rest to a new child; none, and the run ends on it
+                      ;; named) leaves the rest to a new child; none, and the child's run ends on it
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
                         (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)) (merge measured (:measured c)))
-                        {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :measured (merge measured (:measured c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
+                        {:reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :measured (merge measured (:measured c))
+                         :pid (:pid c) :exit (:exit c)}))))))
+        ;; every selected test green at its digest (a turn's run of the same tree, a session's): nothing to run, so no
+        ;; child is forked. Else the tests are dealt by the one deal bin/test uses (proofs/shards, by each test's
+        ;; median measured ms) into at most :seon.config.proofs/jobs children, each run on a fiber of its own (a
+        ;; park on its pipe lets the others run) and every one read to its end; one child is the 1-child case
+        run-all (fn [say]
+            (if (empty? run)
+              {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
+              (let [typical (fx/typical-ms run)
+                    ;; a test never measured counts as the mean of those measured, else the default
+                    mean (if (seq typical) (quot (reduce + (vals typical)) (count typical)) (cfg/value :seon.config.proofs/unmeasured-ms))
+                    ms (into {} (map (fn [t] [t (get typical t mean)])) run)
+                    ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
+                    n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
+                    fds (atom #{})
+                    fibers (mapv #(let [g (a/io-thread (run-child % say fds))] [g (a/go-monitor g)])
+                                 (proofs/shards run n ms))
+                    ;; all are taken before a throw is raised, so no child outlives the run
+                    cs (mapv (fn [[g died]] (or (a/<!! g) {::threw (a/<!! died)})) fibers)]
+                (if-let [e (some ::threw cs)]
+                  (throw e)
+                  (if-let [e (first (filter contract/error? cs))]
+                    e
+                    (let [reports (into [] (mapcat :reports) cs)
+                          counts (frequencies (map :type reports))]
+                      {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
+                       :reports reports :fns (into {} (map :fns) cs) :heap (into {} (map :heap) cs) :measured (into {} (map :measured) cs)
+                       :ms (profile/ms-since t0) :pid (:pid (first cs)) :exit (:exit (first cs))})))))) 
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
     ;; what ran, cached by digest (seon.fx/write-verdicts!), whoever asked for the run; a file the
