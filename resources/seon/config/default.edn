@@ -13,7 +13,7 @@
 ;; - Overrides come only through #env below, and only where a script or a check sets one, so
 ;;   this file is the one list of what can be set. A value resolving to nil (an unset #env with
 ;;   no fallback) is absent, which only an optional key allows.
-;; - #profile selects by SEON_PROFILE (default :default); :deepseek runs agents on DeepSeek.
+;; - #profile selects by the command line's --profile NAME (default :default); :deepseek runs agents on DeepSeek.
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
@@ -320,7 +320,7 @@
  ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.
- :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
+ :seon.config.source/gate-checkout nil
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
@@ -572,13 +572,13 @@
 
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
  ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
- ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
- ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
+ ;; ran the scripted test fixture as if it were a model). --profile deepseek (or
+ ;; --set :seon.config.ai/provider=:openai-compat) uses the endpoint below; --profile scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
- ;; that profile, which states its script (SEON_AI_PROVIDER=scripted alone leaves none, and boot
+ ;; that profile, which states its script (--set :seon.config.ai/provider=:scripted alone leaves none, and boot
  ;; refuses the provider's contract). There is no default model (docs/model.md#no-default-model);
  ;; check the context before any paid call.
- :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}]
+ :seon.config.ai/provider #keyword #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}
  ;; The scripted provider's reply function (a test fixture): replies by task.
  :seon.config.ai/script #profile {:scripted seon.fixtures/reply}
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
@@ -594,7 +594,7 @@
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
  ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
  ;; model that turns thinking on raises it through the resolver (v1's 65,536 for that case).
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 8192]
+ :seon.config.ai/max-tokens 8192
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
  ;; intuitive function calling based on the context our context is bad and instructions need
  ;; help"): a task whose next step needs long reasoning is a context or instruction defect to
@@ -631,11 +631,11 @@
  :seon.config.ai/providers
  {"deepseek"
   {;; Unit: URL; /chat/completions is appended (v1's :seon.config.ai/endpoint named the whole URL).
-   :seon.config.ai/base-url #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
+   :seon.config.ai/base-url "https://api.deepseek.com"
    ;; Unit: the NAME of an environment variable. Never the credential: root's :model owner reads
    ;; the key at the call, it never becomes a datom, and every agent unsets this variable at its
    ;; birth (the key is root's alone).
-   :seon.config.ai/api-key-variable #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
+   :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
    ;; the request field the completion budget is sent in (v1)
    :seon.ai.model/output-token-wire-key "max_tokens"
    ;; Unit: tokens. The block DeepSeek's prompt cache counts a hit in. Provenance: measured
@@ -892,7 +892,7 @@
  ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
  ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
  :seon.config.vector/model #env SEON_EMBED_MODEL
- :seon.config.vector/lib #or [#env SEON_EMBED_LIB #seon/checkout "target/lib/libseon-embed.dylib"]
+ :seon.config.vector/lib #seon/checkout "target/lib/libseon-embed.dylib"
  ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
  ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
  :seon.config.vector/batch-tokens 4096
@@ -974,7 +974,7 @@
  :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
  ;; Unset: UTC, which the page's clocks then show.
- :seon.config.web/utc-offset #or [#env SEON_UTC_OFFSET "+0000"]
+ :seon.config.web/utc-offset "+0000"
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
@@ -983,4 +983,4 @@
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.
- :seon.config.native/probe-lib #or [#env SEON_PROBE_LIB #seon/checkout "target/lib/libprobe.dylib"]}
+ :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"}

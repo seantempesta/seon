@@ -1,11 +1,13 @@
 #!/bin/zsh
-# bin/update   bring the standing root up to date with main, from the main tree, in one go:
+# bin/update [ARGS]   bring the standing root up to date with main, from the main tree, in one go:
 #   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
 #      the write-back tree that config/local.edn's :seon.config.source/root names) into main;
 #   2. move both trees' submodules to main's pins (bin/worktree --sync for the write-back tree);
 #   3. build (bin/build: each step skips what is up to date);
 #   4. restart the standing root on its store (bin/root stop, start): it boots on main's build and
 #      imports its source tree (docs/source.md), first fast-forwarding it to main (seon.fx/read-source).
+# ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
+#   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
 # Worktree sessions merge first (root merges their branches into main, docs/merging.md); then bin/update.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
 setopt pipefail
@@ -39,5 +41,5 @@ git -c protocol.file.allow=always submodule update --init -q || fail "main's sub
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 bin/root stop >/dev/null 2>&1
-bin/root start | tail -1 || fail "the standing root did not start (runs/root.log)"
+bin/root start "$@" | tail -1 || fail "the standing root did not start (runs/root.log)"
 print "UPDATE OK"

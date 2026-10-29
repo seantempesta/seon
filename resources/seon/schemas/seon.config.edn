@@ -10,6 +10,7 @@
  [:map {:closed true :seon.db/attributes true :seon.render/html seon.render.ui/config-panel
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
+  [:seon.config.root/profile {:optional true} :seon.config.root/profile]
   [:seon.config.root/max-agents :seon.config.root/max-agents]
   [:seon.config.root/death-stderr-bytes :seon.config.root/death-stderr-bytes]
   [:seon.config.root/view-window :seon.config.root/view-window]
