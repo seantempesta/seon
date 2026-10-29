@@ -520,11 +520,11 @@
 (deftest a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
   ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
-  ;; red with its digest and first failure, main holding none of it; fixed and run again, green with no
+  ;; red with its digest and its failing assertions as data, main holding none of it; fixed and run again, green with no
   ;; failure and the sums started over at the new digest; a run that changes nothing writes nothing
   (let [facts "(let [pull (fn [db] (if-let [e (seon.db/eid db :var/name 'facts-test/r)] (datahike.api/pull db '[*] e) {}))]
-                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs])
-                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs])})"
+                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs])
+                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs])})"
         [_ red fact-red _ green fact-green again]
         (in-agent ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
                    "(select-keys (my.agent/prove) [:results])" facts
@@ -536,12 +536,12 @@
     (let [{:keys [branch main]} (:value fact-red)]
       (is (= :red (:seon.test/status branch)) (pr-str fact-red))
       (is (string? (:seon.test/digest branch)))
-      (is (str/includes? (str (:seon.test/failure branch)) "it is one") "its first failure")
+      (is (= [{:type :fail :message "it is one"}] (mapv #(select-keys % [:type :message]) (:seon.test/failures branch))) "its failing assertion, as data")
       (is (= {} main) "main holds none of it"))
     (is (= {:results '{facts-test/r :pass}} (:value green)))
     (let [{:keys [branch]} (:value fact-green)]
       (is (= :green (:seon.test/status branch)))
-      (is (nil? (:seon.test/failure branch)) "no failure while green")
+      (is (nil? (:seon.test/failures branch)) "no failures while green")
       (is (= 1 (:seon.test/runs branch)) "the sums start over at the new digest"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 

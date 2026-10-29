@@ -1001,13 +1001,14 @@
         written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
                                    {:var/name 'demo/f-test :var/kind :test :var/form "f"}])
         red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
-                                 :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"}])
-        green (d/db-with red [[:db/retract [:var/name 'demo/f-test] :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"]
+                                 :seon.test/failures [{:type :fail :message "it doubles" :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]}])
+        green (d/db-with red [[:db/retract [:var/name 'demo/f-test] :seon.test/failures [{:type :fail :message "it doubles" :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]]
                               {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
     (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
     (let [h (draw red)]
       (is (str/includes? h ":red") (str "the recorded status: " h))
-      (is (str/includes? h "it doubles") "and its first failure")
+      (is (str/includes? h "it doubles") "and its failing assertion")
+      (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code")
       (is (str/includes? h "digest-1") "and the digest it was judged at")
       (is (str/includes? h "done-when") "marked: done when green"))
     (let [h (draw green)]

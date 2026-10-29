@@ -34,7 +34,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] :string]}
   [db] (docs/page-text db system-page))
 
-(defn- failure
+(defn failure
   "A failing assertion as the agent reads it (the test AI render): the assertion as written
   and what it evaluated to, (= 9 (square 3)) got (= 9 6), never the assertion twice; the
   message only when it says something."

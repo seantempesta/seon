@@ -760,7 +760,7 @@
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
-  each written proof with its source and its recorded result (:status, :failure and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
+  each written proof with its source and its recorded result (:status, the failing assertions and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
   as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
   the task's own attributes in ctx change or a transaction touches what task-data read. Each var
@@ -774,7 +774,7 @@
         ;; seon.proofs/result-tx), read from ctx and nothing computed here
         results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
                            [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
-                                            (:seon.test/failure v) (assoc :failure (:seon.test/failure v)))]))]
+                                            (seq (:seon.test/failures v)) (assoc :failures (mapv context/failure (:seon.test/failures v))))]))]
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}

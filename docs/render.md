@@ -157,7 +157,7 @@ The places that cut a value where it is made, not in the printer, each with its 
 
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
-- `seon.proofs/result-tx`: a red test's first failing assertion is stored as a fact on its var entity (`:seon.test/failure`, seon.proofs/test-results-are-a-few-facts), so it is printed once where it is made, by the one printer under a part's budget, whose cut says what it omitted; the render shows the stored text and prints nothing again.
+- A test child's reports: a child process prints an assertion's expected and actual at its pipe, a process boundary, and the reports are kept as it sent them; `seon.proofs/failures` keeps the first `:seon.config.proofs/max-assertions` of a test's whole, the facts on its var entity hold that data (`:seon.test/failures`), and the one printer prints it where it is shown (the owner, 2026-10-29: "keep everything as data until it's at a print boundary").
 
 ### Cuts in a display namespace that are not cuts of output
 
