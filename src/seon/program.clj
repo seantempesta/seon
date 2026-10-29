@@ -461,6 +461,11 @@
   [[:form/refs :refs] [:form/quoted :quoted] [:form/keywords :keywords] [:form/ops :ops] [:form/requires :requires] [:form/banned :banned] [:form/inline-defs :inline-defs]
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
+(def ^:private form-set-keys
+  "form-sets as a map, {attribute -> row key}: what form-row folds one seek's datoms by. See
+  docs/source.md#tests-run-by-reach."
+  (into {} form-sets))
+
 (defn- form-of
   "The form entity definition entity e points to, or nil."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :int]]}
@@ -647,25 +652,37 @@
     (or (empty? ds) (boolean (some #(= e (form-of db (:db/id %))) ds)))))
 
 (defn- definition-key
-  "Definition entity x's program key ([:var sym], [:method ...], [:impl ...], [:ns sym])."
-  {:malli/schema [:=> [:cat :any] [:maybe :seon.merge/program-key]]}
-  [x] (cond (:var/name x) [:var (:var/name x)]
-            (:method/key x) (into [:method] (sedn/decode (:method/key x)))
-            (:impl/key x) (into [:impl] (sedn/decode (:impl/key x)))
-            (:ns/name x) [:ns (:ns/name x)]))
+  "Definition entity x's program key ([:var sym], [:method ...], [:impl ...], [:ns sym]) on db, from
+  one seek of its datoms (a var's name wins over a method's, an impl's and a namespace's, in that order)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :seon.merge/program-key]]}
+  [db x]
+  (let [m (reduce (fn [m {:keys [a v]}] (case a (:var/name :method/key :impl/key :ns/name) (assoc m a v) m))
+                  {} (d/datoms db :eavt x))]
+    (cond (:var/name m) [:var (:var/name m)]
+          (:method/key m) (into [:method] (sedn/decode (:method/key m)))
+          (:impl/key m) (into [:impl] (sedn/decode (:impl/key m)))
+          (:ns/name m) [:ns (:ns/name m)])))
 
 (defn form-row
   "Form entity e as the loader and the merge read it (:source when it is the text of the
-  source tree the binary was built from, :form/source: its :order is its place in that file)."
+  source tree the binary was built from, :form/source: its :order is its place in that file),
+  built from one seek of e's datoms and one of each namespace, definition and declared var it
+  names, never an entity's attribute-by-attribute reads (about a fifth of the ticks of those)."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
-  (let [f (d/entity db e)]
-    (cond-> (into {:e e :id (:form/id f) :src (:form/src f) :ns (:ns/name (:form/ns f)) :order (:form/order f)
-                   :defines (into #{} (keep definition-key) (:form/defines f))
-                   :declares (into #{} (map :var/name) (:form/declares f))}
-                  (for [[a k] form-sets] [k (set (get f a))]))
-      (:form/lead f) (assoc :lead (:form/lead f))
-      (:form/source f) (assoc :source true))))
+  (reduce (fn [row {:keys [a v]}]
+            (case a
+              :form/id (assoc row :id v)
+              :form/src (assoc row :src v)
+              :form/ns (assoc row :ns (:v (first (d/datoms db :eavt v :ns/name))))
+              :form/order (assoc row :order v)
+              :form/defines (update row :defines conj (definition-key db v))
+              :form/declares (update row :declares conj (:v (first (d/datoms db :eavt v :var/name))))
+              :form/lead (assoc row :lead v)
+              :form/source (assoc row :source true)
+              (if-let [k (form-set-keys a)] (update row k conj v) row)))
+          (into {:e e :id nil :src nil :ns nil :order nil :defines #{} :declares #{}} (map #(vector % #{})) (vals form-set-keys))
+          (d/datoms db :eavt e)))
 
 (defn- live-ids
   "{form id -> entity} of db's live forms (live?), from four index scans and no entity read:
@@ -1067,7 +1084,7 @@
         [ptr-from ptr-to] (reduce (fn [[x y] a] (let [[p q] (diff a)] [(into x p) (into y q)])) [[] []] (vals pointer))
         defined? (fn [db x] (some #(seq (d/datoms db :eavt x %)) (vals pointer)))
         removed (sort-by str (distinct (for [dt ptr-from :let [x (:e dt)] :when (not (defined? db-to x))]
-                                         (definition-key (d/entity db-from x)))))
+                                         (definition-key db-from x))))
         forms (into (sorted-set) cat [(mapcat (fn [[p q]] (map :e (concat p q))) [(diff :form/id) (diff :form/defines)])
                                       (map :v ptr-from) (map :v ptr-to)])
         schema-es (into #{} (mapcat (fn [a] (let [[p q] (diff a)] (map :e (concat p q))))) [:schema/key :schema/form :schema/source])

@@ -350,9 +350,15 @@
   ;; by the one printer at :seon.config.render/root-context-budget; the cut is the printer's alone
   (let [[main branch _] (paged-dbs)
         st (-> (proc-state main branch) (assoc :watch #{}) (root-state main))
-        st1 (#'p/pass st (volatile! {}))
+        st1 (#'p/pass (update st :watch conj [:debug :root]) (volatile! {}))
         ctx (:context st1)
         budget (seon.config/value :seon.config.render/root-context-budget)]
+    (testing "printed only for a reader (a tab on /root/debug, or a :context request): a pass nobody reads it in prints nothing (derived data, AGENTS section 5)"
+      (is (nil? (:context (#'p/pass st (volatile! {})))) "no tab: nothing printed, no health read")
+      (is (nil? (:health-at (#'p/pass st (volatile! {})))))
+      (is (= ctx (:context (#'p/with-context (#'p/health! st)))) "the :context request's print is the page's")
+      (let [asked (#'p/with-context (#'p/health! st))]
+        (is (identical? (:context asked) (:context (#'p/with-context asked))) "held by the walk's value and main's t: asked again prints nothing")))
     (testing "what is wrong comes first (its tiles: its process, main's problems and runs), at the printer's budget"
       (is (str/starts-with? (:text ctx) "{\"process-tile\""))
       (is (str/includes? (:text ctx) "root's process"))
@@ -377,20 +383,27 @@
 
 (deftest the-problems-tile-follows-main-without-reading-it-whole
   ;; task seon.problems/health-at-the-cost-of-what-changed: root's walk holds main's health; a move of
-  ;; main changes it by the datoms that moved (seon.render.proc/health!), and the tile draws what it holds
-  (let [[main branch _] (paged-dbs)
-        st (root-state (proc-state main branch) main)
+  ;; main changes it by the datoms that moved (seon.render.proc/health!, read when a reader is there, not per
+  ;; commit: from the point it was read at, made again by seon.db/at-commit), and the tile draws what it holds
+  (ts/test-branch! (fn [_ conn]
+  (let [[_ branch _] (paged-dbs conn)
+        main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
+        st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
         tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
-        main2 (datahike.api/db-with (:main-db st) [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
+        main2 (:db-after (d/transact conn {:tx-data [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}
                                {:seon.run/id "zz/dead#1" :seon.run/task [:seon.task/id "zz/dead"] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/zz" :seon.agent/id :zz}
                                 :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :dead :seon.run/reason "its agent died"
-                                :seon.run/error (seon.contract/error :seon.agent/died 'seon.root/end-agent "agent zz died" {:agent :zz})}])
-        before (tile st)
-        st2 (#'p/advance-main st main2)]
-    (is (not (str/includes? before "zz/dead")) "main holds no such run yet")
-    (is (str/includes? (tile st2) "zz/dead") "the move shows its dead run in the tile")
-    (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
-    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+                                :seon.run/error (seon.contract/error :seon.agent/died 'seon.root/end-agent "agent zz died" {:agent :zz})}]}))
+        moved (#'p/advance-main st main2)]
+    (is (nil? (:health-at st)) "a move of main reads no health: nothing reads it")
+    (is (nil? (:health-at moved)))
+    (let [st (#'p/health! st) before (tile st)
+          st2 (#'p/health! moved)]
+      (is (some? (:health-at st)) "read when a reader is there")
+      (is (not (str/includes? before "zz/dead")) "main holds no such run yet")
+      (is (str/includes? (tile st2) "zz/dead") "the move shows its dead run in the tile")
+      (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
+      (r/dispose-walk! (get-in st2 [:root-walk :w])))))))
 
 (deftest an-agents-page-draws-the-problems-of-its-own-run
   ;; task seon.problems/health-in-context: its run's open problems, by the report's render, beside the

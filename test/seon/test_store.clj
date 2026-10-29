@@ -115,6 +115,22 @@
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
     path))
 
+(defn clone-process-store!
+  "A store of a test's own at path (made, its directory with it): an APFS copy-on-write clone of the
+  process store's data file (the program, the wiki and the source fact seed-program! put on :db, as
+  bin/check takes its store), so a root booting its first main there imports and loads nothing
+  more than a root on a branch of the process store, and no other test sees what this one writes.
+  For the tests whose subject is a store's restart or resume, which cannot share a main
+  (docs/machine.md#a-root-boots-from-a-seeded-store). Answers path."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path]
+  (.mkdirs (java.io.File. ^String path))
+  (let [r (sh/sh "cp" "-c" (str (process-store) "/data.mdb") (str path "/data.mdb"))]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "the process store could not be cloned to " path ": " (:err r))
+                      {:seon.error/type :seon.test-store/clone-failed :path path})))
+    path))
+
 (defn test-db
   "The test store's seed as a db value (the schema and about 2,000 datoms of the example
   program), for a test that only reads or uses d/db-with: no branch is made."

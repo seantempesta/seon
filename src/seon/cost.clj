@@ -231,9 +231,19 @@
     (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
       contract/on? (assoc :calls (double calls)))))
 
+(def ^:private threaded
+  "Makes this process multi-threaded, once, before anything is measured: Jolt's lazy seq cells take a
+  claim path (compare-and-swap, more ticks and bytes a cell: a seq over a String's chars 8 ticks and
+  80 B, then 15 and 272) from the first real OS thread on, for the rest of the process (`jolt-mt?`,
+  never reset). Every Seon root is threaded, so that is the regime a measure stands for; without
+  this, a proof run alone (no thread yet) and in a shard after a test that made one (a `future`, a
+  shell call) counted different work for one call. docs/cost.md#how-we-measure."
+  (delay (doto (Thread. ^Runnable (fn [] nil)) (.start) (.join)) true))
+
 (def ^:private baseline
   "What measuring a call that does nothing costs: the clock, tick and allocation reads themselves."
-  (delay (let [f (fn [] nil)]
+  (delay @threaded
+         (let [f (fn [] nil)]
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
 (defn measure

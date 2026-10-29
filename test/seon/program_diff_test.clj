@@ -19,7 +19,7 @@
   "What load-diff! planned before diff-plan, reading both programs whole: the oracle."
   {:malli/schema [:=> [:cat :any :any] :map]}
   [from to]
-  (let [def-keys (fn [db] (into #{} (for [a (vals program/pointer) dt (d/datoms db :aevt a)] (#'program/definition-key (d/entity db (:e dt))))))
+  (let [def-keys (fn [db] (into #{} (for [a (vals program/pointer) dt (d/datoms db :aevt a)] (#'program/definition-key db (:e dt)))))
         live-from (#'program/live-ids from)
         to-defs (def-keys to)
         sc-from (program/schema-changes from)]

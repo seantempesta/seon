@@ -591,12 +591,14 @@
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn test-command
-  "The runner the :tests effect calls in a checkout, as argv, for namespaces nss: prove's one
-  entry, each named namespace's tests with no green at their reach
-  digest run, the rest reused, its run written under out (bin/prove --out: the effect reads the
-  plan there, never from a path the run did not name)."
+  "The runner the :tests effect calls in a checkout, as argv, for tests (qualified names, or a
+  namespace's bare name for all its tests): prove's one entry, each named test with no green at
+  its reach digest run, the rest reused, its run written under out (bin/prove --out: the effect
+  reads the plan there, never from a path the run did not name). A gate names exactly the
+  tests the change reached (:seon.run/deferred), never their namespaces' other tests
+  (docs/merging.md#a-merge-runs-what-the-change-reaches)."
   {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
-  [nss out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str nss)))
+  [tests out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str tests)))
 
 (defn full-run-command
   "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
@@ -631,10 +633,10 @@
        (catch Throwable e (error #'seon.fx/read-verdict :seon.fx/io-error (str "reading " path ": " (step/error-msg e)) {:path path}))))
 
 (defn stored-results
-  "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key. A green is
+  "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key, and a red's file read. A green is
   {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
   proof, the verdict it was judged by (:cost {:rows :verdict}); a digest cached both green and red is
-  flaky (seon.proofs/verdict), judged red. A test's verdict is a function of its digest, so a red is
+  flaky (seon.proofs/verdict), judged red (a green's file is not read: measured on one scripted turn, 2,258 reads of 41 KB each were the turn's largest per-test cost). A test's verdict is a function of its digest, so a red is
   reused as a green is. Answers the first :seon.fx/io-error a file gives, never a partial answer. dir:
   the cache's (:seon.config.proofs/results-dir unless given)."
   {:malli/schema [:function [:=> [:cat [:map-of [:or :qualified-symbol :string] :string]] [:or [:map-of :string :map] :seon.error/base]]
@@ -642,10 +644,14 @@
   ([cand] (stored-results (cfg/value :seon.config.proofs/results-dir) cand))
   ([dir cand]
   (reduce (fn [acc [k dg]]
-            (let [g (read-verdict (verdict-path dir k dg :pass)) r (read-verdict (verdict-path dir k dg :red))]
-              (doseq [[v st] [[g :pass] [r :red]] :when (map? v)] (.setLastModified (java.io.File. ^String (verdict-path dir k dg st)) (System/currentTimeMillis)))
-              (cond (contract/error? g) (reduced g)
-                    (contract/error? r) (reduced r)
+            (let [gp (verdict-path dir k dg :pass) rp (verdict-path dir k dg :red)
+                  ;; a green's file is its verdict (its content is never read: written once, whole, by write-verdicts!'s
+                  ;; rename), so a test is one file check; only a red's content (its failures) is read
+                  g (.exists (java.io.File. ^String gp))
+                  r (when (.exists (java.io.File. ^String rp)) (read-verdict rp))]
+              (when g (.setLastModified (java.io.File. ^String gp) (System/currentTimeMillis)))
+              (when (map? r) (.setLastModified (java.io.File. ^String rp) (System/currentTimeMillis)))
+              (cond (contract/error? r) (reduced r)
                     :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
                                                      (when r (cond-> {:digest dg :pass 0 :fail (if (= :fail (:status r)) 1 0) :error (if (= :error (:status r)) 1 0)
                                                                       :failures (vec (:failures r))}
@@ -831,7 +837,7 @@
   "The :tests effect: tests (qualified names) run on a checkout of the merge candidate: a
   detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
   ({relative path text}, the candidate's changed files) written over it, then the runner
-  (test-command) over the tests' namespaces there, niced, in that tree's own environment;
+  (test-command) over exactly the tests named there, niced, in that tree's own environment;
   the worktree removed after. Answers {:value {:results {test status} :ms :log}}, or
   :seon.fx/io-error naming the step and its log. With :all? (the daily full run, seon.prove's
   :full mode) the runner is full-run-command, tests are every test the plan names, and the answer
@@ -873,7 +879,7 @@
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
                   r (apply sh/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
-                                         (if all? (full-run-command out) (test-command (sort (distinct (map (comp symbol namespace) tests))) out))
+                                         (if all? (full-run-command out) (test-command (sort-by str (distinct tests)) out))
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
