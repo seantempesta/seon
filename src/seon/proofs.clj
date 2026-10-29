@@ -98,9 +98,10 @@
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
-  forks (bin/forks: the forks' own suites on Jolt) runs no function: its key is :env alone, so a
-  pin bump selects it and a change to Seon's .clj program does not."
-  '{"laws" :tree "health" :caused "lmdb-kill" [] "lmdb-sem" [] "forks" [] "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
+  forks (bin/forks: the forks' own suites on Jolt) and the lmdb steps run no function: their key
+  is :pins, :env and every submodule's pin (the :seon.pin classes of seon.fx/inputs' :config), so
+  a pin bump selects them and a change to Seon's .clj program does not."
+  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" [seon.check/mg-check] "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -132,10 +133,12 @@
   imported) or a base there is none of, which a run reports red rather than keying by :env alone."
   {:malli/schema [:=> [:cat :seon.host/fn [:map [:env :string] [:tree :string] [:base {:optional true} [:maybe :string]]]]
                   [:map [:digests [:map-of :string :string]] [:missing [:vector :string]]]]}
-  [digests-of {:keys [tree base]}]
+  [digests-of {:keys [tree base env config]}]
   (let [fns (into {} (filter (comp vector? val)) check-steps)
+        pins (str/join "\n" (for [[c d] (sort-by (comp str key) config) :when (= "seon.pin" (namespace c))] (str c " " d)))
         ds (merge (digests-of fns)
                   (into {} (for [[k v] check-steps :when (= :tree v)] [k (error/digest (str k "\n" tree))]))
+                  (into {} (for [[k v] check-steps :when (= :pins v)] [k (error/digest (str k "\n" env "\n" pins))]))
                   (when base (into {} (for [[k v] check-steps :when (= :caused v)] [k (error/digest (str k "\n" tree "\n" base))]))))]
     {:digests ds :missing (vec (sort (remove ds (keys check-steps))))}))
 

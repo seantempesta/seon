@@ -179,7 +179,7 @@
 
 (defn- call-problem
   "Why an eval call, its prose and its code, is not the eval tool's shape, as the error its one
-  result is, or nil: a call is prose and exactly one form (docs/prompt.md).
+  result is, or nil: a call is prose and one or more forms (docs/prompt.md).
   Code that does not read is left to the REPL, whose read error says where."
   {:malli/schema [:=> [:cat [:maybe :string] :string] [:maybe :seon.turn/invalid-call]]}
   [prose code]
@@ -188,10 +188,9 @@
       (str/blank? prose)
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this call has no prose: say in a sentence what its form does and what you expect; the form was not run" {:problem :no-prose})
-      (and forms (not= 1 (count forms)))
+      (and forms (empty? forms))
       (contract/error :seon.turn/invalid-call #'call-problem
-                      (str "one form per call: this code holds " (count forms) " forms; make each its own call. None was run")
-                      {:problem :forms :forms (count forms)}))))
+                      "this call has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
 (defn- evaluated!
   "Code through the one REPL path (seon.repl/eval-string, req) and its record committed to the
@@ -272,7 +271,7 @@
         ;; proofs as this turn observed them), then what it sent, committed, so a page shows the
         ;; call in flight and a call that fails keeps what it sent
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
-                                  {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}]
+                                  {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}]
                                  (included-tx (:seon.task/id t))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
@@ -310,7 +309,7 @@
             ;; each eval call through the one REPL path, in order; its response is the call's
             ;; result; the reply's prose is the first call's
             ;; each eval's prose: the reply's text (on its first call) then the call's own, as the user reads it
-            ;; a call that is not prose and one form, or after one that threw, is not run: its one
+            ;; a call with no prose or no form, or after one that threw, is not run: its one
             ;; result says why (seon.repl/unrun, docs/prompt.md)
             calls (reduce (fn [acc [i {:keys [id code prose]}]]
                             (let [content (when (and (zero? i) (not (str/blank? (:text c)))) (:text c))
@@ -322,7 +321,7 @@
                                         content (assoc :content content)
                                         (and (zero? i) (:reasoning c)) (assoc :reasoning (:reasoning c))
                                         (seq repairs) (assoc :repaired (context/repaired src repairs)))
-                                  ;; a call that failed (threw, or was not prose and one form) stops the rest
+                                  ;; a call that failed (threw, or had no prose or no form) stops the rest
                                   failed (some #(when (:ex (:response %)) (:id %)) acc)
                                   why (if failed
                                         (contract/error :seon.turn/not-run #'act! (str "not run: call " failed " of this reply failed before it (its result says why)") {:after failed})
@@ -348,7 +347,7 @@
         ;; it answered and how it stopped, which evals its calls are, and where the turn's time
         ;; went as this agent saw it
         (agent/transact! [{:db/id "run" :seon.run/id run}
-                          (cond-> (merge (usage c) {:seon.turn/id id :seon.turn/run "run" :seon.turn/n turn
+                          (cond-> (merge (usage c) {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn
                                    :seon.turn/calls (mapv (fn [{:keys [id code response]}]
                                                             (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
@@ -404,7 +403,7 @@
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:db/id "run" :seon.run/id run}
-                      (cond-> {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/n n
+                      (cond-> {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n n
                                :seon.turn/origin :outside :seon.turn/basis basis
                                :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
                         sent (assoc :seon.turn/sent sent))])
@@ -439,19 +438,17 @@
 
 (defn work!
   "Work task `task` as run `run` (the model `model` when set, else root's), at most
-  max-turns model calls. A call of code the run ran before, answered the same, is told so on
-  the answer it reads (seon.context/printed-run, :same-as): no count decides an end (the
-  repeats of the live runs followed answers that said too little, a value
-  folded to an earlier one's form or an error that named nothing to change, and each was fixed
-  at that answer).
+  max-turns model calls.
   Answers the end ({:outcome :turns :model-calls :tokens :ms}); the same end is written on
   the branch. It first merges main into the branch (my.branch/merge-main!), as a merge task
   does again at each green."
   {:malli/schema [:=> [:cat [:map [:task :seon.task/id] [:run :seon.run/id] [:model {:optional true} :string]
                              [:max-turns pos-int?]]]
                   :seon.turn/end]}
-  [{:keys [task run model max-turns]}]
+  [{:keys [task run model] :as arg}]
   (let [{:keys [plan-before]} (begin! task run)
+        ;; the agent's own budget (:seon.agent/max-turns, raised to extend it) bounds the loop; the arg is the default
+        max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])) (:max-turns arg))
         t0-task (task/task (agent/db) task)
         merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]

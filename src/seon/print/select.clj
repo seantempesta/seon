@@ -169,19 +169,6 @@
   [x fits? text tag digits]
   (scalar :seon.print/number x (if fits? text (str "#" tag "[≈" digits " digits]"))))
 
-(defn- seen-form
-  "The form that reads x again when an earlier response showed it (the context's :seen), else
-  nil: a string by its text, a map, set or vector by identity (the same value object), so no
-  lookup hashes a collection's contents (a member may be lazy and endless); the printed value
-  itself is never its own handle."
-  {:malli/schema [:=> [:cat :any :any :map] :any]}
-  [x c context]
-  (when-let [{:keys [strings colls]} (:seen context)]
-    (when-not (identical? x (:root context))
-      (cond (identical? c String) (get strings x)
-            (or (map-classes c) (set-classes c) (vector-classes c))
-            (some (fn [[v form]] (when (identical? v x) form)) (get colls (System/identityHashCode x)))))))
-
 (declare show)
 
 (defn- lifted-namespace
@@ -220,12 +207,8 @@
         ;; carry a budget): its value printed at that budget and handle, so a reader sees the cut the page shows
         ;; and the form that reads the rest. Its budget is its own, beside the enclosing value's, as the
         ;; page's writer gives it; a plain vector headed by a var, with no budgeted opts, prints as data
-        call (when (and (vector? x) (var? (first x)) (pos-int? (:budget (nth x 1 nil)))) x)
-        ;; a value an earlier response showed is the form that reads it again (seen-form); a
-        ;; print given no earlier responses looks nothing up
-        again (when (:seen context) (seen-form x c context))]
+        call (when (and (vector? x) (var? (first x)) (pos-int? (:budget (nth x 1 nil)))) x)]
     (cond
-      again (scalar :seon.print/rendered x (pr-str again))
       summary (classify (:value summary) context)
       call (let [[f o v] call
                  r (show v (cond-> {:handle (:handle o) :budget (:budget o) :max-depth (:max-depth context)
@@ -891,11 +874,10 @@
   "`value` selected under `opts` and emitted: `{:text :tokens :truncated? :elisions}` plus
   `:html` (hiccup) when `outputs` holds `:hiccup`, or the insufficient-budget error.
   opts: `:handle` (what cuts read through: a `result/…` symbol, or a form that reads the value), `:budget` tokens, `:max-depth`, `:width`,
-  `:outputs`, `:seen` (values earlier responses showed, each the form that reads it again: such a
-  nested value prints as its form). A value whose metadata holds `:seon.print/full true` prints whole, and
+  `:outputs`. A value whose metadata holds `:seon.print/full true` prints whole, and
   `:seon.print/budget n` raises its own budget."
   {:malli/schema [:=> [:cat :any :seon.print/opts] :seon.print/result]}
-  [value {:keys [handle budget max-depth width outputs render seen]}]
+  [value {:keys [handle budget max-depth width outputs render]}]
   (let [requery (if (or (and (qualified-symbol? handle) (= "result" (namespace handle))) (seq? handle))
                   {:seon.print/requery-id handle}
                   {:seon.print/requery-refused "the value has no result handle"})
@@ -907,8 +889,7 @@
         context (cond-> (merge limits
                                {:breaks? (pos? width) :requery requery :requery-id (:seon.print/requery-id requery)
                                 :width width :budget chars :max-children (inc (quot chars 2)) :max-depth max-depth}
-                               (when render {:render render :root value})
-                               (when seen {:seen seen :root value}))
+                               (when render {:render render :root value}))
                   full? (assoc :budget Long/MAX_VALUE :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
                                :max-name Long/MAX_VALUE))
         {root :root :as state} (select value context)]

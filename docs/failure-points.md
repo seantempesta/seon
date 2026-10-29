@@ -109,7 +109,7 @@ The failure points met without a catch, where the edge answers with data.
 
 ## Physics: who may run threads
 
-Three rules of the OS and Chez that no code may "fix" by adding a thread or a check:
+The rules of the OS and Chez that no code may "fix" by adding a thread or a check:
 
 - **A process that forks must be one OS thread when it forks.** Two causes, both measured:
   - **Locks held by threads that do not exist in the child.** `seon.lib/fork!` forks only while
@@ -195,6 +195,7 @@ Three rules of the OS and Chez that no code may "fix" by adding a thread or a ch
   not shorten root's small collections), and no collection starts one.
   Unfixed, Chez kept one per thread a collection found waiting, so root's thread count
   drifted by load (0, 5, 15 sweepers across identical runs).
+- **A forked child must not touch an Apple framework.** Once a process has created any thread, macOS's Objective-C runtime treats it and every process forked from it as multithreaded; a forked child that first touches a class whose `+initialize` did not run in the parent aborts (SIGABRT, `+[... initialize] may have been in progress in another thread when fork() was called`), and a child whose parent used Metal or a libdispatch global queue gets a Metal that never compiles (its first encode segfaults) even with that check disabled (`OBJC_DISABLE_INITIALIZE_FORK_SAFETY`, which is not used). Every Seon process is threaded before it forks, and `target/seon` links Foundation, so an agent, the fork server and a test child may use DNS and TLS (OpenSSL) but not Metal, Foundation, Security or CFNetwork classes in process. Reproduced 2026-10-29 (`seon.vector/open` in a forked agent, and in C: a parent that only ever had one thread joined before the fork aborts its child). Work that needs those frameworks runs in an exec'd process, never a fork: the embedding model (task seon.vector/the-model-is-loaded-outside-root).
 - **A forked child holds none of its parent's threads, only their bookkeeping.** fork(2)
   copies the calling thread; Jolt's fiber carriers, its timer and its shutdown watcher are
   parked when the one active thread forks (a parked thread is not active, so

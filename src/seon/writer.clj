@@ -33,12 +33,15 @@
                                (map #(pdb/on-main main %) (pdb/of-main main (set (d/branches conn)))))))))
 
 (defn- main-commit
-  "Main moved to t: the reconciler gets the report, and root loads the program change (a
+  "Main moved from prev to t, by one stored commit: its readers (the reconciler, the test
+  service, the vectors and render procs) get the notice {:t :prev :ops :commit :ns}, the commit
+  to make the db from when they take it (d/commit-as-db), never a db value that a queue or a
+  slow reader would keep alive (docs/machine.md#what-a-process-owns-in-memory); root loads the program change (a
   restarted fork server forks from root). The fork server hears of it per stored commit
   (stored!). Answers st."
-  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/resolved-tx :map :seon.host/db] :seon.writer/state]}
-  [st o t ops tx-meta db]
-  (step/out! o :main {:t t :ops ops :db db :ns (profile/now-ns)})
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.db/t :seon.db/t :seon.db/resolved-tx :seon.host/db] :seon.writer/state]}
+  [st o prev t ops db]
+  (step/out! o :main {:t t :prev prev :ops ops :commit (d/commit-id @(:conn st)) :ns (profile/now-ns)})
   (when-let [errs (seq (program/load-changes! db ops))]
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   (union-caught-up st (pdb/conn-main (:conn st)) db))
@@ -140,7 +143,7 @@
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)
             _ (stored! st o ops)]
-        [(main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep))
+        [(main-commit st o (:max-tx (:db-before rep)) t ops (:db-after rep))
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
           ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
@@ -169,14 +172,19 @@
         (sequential? reps)
         (let [ok (filter (comp map? second) (map vector ms reps))]
           (when (seq ok) (stored! st o (vec (mapcat (comp pdb/report->tx second) ok))))
-          (reduce (fn [st [m rep]]
-                    (if-not (map? rep)
-                      (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
-                      (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                        (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                        (main-commit st o t ops (pdb/report->tx-meta rep) (:db-after rep)))))
-                  (-> st (dissoc :pend) (update :commits inc))
-                  (map vector ms reps)))
+          ;; one stored commit, one notice: the last report's t, every report's ops in order
+          (let [st (reduce (fn [st [m rep]]
+                             (if-not (map? rep)
+                               (do (answer o (:dest m) (refused (step/error-msg rep) {})) st)
+                               (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
+                                 (answer o (:dest m) {:ok true :t t :datoms (count ops)})
+                                 st)))
+                           (-> st (dissoc :pend) (update :commits inc))
+                           (map vector ms reps))]
+            (if (seq ok)
+              (main-commit st o (:max-tx (:db-before (second (first ok)))) (:max-tx (:db-after (second (last ok))))
+                           (vec (mapcat (comp pdb/report->tx second) ok)) (:db-after (second (last ok))))
+              st)))
         (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
         :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
@@ -246,7 +254,7 @@
       ;; root's collection of the store (seon.db/collect!), asked at quiescence: swept when a
       ;; branch the last one saw is gone, and recorded on main through the batch; then root's
       ;; heap collected in full, which returns its free pages past the reserve to the OS
-      ;; (docs/machine.md#roots-heap)
+      ;; (docs/machine.md#what-a-process-owns-in-memory)
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
                  (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
                         (do (lib/non-static-live!) {:ok true :collected r})))

@@ -17,18 +17,23 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 **Measured as** turns to green and tasks merged. **Held to:** nothing crashes or hangs (every failure is data to the agent); everything shown is derived from the db at t; one mechanism per job; every change earns its place; a v1 capability is present or dropped on purpose ([parity](parity.md)).
 
-## Where it stands (2026-10-28, evening)
+## Where it stands (2026-10-29)
 
-A real agent fixed a printer bug in 4 evals but could not finish: the done rule refused it ("behind" main, ~140 unrelated reds in its fork from an inherited heap ceiling and a 1 GB store creation), answered 74 KB, and the dead agent wedged its task. The work is within reach; the machinery around it failed. Since then, on main (03d4cab0b1, aed637debd): store creation linear (1.05 GB to 366 MB), a test child's own ceiling, the agent's collect trip, the fork server freezing its heap only when the program moves, the node cache weighing real sizes, the socket write that lost answers, the orphan watch, a one-function prove 113 s to 57 s, the docs cleanup, `cancel!` refusing unknown ids. The way of working changed: the owner and one session, plans written into task entries, one-use helpers (AGENTS §2).
+The eval protocol is settled and merged: a call is prose and a form (several forms answer `:forms` and each one's value, DECISIONS 2026-10-29), its answer Clojure's value as data with timing and work, a top-level `do` unrolled as Clojure does, the whole conversation sent ([prompt](prompt.md), DECISIONS 2026-10-28). Since then the work has been the machine: what Seon costs on an ordinary MacBook, and what crashes or hangs.
+
+**Memory, measured.** An idle root on a resumed store went 1,438 to 1,106 MB, and its fork server 438 to 381 MB (the fork server preloads main, root returns free pages past 10%, the node cache weighs what it retains); `e2e calc` 927 to ~836 MB. Ten agents working at once (`bin/check swarm`, scripted, a scratch store) peaked at 2.4 GB: root 845 MB, fork server 124 MB, each agent ~140 MB. On the standing store root is ~2.0 GB once it has embedded (the embedding model alone is 380-500 MB) and the fork server 670 MB, so ten agents are ~4.1 GB today. Of root's static 740 MB boot image, 213 MB is Chez's expanded source for every procedure (measured; dropping it keeps every frame's file:line) ([machine](machine.md#roots-heap)).
+
+**Target:** an idle root at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB, so an 8 GB Mac runs Seon with room to spare.
+
+**Stability, found this session:** a Datahike commit loop lost a report because Jolt's `reduce` read past `reduced` (fixed in Jolt e13d154f); the main carrier's loop held its mutex across a throw (fixed, 80579b46), yet its test still fails ~1 run in 20 (cause not found); root's file watcher died on one bad batch (a task with a nil ns) and stopped watching; any forked process that touches an Apple framework (Metal, Foundation) aborts, so the embedding model cannot run in a fork; Datahike's stress-test units are red; `bin/update` refused every pin bump (fixed).
 
 In flight, in order:
-- The agent page and context design: agreed points and open questions in task seon.context/the-agent-page-shows-what-the-agent-knows (open first: how an eval's answer ties each handle to its form). Next: one example from scratch, an independent read for gaps, then the mock rebuilt (https://claude.ai/artifact/MRzLTTwTTiTJMdtryzT9pG) and the build plan.
-- The background-GC hang (task jolt.async/a-permit-released-by-a-callback-is-never-lost): not a regression (bisected: every Jolt that runs it hangs ~1 run in 5); a probe counting callbacks spawned, started, finished and releases is running; its unit is out of the forks baseline until fixed.
-- Test results back in the db as a few facts (task seon.proofs/test-results-are-a-few-facts): planned, approved, not started.
-- Root's heap (1.2 GB live vs ~600 expected): the render, vectors and reconciler procs each hold a db (~160 MB, the reconciler's 230 t stale) and should keep {:branch :commit :t}; root's `*e` Throwable pins the system (keep data); the fork server's log keeps 117 raw transactions (30.6 MB); the boot image is 740 MB vs ~450 expected; root owns 2.85 GB privately (unexplained).
-- The infrastructure audit's cuts (~1,100 lines): delete my.root/gate!, bin/stalls (after the orphan watch), a minimal bin/worktree; simplify the test service and test_runner's second program store; rewrite the cron well (the owner keeps it).
-- New red: forks' datahike.test.stress-test (a writer shut down mid-run) after the node-cache change, unexamined.
-- seon.agent/a-spawns-start-costs-the-same-on-a-bigger-program, taken out with its task: an agent's :state phase grows with main's program (460 KB to 617 KB per 200 forms).
+- Jolt 80579b46 pinned (the reduce and carrier fixes), proving; then the full run on main.
+- Six salvaged branches from old worktrees, as one batch: each eval tells an outside agent how main differs, done answers one line, a dead agent never wedges its task; the `:uncited-var` class; dead reach code deleted.
+- Main's commit notice carries a commit, not a db (no pinned versions under churn): held, `e2e calc` root +30 MB unexplained.
+- The image keeps each frame's file:line and drops the expanded source (task seon.main/the-image-keeps-no-inspector-information; owner chose this way): a Chez strip option and Jolt's build, in its gates.
+- Root's watcher outlives a bad batch, and the nil-ns task load race; the main carrier's remaining race in Jolt; Datahike's stress-test reds.
+- The agent page and context redesign: a separate session (`(seon/changes)` after each turn; a prose-only reply winds the agent down).
 
 ## Now: one step
 
@@ -45,12 +50,22 @@ In flight, in order:
 | 7 | The run concept (approved schema design: the agent is the unit, no stored judgement, turns bounded per wake) and test results (open: per-test facts with running averages and no history, in place of slice 1's file cache) | an agent's record is its turns, evals and messages; a test's status, failure and averages are queryable facts |
 | 8 | ~~The agent's page isn't a chat~~ merged (db03b7a6fb); live after `bin/update` | `/agent/<branch>` shows the conversation; the tiles move to `/debug` |
 | 9 | Partly fixed (113 s to 57 s) A one-function prove takes 30 s | everything but the reached tests' own run takes milliseconds |
-| 10 | Jolt: the background-GC hang (1 in 5) | its cause found and fixed in Jolt, every gate green |
+| 10 | ~~fixed (Jolt e13d154f, pinned 80579b46)~~ Jolt: the background-GC hang: `reduce` realized past `reduced`, and Datahike's commit loop lost a report | its cause found and fixed in Jolt, every gate green |
 | 11 | Making a store allocated 1.05 GB: fixed in Datahike (linear schema transaction, ea53e8d580); tests branching the seeded store is on a branch | store creation linear; tests make no store of their own |
-| 12 | Root's heap is 1.22 GB on a fresh store (expected ~600 MB): a 740 MB boot image, a node cache weighed at 4 KB per 12 KB node, strings copied per index, a 124 MB `*e` | each part measured before and after; root under ~600 MB; an agent's cap bounds only what it allocates itself |
+| 12 | Partly fixed (1,438 to 1,106 MB idle; preload, free pages, node cache) Root's heap: the 740 MB boot image (213 MB of it expanded source), the embedding model in root (380-500 MB once it has embedded), the fork server's 670 MB on the standing store | root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([machine](machine.md#roots-heap)) |
 | 13 | ~~test fixed; the Jolt loop open~~ The `line-parks` fork test grew to 35 GB: a thread started in a forked child loops in Jolt's collector | the test starts no thread in a child (on a branch); Jolt refuses or survives such a thread |
-| 14 | Jolt: a full collection in a tight forked heap doesn't reclaim garbage; Chez keeps up to ~530 MB of free pages per agent; the fork server freezes replaced data into static | each measured before and after |
+| 14 | Partly fixed (root keeps at most 10% free: Jolt eddb1882) Jolt: a full collection in a tight forked heap doesn't reclaim garbage; an agent's ~90 MB of start-up garbage; an agent may grow 1 GiB whatever the machine | each measured before and after; an agent's allowance sized from the machine |
 | 15 | The infrastructure built for parallel sessions (merge batches, worktree roots, shared test roots, the test service, stall watcher) | one measured pass: each piece's cost (lines, run time, defects) against what it saves now; most of it deleted |
+| 16 | Stability found 2026-10-29: root's watcher dies on one bad batch (a task with a nil ns); the main carrier's test fails ~1 run in 20; a forked process touching an Apple framework aborts; Datahike's stress-test units red | each a task with its proof; the watcher records the error and keeps watching; the embedding model runs in an exec'd helper |
+
+**Beside step 1: the machine and its config** (owner, 2026-10-29: "I want this to run on an average user's MacBook"). In order, each a task with its measurement before and after:
+1. The embedding model leaves root: a Flow proc whose work wakes it, running an exec'd helper that loads the model (~0.45 s) and exits when the queue empties; a fork cannot load it (task seon.vector/the-model-is-loaded-outside-root). Root -380 to -500 MB.
+2. The image drops each procedure's expanded source and keeps every frame's file:line (task seon.main/the-image-keeps-no-inspector-information). About -210 MB per root, a 111 MB binary.
+3. The fork server's 670 MB on the standing store: preload only what agents read.
+4. The ~165 MB of load-time data in the image, by namespace; the node cache sized from the machine.
+5. An agent's ~90 MB of start-up garbage, and its 1 GiB growth allowance sized from the machine's RAM.
+6. Config at every level, one resolver, no env var switches: defaults < profile < --config < --set < main's root entity < model < provider < task < agent, each key's schema naming the levels that may set it; bin/ passes --set (owner, 2026-10-29). First task: delete the eight #env tags nothing sets.
+7. `bin/check scale` charges ten working agents, some running tests, against an 8 GB-class `:seon.config.machine/memory-mb`, and fails past it.
 
 **Not now** (no session builds these until step 1 is done): relevance and ranking work, new renders beyond the chat page, self-modifying environments, declared design, new config keys or namespaces that no problem above needs, Jolt pin bumps that fix no red on main.
 

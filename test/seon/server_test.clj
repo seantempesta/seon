@@ -112,11 +112,11 @@
 (deftest an-attached-agent-holds-its-run
   ;; agent view's browser check: an agent attached from outside (seon.server/attach!
   ;; spawns it before it writes the run on main, so its branch is cut without the run) held no
-  ;; :runs in @ctx, and its page no task, until a turn or a context read began the run. Forked for
+  ;; task in @ctx (then under :runs; now :task, the-agent-is-the-unit-not-the-run), and its page no task, until a turn or a context read began the run. Forked for
   ;; a run, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
   (let [names (volatile! nil)
-        [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx r (val (first (:runs t)))] [(count (:runs t)) (:seon.run/id r) (get-in r [:task :seon.task/id])])"]))]
-    (is (= [1 (:run @names) (:task @names)] (:value held)) "its run, with its task, in its record")))
+        [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:task :seon.task/id])])"]))]
+    (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")))
 
 (deftest an-agent-reads-its-task-running
   ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
@@ -275,12 +275,12 @@
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :context :agent agent}
                         "(def c0 (datahike.api/commit-id (seon.agent/db)))"
-                        (str "(let [rid (key (first (:runs @ctx)))] (swap! ctx assoc-in [:runs rid :task :seon.task/plan] " (pr-str plan) ")"
-                             " (get-in @ctx [:runs rid :task :seon.task/plan]))")
+                        (str "(do (swap! ctx assoc-in [:task :seon.task/plan] " (pr-str plan) ")"
+                             " (get-in @ctx [:task :seon.task/plan]))")
                         "(pr-str (seon.repl/render-ctx-hiccup))"
                         ;; from any namespace, the record by its qualified name (a value the printer
                         ;; would show as an earlier eval's handle is compared here instead)
-                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:runs (key (first (:runs @seon.ctx/ctx))) :task :seon.task/plan]))")
+                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:task :seon.task/plan]))")
                         {:op :eval :agent "root"
                          :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
                                     " [:seon.task/id " (pr-str task) "]))")}
@@ -293,7 +293,7 @@
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
-    (is (true? (:value elsewhere)) "read from another namespace as @seon.ctx/ctx")
+    (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (= {:path true :old true :new true :handle true :record false :agent-id false} (dissoc (:value told) :tokens)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value, each eval by its handle, never its record")
     ;; the :ctx part of the message, which is what the diff owns: about 90 tokens (630 when an eval was

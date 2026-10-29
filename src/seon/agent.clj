@@ -209,7 +209,10 @@
   "The transaction that writes entries (untaken-entries) on this branch: the same facts root
   wrote on main, which their reader takes by writing them."
   {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
-  [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}] (task/message-tx id kind from to body))) entries))
+  [entries] (into [] (mapcat (fn [{:keys [id kind from to body]}]
+                               ;; the agent that takes it, beside its run (:seon.message/agent: its record's messages)
+                               (update (task/message-tx id kind from to body) 0 assoc :seon.message/agent {:seon.agent/key (:key @state)})))
+                  entries))
 
 (defn taken!
   "The first n messages of the inbox leave it: their reader recorded them (seon.turn/basis!
@@ -1232,7 +1235,10 @@
                                                              :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                              (update :seon.task/ns symbol))]))))
     (transact! [{:seon.task/id task :seon.task/execution :running}
-                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)}}])))
+                {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)
+                                                         ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
+                                                         ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
+                                                         :seon.agent/task {:seon.task/id task}}}])))
 
 (defn init!
   "Make this process the agent: its socket (fd), its namespace, its state map, its
