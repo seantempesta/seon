@@ -8,6 +8,16 @@
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
+;; The pattern these tests of seon.ctx's machinery (patch = build, windows, sharing) run on: the run-shaped
+;; record the agent's pull had until seon.agent/the-agent-is-the-unit-not-the-run, kept as the machinery's
+;; input (runs with their task, turns and messages; windowed evals). The agent's own pattern is proved by
+;; an-agents-record-holds-its-task-and-every-turn-and-eval.
+(def ^:private run-pattern
+  "The run-shaped agent pattern the machinery tests build their records by."
+  '[* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact}
+    {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}
+    {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}])
+
 (defn- end-agent!
   "The agent state ended as a test leaves it: the walk of its render (seon.repl/render-ctx holds one
   in the state, reactions on @ctx that run at every write of it) disposed, then the state reset. A
@@ -52,12 +62,15 @@
                             :seon.turn/reply "I will check f0 against its failing assertion, then edit it."})))
 
 (defn- seeded
-  "The test store's db with the agent's record of n evals: its task, citing app.x/f0 (defined, with
+  "The test store's db with the agent's record of n evals (seeded n pattern: the agent's own pattern, the schema's
+  when nil; one arity less, run-pattern): its task, citing app.x/f0 (defined, with
   one caller) and app.x/f1 (not written yet), one run with n/3 turns and n/20 messages, written in
   transactions of 100 evals as a session writes them."
-  {:malli/schema [:=> [:cat nat-int?] :seon.host/db]}
-  [n]
-  (let [db (:db-after (d/with (ts/test-db) (into [{:seon.agent/key k :seon.agent/id :a1}
+  {:malli/schema [:function [:=> [:cat nat-int?] :seon.host/db] [:=> [:cat nat-int? [:maybe [:vector :any]]] :seon.host/db]]}
+  ([n] (seeded n run-pattern))
+  ([n pattern]
+  (let [db (:db-after (d/with (ts/test-db) (into [(cond-> {:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+                                                     pattern (assoc :seon.ctx/pattern pattern))
                                                    {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                                     :seon.task/kind :work :seon.task/proofs #{'app.x-test/t0}
                                                     :seon.task/references #{'app.x/f0 'app.x/f1} :seon.task/sections #{"docs/x.md#the-x"}
@@ -70,11 +83,11 @@
                                                   (run-tx "lab/ctx#1" 0))))]
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
-                                                            (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/n i})
+                                                            (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/to [:seon.run/id "lab/ctx#1"] :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/to [:seon.run/id "lab/ctx#1"] :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
                                                  part)))))
-            db (partition-all 100 (range 1 (inc n))))))
+            db (partition-all 100 (range 1 (inc n)))))))
 
 (defn- order-of
   "Every collection's keys in t, in the order the map holds them, by path: what = on maps ignores."
@@ -129,7 +142,7 @@
       19 [[:db/add [:seon.agent/key k] :seon.ctx/pattern
            (if (.nextBoolean r)
              '[* {[:seon.eval/_agent :as :evals :limit 5 :reverse true] [*]} {[:seon.run/_agent :as :runs :limit 5 :reverse true] :seon.run/run-fact}]
-             (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact)))]]
+             run-pattern)]]
       ;; a window's moves in one transaction: several evals join while one it holds leaves; a member's
       ;; ref retracted and asserted again (it leaves and comes back)
       20 (into (vec (mapcat #(eval-tx (+ 70000 (* 10 i) %)) (range 3)))
@@ -140,6 +153,29 @@
            (eval-tx (+ 80000 i)))
       11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
+
+(deftest an-agents-record-holds-its-task-and-every-turn-and-eval
+  ;; the owner, 2026-10-29: "get rid of runs ... by default show everything: get rid of the limits for evals and
+  ;; turns; messages at the newest 100 is fine" (seon.agent/the-agent-is-the-unit-not-the-run, cut 1): the agent's
+  ;; schema pattern reaches its task directly, holds its turns and evals with no window, and has no runs or catch-ups
+  (let [pattern (:seon.ctx/pattern (seon.contract/properties :seon.db/agent-fact))
+        joins (into {} (keep #(when (map? %) (first %))) pattern)
+        db (:db-after (d/with (ts/test-db)
+                              (into [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+                                     {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                    (concat (mapcat eval-tx (range 1 6))
+                                            (for [t (range 3)] {:seon.turn/id (str "lab/ctx#1/" t) :seon.turn/agent [:seon.agent/key k] :seon.turn/n t})
+                                            [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
+                                              :seon.message/agent [:seon.agent/key k]}]))))
+        t (:tree (ctx/build db (aid db) :b))]
+    (is (= "lab/ctx" (get-in t [:task :seon.task/id])) "the task, pulled whole by the agent's own ref")
+    (is (= "Make app.x/f0 pass." (get-in t [:task :seon.task/plan])))
+    (is (= 3 (count (:turns t))) "every turn")
+    (is (= 5 (count (:evals t))) "every eval")
+    (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
+    (is (= [:seon.message/_agent] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on the turns and evals: the messages alone are windowed")
+    (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
 
 (deftest ctx-is-the-record-after-every-transaction
   ;; the patch holds what a build holds, its map and its index, after each of 150 changes of a
@@ -560,7 +596,7 @@
   ;; the live-agents context audit (2026-10-26): the task's record held each cited var's tests and
   ;; each cited section's text (D1-D3), and the page drew neither: the cited part showed the callers
   ;; alphabetically with no result, and a section only as an address. Each is drawn from ctx
-  (let [db (d/db-with (seeded 3) [;; a second test, and a caller that is no test
+  (let [db (d/db-with (seeded 3 nil) [;; a second test, and a caller that is no test
                                   {:db/id "t1" :form/id "app.x-test/t1-1" :form/src "(deftest t1 (is (= 2 (f0 2))))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x-test/t1 :var/kind :test :var/form "t1"}
                                   {:db/id "g" :form/id "app.x/g-1" :form/src "(defn g [] (f0 2))" :form/refs #{'app.x/f0}}
@@ -579,7 +615,7 @@
   ;; crowded its tests out; and a var whose form was also another cited var's caller printed its source
   ;; blank, with no cut (ctx holds an entity whole at its first path, {:db/id e} at the others). Its
   ;; source and the rest are each a call of the printer under its own budget, the source read by id
-  (let [db (d/db-with (seeded 3) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
+  (let [db (d/db-with (seeded 3 nil) [{:db/id "f1" :form/id "app.x/f1-1" :form/src "(defn f1 [] (f0 1))" :form/refs #{'app.x/f0}}
                                   {:var/name 'app.x/f1 :var/form "f1"}])
         page (try (reset! seon.agent/state {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         part (fn [id] (some (fn [[i h]] (when (str/ends-with? i id) h)) page))
@@ -595,7 +631,7 @@
   ;; the owner's styling ruling (DECISIONS, compact hiccup): a component's root element carries one
   ;; class, its render's name; the page's html adds the Tailwind classes its render's var states
   ;; (:seon.render/style), and what the model reads holds the name only
-  (let [db (seeded 3)
+  (let [db (seeded 3 nil)
         as #(try (reset! seon.agent/state {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
@@ -611,7 +647,7 @@
   ;; build 3's self-review (D2): ctx holds a cited var's newest :seon.config.ctx/callers callers of any
   ;; kind, so its tests went off the page once newer callers outnumbered the window. The tests are
   ;; the cited render's own query (root's ruling (C)): three tests, then sixty newer callers
-  (let [db (reduce d/db-with (seeded 3)
+  (let [db (reduce d/db-with (seeded 3 nil)
                    [(vec (mapcat (fn [i] [{:db/id (str "t" i) :form/id (str "app.x-test/w" i "-1") :form/src (str "(deftest w" i " (is (f0 1)))") :form/refs #{'app.x/f0}}
                                           {:var/name (symbol "app.x-test" (str "w" i)) :var/kind :test :var/form (str "t" i)}])
                                  (range 3)))
