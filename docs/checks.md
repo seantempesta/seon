@@ -15,6 +15,16 @@ A step is a mode of `target/seon` (except `laws`, which is `bin/laws`, `lmdb-kil
 - **tasks end to end**: the `e2e-*` steps, `swarm` and `resume`, below;
 - **scale**: `scale N` agents spawned at once (`seon.check/scale`), red past `:seon.config.machine/memory-mb`.
 
+## Contracts, armed at definition
+
+Every platform function carries a Malli function schema, checked on entry (inputs, arity) and on exit (output), and the `contracts` and `mg-check` steps hold the platform to it. A contracted function is checked from the moment it is defined: a release build direct-links and inlines definitions, so a wrapper installed later would miss every caller compiled against the def. ```seon.contract/defn``` (and ```seon.contract/defn-``` for a private one) is `clojure.core/defn` that holds the checked function when its attribute map has `:malli/schema`; ```seon.contract/defchecked``` does the same for a function value (a Scheme procedure, an FFI binding).
+
+The schemas are data: ```seon.contract/forms``` is every named form of the platform (the one baked map, [config](config.md#the-file)), ```seon.contract/registry``` compiles each once, and ```seon.contract/options``` is what every contract compiles against, that registry under malli's dynamic registry, so an agent's REPL that binds its branch's schemas compiles against those. ```seon.contract/valid?``` asks whether a value satisfies a registered schema. `:seon.config.contract/instrument` decides whether the contracts are on in the process (```seon.contract/on?```: `:off` installs no wrapper and no recording) and whether each eval request writes its recording transaction (```seon.contract/record?```: `:on` only).
+
+A function defined at the REPL, or one whose root is redefined, is armed afterwards: ```seon.contract/contract``` reads a var's declared form, ```seon.contract/armed?``` asks whether its root is its own wrapper, ```seon.contract/arm!``` instruments one var (`:armed`, `:unchanged`, `:off`, `:uncontracted`, or the error of a contract that does not compile), and ```seon.contract/instrument!``` arms every contracted var of some namespaces, in root before the fork server forks so each agent inherits the compiled validators. ```seon.contract/function-var?``` says which vars need a contract (not a macro, test, dynamic setting, protocol method or positional factory) and ```seon.contract/uncontracted``` lists those that declare none, which the `contracts` step holds empty.
+
+A failed check or any other failure is the one error map ([errors](errors.md)): ```seon.contract/error``` builds the map of a registered variant, checked against that variant's schema at its constructor, and ```seon.contract/error?``` is whether a value is one. What a contract costs per call: [cost](cost.md#what-a-contract-costs).
+
 ## Tasks end to end
 
 Each end-to-end run is a row of data worked by one runner with real agent processes, ending on what the system observes (the reconciler's quiescence, an event, a fact on main), never on a deadline: ```seon.e2e/run```.
