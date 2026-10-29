@@ -328,7 +328,8 @@
                                                :else (do (println "ended" (:test x))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
-                                 (config/value :seon.config.agent/test-ticks))
+                                 (config/value :seon.config.agent/test-ticks)
+                                 (fx/test-budgets tests))
           ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
           ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
           ;; tree-id per shard, not two)

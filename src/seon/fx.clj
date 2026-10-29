@@ -429,7 +429,7 @@
                       (when (str/starts-with? m "160000") (group-entries root cfg p pn))]))
          by-class (group-by first entries)]
      {:tree tree
-      :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
+      :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
@@ -724,6 +724,7 @@
                         (:ms r) (assoc :ms (long (:ms r)))
                         (:ticks r) (assoc :ticks (:ticks r))
                         (:bytes r) (assoc :bytes (:bytes r))
+                        (:budget r) (assoc :budget (:budget r))
                         (seq (failures k)) (assoc :failures (vec (failures k)))
                         (:cost r) (assoc :cost (:cost r))
                         (seq (:fns r)) (assoc :fns (into {} (for [{:keys [var calls ticks self-ticks bytes self-bytes]} (:fns r)] [var [calls ticks self-ticks bytes self-bytes]]))))
@@ -751,6 +752,35 @@
                  :let [ms (sort (keep (fn [[_ _ f]] (let [v (read-verdict (str f))] (when-not (contract/error? v) (:ms v)))) (verdict-files dir t)))]
                  :when (seq ms)]
              [t (nth ms (quot (count ms) 2))]))))
+
+(defn- green-ticks
+  "The ticks the green verdict file f measured, read from its first bytes (a verdict writes :ticks
+  before its failures, cost and per-function rows, which are most of its size: seon.fx/write-verdicts!),
+  nil when it has none or cannot be read. An order of work, never a verdict (docs/merging.md#a-tests-tick-budget)."
+  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
+  [f]
+  (try (with-open [r (java.io.FileReader. ^java.io.File f)]
+         (let [buf (char-array 768) n (.read r buf)]
+           (when (pos? n) (some-> (re-find #":ticks (\d+)" (String. buf 0 (int n))) second parse-long))))
+       (catch java.io.IOException _ nil)))
+
+(defn test-budgets
+  "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
+  ticks its green verdicts measured, at any digest)); a test with no green gets the floor. cap
+  (:seon.config.agent/test-ticks), floor (:seon.config.agent/test-ticks-floor) and factor
+  (:seon.config.agent/test-ticks-factor) are config; 0 cap: none (nil). The history is read once, here, by a run before it
+  runs anything. Work done, never time; derived data, so a missing or evicted history gives the floor.
+  docs/merging.md#a-tests-tick-budget."
+  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:maybe [:map-of :qualified-symbol pos-int?]]]
+                  [:=> [:cat :string [:sequential :qualified-symbol] nat-int? pos-int? pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]]}
+  ([tests] (test-budgets (cfg/value :seon.config.proofs/results-dir) tests (cfg/value :seon.config.agent/test-ticks)
+                         (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor)))
+  ([dir tests cap floor factor]
+   (when (pos? cap)
+     (into {} (for [t (distinct tests)
+                    :let [g (sort (keep (fn [[_ st f]] (when (= :pass st) (green-ticks f))) (verdict-files dir t)))
+                          med (if (seq g) (nth g (quot (count g) 2)) 0)]]
+                [t (min cap (max floor (* factor med)))])))))
 
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
