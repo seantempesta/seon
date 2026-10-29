@@ -186,15 +186,18 @@
 (deftest a-failure-that-cannot-be-recorded-does-not-end-the-watch-either
   ;; recording a batch's failure writes to the store, which may refuse: the edge writes stderr and reads on
   (let [dir (.getCanonicalPath (doto (io/file (str (System/getProperty "java.io.tmpdir") "/seon-watch-" (random-uuid) "/docs")) (.mkdirs)))
-        read (promise) batches (atom 0)
+        read (promise) tried (promise) batches (atom 0)
         w (watch/start! [dir]
                         (fn [b] (when (some #(= [:path (str dir "/x.md")] %) b)
                                   (if (= 1 (swap! batches inc)) (throw (ex-info "the handler broke" {})) (deliver read b))))
-                        (fn [_] (throw (ex-info "the store refused it" {})))
+                        (fn [_] (deliver tried true) (throw (ex-info "the store refused it" {})))
                         (fn [_]))]
     (is (not (contract/error? w)))
     (try
       (spit (str dir "/x.md") "# X\n")
+      ;; the change below is a batch of its own only once the first batch has failed (two writes made together
+      ;; may arrive as one batch, whose handler throws: nothing would be left to wait for)
+      @tried
       (spit (str dir "/x.md") "# X\n\nChanged.\n")
       (is (some #(= [:path (str dir "/x.md")] %) @read) "the next batch was read after the recording threw")
       (finally (watch/stop! w) (clojure.java.shell/sh "rm" "-rf" (.getParent (io/file dir)))))))
