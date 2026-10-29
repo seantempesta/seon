@@ -1171,7 +1171,10 @@
     ;; the vars that walk every attribute a db's schema declares (the schema resources' entries)
     ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
     seon.reconcile/index :seon.env/schemas
-    seon.merge/content-datoms :seon.env/schemas})
+    seon.merge/content-datoms :seon.env/schemas
+    ;; the test that reads the checkout's own program from its kept db (docstrings, form sources): a
+    ;; change to any src or test text is a change to what it reads, though no test names the var
+    seon.test-store/kept-program-store :seon.env/src})
 
 (def env-readers
   "The platform vars whose file reads are of a class of inputs a digest holds apart from the
@@ -1579,7 +1582,8 @@
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
   [{:keys [rows plain comp-of cd flags]} {:keys [env tree config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
-        env-keys (filterv #(= "seon.env" (namespace %)) (keys config))]
+        ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
+        env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
     (fn [k ids]
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
