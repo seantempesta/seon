@@ -702,9 +702,7 @@
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
          st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
-                ;; a go block parks on the timer (Jolt's take! with a callback forks a thread per
-                ;; pending take: session D2's finding, seen as one thread per root in lifecycle)
-                (a/go (a/<! (a/timeout (quot (:stall-ms st) 2))) (a/>! back {:op :stall-check}))
+                (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
                 (assoc st ::stall-due true))
               st)
          st (if (::update st)

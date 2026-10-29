@@ -11,8 +11,8 @@
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader]))
 
 (def calc
-  "The six-task graph: add; twice and square need add; sum-sq needs both; neg (slow on
-  its first turn, the one the demo cancels) and abs, which needs neg."
+  "The six-task graph: add; twice and square need add; sum-sq needs both; neg (the one the demo
+  cancels, seon.fixtures/calc-cancel) and abs, which needs neg."
   [{:name "add" :stub "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] 0)"
     :proof "(deftest add-test (is (= 3 (app.calc/add 1 2))) (is (= 0 (app.calc/add -2 2))))"}
    {:name "twice" :needs ["add"] :stub "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
@@ -41,13 +41,13 @@
 
 (def calc-replies
   "The scripted model's replies by task name and turn. square answers wrong first (its proof
-  stays red, the next turn sees the failure and fixes it); neg is slow."
+  stays red, the next turn sees the failure and fixes it); each reply is one turn's calls."
   {"add" [(calls "add adds." "(in-ns 'app.calc)" "(defn add {:malli/schema [:=> [:cat :int :int] :int]} [a b] (+ a b))")]
    "twice" [(calls "twice is add with itself." "(in-ns 'app.calc)" "(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (add x x))")]
    "square" [(calls "Squaring doubles?" "(in-ns 'app.calc)" "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (twice x))")
              (calls "The proof shows 6, not 9: square multiplies." "(in-ns 'app.calc)" "(defn square {:malli/schema [:=> [:cat :int] :int]} [x] (* x x))")]
    "sum-sq" [(calls "Sum of squares." "(in-ns 'app.calc)" "(defn sum-sq {:malli/schema [:=> [:cat :int :int] :int]} [a b] (add (square a) (square b)))")]
-   "neg" [(calls "Thinking slowly first." "(Thread/sleep 8000)" "(in-ns 'app.calc)" "(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] (- x))")]
+   "neg" [(calls "Thinking slowly first." "(in-ns 'app.calc)" "(defn neg {:malli/schema [:=> [:cat :int] :int]} [x] (- x))")]
    "abs" [(calls "abs via neg." "(in-ns 'app.calc)" "(defn abs {:malli/schema [:=> [:cat :int] :int]} [x] (if (neg? x) (neg x) x))")]})
 
 (defn program-txs
@@ -367,3 +367,12 @@
       (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
           (swarm-reply nm)
           (says "No script for this task.")))))
+
+(defn calc-cancel
+  "The scripted model of the calc run that cancels neg: `reply`, except neg's first turn derefs a
+  promise nothing delivers, so the turn stays in flight until the run cancels it (seon.e2e/calc)."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [{:keys [task turn] :as request}]
+  (if (and (= "calc/neg" task) (zero? turn))
+    (calls "Waiting on a promise nothing delivers." "@(promise)")
+    (reply request)))

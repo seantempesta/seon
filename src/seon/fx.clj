@@ -268,27 +268,6 @@
         (str/starts-with? p "bin/") :seon.env/bin
         (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas))
 
-(defn- group-entries
-  "The :seon.pin class of each source group cfg's :seon.config.source/pin-namespaces names
-  inside the submodule at sub (relative to root), with its git entry in the tree of the
-  submodule's files as they are (pin: HEAD's, or HEAD+ the tree-id of its files, an uncommitted
-  or untracked file included), one ls-tree for all of them: [class text] pairs. A group path the
-  tree does not hold is refused, naming it (a typo or an upstream rename would key nothing)."
-  {:malli/schema [:=> [:cat :string :map :string [:maybe :string]] [:sequential [:tuple :qualified-keyword :string]]]}
-  [root cfg sub pn]
-  (let [ps (sort (into #{} (comp (mapcat val) (filter #(str/starts-with? % (str sub "/")))) (get cfg :seon.config.source/pin-namespaces)))
-        rel #(subs % (inc (count sub)))]
-    (if-not (and (seq ps) pn)
-      []
-      (let [tree (or (second (str/split pn #"\+" 2)) "HEAD")
-            ls (into {} (for [l (str/split-lines (git! {} (str root "/" sub) (into ["ls-tree" tree "--"] (map rel ps)) nil)) :when (seq l)]
-                          [(second (str/split l #"\t" 2)) l]))]
-        (for [p ps]
-          (if-let [l (get ls (rel p))]
-            [(cfg/pin-class p) l]
-            (throw (ex-info (str "inputs: " p ", a source group of :seon.config.source/pin-namespaces, is not in " sub "'s tree")
-                            {:path p}))))))))
-
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
   --config layers its command line names, the #env values, the profile), as {key text}: each
@@ -405,13 +384,12 @@
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for root's :source read (read-source, which records them for its agents):
   {:tree (tree-id: every file and pin, for a test reading files or running the binary) :env
-  (every test's: the tree's env-input? entries of no env-class, and the per-test tick bound every
-  verdict is a function of, :seon.config.agent/test-ticks) :config (the config in force,
-  config-input, and a digest of each env-class of files, of each submodule's pin (its files as
-  they are) and of each source group pin-namespaces names inside one (group-entries), all
-  seon.config/pin-class: each test's digest takes the keys and classes it reads, so a pin no
-  namespace of a test's reach names, the runtime core's, moves only the tests that read files or
-  run a process, and the daily full run) :data-refs (declared-refs of its system.edn)}, by
+  (every test's: the tree's env-input? entries of no env-class, among them the runtime's pins
+  (:seon.config.source/runtime-pins: Jolt and Chez, a bump re-runs every test), and the per-test
+  tick bound every verdict is a function of, :seon.config.agent/test-ticks) :config (the config in
+  force, config-input, and a digest of each env-class of files and of each other submodule's pin
+  (its files as they are), seon.config/pin-class: each test's digest takes the keys and classes it
+  reads, so a library's pin moves the tests whose reach names a namespace it provides) :data-refs (declared-refs of its system.edn)}, by
   relative paths and content, so the same content at another path is the same inputs."
   {:malli/schema [:function [:=> [:cat :string] :seon.program/inputs] [:=> [:cat :string :map :string] :seon.program/inputs]
                   [:=> [:cat :string :map :string :string] :seon.program/inputs]]}
@@ -419,22 +397,22 @@
   ([root cfg checkout] (inputs root cfg checkout (tree-id root)))
   ;; tree: the checkout's tree-id the caller already holds (one per run: bin/test's plan computes it once)
   ([root cfg checkout tree]
-   (let [entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
+   (let [runtime-pins (set (:seon.config.source/runtime-pins cfg))
+         entries (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when (env-input? p)]
                    ;; a submodule by its pin: its files as they are, an uncommitted edit included
                    ;; (a clean one's line is its gitlink's, as before; one not checked out has no files to read)
                    (let [d (str root "/" p)
                          pn (when (and (str/starts-with? m "160000") (checked-out? d)) (pin d))]
-                     [(or (env-class p) (when (str/starts-with? m "160000") (cfg/pin-class p)))
-                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)
-                      (when (str/starts-with? m "160000") (group-entries root cfg p pn))]))
+                     ;; the runtime's pins (Jolt, Chez) are no class: every test's :env takes them
+                     [(or (env-class p) (when (and (str/starts-with? m "160000") (not (runtime-pins p))) (cfg/pin-class p)))
+                      (if (and pn (str/includes? pn "+")) (str l " " pn) l)]))
          by-class (group-by first entries)]
      {:tree tree
       :env (err/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
-                    (concat (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))])
-                            (for [[_ _ gs] entries [c t] gs] [c (err/digest t)])))
+                    (for [[c es] by-class :when c] [c (err/digest (str/join "\n" (map second es)))]))
       :data-refs (declared-refs (str root "/resources/seon/system.edn"))})))
 
 (defn git-commit
@@ -993,7 +971,7 @@
   (if (and (:bucket st) (:tick st) (not (:tick-due st)) (< (:busy st) (:workers st)))
     (let [b (refill (:bucket st) now)
           ms (long (Math/ceil (/ (max 1 (- (or (:est m) 0) (:tokens b))) (:per-ms b))))]
-      (a/take! (a/timeout ms) (fn [_] (a/put! (:tick st) {})))
+      (step/put-after! (:tick st) ms {})
       (assoc st :tick-due true))
     st))
 
