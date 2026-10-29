@@ -1252,6 +1252,8 @@
       (let [db (d/db-with db [{:db/id "q" :form/id "demo/q" :form/src "(defn q [])" :form/defines #{"qv"}} {:db/id "qv" :var/name 'demo/q :var/form "q" :var/kind :fn}
                               {:db/id "c" :form/id "demo/c" :form/src "(defn c [] (q))" :form/refs #{'demo/q} :form/defines #{"cv"}} {:db/id "cv" :var/name 'demo/c :var/form "c" :var/kind :fn}
                               {:seon.task/id "demo/r" :seon.task/plan (str plan " Change `demo/q`.")}])
+            ;; a plan written derives what it cites again, as my.task/update! does (seon.task/rederive-tx)
+            db (d/db-with db (task/rederive-tx db (task/task db "demo/r")))
             fs (:functions (context/related db te))]
         (is (some #{'demo/c} fs) (str "a cited var's graph: its caller " (pr-str fs)))
         (is (not-any? #{'demo/h} fs) "and not meaning's seed")))))
@@ -1508,3 +1510,17 @@
     (is (= '[(b [x]) a] (:defines (context/namespace-data db 'x.nsd true)))
         "the namespace the REPL is in: each definition with its arglists, as eldoc shows them")
     (is (nil? (context/namespace-data db 'x.nowhere)) "a namespace db does not record")))
+
+(deftest a-draw-reads-the-citations-its-plan-write-derived
+  ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan
+  ;; again ran its broken parser (the layout, the status, the namespaces part); a task's citations are a
+  ;; fact its plan's write derives (seon.task/references-of), which every draw reads
+  (let [db (db-with-program)
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Change `demo/f`."
+                                               :seon.task/proofs #{'demo-test/f-test}}]))
+        names #(set (map :seon.ref/name (context/citations % (task/task % "demo/c"))))]
+    (is (= '#{demo/f} (names db)) "the citations its write derived")
+    (let [db (d/db-with db [{:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
+      (is (= '#{demo/f} (names db)) "a draw reads the fact, never the text again")
+      (is (= '#{demo/g} (names (d/db-with db (task/rederive-tx db (task/task db "demo/c")))))
+          "and a write of the plan derives them again"))))

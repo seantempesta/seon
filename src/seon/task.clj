@@ -48,18 +48,39 @@
 
 (defn- cited-text
   "The text a declaration cites from: its plan and its instructions."
-  {:malli/schema [:=> [:cat :seon.task/declaration] :string]}
+  {:malli/schema [:=> [:cat [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] :string]}
   [decl] (str (:seon.task/plan decl) "\n" (:seon.task/instructions decl)))
 
 (defn- references-of
-  "The :seon.task/references and :seon.task/sections a declaration states: the program's names and
-  the wiki sections its text cites (seon.ref/names,
-  seon.program/program-names, seon.ref/addresses),
-  derived and never authored; each absent when it cites none."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/declaration] :map]}
+  "The :seon.task/references, :seon.task/sections and :seon.task/citations a declaration states: the
+  program's names, the wiki sections and every citation its text makes at its depth (seon.ref/names,
+  seon.program/program-names, seon.ref/addresses, seon.ref/cited of seon.ref/parse), derived when the text is
+  written and never authored; each absent when it cites none. Read by every draw of the agent's page,
+  so none parses the plan with the program the agent may be changing (md-scan #10's redefined scan
+  broke the layout that parsed it each frame)."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] :map]}
   [db decl]
-  (let [text (cited-text decl) ns (set (program/program-names db (ref/names text))) as (set (ref/addresses text))]
-    (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as))))
+  (let [text (cited-text decl) ns (set (program/program-names db (ref/names text))) as (set (ref/addresses text))
+        ;; the citations the text makes, before any db's filter (seon.ref/kept, which its readers apply on
+        ;; the db they draw on: a name the same write creates, or a later one defines, is no alias form there)
+        cs (vec (ref/cited (:seon.ref/citations (ref/parse nil text))))]
+    (cond-> {} (seq ns) (assoc :seon.task/references ns) (seq as) (assoc :seon.task/sections as)
+            (seq cs) (assoc :seon.task/citations cs))))
+
+(defn rederive-tx
+  "The facts that make task t's references, sections and citations those its text states now
+  (`references-of` over its plan and instructions): what a write of its plan or instructions adds,
+  as task creation does (my.task/update!)."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
+  [db t]
+  (let [id [:seon.task/id (:seon.task/id t)]
+        now (references-of db t)
+        set-tx (fn [k] (let [old (set (get t k)) new (set (get now k))]
+                         (concat (for [v (remove new old)] [:db/retract id k v]) (for [v (remove old new)] [:db/add id k v]))))]
+    (vec (concat (set-tx :seon.task/references) (set-tx :seon.task/sections)
+                 (if-let [cs (:seon.task/citations now)]
+                   [[:db/add id :seon.task/citations cs]]
+                   (when (contains? t :seon.task/citations) [[:db/retract id :seon.task/citations (:seon.task/citations t)]]))))))
 
 (defn citation-problems
   "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
@@ -420,10 +441,10 @@
   "write the assertion: the behaviour, on data")
 
 (defn accumulate
-  "Task id's accumulated plan and proofs over its needs (owner: a task
+  "Task id's accumulated plan, proofs and citations over its needs (owner: a task
   inherits its prerequisites' plan and proofs and adds its own, so a refinement only
-  tightens): {:plan text :proofs set}. own: id -> own task value."
-  {:malli/schema [:=> [:cat ifn? :seon.task/id] [:map [:plan :string] [:proofs :seon.task/proofs]]]}
+  tightens): {:plan text :proofs set :citations [citation]}. own: id -> own task value."
+  {:malli/schema [:=> [:cat ifn? :seon.task/id] [:map [:plan :string] [:proofs :seon.task/proofs] [:citations [:vector :seon.ref/citation]]]]}
   [own id]
   (let [order (fn order [acc id]
                 ;; prerequisites first, each once (a diamond reaches one twice)
@@ -434,7 +455,9 @@
     ;; agent was told to merge); its proofs flow on like every task's
     {:plan (str/join "\n\n" (distinct (remove str/blank? (map #(:seon.task/plan (own %))
                                                                (remove #(and (not= % id) (= :merge (:seon.task/kind (own %)))) chain)))))
-     :proofs (into #{} (mapcat #(:seon.task/proofs (own %))) chain)}))
+     :proofs (into #{} (mapcat #(:seon.task/proofs (own %))) chain)
+     ;; the citations of the same texts the plan joins, in its order (seon.task/references-of wrote each)
+     :citations (into [] (mapcat #(:seon.task/citations (own %))) (remove #(and (not= % id) (= :merge (:seon.task/kind (own %)))) chain))}))
 
 (defn tasks
   "Every task on db, by id, each with its :seon.task/accumulated plan and proofs."

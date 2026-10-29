@@ -149,6 +149,14 @@
            (seq inserted) (assoc :inserted inserted)))))
 
 
+(defn plan-citations
+  "The references task t's texts make, read on db: the citations their writes derived
+  (:seon.task/citations, along its needs: seon.task/references-of), once each at their strongest
+  depth, those db holds (seon.ref/kept). What every part reads of what the plan cites; none parses
+  the plan again with the program the agent may be changing."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
+  [db t] (ref/kept db (ref/cited (vec (:citations (:seon.task/accumulated t))))))
+
 (defn- program-vars
   "Of citations, those of the program's vars (seon.program/program-names), in their order: what a
   task's page cites as vars, and what its related search starts from."
@@ -418,8 +426,9 @@
        (let [t (d/pull db [:seon.task/id :seon.task/model :seon.config.render/relevance-summary :seon.config.render/relevance-doc] te)
              depth {:summary (or cut (cfg/value :seon.config.render/relevance-summary {:task t :model (:seon.task/model t)}))
                     :doc (cfg/value :seon.config.render/relevance-doc {:task t :model (:seon.task/model t)})}
+             ;; what the plan cites, as its write derived it (seon.task/references-of): no draw parses it
              {:keys [plan]} (:seon.task/accumulated (task/task db (:seon.task/id t)))
-             cites (ref/references db plan)
+             cites (plan-citations db (task/task db (:seon.task/id t)))
              fns (into #{} (keep :seon.ref/name) (program-vars db cites))
              ;; a wiki page's section only: a cited file is read whole by its view
              secs (into #{} (comp (filter #(and (some-> (:seon.ref/path %) (str/ends-with? ".md")) (= :view (docs/citation-kind db %))))
@@ -774,8 +783,8 @@
   the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:map-of :symbol :map]]}
   [db t a]
-  (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        cited (for [{n :seon.ref/name} (ref/references db (str plan "\n" (:seon.task/instructions t)))
+  (let [{:keys [proofs]} (:seon.task/accumulated t)
+        cited (for [{n :seon.ref/name} (plan-citations db t)
                     :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
     (let [here (current-ns db a)]
       ;; the one the REPL is in first, with its arglists, as a REPL's eldoc shows them; a map by name, in
@@ -786,17 +795,18 @@
            (apply array-map)))))
 
 (defn citations
-  "The citations of task t's plan and instructions (seon.ref/references, the one parser), one per
+  "The citations of task t's plan and instructions as their write derived them (:seon.task/citations,
+  seon.task/references-of: no draw parses the plan with the program the agent may be changing), one per
   name, in first-mention order, each at the depth its delimiter asks
   (docs/references.md#the-delimiter-picks-the-depth): each that pulls something
   (seon.docs/citation-kind), the task's own proofs left out (the status shows them). What the page and
   the model are shown of what the task cites, one part each (seon.render.ui/cited)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
   [db t]
-  (let [{:keys [plan proofs]} (:seon.task/accumulated t)
+  (let [{:keys [proofs]} (:seon.task/accumulated t)
         proof? (set proofs)]
     (let [cs (into [] (comp (filter #(docs/citation-kind db %)) (remove #(proof? (:seon.ref/name %))))
-                   (ref/references db (str plan "\n" (:seon.task/instructions t))))
+                   (plan-citations db t))
           by (group-by cite-key cs)]
       ;; a name cited twice is shown once, at the deepest depth it is cited at
       (mapv (fn [k] (apply max-key #(get {:summary 0 :doc 1 :code 2} (:seon.ref/depth %) 0) (by k)))
@@ -815,7 +825,7 @@
   ([db t] (task-data db t true))
   ([db t write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        cites (ref/references db (str plan "\n" (:seon.task/instructions t)))
+        cites (plan-citations db t)
         refs (program-vars db cites)
         sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
                        cites)
@@ -946,8 +956,7 @@
   charges a form reading again to (seon.learn/waste, producer seon.docs/resolve-ref)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :symbol]]}
   [db t]
-  (let [{:keys [plan]} (:seon.task/accumulated t)]
-    (mapv :seon.ref/name (program-vars db (ref/references db (str plan "\n" (:seon.task/instructions t)))))))
+  (mapv :seon.ref/name (program-vars db (plan-citations db t))))
 
 (defn status-model
   "The status as the model is sent it (the declared model render of :seon.context/status): its

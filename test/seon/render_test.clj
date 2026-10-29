@@ -283,7 +283,8 @@
                        [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                          :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}
                          ;; the names its plan cites, as the task writer derives them (seon.task/references-of)
-                         :seon.task/references (set (seon.ref/names walked-plan))}]
+                         :seon.task/references (set (seon.ref/names walked-plan))
+                         :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan))))}]
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
                        (update (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g") 0 assoc :seon.message/agent {:seon.agent/key k})

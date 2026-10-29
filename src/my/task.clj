@@ -31,7 +31,11 @@
   (let [tx (task/member-tx (current) member f (vec args))]
     (if (contract/error? tx)
       tx
-      (do (agent/transact! tx) (get (current) member)))))
+      (do (agent/transact! tx)
+          ;; its plan or instructions rewritten: what they cite is derived again from the text, as at creation
+          (when (#{:seon.task/plan :seon.task/instructions} member)
+            (let [rx (task/rederive-tx (agent/db) (current))] (when (seq rx) (agent/transact! rx))))
+          (get (current) member)))))
 
 (defn fail!
   "Mark this agent's task failed: reason, and a counterexample (a form or value showing
