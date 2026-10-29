@@ -708,7 +708,9 @@
                     ;; where its tokens went, sized from those parts
                     :split (context/sent-split whole)})
       prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
-      open? (assoc :whole whole))))
+      ;; the whole request, always (owner, 2026-10-29: "I don't want anything hidden"): a finished turn's
+      ;; row is drawn once and cached
+      true (assoc :whole whole :added-refs (set added)))))
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
@@ -756,6 +758,48 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] [:maybe :string]]}
   [db f] (or (:form/src f) (some->> (:db/id f) (d/pull db [:form/src]) :form/src)))
 
+(defn task-html
+  "The task as the page shows it (the declared html render of :seon.context/task; the model is sent the
+  value): its name as a title, its namespace above it, how its kind is worked (folded), its plan as
+  Markdown, the rest of its data folded, the sections it cites. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts {:keys [id sections-cited] :as v}]
+  (let [t {:sections (into {} (map-indexed vector sections-cited))}]
+    [:section
+     ;; its name as a title (the id's name, words), its namespace and state above it
+     [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
+      (str "task · " (namespace (symbol id)))]
+     [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
+     ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
+     ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
+     ;; prose here, then each section it cites, its text as prose (ctx's :sections), and
+     ;; the rest of its data by the printer (each cited var is its own component); each proof how to
+     ;; run it and, written, its source (its last result is the status's)
+     (let [data v]       ;; a cut names the form that answers the whole at the agent's REPL
+       (remove nil?
+         (list ;; a premise main may already answer comes first, so it is checked in turn 1
+               (when-let [g (seq (:green-on-main data))]
+                 [:p {:class "seon-prose"} (str "Already green on main: " (str/join ", " g) ". The premise may already hold: reproduce it first, and if the output is right, fail the task with that output now (my.task/fail! \"why\" evidence).")])
+             ;; how its kind is worked (read first, so the model reads it before the plan), folded for a person
+             (when-let [ins (get-in data [:task :seon.task/instructions])]
+               [:details [:summary "how the agent works it"]
+                [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})]])
+             ;; what the task is: its plan, as the Markdown it is written in
+             ;; drawn as Markdown when it fits its budget, else the printer's cut, which names the form for the rest
+             (when-let [plan (get-in data [:task :seon.task/plan])]
+               (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
+                 (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
+             ;; the rest folds: a person opens what they want, the model reads it all
+             (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main :id :kind :execution :sections-cited))]
+               (when (seq shown)
+                 [:details [:summary "proofs and data"]
+                  [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown]]))
+             (when (seq (:sections t))
+               [:details [:summary (str "sections it cites (" (count (:sections t)) ")")]
+                (for [{:keys [address heading text]} (vals (:sections t))]
+                  (list [:h3 heading " " [:code address]]
+                        [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))]))))]))
+
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
@@ -774,46 +818,16 @@
         results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
                            [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
                                             (seq (:seon.test/failures v)) (assoc :failures (mapv context/failure (:seon.test/failures v))))]))]
-    [:section
-     ;; its name as a title (the id's name, words), its namespace and state above it
-     [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
-      (str "task · " (namespace (symbol id)))]
-     [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-     ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
-     ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
-     ;; prose here, then each section it cites, its text as prose (ctx's :sections), and
-     ;; the rest of its data by the printer (each cited var is its own component); each proof how to
-     ;; run it and, written, its source (its last result is the status's)
-     (let [data (cond-> (context/task-data db (task/task db id) false)
+    ;; a part: the page draws it by task-html, the model is sent the value (docs/render.md#a-part-answers-data)
+    (with-meta (assoc (let [data (cond-> (context/task-data db (task/task db id) false)
                   (or (seq sources) (seq results))
                   (update :to-prove #(into (empty %) (for [[s run] %]
                                                        [s (if (or (sources s) (results s))
                                                             (cond-> (merge {:run run} (results s)) (sources s) (assoc :source (sources s)))
-                                                            run)]))))]
-       ;; a cut names the form that answers the whole at the agent's REPL
-       (remove nil?
-         (list ;; a premise main may already answer comes first, so it is checked in turn 1
-               (when-let [g (seq (:green-on-main data))]
-                 [:p {:class "seon-prose"} (str "Already green on main: " (str/join ", " g) ". The premise may already hold: reproduce it first, and if the output is right, fail the task with that output now (my.task/fail! \"why\" evidence).")])
-             ;; how its kind is worked (read first, so the model reads it before the plan), folded for a person
-             (when-let [ins (get-in data [:task :seon.task/instructions])]
-               [:details [:summary "how the agent works it"]
-                [:p {:class "seon-prose"} (prose ins (config/value :seon.config.render/value-budget) {:whole '(:seon.task/instructions (:task (my.task/data)))})]])
-             ;; what the task is: its plan, as the Markdown it is written in
-             ;; drawn as Markdown when it fits its budget, else the printer's cut, which names the form for the rest
-             (when-let [plan (get-in data [:task :seon.task/plan])]
-               (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
-                 (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
-             ;; the rest folds: a person opens what they want, the model reads it all
-             (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main))]
-               (when (seq shown)
-                 [:details [:summary "proofs and data"]
-                  [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown]]))
-             (when (seq (:sections t))
-               [:details [:summary (str "sections it cites (" (count (:sections t)) ")")]
-                (for [{:seon.section/keys [address heading text]} (vals (:sections t))]
-                  (list [:h3 heading " " [:code address]]
-                        [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))]))))]))
+                                                            run)]))))] data)
+                      :id id :kind kind :execution execution
+                      :sections-cited (vec (for [{:seon.section/keys [address heading text]} (vals (:sections t))] {:address address :heading heading :text text})))
+      {:seon.render/schema :seon.context/task})))
 
 (defn cited-of
   "Var v as the newest run's task holds it in ctx c (its :cited, seon.ctx's pattern: its form and
@@ -847,9 +861,17 @@
   own budget, so a long source never crowds the tests out (the model reads the data)."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :symbol] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _ var]
+  ;; a part: the page draws it by cited-html, the model is sent the value (docs/render.md#a-part-answers-data)
+  (with-meta (assoc (cited-of db c var) :var var) {:seon.render/schema :seon.context/cited}))
+
+(defn cited-html
+  "A var the plan cites as the page shows it (the declared html render of :seon.context/cited; the model
+  is sent the value): its source, then its tests and other callers, each by the one printer. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts {:keys [var source] :as data}]
   (let [whole (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))
-        {:keys [source] :as data} (cited-of db c var)
-        others (dissoc data :source)
+        others (dissoc data :source :var)
         budget (config/value :seon.config.render/value-budget)]
     (cond-> [:section [:h2 (str "cites " var)]]
       source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
@@ -975,17 +997,25 @@
         ;; the agent, a fact written when a run begins
         run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db aid) seq (apply max) (d/entity db))
         cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
-        n (count (:turns c))]
-    [:section
-     ;; the run's schema render draws its declared keys only: the turns taken and a cut reply are lines of their own
-     ;; this turn's number (its record is written before its page is drawn), of the cap, as chat-end says it,
-     ;; and the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
-     [:p (str "turn " n (when cap (str " of " cap))
-              (when-let [sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)]
-                (str " · " (print/tokens-text sent) " sent in all")))]
-     ;; its last reply cut at the model's token limit: what followed it was lost
-     (when (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
-       [:p {:class "err"} "your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
+        n (count (:turns c))
+        ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
+        sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)]
+    ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
+    ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
+    (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
+                 sent (assoc :tokens-sent sent)
+                 (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
+                 (assoc :your-last-reply "cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."))
+      {:seon.render/schema :seon.context/run})))
+
+(defn run-html
+  "The run as the page shows it (the declared html render of :seon.context/run; the model is sent the
+  value): its turn of its cap, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts {:keys [turn tokens-sent your-last-reply]}]
+  [:section
+   [:p (str "turn " turn (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
+   (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
 
 (defn own-problems
   "The open problems of the agent's newest run (a component over its branch db, seon.problems/own: its run's,
@@ -995,7 +1025,8 @@
   [{db :seon.db/db} aid]
   (when-let [run-e (d/q '[:find (max ?r) . :in $ ?a :where [?r :seon.run/agent ?a]] db aid)]
     (let [r (problems/own db run-e)]
-      (when (seq (:classes r)) [:section [:h2 "problems"] (render/html {:schema :seon.problems/report} r)]))))
+      ;; a part: the report's own render draws it, the model is sent the report
+      (when (seq (:classes r)) (with-meta r {:seon.render/schema :seon.problems/report})))))
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
@@ -1530,7 +1561,7 @@
   {:malli/schema [:=> [:cat [:sequential :any]] :any]}
   [parts]
   (let [text (fn [s] [:pre {:class "whitespace-pre-wrap break-words text-text-100"} s])
-        fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (count s) " characters")] (text s)])
+        fold (fn [label s] [:details [:summary {:class "text-2xs text-text-500"} (str label ", " (print/tokens-text (select/chars-tokens (count s))))] (text s)])
         msg (fn [{:keys [role content reasoning tool-calls tool-call-id]}]
               [:div {:class (str "flex flex-col gap-1 rounded border-l-2 pl-2 py-1 "
                                  (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-base-700"))}
@@ -1548,40 +1579,73 @@
        [:div {:class "text-2xs text-text-500 break-words"} (source ref)]
        (into [:div {:class "flex flex-col gap-1 min-w-0"}] (map msg ms))])))
 
+(defn- request-messages
+  "A sent request's messages in order, from its parts [[ref messages]], each [ref message tokens new?]:
+  tokens by the one sizer (seon.context/messages-tokens), new? whether its record is one this turn
+  added (added, its refs)."
+  {:malli/schema [:=> [:cat [:sequential :any] [:set :any]] [:vector :any]]}
+  [parts added]
+  (vec (for [[ref ms] parts m ms] [ref m (context/messages-tokens [m]) (contains? added ref)])))
+
 (defn sent-request
-  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request):
-  its turn, tokens and the share its provider served from cache, then what this turn added to the
-  request (:added, each part beside the record that made it), a line naming what it sends as the
-  turn before it in its run did (:same), and its whole request in a <details> that is rendered
-  only while open (:whole: opening it posts /open, and the unit comes back with it), and where its
-  tokens went (:split, seon.context/sent-split of its parts: system, conversation, page). input {:turn
-  :run :view :refs :added [[ref messages]] :same {:turn :parts} :whole :split}, the turn's origin
-  (:seon.turn/origin: an :outside read calls no model) and its usage (:seon.model-call/tokens, cache-hit and
-  cache-miss tokens) or its call's error (:seon.turn/error)."
+  "A model turn's request as it recorded it (the declared html render of :seon.render/sent-request),
+  whole, nothing hidden (owner, 2026-10-29: \"I want to understand what the agent was sent cleanly ...
+  I don't want anything hidden\"): its turn and the provider's numbers (its tokens, the prompt tokens it
+  served from cache), then every message it sent in order, each a card with its role, the record that
+  made it and its tokens (the one sizer's estimate): what it sends as the turn before it did, grouped
+  under one line that opens to it, then what this turn added, whole; and the cache point, where the
+  provider's cached prefix ends, placed by its cache-hit count over the messages' estimates (an
+  estimate, said so). input {:turn :run :view :refs :whole :added-refs :same :split}, the turn's origin,
+  usage or error. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [turn run view refs added same whole split] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
+  [opts {:keys [turn run refs whole added-refs same split] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
-        unit (:unit opts)]
+        unit (:unit opts)
+        ms (request-messages whole (or added-refs #{}))
+        est (reduce + 0 (map #(nth % 2) ms))
+        ;; the messages the provider's cached prefix covers: its cache-hit count apportioned over the estimates
+        scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)
+        cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
+                 (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale (nth % 2)) ms)))))
+        cache-line [:div {:class "my-1 flex items-center gap-2 text-2xs text-info"}
+                    [:span {:class "h-px flex-1 bg-info/40"}]
+                    (str "the provider's cache ends here: " (group3 (or cache-hit-tokens 0)) " tokens served from cache (placed by estimate)")
+                    [:span {:class "h-px flex-1 bg-info/40"}]]
+        card (fn [i [ref {:keys [role content reasoning tool-calls tool-call-id]} tk]]
+               (list
+                 [:div {:class (str "flex flex-col gap-1 rounded-md border-l-2 bg-base-950 px-2 py-1 "
+                                    (case role "assistant" "border-signal" "tool" "border-base-600" "user" "border-text-400" "border-info"))}
+                  [:div {:class "flex items-baseline justify-between gap-2 text-2xs text-text-500"}
+                   [:span (str role (when tool-call-id " · result") " · ") (source ref)] [:span (print/tokens-text tk)]]
+                  (when reasoning [:details [:summary {:class "text-2xs text-text-500"} "reasoning, as returned"] [:pre {:class "whitespace-pre-wrap break-words"} reasoning]])
+                  (when-not (str/blank? content) [:pre {:class "whitespace-pre-wrap break-words text-text-100"} content])
+                  (for [{:keys [code prose]} tool-calls]
+                    [:div {:class "flex flex-col gap-0.5"}
+                     (when prose [:p {:class "italic text-text-300"} prose])
+                     (emit/marked-hiccup :seon.print/code code)])]
+                 (when (= (inc i) cached) cache-line)))
+        shared (vec (take-while #(not (nth % 3)) ms))
+        n-shared (if same (count shared) 0)]
     [:li {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (str "turn " (inc turn))] [:span {:class "text-text-400"} run]
-      (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
-      (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens cached (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
-      [:span {:class "text-text-500"} (str refs " records sent")]
-      ;; an outside read (seon_context, an outside agent) is sent to no model: it has no call to wait on
+      (when tokens [:span {:class "tabular-nums text-text-300"} (str (group3 tokens) " tokens")])
+      (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
+      [:span {:class "text-text-500"} (str (count ms) " messages · " refs " records")]
       (cond (= :outside origin) [:span {:class "text-text-500"} "an outside read: no model call"]
             (not (or tokens error)) [:span {:class "text-text-500"} "the call is in flight"])]
-     ;; where its tokens went, as the printer sizes what it sent
      (when split
-       [:p {:class "tabular-nums text-text-400"}
+       [:p {:class "tabular-nums text-text-500"}
         (str/join " · " (for [[k w] [[:system "system"] [:conversation "conversation"] [:page "page"]]]
-                          (str w " " (group3 (get split k 0)))))])
-     ;; a call that failed: its typed error, by its render
+                          (str w " " (print/tokens-text (get split k 0)))))])
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
-     [:div {:class "text-2xs uppercase text-text-500"} (if same "what this turn added" "what this turn sent")]
-     (sent-parts-html added)
-     (when same [:p {:class "text-text-500"} (str "and " (:parts same) " records as turn " (inc (:turn same)) " sent them")])
-     [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "&open=' + el.open)")}
-                 whole (assoc :open true))
-      [:summary {:class "text-2xs text-text-500 cursor-pointer"} (str "its whole request, " refs " records")]
-      (when whole (into [:div {:class "flex flex-col gap-2 pt-2"}] (sent-parts-html whole)))]]))
+     ;; what it sends as the turn before it did: one line that opens to it, its cache point inside
+     (when (pos? n-shared)
+       [:details
+        [:summary {:class "cursor-pointer text-text-400"}
+         (str "same as turn " (inc (:turn same)) " · " n-shared " messages · " (print/tokens-text (reduce + 0 (map #(nth % 2) shared)))
+              (when (and cached (<= cached n-shared)) " · from cache up to the line inside"))]
+        (into [:div {:class "flex flex-col gap-1 pt-1"}] (mapcat card (range) shared))])
+     [:div {:class "text-2xs uppercase text-text-500"} (if (pos? n-shared) "new this turn" "what this turn sent")]
+     (into [:div {:class "flex flex-col gap-1"}]
+           (mapcat card (map #(+ % n-shared) (range)) (drop n-shared ms)))]))

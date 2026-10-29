@@ -12,6 +12,13 @@
  ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
  ;; what an agent's work is likely to need beyond what its plan cites (seon.context/related-view), a part of its
  ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
+ ;; the task an agent works (seon.context/task-data, with its proofs' sources and verdicts), a part of its page:
+ ;; the page draws it (task-html), the model is sent the value
+ :seon.context/task [:map {:seon.render/html seon.render.ui/task-html}]
+ ;; a var the plan cites (seon.render.ui/cited-of: its source, tests and callers), a part of the page
+ :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html}]
+ ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
+ :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
  :seon.context/related [:map {:seon.render/html seon.render.ui/related-html}]
  :seon.context/status [:map {:seon.render/html seon.render.ui/status-html :seon.render/model seon.context/status-model}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
