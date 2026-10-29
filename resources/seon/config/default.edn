@@ -455,13 +455,12 @@
  ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this
  ;; checkout's own. At the bound: a missing directory is made by the first write.
  :seon.config.proofs/results-dir #or [#env SEON_RESULTS_DIR #seon/checkout "target/results"]
- ;; Unit: digests. How many digests of one test (or check step) the cache keeps: the writer of a test's next
- ;; digest removes the excess, lowest digest first, never the one it writes nor a digest judged red
- ;; (a red, or flaky, is never laundered by its eviction). Provenance: estimate, 2026-10-28: the live
- ;; trees (main, the merges tree, five worktree sessions, the agents' branches) hold up to ~15 digests of
- ;; a widely reached test (16,598 results for 1,075 tests over the store's life); 32 leaves room. At the
- ;; bound: an evicted digest's test runs again once.
- :seon.config.proofs/results-per-test 32
+ ;; Unit: bytes. The whole verdict cache's capacity (the files under results-dir). A write that takes it
+ ;; past the bound removes the least recently used verdicts (oldest file mtime; a read touches it),
+ ;; greens and reds alike, until it is under, never one just written; below the bound nothing is
+ ;; removed. Provenance: the owner, 2026-10-29 (docs/decisions.md); the main tree's cache held 121 MB
+ ;; in 27,079 files that day. At the bound: an evicted verdict's test runs again once.
+ :seon.config.proofs/results-max-bytes 536870912
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
