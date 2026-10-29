@@ -148,16 +148,16 @@
   nil)
 
 (defn- turn-error!
-  "A turn that threw (st, its state; e, what it threw) given to the agent as data: the one error map
-  (seon.agent/error-map, operation seon.turn/work!) as a message from seon on its branch, which its
+  "A turn Seon could not draw (st, its state; em, the error map: what it threw, seon.agent/error-map,
+  or the walk's missing status, :seon.turn/no-status) given to the agent as data: em as a message
+  from seon on its branch, which its
   next turn reads as any message, the turn counted and the throw counted in :threw (work! ends the
   agent's work :error on the second turn in a row that throws: its request cannot be drawn, so no
   model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
   Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
-  {:malli/schema [:=> [:cat :map :seon.host/throwable] :map]}
-  [st e]
+  {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
+  [st em]
   (let [k (:key @agent/state)
-        em (agent/error-map e 'seon.turn/work!)
         body (print/text (vary-meta {:seon-threw "drawing your turn: Seon's code called the program on your branch, as it stands now, and it threw"
                                      :error em}
                                     assoc :seon.print/full true))]
@@ -456,7 +456,8 @@
                     hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
                 (cond
                   ;; no status is no done rule: the run ends on that error, never green
-                  (contract/error? s) (end! st :error (:seon.error/message s) s)
+                  ;; the walk drew no status (the agent's program broke the layout): the agent's to read, as a throw is
+                  (contract/error? s) [::undrawn s]
                   ;; git's CI after the merge: green on the combined program; merge main again until
                   ;; it brings nothing new
                   (and (empty? reasons) merge?)
@@ -473,9 +474,13 @@
                           (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))
                       ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!); the
                       ;; second in a row, with no model turn between, ends its work with that error
-                      (catch Throwable e
-                        (let [st' (turn-error! st e)]
-                          (if (< 1 (:threw st'))
-                            (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                            [::next st']))))]
+                      (catch Throwable e [::undrawn (agent/error-map e 'seon.turn/work!)]))
+            ;; a turn Seon could not draw (it threw, or drew no status) is given to the agent (turn-error!); the
+            ;; second in a row, with no model turn between, ends its work with that error
+            step (if (and (vector? step) (= ::undrawn (first step)))
+                   (let [st' (turn-error! st (second step))]
+                     (if (< 1 (:threw st'))
+                       (end! st' :error (str "two turns in a row Seon could not draw: " (:seon.error/message (:error st'))) (:error st'))
+                       [::next st']))
+                   step)]
         (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))
