@@ -61,6 +61,27 @@ An agent keeps every eval's whole response (value included) for its process's li
 
 Ten agents working at once cost root, the fork server and about 140 MB each: `bin/check swarm 10 10` (scripted agents, a scratch store, 2026-10-29) peaked at 2,415 MB with all ten live (root 845 MB, fork server 124 MB, standby 31 MB, agents 138-144 MB each), and `bin/check scale 10` reports about 97 MB an agent. On the standing store root is about 1.1 GB with the model out of it (it was 1.7 GB with the model loaded; the model now runs in a helper process, 350-550 MB, only while embedding work is queued: [vector](vector.md#the-model)) and the fork server 670 MB, so ten light agents there are about 4.1 GB. Agents running their tests were not measured, and each may grow 1 GiB (`:seon.config.agent/heap-extra-bytes`). The target is an ordinary MacBook: root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([plan](plan.md)).
 
+## A root boots from a seeded store
+
+Measured 2026-10-29 on this checkout, an idle-ish machine (load 5-7; at load 13 every figure was 3-5 times larger, a boot 33 s), test environment (`SEON_WIKI_BASELINE=false`). A root's boot to `ROOT LISTENING` is 6.5 s when it resumes a main, 14.4 s on a store of its own, 7.1 s on a fresh main of a store whose `:db` already holds the program and the wiki:
+
+| phase (fresh main, no seed) | ms | bytes allocated |
+|---|---|---|
+| process start to `seon.root` loaded (the 997 MB boot image, `bin/root`, held) | ~2,300 | 997 M (the image) |
+| store open, main made from `:db` | 25 | 19 M |
+| program loaded from main (`program/load-all!`, no tests) | 1,050-1,550 | 1,050 M |
+| contracts, warm paths, static collect, fork server forked | 150-250 | 60 M |
+| wiki loaded onto main (`wiki-tx`, in the boot fact's commit) | 1,250-2,400 | 1,420-2,200 M |
+| source import: read the tree, digest equal or not | 650 | 0.5 M |
+| source import: analyse and write 3,900 forms (a main with no program) | 5,600-12,600 | 5,900-6,000 M |
+| fork server: main's test namespaces compiled (`program/load-all!`, after root listens; the first fork waits behind it, not measured here) | | |
+
+The import and the wiki are the two phases that grow with the program, and a main made from `:db` repeated both for every root. `seon.root/seed-program!` (`bin/root seed STORE`, which `bin/test` runs once after it builds the binary, on the process store its plan made, `seon.test-store/process-store`) brings `:db` up to the tree: the wiki, the program and the `:seon.root/source` fact with the tree's digest, the wiki loaded again until it states nothing more (once the program exists its citations resolve to it, and a root's second boot reached that by itself). A root whose main is a branch of that `:db` finds the digest equal and imports nothing. The seed costs 22 s a tree (the whole tree is analysed; an edit to one file is not yet incremental: 9.6 s) and saves 7.3 s a first boot, so it pays from the fourth root a run boots; a test with a store of its own (`seon.root-test/root-answers` and the restart tests) does not take it. With the wiki baseline on (a standing root's, `SEON_WIKI_BASELINE` unset) a store's second boot also spent 41 s and 8.6 GB in `seon.fx/wiki-history` (`git blame` of every page, `git show` of every old file the sections cite, parsed by `seon.source/defining-ids`), once per store; the seed pays it once in the process store when it is on.
+
+What is left in a seeded boot: the image (2.3 s, fixed), the program loaded from the store (1 s) and the wiki computed to nothing (1.3 s: every page parsed and every section compared, to find that the tree's wiki is the one stored; a digest of the wiki dirs on main would skip it).
+
+A test root's processes end with the runner. `bin/held`'s watcher blocked in a `read` of the starter's fifo, and on macOS the last writer closing wakes one blocked reader, not all of them: a root started under a held starter has two watchers on the one fifo (the outer holder of `bin/root start`, and the detached holder of the root), so a runner killed while a root was booting (every test's `start-root!` waits for ROOT LISTENING, 7-45 s) woke one, and the root, its fork server and their agents stayed (~50 found, 2026-10-29). Reproduced by killing the starter 4 s into a root's boot (four survivors); the watcher now opens the fifo non-blocking and waits with `select`, which wakes every watcher (three readers of one fifo: one woken with `read`, three with `select`), and the same kill leaves none.
+
 ## Processes
 
 Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.

@@ -47,6 +47,11 @@ F=($OUT/shard-*.edn(N))
 if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
+# the process tests' store gets this tree's program and wiki on :db (the plan made the store), so a root
+# whose main is a branch of it imports nothing (seon.root/seed-program!)
+if [[ -s $OUT/process-store ]]; then
+  nice -n 15 "$ROOT/bin/root" seed "$(<$OUT/process-store)" > "$OUT/seed.log" 2>&1 || { tail -5 "$OUT/seed.log"; echo "TEST FAILED (bin/root seed: $OUT/seed.log)"; exit 1 }
+fi
 st=0 P=()
 # each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
 for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
