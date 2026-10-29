@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent]))
 
 (defn- reaped
   "Child pid, which exited (kqueue's NOTE_EXIT, seon.lib/kq-wait) or was already gone when it was
@@ -50,9 +50,16 @@
 (defn graph-at-fork
   "Server state st with main's reach graph (built when the server starts) brought to :db, only
   when a commit since moved the program (:graph-moved, seon.program/moves-program?): a spawn's own commit (its
-  run) moves none, and reach-update reads every live form (15-21 ms a fork, measured)."
+  run) moves none, and reach-update reads every live form (15-21 ms a fork, measured). The graph keeps its
+  index (seon.program/reach-indexed), moved with it and held under the inputs an agent forked from :db takes
+  (seon.agent/test-inputs: made whole here when they are not the held ones, never in every agent), so an agent's
+  base-graph starts from main's answers and recomputes only the tests its base differs in
+  (docs/source.md#tests-run-by-reach). An unmoved program is a key lookup."
   {:malli/schema [:=> [:cat :map] :map]}
-  [st] (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved))))
+  [st]
+  (cond-> st (:graph-moved st)
+          (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
+              (dissoc :graph-moved))))
 
 (defn index-at-fork
   "Server state st with main's reconciler index (:index {:commit :index}, listed when the server
@@ -101,7 +108,8 @@
    {:db db :cfg cfg :store store :mismatch 0 :conn conn :kq kq :status-buf (ffi/alloc 4) :children #{}
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
-    :graph (or graph (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path))))
+    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
+                                            (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
     :index (or index {:commit (d/commit-id db) :index (r/index db)})})
   ;; stop (root closed its end, or died): every child (agents, the standby) killed and reaped
