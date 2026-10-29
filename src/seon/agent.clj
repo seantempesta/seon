@@ -153,25 +153,28 @@
 (declare branch-changes)
 
 (defn main-changes
-  "What main changed since base (seon.merge/delta-changes, declared data left out), a derived value
-  held keyed by the two commits it is a function of (:main-changes on the state: the newest pair, which
-  an eval after an eval at the same main reuses; evicted by the next pair, regenerated from the two dbs).
-  {} when main's head is base's. See docs/merging.md#main-moved-is-said-at-every-eval."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] :seon.merge/changes]}
+  "What main changed since base, reduced to what main-line reads and held keyed by the two points
+  (commit, t) it is a function of: {:after {program-key (hash of its content on main)}}, from
+  seon.merge/delta-changes (declared data left out). The diff itself, whose values carry the forms
+  and so pin the dbs they were read from, is let go at once (AGENTS section 4, a kept db value is a
+  reference); the newest pair is held on the state (:main-changes), evicted by the next and
+  regenerated from the two dbs. {} when main's point is base's.
+  See docs/merging.md#main-moved-is-said-at-every-eval."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map-of :any :int]]}
   [base main]
   (let [at (juxt d/commit-id :max-tx)
         k [(at base) (at main)]
-        {held :key ch :changes} (:main-changes @state)]
+        {held :key after :after} (:main-changes @state)]
     (cond (= (k 0) (k 1)) {}
-          (= k held) ch
-          :else (let [ch (pm/delta-changes base main #{})]
-                  (swap! state assoc :main-changes {:key k :changes ch})
-                  ch))))
+          (= k held) after
+          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
+                  (swap! state assoc :main-changes {:key k :after after})
+                  after))))
 
 (defn main-line
   "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
   nothing of the program since base: how many names main changed (main-changes, held per pair of
-  commits), those of them b changed too (branch-changes), those b's changed functions call, and
+  points), those of them b changed too (branch-changes), those b's changed functions call, and
   those both changed to different content (what a merge of main would leave unmerged), each list
   cut by the one printer; and the form that merges main
   (docs/merging.md#main-moved-is-said-at-every-eval). Cost: O(1) while main is the base; the first
@@ -185,7 +188,7 @@
             moved (into #{} (keep (fn [[kind x]] (when (#{:var :schema} kind) x))) (keys theirs))
             changed (pm/changed-vars ours-ch)
             ours (filter moved changed)
-            conflicts (sort-by str (for [[k [_ after]] ours-ch :let [t (theirs k)] :when (and t (not= after (second t)))] (second k)))
+            conflicts (sort-by str (for [[k [_ after]] ours-ch :let [t (theirs k)] :when (and t (not= (hash after) t))] (second k)))
             reached (remove (set ours) (filter moved (d/q '[:find [?r ...] :in $ [?v ...] :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs ?r]] b (vec changed))))
             names #(print/text (vec (sort-by str %)) (:part print/budgets))]
         (str "main moved since your base: " (count moved) " names changed"
@@ -195,13 +198,19 @@
              ". Merge it when you choose: (my.branch/merge-main!)")))))
 
 (defn main-difference
-  "main-line for this agent now: its merge base, its branch and main as last heard (heard-main),
-  which an outside agent's seon_eval answers carry (seon.repl/eval-string, seon.server op-answer :eval; a model agent's turn reads the recorded eval, which holds no :main); nil with no base, or when main's head
-  is still the base. Computed at t, never stored."
+  "main-line for this agent now: its merge base, its branch and main as last heard (:main, held by
+  heard-main, which each turn's readers call); which an outside agent's seon_eval answers carry
+  (seon.repl/eval-string, seon.server op-answer :eval; a model agent's turn reads the recorded eval,
+  which holds no :main); nil with no base, or when main as last heard is still the base. Computed at
+  t, never stored, and it reads no store: a read of main's head (heard-main, seon.db/head,
+  datahike.writing/read-head) on each eval held the agent's heap past its ceiling in
+  seon.agent-test/an-agent-finds-no-repository (OutOfMemoryError, exit 70). So an agent that never
+  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit
+  (task seon.writer/main-notices-carry-a-commit-not-a-db)."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (when-let [base (:base @state)]
-    (let [main (heard-main)]
+    (when-let [main (:main @state)]
       (when-not (= (d/commit-id base) (d/commit-id main))
         (main-line base (db) main)))))
 
