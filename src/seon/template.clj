@@ -35,7 +35,7 @@
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
-  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page)."
+  (seon.context/system-page), and the help page it reads on demand (seon.context/help-page). A work task's steps (reproduce what is wrong, or make the new namespace; the proof first, and only those proofs its status lists with no source) are docs/agent.md#what-you-read."
   {:design (str "Your task: turn the plan below into a plan the implement "
                 "step can follow without exploring. You are done when the plan names each function to change, cited with three "
                 "backticks, and the proofs that will show the change are written, registered "

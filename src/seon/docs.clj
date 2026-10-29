@@ -361,7 +361,7 @@
                                                                     :else :changed)]))}]))))))
           plan)))
 
-;; ---- a citation as its depth shows it (docs/references.md#the-delimiter-picks-the-depth): ----
+;; ---- a citation as its depth shows it (docs/references.md#resolving-and-showing): ----
 ;; what the model's context and every page pull of what a text cites
 
 (defn source-of
@@ -575,7 +575,7 @@
                  second)))))))
 
 (defn resolve-ref
-  "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
+  "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
   :code its source (from the db), whole: the printer cuts it where it is shown, with the form
   that reads its rest, and the form that changes a part of it (seon.repl/edit!); at :doc a var with no doc shows its source. A name that resolves to
@@ -641,7 +641,7 @@
         (or (symbol? name) (and path (not problem-kind))) :view))
 
 (defn schema-view
-  "Schema key k as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth),
+  "Schema key k as its citation's depth shows it (docs/references.md#resolving-and-showing),
   read from the db's schema entry (:schema/form), so it changes as the db does: :summary the form
   that reads it; :doc and :code its form as written (code), the form of each other key it names
   (one level: the agent of the md-scan bench read them one a turn, 2026-10-29), and how it changes
@@ -698,7 +698,7 @@
   "Namespace sym as db records it: its ns form as written (its requires and aliases), then each
   definition, privates included, a line each in file order (`definition-lines`); nil when db
   records no ns form for it. What `(source ns)` and a namespace's citation at code depth show
-  (docs/references.md#the-delimiter-picks-the-depth)."
+  (docs/references.md#resolving-and-showing)."
   {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :string]]}
   [db sym]
   (when-let [head (d/q '[:find ?src . :in $ ?s :where [?n :ns/name ?s] [?f :form/defines ?n] [?f :form/src ?src]] db sym)]

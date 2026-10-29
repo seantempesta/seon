@@ -64,7 +64,7 @@
 
 (def ^:private repl-helpers
   "The clojure.repl names an agent's REPL keeps in every namespace it moves to (`equip-ns!`), and
-  warns of when the namespace's own var hides one (`shadowed`)."
+  warns of when the namespace's own var hides one (`shadowed`; docs/render.md#a-part-answers-data)."
   '[source apropos dir pst doc find-doc])
 
 (defn- equip-ns!
@@ -87,7 +87,7 @@
   "The REPL helpers (`repl-helpers`) namespace ns holds a var of its own for, {name its-var}:
   there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
   referred var (an agent in seon.render.ui called its source with a function and read an nth
-  error four times, 2026-10-29). nil when none."
+  error four times, 2026-10-29). nil when none. It answers a move's :helper-shadowed (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
   [ns]
   (not-empty (into {} (for [s repl-helpers
@@ -359,7 +359,7 @@
   read now: what a form compiles against, and the renders its values' schemas name
   (seon.contract/properties reads it). Each eval binds it, and so does each turn of the turn loop
   (seon.turn/work!), so Seon's own code checks the agent's values against the schemas the agent
-  registered since the loop began."
+  registered since the loop began (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)."
   {:malli/schema [:=> [:cat :seon.host/fn] :any]}
   [f] (binding [mr/*registry* (branch-registry)] (f)))
 
@@ -570,7 +570,8 @@
   agent-step's; a model's call: its :prose and :call-id). The request's entrant boundary: a
   defect past a form's own (a middleware's, the printer's) ends the request with its error as
   the response's :ex. Its cost (:ms :ticks :bytes, seon.repl/wrap-cost) is taken once when the
-  forms ran, so what the model reads of it never changes in a later turn."
+  forms ran, so what the model reads of it never changes in a later turn. The response's :ns is the
+  namespace the REPL is in after it (docs/render.md#a-part-answers-data)."
   {:malli/schema [:function [:=> [:cat :string] :seon.eval/response] [:=> [:cat :string :map] :seon.eval/response]]}
   ([code] (eval-string code {:origin :model}))
   ([code req]

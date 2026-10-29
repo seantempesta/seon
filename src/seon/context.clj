@@ -50,7 +50,7 @@
   "A test's failing assertions as the agent reads them (`failure`), those that got the same value
   with the same message one entry, {:asserts [assertion ...] :got v}, in first-failure order: nine
   assertions that each threw one NullPointerException are one cause, read once (the md-scan bench,
-  2026-10-29). See docs/agent.md#what-you-read."
+  2026-10-29). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat [:sequential :map]] [:vector :map]]}
   [fs]
   (let [ms (mapv failure fs)
@@ -65,7 +65,7 @@
   the compiler's resolved references), each at summary level from its own facts on db: its
   contract and doc, and for a helper of p's own namespace its source too (what the proof means:
   the md-scan bench's agent read its proofs' block-of first, 2026-10-29); a var is program when db
-  holds it (a branch's callee this process never loaded included)."
+  holds it (a branch's callee this process never loaded included). See docs/agent.md#what-you-read."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:vector :map]]}
   [db p]
   (vec (for [q (sort (disj (set (d/q '[:find [?r ...] :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/refs ?r]] db p)) p))
@@ -727,13 +727,13 @@
 (declare cited)
 
 (defn cite-key
-  "Citation c's one key on a page: the name it cites, else its address."
+  "Citation c's one key on a page: the name it cites, else its address (docs/references.md#resolving-and-showing)."
   {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
   [c] (str (or (:seon.ref/name c) (:seon.ref/address c) (:seon.ref/path c))))
 
 (defn current-ns
   "The namespace agent a's REPL is in on db: the one its newest eval left it in (its response's :ns,
-  as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs."
+  as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
   [db a]
   (some->> (d/q '[:find ?tx ?r :in $ ?a :where [?e :seon.eval/agent ?a ?tx] [?e :seon.eval/record ?r]] db a)
@@ -745,7 +745,7 @@
   aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
   and its deftests, how many are green and which are red. With arglists? (the namespace the REPL is
   in, as a REPL's eldoc shows what is at point) each definition is its name and arglists,
-  (scan [text]). nil when db records no such namespace."
+  (scan [text]). nil when db records no such namespace. See docs/render.md#a-part-answers-data."
   {:malli/schema [:function [:=> [:cat :seon.host/db :symbol] [:maybe :map]] [:=> [:cat :seon.host/db :symbol :boolean] [:maybe :map]]]}
   ([db nsym] (namespace-data db nsym false))
   ([db nsym arglists?]
@@ -771,7 +771,7 @@
   "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
   (`current-ns`) first, marked :here, its definitions with their arglists, then those of what the plan
   cites (a var's, a namespace itself) and of the task's proofs, once each, those db records. What
-  the page's namespaces part shows the model."
+  the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:map-of :symbol :map]]}
   [db t a]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
@@ -1177,7 +1177,7 @@
   "Refs (as :seon.model-call/sent names records) each beside its messages, each record by its own
   render: the system prompt's section as of its t (system-text), an eval by eval-messages, a
   message or a prose reply by its render, the parts of a turn ([:parts a c whole? ids], drawn cold from
-  the branch at commit c, the ids' hiccup: what the request sent, the same bytes), without the hashes (a request's, for the next to compare: no part of it). No request is built again: the same records, rendered. See docs/render.md#the-branchs-views."
+  the branch at commit c, the ids' hiccup: what the request sent, the same bytes), without the hashes (a request's, for the next to compare: no part of it). No request is built again: the same records, rendered. See docs/render.md#the-page-is-sent-as-what-changed."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector [:tuple :any [:vector :seon.model/message]]]]}
   [db refs]
   (let [ev #(d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] [:seon.eval/id %])]

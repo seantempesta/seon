@@ -10,7 +10,7 @@
             [datahike.api :as d] [seon.edn :as sedn] [malli.core :as m] [seon.schema.datahike :as sd]))
 
 (defn- refused
-  "The registration-refused error for k: why, and the message of what refused it."
+  "The registration-refused error for k: why, and the message of what refused it (a form that is no EDN names its value, seon.program/non-edn; docs/references.md#resolving-and-showing)."
   {:malli/schema [:=> [:cat :qualified-keyword :keyword :string] :seon.schema/registration-refused]}
   [k why message]
   (contract/error :seon.schema/registration-refused #'my.schema/refused (str k ": " message)
@@ -90,7 +90,7 @@
   branch's registrations; (keys (forms)) are every key. With a key, that key's form (agents asked
   (forms k) four times in step E's paid runs), or, for a key no schema registers,
   :seon.schema/unknown-key naming the keys its namespace registers: unknown is no nil (md-scan #6,
-  2026-10-29, asked for :seon.ref/names twenty times and read nil each time)."
+  2026-10-29, asked for :seon.ref/names twenty times and read nil each time). See docs/references.md#resolving-and-showing."
   {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
                   [:=> [:cat :qualified-keyword] :any]]}
   ([] (merge contract/forms (program/schema-changes (agent/db))))

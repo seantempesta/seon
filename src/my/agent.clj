@@ -338,7 +338,7 @@
   whose address holds a word of it (four letters or more), the sections whose text the search finds
   for it (`search`: \"schema\" named no address, though the help page says how a schema changes;
   md-scan #6, 2026-10-29), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
-  addresses, never the page ((my.agent/help) lists it)."
+  addresses, never the page ((my.agent/help) lists it). See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (docs/page db context/help-page :summary)

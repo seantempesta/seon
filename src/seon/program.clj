@@ -59,8 +59,8 @@
   "The first value in v that is no EDN, depth first, as [path value] (path the keys and indices that
   reach it, a set member by its place in the set's seq), or nil when v is plain data that EDN prints
   and reads back equal (nil, booleans, numbers, strings, keywords, symbols, and lists, vectors, maps
-  and sets of them): what a refusal names, so its reader fixes that value (a predicate written
-  unquoted, nat-int?, is a function value, its symbol 'nat-int? the data)."
+  and sets of them): what a refused registration names, so its reader fixes that value (a predicate written
+  unquoted, nat-int?, is a function value, its symbol 'nat-int? the data). See docs/references.md#resolving-and-showing."
   {:malli/schema [:=> [:cat :any] [:maybe [:tuple [:vector :any] :any]]]}
   [v]
   (letfn [(walk [path x]

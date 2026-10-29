@@ -872,7 +872,7 @@
    [#'render/html {:budget (config/value :seon.config.render/value-budget)} (dissoc v :cites :kind :depth)]])
 
 (def ^:private reason-words
-  "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page."
+  "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
   {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
    :stray-red "red test that is no proof" :contract-gap "functions without a contract" :unmerged "unmerged entries"
    :open-problem "problems the work caused" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"

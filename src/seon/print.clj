@@ -58,7 +58,7 @@
   [s] {:seon.print/code s})
 
 (defn tokens-text
-  "A count of tokens as a reader is shown it: seon.print.emit/tokens-text, the printer's one wording of a size."
+  "A count of tokens as a reader is shown it: seon.print.emit/tokens-text, the printer's one wording of a size (docs/render.md#cut-where-a-value-is-made)."
   {:malli/schema [:=> [:cat nat-int?] :string]}
   [n] (emit/tokens-text n))
 
