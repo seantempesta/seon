@@ -518,6 +518,27 @@
     (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (:value judge))
         (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
+(deftest a-test-run-leaves-nothing-in-its-agents-working-directory
+  ;; docs/failure-points.md, a directory walk: a test child works in a directory of its own
+  ;; (seon.fx/run-dir, under the agents' working directory), so what a test writes relative to its
+  ;; working directory is the run's, removed when the child has ended. The test writes a marker
+  ;; relative to its working directory and checks it is not the agents' own; after the run neither
+  ;; the marker nor the child's directory is in the agents' working directory.
+  (let [[_ run after]
+        (in-agent ["(ns leaks-test (:require [clojure.test :refer [deftest is]]))
+                   (deftest w (let [cwd (System/getProperty \"user.dir\")]
+                                (.mkdirs (java.io.File. \"target/leak\"))
+                                (spit \"target/leak/x\" \"x\")
+                                (is (.isFile (java.io.File. \"target/leak/x\")))
+                                (is (re-find #\"/tests/[0-9]+$\" cwd) cwd)))"
+                   "(let [r (seon.agent/run-tests-forked 100000000 #{'leaks-test/w} :turn)] [(seon.proofs/results r) (:pid r)])"
+                   "(let [cwd (get seon.config/config :seon.config.agent/cwd)]
+                      {:target (.exists (java.io.File. (str cwd \"/target/leak\"))) :dirs (vec (filter #(= \"tests\" %) (.list (java.io.File. cwd))))})"]
+                  {:dirs ["src" "test"] :proofs #{}})]
+    (is (= '{leaks-test/w :pass} (first (:value run))) (pr-str run))
+    (is (false? (:target (:value after))) "the test's relative write is not in the agents' working directory")
+    (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
+
 (deftest a-red-at-its-digest-is-reused-with-its-failures
   ;; task seon.proofs/a-red-at-its-digest-is-reused: a run cached r red at its digest; r is green
   ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
