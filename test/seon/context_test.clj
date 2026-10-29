@@ -270,6 +270,18 @@
     (is (empty? (d/q '[:find ?e :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a "bin/")]] db))
         "and nothing stored for it")))
 
+(deftest a-cited-schema-shows-its-form-what-it-names-and-how-it-changes
+  ;; 2026-10-29, the md-scan bench: the part sent the entry's resource file, and three runs tried to
+  ;; slurp it from an agent's empty working directory; a fourth read each key the form names one a turn
+  (let [db (d/db-with (db-with-program) [{:schema/key :x.s/block :schema/form "[:map [:x.s/from :x.s/offset] [:x.s/kind :keyword]]" :schema/file "resources/seon/schemas/x.s.edn"}
+                                         {:schema/key :x.s/offset :schema/form "nat-int?"}])
+        doc (seon.docs/schema-view db :x.s/block :doc)]
+    (is (= "[:map [:x.s/from :x.s/offset] [:x.s/kind :keyword]]" (:seon.print/code (:form doc))) "its form as written")
+    (is (= {:x.s/offset "nat-int?"} (update-vals (:names doc) :seon.print/code)) "each key it names that has a form, one level")
+    (is (str/includes? (:seon.print/code (:change doc)) "(my.schema/register! :x.s/block") "how it changes at the REPL")
+    (is (not (contains? doc :file)) "never the file it merges into")
+    (is (= {:schema :x.s/block :read '(my.schema/forms :x.s/block)} (seon.docs/schema-view db :x.s/block :summary)) "a summary: the form that reads it")))
+
 (deftest a-cited-namespace-and-a-reference-code-file-show-what-they-are
   ;; task seon.ref/files-namespaces-and-symbols-are-plain-markdown: a namespace shows its
   ;; docstring and publics, a reference-code file the revision main's source pins it at (the

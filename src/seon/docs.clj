@@ -632,15 +632,24 @@
         (or (symbol? name) (and path (not problem-kind))) :view))
 
 (defn schema-view
-  "Schema key k as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
-  :summary its key and the file that declares it; :doc and :code its form as written there (code),
-  read from the db's schema entry (:schema/form), so it changes as the db does."
+  "Schema key k as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth),
+  read from the db's schema entry (:schema/form), so it changes as the db does: :summary the form
+  that reads it; :doc and :code its form as written (code), the form of each other key it names
+  (one level: the agent of the md-scan bench read them one a turn, 2026-10-29), and how it changes
+  at the REPL (my.schema/register!). Never the resource file it merges into: an agent's working
+  directory holds no checkout, and the file sent three runs to slurp it."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.ref/depth] :map]}
   [db k depth]
-  (let [e (d/entity db (pdb/eid db :schema/key k))]
-    (cond-> {:schema k}
-      (:schema/file e) (assoc :file (:schema/file e))
-      (and (not= :summary depth) (:schema/form e)) (assoc :form (print/code (:schema/form e))))))
+  (let [form (:schema/form (d/entity db (pdb/eid db :schema/key k)))
+        named (when form
+                (->> (tree-seq coll? seq (sedn/decode form))
+                     (filter qualified-keyword?) distinct
+                     (keep #(when-let [f (and (not= k %) (:schema/form (d/entity db (pdb/eid db :schema/key %))))] [% (print/code f)]))
+                     (into (sorted-map))))]
+    (if (or (= :summary depth) (nil? form))
+      {:schema k :read (list 'my.schema/forms k)}
+      (cond-> {:schema k :form (print/code form) :change (print/code (str "(my.schema/register! " k " '[...its new form])"))}
+        (seq named) (assoc :names named)))))
 
 (defn cited
   "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
