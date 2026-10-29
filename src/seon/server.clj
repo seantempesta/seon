@@ -281,7 +281,7 @@
       ;; an outside model's read is its turn, and takes its messages; anyone
       ;; else's read of an agent its model drives only looks
       (let [r @(c/submit! sys ag (sedn/encode (list 'print (list 'seon.turn/context-block task run (= "outside" (:model env))))) {:origin :context})]
-        (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:out r)}))
+        (cond (contract/error? r) r (:ex r) (:ex r) :else {:context (:seon.print/code (:out r))}))
       (refused (if ag (str ag " works no task: attach one first") (str "no task " (:task req) ", and no agent named"))))))
 
 (defmethod op-answer :message [sys ag req]

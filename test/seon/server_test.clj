@@ -121,8 +121,10 @@
 (deftest an-agent-reads-its-task-running
   ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
   ;; before main writes the task's release, so (my.task/current) and its page read :held
+  ;; the page as a person reads it: its parts' HTML (seon.repl/render-ctx; the hiccup is each part as the model
+  ;; reads it, and the model's task part leaves the execution to :task)
   (let [[current page] (at/in-agent ["(:seon.task/execution (my.task/current))"
-                                     "(pr-str (seon.repl/render-ctx-hiccup))"])]
+                                     "(apply str (map :html (:units (seon.repl/render-ctx))))"])]
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
 
@@ -404,15 +406,17 @@
 (deftest a-prove-never-ends-the-agent-it-proves
   ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
   ;; ended"), so my.task/fail! and seon_done recorded nothing ("a7 works no task"). An outside agent
-  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run
+  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run.
+  ;; Each prove names one small namespace: an unnamed one proved all of main inside this test (568 s
+  ;; alone, 2026-10-30, and its shard's root stopped under it); the agent's life is what is proved here
   (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
         [ctx proved after live1 main-proved after2 live2 failed]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
-                        {:op :prove :agent agent}
+                        {:op :prove :agent agent :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
-                        {:op :prove}
+                        {:op :prove :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
                         "(my.task/fail! \"cannot\")"]))]
