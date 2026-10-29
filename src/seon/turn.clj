@@ -147,6 +147,17 @@
       (agent/taken! (count sends))))
   nil)
 
+(defn- tell-error!
+  "Error map em given to the agent as a message from seon on its branch, saying what Seon was doing
+  (what): its next request reads it as any message. nil."
+  {:malli/schema [:=> [:cat :seon.error/base :string] :nil]}
+  [em what]
+  (let [k (:key @agent/state)
+        body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
+    (agent/transact! (update (task/message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body) 0 assoc :seon.message/agent {:seon.agent/key k}))
+    (agent/commit!)
+    nil))
+
 (defn- turn-error!
   "A turn Seon could not draw (st, its state; em, the error map: what it threw, seon.agent/error-map,
   or the walk's missing status, :seon.turn/no-status) given to the agent as data: em as a message
@@ -158,13 +169,8 @@
   Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
   {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
   [st em]
-  (let [k (:key @agent/state)
-        body (print/text (vary-meta {:seon-threw "drawing your turn: Seon's code called the program on your branch, as it stands now, and it threw"
-                                     :error em}
-                                    assoc :seon.print/full true))]
-    (agent/transact! (update (task/message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body) 0 assoc :seon.message/agent {:seon.agent/key k}))
-    (agent/commit!)
-    (-> st (update :threw (fnil inc 0)) (assoc :error em))))
+  (tell-error! em "drawing your turn: Seon's code called the program on your branch, as it stands now, and it threw")
+  (-> st (update :threw (fnil inc 0)) (assoc :error em)))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -255,7 +261,13 @@
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
                                   {:db/id "turn" :seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}
                                   {:seon.model-call/id id :seon.model-call/turn "turn" :seon.model-call/basis basis}]
-                                 (included-tx (:seon.task/id t))))
+                                 ;; what is related is read with the program the agent may be changing (the parser): a throw is
+                                 ;; the agent's to read, this turn includes nothing, and its model call is made
+                                 (try (included-tx (:seon.task/id t))
+                                      (catch Throwable e
+                                        (tell-error! (agent/error-map e 'seon.turn/included-tx)
+                                                     "choosing what is related for your turn: Seon's code called the program on your branch, as it stands now, and it threw; this turn includes nothing related")
+                                        []))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
         ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the

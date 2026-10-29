@@ -655,7 +655,7 @@
   hold old's first line, ignoring indentation), or old there more than once (each candidate's line).
   Exact text and one occurrence, as file editors converged on (docs/agent.md#changing-a-definition):
   the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan, 2026-10-29."
-  {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :seon.eval/response]]}
+  {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]}
   [sym old new]
   (let [src (my.agent/source-fn sym)
         refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
@@ -663,7 +663,8 @@
         line-of (fn [i] (inc (count (filter #{\newline} (subs src 0 i)))))
         at (when src (offsets src old))]
     (cond
-      (nil? src) (refuse :no-source "no recorded source: define it whole first" nil)
+      ;; a name that is no var: the nearest names, as source and callers answer (my.agent/no-var)
+      (nil? src) (or (some-> (:db @agent/state) (my.agent/no-var sym)) (refuse :no-source "no recorded source: define it whole first" nil))
       (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))]
                     (refuse :not-found "the old text is not in its source exactly (whitespace counts); (source f) shows it as recorded"
                             (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))))

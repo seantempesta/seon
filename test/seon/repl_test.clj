@@ -63,7 +63,7 @@
          (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
            (is (= 3 ((resolve 'x.repl-edit/g))) "a delimiter left open is closed by the forgiving reader")
            (is (seq (:repaired r)) "and the repair is said"))
-         (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source")
+         (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source (outside an agent: no branch to name the nearest from)")
          (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
 
 (deftest an-edit-in-an-agent-is-program-on-its-branch
@@ -233,8 +233,10 @@
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]
               ;; a key no schema registers is said so, with its namespace's keys (md-scan #6 read nil twenty times)
-              ["(my.schema/forms :seon.run/no-such-key)" :text ":seon.schema/unknown-key"]
-              ["(my.schema/forms :seon.run/no-such-key)" :text ":seon.run/status"]
+              ["(my.schema/forms (keyword \"seon.run\" \"no-such-key\"))" :text ":seon.schema/unknown-key"]
+              ;; (the typo made at run time: a key this file names is one the program knows)
+              ["(my.schema/forms (keyword \"seon.run\" \"statu\"))" :text ":seon.run/status"]
+              ["(my.agent/callers (keyword \"seon.run\" \"statu\"))" :text ":seon.schema/unknown-key"]
               ;; a help address that is no section names the sections whose text holds it
               ["(:nearest (my.agent/help \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]

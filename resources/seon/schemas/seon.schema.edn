@@ -24,10 +24,10 @@
  :seon.schema/registration-refused [:and :seon.error/base
                                      [:map [:seon.error/type [:enum :seon.schema/registration-refused]]
                                       [:seon.schema/key :seon.schema/key] [:seon.schema/refused-because :seon.schema/refused-because]]]
- ;; a key no schema registers, asked of my.schema/forms: the keys its namespace registers
+ ;; a key no schema registers, asked of my.schema/forms or my.agent/callers: the nearest registered keys
  :seon.schema/unknown-key [:and :seon.error/base
                            [:map [:seon.error/type [:enum :seon.schema/unknown-key]] [:seon.schema/key :qualified-keyword]
-                            [:seon.schema/registered [:vector :qualified-keyword]]]]
+                            [:seon.schema/nearest [:vector :qualified-keyword]]]]
  :seon.schema/unstorable [:and :seon.error/base
                            [:map [:seon.error/type [:enum :seon.schema/unstorable]]
                             [:seon.schema/attribute :qualified-keyword] [:seon.schema/reason :seon.schema/reason]
