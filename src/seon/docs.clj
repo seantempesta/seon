@@ -658,7 +658,7 @@
     (if (or (= :summary depth) (nil? form))
       {:schema k :read (list 'my.schema/forms k)}
       (cond-> {:schema k :form (print/code form) :change (print/code (str "(my.schema/register! " k " '[...its new form])"))}
-        (seq named) (assoc :names named)))))
+        (seq named) (assoc :keys-it-names named)))))
 
 (defn cited
   "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]

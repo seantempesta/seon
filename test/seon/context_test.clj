@@ -277,7 +277,7 @@
                                          {:schema/key :x.s/offset :schema/form "nat-int?"}])
         doc (seon.docs/schema-view db :x.s/block :doc)]
     (is (= "[:map [:x.s/from :x.s/offset] [:x.s/kind :keyword]]" (:seon.print/code (:form doc))) "its form as written")
-    (is (= {:x.s/offset "nat-int?"} (update-vals (:names doc) :seon.print/code)) "each key it names that has a form, one level")
+    (is (= {:x.s/offset "nat-int?"} (update-vals (:keys-it-names doc) :seon.print/code)) "each key it names that has a form, one level")
     (is (str/includes? (:seon.print/code (:change doc)) "(my.schema/register! :x.s/block") "how it changes at the REPL")
     (is (not (contains? doc :file)) "never the file it merges into")
     (is (= {:schema :x.s/block :read '(my.schema/forms :x.s/block)} (seon.docs/schema-view db :x.s/block :summary)) "a summary: the form that reads it")))

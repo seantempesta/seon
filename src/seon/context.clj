@@ -768,20 +768,22 @@
                                     (seq (by :red)) (assoc :red (vec (sort (map first (by :red))))))))))))
 
 (defn namespaces-of
-  "The namespaces agent a's work on task t touches, each as `namespace-data`: the one its REPL is in
+  "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
   (`current-ns`) first, marked :here, its definitions with their arglists, then those of what the plan
   cites (a var's, a namespace itself) and of the task's proofs, once each, those db records. What
   the page's namespaces part shows the model."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:map-of :symbol :map]]}
   [db t a]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         cited (for [{n :seon.ref/name} (ref/references db (str plan "\n" (:seon.task/instructions t)))
                     :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
     (let [here (current-ns db a)]
-      ;; the one the REPL is in first, with its arglists, as a REPL's eldoc shows them
-      (into (if-let [d (some->> here (#(namespace-data db % true)))] [(assoc d :here true)] [])
-            (keep #(namespace-data db %))
-            (remove #{here} (distinct (concat cited (map (comp symbol namespace) proofs))))))))
+      ;; the one the REPL is in first, with its arglists, as a REPL's eldoc shows them; a map by name, in
+      ;; that order (a part answers a map: a vector is hiccup)
+      (->> (concat (some-> (some->> here (#(namespace-data db % true))) (assoc :here true) vector)
+                   (keep #(namespace-data db %) (remove #{here} (distinct (concat cited (map (comp symbol namespace) proofs))))))
+           (mapcat (fn [d] [(:ns d) (dissoc d :ns)]))
+           (apply array-map)))))
 
 (defn citations
   "The citations of task t's plan and instructions (seon.ref/references, the one parser), one per

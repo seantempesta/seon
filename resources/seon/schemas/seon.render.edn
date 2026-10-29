@@ -21,7 +21,7 @@
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
  :seon.context/related [:map {:seon.render/html seon.render.ui/related-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests
- :seon.context/namespaces [:vector {:seon.render/html seon.render.ui/namespaces-html} :map]
+ :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  :seon.context/status [:map {:seon.render/html seon.render.ui/status-html :seon.render/model seon.context/status-model}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value

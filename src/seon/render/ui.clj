@@ -984,12 +984,12 @@
   "The namespaces the work touches as the page shows them (the declared html render of
   :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
   aliases, definitions and tests by the one printer. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.render/opts [:sequential :map]] :any]}
+  {:malli/schema [:=> [:cat :seon.render/opts [:map-of :symbol :map]] :any]}
   [_opts v]
   [:details
-   [:summary {:class "kicker"} (str "namespaces · " (str/join ", " (map :ns v)))]
+   [:summary {:class "kicker"} (str "namespaces · " (str/join ", " (keys v)))]
    (into [:div {:class "mt-1 flex flex-col gap-1"}]
-         (for [n v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} n]))])
+         (for [[n d] v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} {n d}]))])
 
 (defn namespaces
   "The namespaces the agent's work touches (a component over ctx and the db): the one its REPL is in,
