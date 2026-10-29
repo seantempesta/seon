@@ -1204,7 +1204,10 @@
   [opts v]
   ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
   (let [{:seon.agent/keys [id status branch description]} v
-        pid (:seon.process/pid (task/newest-process (:processes v)))]
+        ;; its current process's pid while it runs: an ended process's pid names nothing live
+        ;; a ctx join holds its members by id (a map); root's own pull, a vector
+        proc (task/newest-process (let [ps (:processes v)] (if (map? ps) (vals ps) ps)))
+        pid (when-not (:seon.process/ended-ms proc) (:seon.process/pid proc))]
     [:div {:class "flex flex-col gap-1"}
      [:h1 {:class "text-base font-bold text-signal"} (kname id)]
      [:p {:class "text-text-300"} (str/join " · " (remove nil? [(kname status) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))]
