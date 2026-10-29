@@ -155,6 +155,8 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-ms { font-size: 0.7rem; color: var(--color-text-500); font-variant-numeric: tabular-nums; }
 .seon-handle { font-size: 0.7rem; color: var(--color-eval); }
 .seon-turn .seon-eval { border: 0; background: transparent; }
+.seon-md-inline > div, .seon-md-inline p { display: inline; margin: 0; }
+.seon-md-inline code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
 .seon-message, .seon-message p, .seon-message li { font-family: var(--font-prose); font-size: 0.9rem; line-height: 1.55; }
 .seon-steps > summary { list-style: none; cursor: pointer; }
 .seon-steps > summary::-webkit-details-marker { display: none; }

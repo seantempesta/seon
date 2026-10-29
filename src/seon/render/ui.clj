@@ -1090,7 +1090,8 @@
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if (str/blank? (:prose rec))
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:code rec) "")))]
-               [:span {:class "seon-prose min-w-0 flex-1"} (:prose rec)])
+               ;; the agent's prose is Markdown, rendered (owner, 2026-10-29); the model reads it as written
+               [:div {:class "seon-prose seon-md-inline min-w-0 flex-1"} (markdown (:prose rec))])
              ;; how responsive it was and what it costs the context: quiet, at the line's end
              [:span {:class "ml-auto flex shrink-0 gap-2 text-2xs text-text-500"}
               (when ms [:span {:class "seon-ms"} (ms-str ms)])
