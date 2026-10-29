@@ -28,7 +28,7 @@
   ;; buffer, back-pressure on the writer if it lags
   :reconciler {:proc seon.reconcile/reconciler-proc
                :chan-opts {:main {:buf-or-n :bind/reconciler-buf}}
-               :args {:boot :bind/boot :judge :bind/judge :source :bind/source}}
+               :args {:boot :bind/boot :judge :bind/judge :source :bind/source :conn :bind/conn}}
 ;; the test service (seon.prove): one run at a time per checkout, whoever asks. :main is the writer's
   ;; commit notice, a sliding buffer of one beside the reconciler's (a reader catches up from main's head)
 ;; :req and :answers are lossless and bounded by the reconciler's size (a full one parks the api); a run's
@@ -37,13 +37,14 @@
          :args {:tick :bind/cron-tick :at :bind/full-run-at}}
   :prove {:proc seon.prove/prove-proc
           :chan-opts {:req {:buf-or-n :bind/reconciler-buf} :answers {:buf-or-n :bind/reconciler-buf}
-                      :main {:buf-or-n :bind/prove-main-buf}}}
+                      :main {:buf-or-n :bind/prove-main-buf}}
+          :args {:conn :bind/conn}}
   ;; semantic search (seon.vector, docs/vector.md#what-is-embedded): main's vectors kept current. :main
   ;; is the writer's commit notice, a sliding buffer of one beside prove's; each round's texts go to
   ;; the :embed effect and its vectors to the writer
   :vectors {:proc seon.vector/vectors-proc
             :chan-opts {:main {:buf-or-n :bind/vectors-main-buf}}
-            :args {:model :bind/embed-model :texts :bind/embed-texts}}
+            :args {:model :bind/embed-model :texts :bind/embed-texts :conn :bind/conn}}
   ;; root's web (session W2): the render proc renders what changed into patches per view
   ;; (:compute, never waits); the web proc owns the listener and the tabs (:io). Port:
   ;; 127.0.0.1 only, :seon.config.web/port; 0 serves nothing
@@ -51,7 +52,7 @@
            ;; main's commits, the newest only (a sliding buffer of one): what changed since the main it holds is
            ;; their datoms-diff (seon.render.proc/advance-main), so a lagging render never parks the writer
            :chan-opts {:main {:buf-or-n :bind/render-main-buf}}
-           :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system}}
+           :args {:events-mult :bind/events-mult :graph :bind/graph :system :bind/system :conn :bind/conn}}
   :web {:proc seon.web/web-proc
         :args {:port :bind/web-port}}}
  :fx

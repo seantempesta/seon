@@ -102,41 +102,53 @@
       (is (= [[ev "task: search result | query: (f)\n1"]] (mapv pop (filterv (comp #{ev} first) (vector/due db "m"))))
           "an eval is embedded as a search asks: its code and its result's line"))))
 
+(defn- with!
+  "conn's head after tx-data is committed on it (db, the head before, is the one the test holds):
+  main's dbs here are commits, as the writer's notices name them."
+  [conn _db tx-data]
+  (:db-after (d/transact conn {:tx-data tx-data})))
+
+(defn- note
+  "The writer's notice for the commit db (a head of a test branch): {:t :commit}."
+  [db] {:t (:max-tx db) :commit (d/commit-id db)})
+
 (defn- db-due-only
-  "The test store's seed with every text but form x/1's already embedded: x/1 alone is due."
-  []
-  (let [db (ts/test-db)
+  "The test branch conn's seed with every text but form x/1's already embedded: x/1 alone is due."
+  [conn]
+  (let [db @conn
         seeded (vector/due db "m")
-        db (d/db-with db (embedded seeded (vectors 2 (count seeded) 8 768) "m"))]
-    (d/db-with db [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}])))
+        db (with! conn db (embedded seeded (vectors 2 (count seeded) 8 768) "m"))]
+    (with! conn db [{:db/id "f" :form/id "x/1" :form/src "(defn g [])"}])))
 
 (deftest the-proc-asks-for-what-is-due-and-writes-it
-  (let [db (db-due-only)
-        st (vector/vectors-proc {:model "m" :texts 64})
-        [st o] (vector/vectors-proc st :main {:t 10 :db db})
+  (ts/test-branch! (fn [_ conn]
+  (let [db (db-due-only conn)
+        st (vector/vectors-proc {:model "m" :texts 64 :conn conn})
+        [st o] (vector/vectors-proc st :main (assoc (note db) :t 10))
         ask (first (:to-api o))]
     (is (= :embed (get-in ask [:req :kind])) "main's notice asks the :embed effect")
-    (is (empty? (:to-api (second (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 0}) :main {:t 10 :db db}))))
+    (is (empty? (:to-api (second (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 0 :conn conn}) :main (assoc (note db) :t 10)))))
         "a proc of 0 texts a round asks nothing: the model never loads")
     (is (= ["title: none | text: (defn g [])"] (get-in ask [:req :req :texts])) "for the texts due, as the model reads them")
-    (let [[st o2] (vector/vectors-proc st :main {:t 11 :db db})
+    (let [[st o2] (vector/vectors-proc st :main (assoc (note db) :t 11))
           _ (is (empty? (:to-api o2)) "one round at a time: a notice during one is kept")
           [st o3] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
           w (first (:to-api o3))]
       (is (= {:op :tx :branch :db} (select-keys (get-in w [:req :req]) [:op :branch])) "the vectors go to main through the writer")
-      (let [db2 (d/db-with db (get-in w [:req :req :tx-data]))
+      (let [db2 (with! conn db (get-in w [:req :req :tx-data]))
             [st o4] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 12}})]
         (is (empty? (:to-api o4)) "the kept notice is older than the write: the write's own notice starts the next round")
-        (let [[st o5] (vector/vectors-proc st :main {:t 12 :db db2})]
+        (let [[st o5] (vector/vectors-proc st :main (assoc (note db2) :t 12))]
           (is (empty? (:to-api o5)) "nothing due: nothing asked, the proc idles")
-          (is (= 1 (:embedded st))))))))
+          (is (= 1 (:embedded st)))))))))
+)
 
 (defn- round
-  "One whole round of the proc st at db, notice t: the notice, the :embed answered with vectors, the
+  "One whole round of the proc st at db, notice t: the notice (committed on conn), the :embed answered with vectors, the
   write answered. [st' db' the texts asked] (db' holds the vectors written), or [st db []] when
   nothing was asked."
-  [st db t]
-  (let [[st o] (vector/vectors-proc st :main {:t t :db db})
+  [conn st db t]
+  (let [[st o] (vector/vectors-proc st :main (assoc (note db) :t t))
         ask (first (:to-api o))
         texts (get-in ask [:req :req :texts])]
     (if-not ask
@@ -144,75 +156,111 @@
       (let [[st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 (count texts) 1 768) :tokens (vec (repeat (count texts) 5))}}})
             w (first (:to-api o2))
             [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t (inc t)}})]
-        [st (d/db-with db (get-in w [:req :req :tx-data])) texts]))))
+        [st (with! conn db (get-in w [:req :req :tx-data])) texts]))))
 
+(defn- caught-up
+  "A proc caught up at the first round on conn's seed (x/1 alone due): [st db1 asked]."
+  [conn]
+  (round conn (vector/vectors-proc {:model "m" :texts 64 :conn conn}) (db-due-only conn) 10))
+
+;; once everything due is asked for the proc looks only at the texts a commit changed
+;; (seon.vector/written): what it asks must still be what is due, whatever happened between;
+;; each case on its own branch of the test store, as main's commits are linear
 (deftest a-caught-up-proc-asks-for-exactly-what-a-full-scan-would
-  ;; once everything due is asked for the proc looks only at the texts a commit changed
-  ;; (seon.vector/written): what it asks must still be what is due, whatever happened between
-  (let [st0 (vector/vectors-proc {:model "m" :texts 64})
-        db (db-due-only)
-        [st db1 asked] (round st0 db 10)]
-    (is (= ["title: none | text: (defn g [])"] asked) "the first round reads the store")
-    (testing "a commit's new text alone"
-      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
-            [st db3 asked] (round st db2 12)]
+  (ts/test-branch! (fn [_ conn]
+    (let [[_ _ asked] (caught-up conn)]
+      (is (= ["title: none | text: (defn g [])"] asked) "the first round reads the store"))))
+  (testing "a commit's new text alone"
+    (ts/test-branch! (fn [_ conn]
+      (let [[st db1 _] (caught-up conn)
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            [_ db3 asked] (round conn st db2 12)]
         (is (= ["title: none | text: (defn h [])"] asked))
-        (is (= [] (map first (vector/due db3 "m"))) "and nothing is due after it")))
-    (testing "a backlog larger than a round leaves the proc not caught up: the rest is asked next"
-      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
-            [st2 db3 asked1] (round (assoc st :texts 1) db2 12)
-            [_ _ asked2] (round st2 db3 14)]
+        (is (= [] (map first (vector/due db3 "m"))) "and nothing is due after it")))))
+  (testing "a backlog larger than a round leaves the proc not caught up: the rest is asked next"
+    (ts/test-branch! (fn [_ conn]
+      (let [[st db1 _] (caught-up conn)
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+            [st2 db3 asked1] (round conn (assoc st :texts 1) db2 12)
+            [_ _ asked2] (round conn st2 db3 14)]
         (is (= 1 (count asked1)))
         (is (= 1 (count asked2)) "the other text, from a full scan")
-        (is (not= asked1 asked2))))
-    (testing "a text changed while its round was out is asked again"
-      (let [db2 (d/db-with db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
-            [st o] (vector/vectors-proc st :main {:t 12 :db db2})
+        (is (not= asked1 asked2))))))
+  (testing "a text changed while its round was out is asked again"
+    (ts/test-branch! (fn [_ conn]
+      (let [[st db1 _] (caught-up conn)
+            db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            [st o] (vector/vectors-proc st :main (assoc (note db2) :t 12))
             ask (first (:to-api o))
             x2 (:e (first (d/datoms db2 :avet :form/id "x/2")))
-            changed (d/db-with db2 [[:db/add x2 :form/src "(defn h [] 1)"]])
+            changed (with! conn db2 [[:db/add x2 :form/src "(defn h [] 1)"]])
             [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
             w (first (:to-api o2))
             [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 13}})
-            written (d/db-with changed (get-in w [:req :req :tx-data]))
-            [_ o3] (vector/vectors-proc st :main {:t 14 :db written})]
-        (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts])))))))
+            written (with! conn changed (get-in w [:req :req :tx-data]))
+            [_ o3] (vector/vectors-proc st :main (assoc (note written) :t 14))]
+        (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts]))))))))
 
 (deftest a-failed-embedding-waits-for-the-next-notice
-  (let [db (db-due-only)
-        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
+  (ts/test-branch! (fn [_ conn]
+  (let [db (db-due-only conn)
+        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64 :conn conn}) :main (assoc (note db) :t 10))
         e (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"})
         [st o2] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r e})]
     (is (empty? (:to-api o2)) "nothing is written")
-    (let [[st o4] (vector/vectors-proc st :main {:t 11 :db db})
+    (let [[st o4] (vector/vectors-proc st :main (assoc (note db) :t 11))
           _ (is (seq (:to-api o4)) "the next notice tries again")
           e (contract/error :seon.vector/encode-failed 'seon.vector/embed "llama.cpp's encode answered -2" {:code -2})
           [st _] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o4))) :r e})
-          [_ o5] (vector/vectors-proc st :main {:t 12 :db db})]
-      (is (empty? (:to-api o5)) "texts the model could not encode are set aside: nothing else is due, so nothing is asked"))))
+          [_ o5] (vector/vectors-proc st :main (assoc (note db) :t 12))]
+      (is (empty? (:to-api o5)) "texts the model could not encode are set aside: nothing else is due, so nothing is asked")))))
+)
 
 (deftest a-failed-embedding-is-recorded-and-its-own-commit-asks-nothing
+  (ts/test-branch! (fn [_ conn]
   ;; root code records its own failed effect (seon.error/asked-tx): the :effect row names the vectors'
   ;; :seon.vector/model, closed by the next vectors written; the row's own commit starts no round,
   ;; or an idle main would ask, fail and write for ever
-  (let [db (db-due-only)
-        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64}) :main {:t 10 :db db})
+  (let [db (db-due-only conn)
+        [st o] (vector/vectors-proc (vector/vectors-proc {:model "m" :texts 64 :conn conn}) :main (assoc (note db) :t 10))
         e (assoc (contract/error :seon.vector/model-unopened 'seon.vector/open "no model file" {:path "m.gguf"}) :seon.fx/at-ms 1000)
         [st o2] (vector/vectors-proc st :answers {:tag (:tag (first (:to-api o))) :r e})
         w (first (:to-api o2))
         rows (fn [db] (get-in (seon.problems/report db) [:classes :effect :rows]))
-        db2 (d/db-with db (get-in w [:req :req :tx-data]))]
+        db2 (with! conn db (get-in w [:req :req :tx-data]))]
     (is (= {:op :tx :branch :db} (select-keys (get-in w [:req :req]) [:op :branch])) "the failure is written to main")
     (is (= [[:seon.vector/model-unopened :seon.vector/model]] (map (juxt :type #(get-in % [:example :seon.error/subject])) (rows db2)))
         "as one :effect row naming the vectors' attribute")
-    (let [[st o3] (vector/vectors-proc st :main {:t 11 :db db2})
+    (let [[st o3] (vector/vectors-proc st :main (assoc (note db2) :t 11))
           _ (is (empty? (:to-api o3)) "a notice while the write is out is kept")
           [st o4] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 11}})
           _ (is (empty? (:to-api o4)) "the kept notice is the row's own commit: no round")
-          [st o5] (vector/vectors-proc st :main {:t 11 :db db2})
+          [st o5] (vector/vectors-proc st :main (assoc (note db2) :t 11))
           _ (is (empty? (:to-api o5)) "nor when it arrives after")
-          [_ o6] (vector/vectors-proc st :main {:t 12 :db db2})]
-      (is (= :embed (get-in (first (:to-api o6)) [:req :kind])) "a later commit tries again"))))
+          [_ o6] (vector/vectors-proc st :main (assoc (note db2) :t 12))]
+      (is (= :embed (get-in (first (:to-api o6)) [:req :kind])) "a later commit tries again")))))
+)
+
+(defn- db-value? "Is x a db value (it carries a :max-tx)?" [x] (some? (:max-tx x)))
+
+;; task seon.vector/vectors-clean-is-a-commit: the proc keeps references to main, never db values
+(deftest a-caught-up-round-diffs-from-its-clean-commit
+  (ts/test-branch! (fn [_ conn]
+    (let [[st db1 asked] (caught-up conn)]
+      (is (= 1 (count asked)) "the first round reads the store")
+      (is (= #{:t :commit} (set (keys (:clean st)))) "caught up: :clean is a commit reference, not a db")
+      (is (not-any? db-value? (vals st)) "the state holds no db value")
+      (let [db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"}])
+            [st2 o] (vector/vectors-proc st :main (assoc (note db2) :t 12))
+            ask (first (:to-api o))
+            db3 (with! conn db2 [{:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+            [st3 o3] (vector/vectors-proc st2 :main (assoc (note db3) :t 13))]
+        (is (= ["title: none | text: (defn h [])"] (get-in ask [:req :req :texts]))
+            "the round diffs from the clean commit: only the new text is asked")
+        (is (empty? (:to-api o3)) "a notice during the round is kept")
+        (is (= #{:t :commit} (set (keys (:latest st3)))) "as a reference")
+        (is (not-any? db-value? (vals (:latest st3))))
+        (is (not-any? db-value? (vals st3))))))))
 
 (deftest rrf-fuses-rankings-by-reciprocal-rank
   ;; kept for exploration (owner, 2026-10-24): an item in both rankings beats one high in only one

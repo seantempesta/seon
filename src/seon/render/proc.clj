@@ -731,9 +731,10 @@
   "Root's render proc (see the namespace doc)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:events-mult "the api's events, a mult this proc taps" :graph "a promise of the root graph (unused: nothing is pinged)"
-                :system "a promise of the built system (its declared procs, for the health tile)"}
+                :system "a promise of the built system (its declared procs, for the health tile)"
+                :conn "the store main's commit notices are read from"}
        :ins {:answers "the api's answers" :from-web "views open, page and keyframe requests"
-             :main "main's commits from the writer {:t :ops :db}: each one's datoms find the pages whose reads they touched"}
+             :main "main's commit notices from the writer {:t :prev :ops :commit}, read with d/commit-as-db: each one's datoms find the pages whose reads they touched"}
        :outs {:to-api "requests to the api" :to-web "patches, keyframes, pages, the agents' index"}
        ;; a pass renders what changed; it never waits. :mixed: one thread of its own for
        ;; its life, joined at stop. :compute futurized each pass onto Jolt's cached pool,
@@ -745,7 +746,7 @@
    ;; no beat: a pass happens on an event, an api answer or a tab's request, never on a clock
    (let [events (a/chan (a/sliding-buffer 4096))]
      (a/tap (:events-mult args) events)
-     {:events-ch events :mult (:events-mult args) :system-p (:system args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
+     {:events-ch events :mult (:events-mult args) :system-p (:system args) :conn (:conn args) :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{}
       :new-events [] :events [] :views {} :branches {}
       ::flow/in-ports {:events events}}))
   ([st tr]
@@ -760,7 +761,7 @@
               ;; a commit on main: the pages its datoms touched walk in the pass
               ;; a commit on main (a sliding buffer of one: the newest, its datoms since the main held
               ;; found by their diff, so a lagging proc never parks the writer)
-              :main (pass (advance-main st (:db m)) o)
+              :main (pass (advance-main st (d/commit-as-db (:conn st) (:commit m))) o)
               :answers (let [[st' kind] (step/answered st (:tag m))
                              r (:r m)
                              err (:seon.error/message r)]

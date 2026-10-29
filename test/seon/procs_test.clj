@@ -261,10 +261,33 @@
       (let [[_ outs] (step #'writer/writer-proc st2 :in {:op :clean :dest {:rid 3}})]
         (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
 
+(defn- notice
+  "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}."
+  [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns (profile/now-ns)})
+
+(deftest the-writers-main-notice-holds-no-db
+  ;; task seon.writer/main-notices-carry-a-commit-not-a-db: a queued notice pins its own version of
+  ;; the index (AGENTS section 4), so the notice names the commit and its consumers make the db
+  ;; when they take it
+  (ts/test-branch! (fn [cfg conn]
+    (let [in (a/chan 16)
+          st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+          t0 (:max-tx @conn)
+          _ (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c"}] :dest {:rid 3}})
+          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b"}] :dest {:rid 2}})
+          n (first (:main outs))]
+      (is (= 1 (count (:main outs))) "a group commit is one stored commit: one notice")
+      (is (not-any? #(some? (:max-tx %)) (vals n)) "no db value in the notice")
+      (is (= #{:t :prev :ops :commit :ns} (set (keys n))))
+      (is (= t0 (:prev n)))
+      (is (= (:max-tx @conn) (:t n)))
+      (is (= (d/commit-id @conn) (:commit n)))
+      (is (= (:max-tx @conn) (:max-tx (d/commit-as-db conn (:commit n)))) "the consumer makes the db from it")))))
+
 (deftest reconciler
-  (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}})]
+  (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :conn conn :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
-      (let [[st outs] (step #'reconcile/reconciler-proc st :main {:t 7 :ops [] :db @conn :ns (profile/now-ns)})]
+      (let [[st outs] (step #'reconcile/reconciler-proc st :main (notice conn nil []))]
         (is (= 1 (:seen st)))
         (is (= :main-seen-us (:k (first (:to-api outs)))))
         (is (empty? (:flights st)))))
@@ -283,7 +306,7 @@
     (let [v #'reconcile/reconciler-proc
           ;; a commit touching nothing the reconciler watches (as root's own report is)
           other-commit! #(d/transact conn {:tx-data []})
-          [st0 _] (step v (v {:boot "b" :provider {:kind :scripted :script 'seon.fixtures/reply}}) :main {:ops [] :db @conn :ns (profile/now-ns)})
+          [st0 _] (step v (v {:boot "b" :conn conn :provider {:kind :scripted :script 'seon.fixtures/reply}}) :main (notice conn nil []))
           t (:t st0)
           ;; the writer's answer to the spell's report
           [st _] (step v st0 :answers {:tag (:report st0) :r {:ok true}})]
@@ -301,7 +324,7 @@
       (testing "asked past what it has seen: held until that commit's pass, then answered"
         (let [p (promise) [st2 _] (step v st :judge {:op :quiet :after (inc t) :p p})
               _ (other-commit!)
-              [st3 _] (step v st2 :main {:ops [] :db @conn :ns (profile/now-ns)})
+              [st3 _] (step v st2 :main (notice conn t []))
               ;; the spell goes on, or (main relisted) a new one began: answered once its report is
               [st3 _] (if (:report st3) (step v st3 :answers {:tag (:report st3) :r {:ok true}}) [st3 nil])]
           (is (= 1 (count (:waits st2))) "held while the reconciler has not seen t+1")

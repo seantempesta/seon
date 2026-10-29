@@ -113,7 +113,7 @@
         _ (d/branch! conn b s)
         c (d/connect (assoc cfg :branch s))
         _ (d/transact c {:tx-data [{:form/id "vnew" :form/src "(defn vnew [])"}]})
-        r [(assoc (vector/vectors-proc {:model "m" :texts 64}) :clean (pdb/head conn b)) :main {:t 1 :db (pdb/head conn s)}]]
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn conn}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))}) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
     (d/release c) (d/release bc)
     r))
 
@@ -130,8 +130,12 @@
        ;; a scan of every text read ~790 ticks and 5 KB a text (what-is-due-reads-each-fact-once)
        ;; 2026-10-27: 130k / 263 KB / 12 calls at 100: the written text's title by seeks (seon.vector/title,
        ;; its stored read), two contracted calls more
+       ;; 2026-10-29 (vectors-clean-is-a-commit): the notice and :clean are commits, the proc makes both dbs with
+       ;; d/commit-as-db: 433k ticks / 1.61 MB / 12 calls at 100 (+300k ticks, +1.34 MB, no more contracted calls). The setup
+       ;; here is a cold LMDB read of two commits' index roots (root's cache holds them: the writer has just written the
+       ;; commit), so this is the cost of making a db from a commit, twice, once per round, whatever the store's size
        :per-n {:ticks 70.0 :bytes 150.0}
-       :fixed {:ticks 130000.0 :bytes 250000.0 :calls 12}
+       :fixed {:ticks 430000.0 :bytes 1590000.0 :calls 12}
        :sizes [100 300 1000]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]

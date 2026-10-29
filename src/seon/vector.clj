@@ -307,21 +307,25 @@
 ;; ---- keeping main's vectors current -------------------------------------------------------
 
 (defn- round
-  "At main's db, the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
-  to the :embed effect. When the proc is caught up (:clean, the db at which everything due was asked
-  for), only the texts that db to this one changed are looked at (`written`: the cost of the commit,
+  "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
+  to the :embed effect. When the proc is caught up (:clean, the commit at which everything due was asked
+  for), only the texts that commit to this one changed are looked at (`written`: the cost of the commit,
   not of the store); otherwise, at the first round and after a backlog, a failure or an unwritten
-  answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at db.
+  answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
+  commit. Both dbs are made from their commits here (d/commit-as-db) and let go with the round: the
+  proc keeps references, never db values (AGENTS section 4).
   Answers [st outputs]; nothing due, nothing asked."
-  {:malli/schema [:=> [:cat :map :seon.host/db] [:tuple :map [:vector :map]]]}
-  [st db]
-  (let [clean (:clean st)
-        todo (remove (comp (:unembeddable st) first) (if clean (due db (:model st) (written clean db)) (due db (:model st))))
+  {:malli/schema [:=> [:cat :map :map] [:tuple :map [:vector :map]]]}
+  [st m]
+  (let [db (d/commit-as-db (:conn st) (:commit m))
+        clean (:clean st)
+        todo (remove (comp (:unembeddable st) first)
+                     (if clean (due db (:model st) (written (d/commit-as-db (:conn st) (:commit clean)) db)) (due db (:model st))))
         due (take (:texts st) todo)
-        st (assoc st :clean (when (= (count due) (count todo)) db))]
+        st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
     (if (empty? due)
       [(assoc st :running false) []]
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) db]]
+      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req {:texts (mapv second due)}})]
         [(assoc st :running true) [m]]))))
 
@@ -337,29 +341,30 @@
   those are kept out of later rounds (:unembeddable, shown in its ping), so they never hold back
   the texts due after them."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:model "the model id its vectors are made by (seon.vector/model-id)"
+  ([] {:params {:conn "the store main's commits are read from (d/commit-as-db)"
+                :model "the model id its vectors are made by (seon.vector/model-id)"
                 :texts "the texts one round asks for, :seon.config.vector/texts (0: none, the model never loads)"}
-       :ins {:main "main's commit notice {:t :db}, a sliding buffer of one" :answers "the api's answers"}
+       :ins {:main "main's commit notice {:t :commit}, a sliding buffer of one" :answers "the api's answers"}
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]
          (case in
            :main (if (or (:running st) (< (:t m) (:written-t st)))
-                   [(cond-> st (>= (:t m) (get-in st [:latest :t] -1)) (assoc :latest m)) []]
-                   (round (dissoc st :latest) (:db m)))
+                   [(cond-> st (>= (:t m) (get-in st [:latest :t] -1)) (assoc :latest (select-keys m [:t :commit]))) []]
+                   (round (dissoc st :latest) m))
            :answers (let [[st [step es]] (step/answered st (:tag m)) r (:r m)]
                       (case step
-                        :embedded (let [[es ts db] es]
+                        :embedded (let [[es ts asked] es]
                                     (if (contract/error? r)
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
                                       (let [st (cond-> (assoc st :clean nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
                                             ;; the newest main it holds, so the row's count reads what is stored
-                                            tx (err/asked-tx (or (:db (:latest st)) db) r :seon.vector/model [])]
+                                            tx (err/asked-tx (d/commit-as-db (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
                                         (if (seq tx)
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])
@@ -373,14 +378,14 @@
                                             (contract/error? r) (assoc :clean nil))
                                        l (:latest st)]
                                    (if (and l (>= (:t l) (:written-t st)))
-                                     (round (dissoc st :latest) (:db l))
+                                     (round (dissoc st :latest) l)
                                      [st []]))
                         ;; the failure's own commit starts no round (it would ask again and fail again,
                         ;; on an idle main): the next round reads a commit after it
                         :recorded (let [st (cond-> (assoc st :running false) (not (contract/error? r)) (assoc :written-t (inc (:t r))))
                                         l (:latest st)]
                                     (if (and l (>= (:t l) (:written-t st)))
-                                      (round (dissoc st :latest) (:db l))
+                                      (round (dissoc st :latest) l)
                                       [st []]))
                         [st []])))]
      [st (if (seq outs) {:to-api outs} {})])))
