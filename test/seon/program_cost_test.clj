@@ -303,6 +303,55 @@
      :fixed {:ticks 350000 :bytes 4000000 :calls 19}
      :sizes [100 300 1000 10000]}))
 
+(defn indexed-top
+  "reach-indexed's and reach-update's arguments: the graph of a branch holding n forms (app.pc/f0..fn-1, each
+  calling the one before) and a test for every tenth of them and for the last (app.pc-test/t<i> calls f<i>),
+  holding its index (reach-indexed), and that branch with the last form redefined: the one test that
+  calls it is what moved. [indexed-graph db'] and, as `moved-top`, [updated-graph inputs]."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
+  [n]
+  (let [[db] (branch-of n)
+        test-acct (fn [i] {:id (str "app.pc-test/t" i) :src (str "(deftest t" i " (f" i " 1))") :ns 'app.pc-test :ns-form? false
+                           :defs [{:var (symbol "app.pc-test" (str "t" i)) :kind :test}] :declares #{} :methods [] :impls []
+                           :refs #{(symbol "app.pc" (str "f" i))} :requires #{} :banned #{} :inline-defs #{}})
+        db (d/db-with db (vec (mapcat (fn [i k] (program/account-tx db (test-acct i) (+ n k))) (conj (vec (range 0 n 10)) (dec n)) (range))))
+        g (program/reach-indexed (program/reach-graph db nil) {:env "e" :tree "t" :config {}})]
+    [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
+
+(defn moved-top
+  "reach-indexed's arguments: indexed-top's graph updated to its changed branch (reach-update), and the inputs."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [[g db] (indexed-top n)] [(program/reach-update g db) {:env "e" :tree "t" :config {}}]))
+
+(deftest an-update-holding-an-index-costs-what-moved
+  ;; task seon.agent/an-agents-reach-index-is-incremental: a graph holding its index drops the answers a change can move
+  ;; (its test, here) in the update itself: the scans are the update's, the invalidation is the change's
+  (cost/proof
+    {:of 'seon.program/reach-update :input 'seon.program-cost-test/indexed-top
+     :n "forms the graph already holds (and a test for every tenth, whose index it holds)"
+     :work (str "reach-update's own (four index scans of the forms, the changed form and what reaches it re-folded) and "
+                "the held index's: the answers of the tests of the forms re-folded (here one), and of the namespaces "
+                "whose plain forms moved (none), dropped and named :stale: no walk of the tests or the answers")
+     :growth :linear
+     :per-n {:ticks 850 :bytes 5000 :calls 0}
+     ;; measured: 414k ticks / 2.30 MB at 100, 1.11M / 6.72 MB at 1,000 (the same as with no index held: its part is nothing)
+     :fixed {:ticks 350000 :bytes 2000000 :calls 24}
+     :sizes [100 300 1000 10000]}))
+
+(deftest an-index-is-recomputed-for-what-moved-only
+  (cost/proof
+    {:of 'seon.program/reach-indexed :input 'seon.program-cost-test/moved-top
+     :n "forms the graph holds (and a test for every tenth)"
+     :work (str "the answers of the one stale test (its starting components' digests, the config lines of its inputs, "
+                "one digest) and the answers held kept: constant in the program, where graph-index answered every test "
+                "(Seon's program, 4,698 forms and 1,130 tests, 170 config keys: 18.8M ticks, 134 MB a call)")
+     :growth :constant
+     :per-n {}
+     ;; measured: 2.3k ticks / 15.7 KB at 100, 2.4k / 16.3 KB at 1,000
+     :fixed {:ticks 3000 :bytes 20000 :calls 3}
+     :sizes [100 300 1000 10000]}))
+
 (defn- calls-form
   "A defn of m whose body is n steps, each (assoc m :k<i> (str \"s<i>\" (:name m))): a
   program's usual mix of locals, var calls, keywords and strings; every tenth step also names
