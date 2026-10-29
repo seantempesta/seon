@@ -963,6 +963,46 @@
              "so the agent's divergence carries none of main's changes")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
+(deftest an-agent-keeps-no-db-older-than-its-branchs-current
+  ;; docs/machine.md#roots-heap, a kept db value is a reference: after a run of its own commits, a
+  ;; read of what they changed, its test plan's graph and a merge of main, the agent's state holds
+  ;; its branch's current db and nothing older but the two main points it is judged by (:base, the
+  ;; merge base, and :main, as last heard: seon.turn, seon.render.ui and my.branch read them as
+  ;; dbs, so they stay values until those readers take a commit: reported with this change). A
+  ;; graph, a diff and the last transaction are keyed by a point or let go (seon.db/point). In this
+  ;; process, on a branch of the test store, with a socketpair standing for root.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-refs)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state
+           note (fn [i] (agent/transact! [{:note/text (str "n" i)}]))
+           stale #(for [[path t] (ts/stale-dbs (apply dissoc @agent/state %) (:max-tx (agent/db)))] [path t])]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
+         (let [[_ in] (agent/test-inputs (agent/db))]
+           (doseq [i (range 4)]
+             (note i)
+             (agent/branch-changes (:base @agent/state) (agent/db))
+             (agent/branch-graph (agent/db) (:base @agent/state) in))
+           (is (= [] (stale [:base :main])) "after commits of its own")
+           ;; main redefines app.m0/f1: a program change, which a merge of main brings in
+           (let [[v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+             (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]]))
+           (agent/heard-main)
+           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+           (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
+           (note 5)
+           (agent/branch-changes (:base @agent/state) (agent/db))
+           (agent/branch-graph (agent/db) (:base @agent/state) in)
+           (is (= [] (stale [:base :main])) "and after more of its own"))
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
 (deftest merge-main-brings-the-task-content-main-carried
   ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
   ;; brought only the program, so the task content main had carried since the fork (another

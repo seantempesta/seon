@@ -552,12 +552,16 @@
 
 (defn- drop-view
   "St without view v (no tab watches it, nothing waits on it): its page, its reads in :read-index,
-  its branch read, its rows and opens."
+  its branch read (and the branch's db, when no other view shows that branch: a db kept for a page
+  nobody has open is a version of the index pinned for nothing, docs/machine.md#roots-heap), its
+  rows and opens."
   {:malli/schema [:=> [:cat :map :any] :map]}
   [st v]
-  (-> (reindex st v (get-in st [:views v :reads]) #{})
-      (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
-      (update :dirty #(disj (or % #{}) v))))
+  (let [b (get-in st [:branches v :branch])
+        st (-> (reindex st v (get-in st [:views v :reads]) #{})
+               (update :views dissoc v) (update :branches dissoc v) (update :shown dissoc v) (update :open dissoc v)
+               (update :dirty #(disj (or % #{}) v)))]
+    (cond-> st (and b (not-any? #(= b (:branch %)) (vals (:branches st)))) (update :branch-reads dissoc b))))
 
 (defn- index-of
   "What the web proc needs to turn a UI call into root's request: each agent's pid, branch
@@ -734,7 +738,10 @@
           err? (seon.contract/error? r)
           ;; what moved on the branch: the datoms either db holds alone (O(changed))
           moved (when (and held (not err?)) (apply concat (d/datoms-diff held (:db r) :eavt [])))
-          st (assoc-in st [:branch-reads b] (cond-> {:at asking} err? (assoc :error r) (not err?) (assoc :db (:db r))))
+          ;; an answer for a branch no view shows any more (its page was dropped while it was asked) is let go
+          st (if (some #(= b (:branch %)) (vals (:branches st)))
+               (assoc-in st [:branch-reads b] (cond-> {:at asking} err? (assoc :error r) (not err?) (assoc :db (:db r))))
+               (update st :branch-reads dissoc b))
           st (reduce #(take-read %1 %2 b) st (filter #(= b (get-in st [:branches % :branch])) (keys (:branches st))))]
       (pass (cond-> st (seq moved) (update :dirty (fnil into #{}) (touched st moved))) o))
     :else st))

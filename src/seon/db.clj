@@ -424,6 +424,15 @@
   [conn main branch]
   (d/commit-as-db conn (d/merge-base conn branch main)))
 
+(defn point
+  "Where db is, as data: [its commit's id, its max-tx]. What a process keeps of an older db it
+  derived something from (a graph, a diff), in place of the db, which pins its own version of the
+  index; the thing derived is a cache keyed by the point, and the db is made again with at-commit
+  when it must be read. Two values of one commit differ by their t (a run-ahead branch is ahead of
+  its last commit). See docs/machine.md#roots-heap."
+  {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :uuid] :int]]}
+  [db] [(d/commit-id db) (:max-tx db)])
+
 (defn at-commit
   "The db of commit cid on conn's store: conn's own head when cid is the commit it holds (already
   in memory, no store read), else made from the store (datahike.api/commit-as-db). What a reader
