@@ -406,15 +406,17 @@
 (deftest a-prove-never-ends-the-agent-it-proves
   ;; THE PLAN 0.7 (root, 2026-10-27): after seon_prove, the outside agent had ended ("agent a7
   ;; ended"), so my.task/fail! and seon_done recorded nothing ("a7 works no task"). An outside agent
-  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run
+  ;; lives until seon_done or an explicit end: a prove of its branch, then its REPL and its run.
+  ;; Each prove names one small namespace: an unnamed one proved all of main inside this test (568 s
+  ;; alone, 2026-10-30, and its shard's root stopped under it); the agent's life is what is proved here
   (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
         [ctx proved after live1 main-proved after2 live2 failed]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
-                        {:op :prove :agent agent}
+                        {:op :prove :agent agent :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
-                        {:op :prove}
+                        {:op :prove :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
                         "(my.task/fail! \"cannot\")"]))]
