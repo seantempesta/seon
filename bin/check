@@ -60,8 +60,9 @@ export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 # idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
 # full run and a single mode alike
 IDLE_WEB_PORT=$((20000 + $$ % 20000))
-# agents' turns are the scripted provider's (a test fixture; a root with no profile has no model provider)
-export SEON_PROFILE=${SEON_PROFILE:-scripted}
+# agents' turns are the scripted provider's (a test fixture; a root with no profile has no model
+# provider): every process of the binary below is given --profile scripted on its command line
+# (seon.config reads it there; no environment variable selects a profile)
 # a step's root embeds no text (:seon.config.vector/texts 0), but the vectors step's (run-embedding, and
 # bin/check vectors alone): none other searches, and each would load the 0.9 GB model (docs/vector.md)
 [[ ${1:-} == vectors ]] || export SEON_EMBED_TEXTS=${SEON_EMBED_TEXTS:-0}
@@ -97,7 +98,7 @@ export SEON_STARTER_FIFO=$STARTER
 trap 'rm -f "$STARTER"; rm -rf "$CHECK_RESULTS"' EXIT
 trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
-run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" 2>&1 7>&- 3>&-) }
+run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-) }
 run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
@@ -220,13 +221,13 @@ u-smoke() { echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " r
 u-robust() { echo "== robust"; step robust "" run robust }
 # no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
 # web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
-u-lifecycle() { echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10" }
+u-lifecycle() { echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10 --profile scripted" }
 u-backpressure() { echo "== backpressure"; step backpressure "" run backpressure 8 }
 u-hotreload() { echo "== hotreload"; step hotreload "" run hotreload }
 u-drain() { echo "== drain"; step drain "" run drain 8 }
 u-idle() {
   echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
-  step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 2000"
+  step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 2000 --profile scripted"
 }
 u-orphan() {
   want orphan || return 0
@@ -236,7 +237,7 @@ u-orphan() {
   # which each inherits): the orphans' end is the event this waits on, not a count of seconds. An
   # orphan that never ends holds this step open: no clock calls it dead, so that verdict is the
   # harness's (docs/failure-points.md)
-  (cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan 7>&- 3>&-) > "$OUT/orphan.log" 2>&1
+  (cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan --profile scripted 7>&- 3>&-) > "$OUT/orphan.log" 2>&1
   (( $? == 0 )) || { echo "FAILED orphan (no test child)"; failed "orphan (no test child, $OUT/orphan.log)"; return 0 }
   PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
   # every process of the tree has ended by now (the drain above); any pid still alive is a survivor

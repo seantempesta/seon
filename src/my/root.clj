@@ -452,6 +452,7 @@
                       [:seon.config.source/branch (config/value :seon.config.source/branch)]
                       [:seon.config.source/generations-dir (config/value :seon.config.source/generations-dir)]]
                source-root (conj [:seon.config.source/root source-root])))
+       (into ["--profile" (name (config/value :seon.config.root/profile))])
        (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))
 
 (defn build!

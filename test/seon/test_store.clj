@@ -4,7 +4,7 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [hasch.core :as hasch]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.config :as config] [hasch.core :as hasch]))
 
 (def ^:private store
   "The test store's config, made and seeded with about 2,000 datoms on first use."
@@ -210,7 +210,8 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (-> ["--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
+  (root-sh root "start" (-> ["--profile" (name (config/profile)) ; this process's own profile (--profile scripted under bin/test): a root's agents answer as the test's do
+                             "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
                              ;; its verdict cache is its own too, so no verdict an earlier test run cached is
                              ;; reused (the store's results were per main; the cache outlives a run)
                              "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))]
