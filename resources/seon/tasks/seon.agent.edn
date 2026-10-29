@@ -107,4 +107,29 @@
  {:seon.task/name "a-spawns-start-costs-the-same-on-a-bigger-program"
   :seon.task/plan "Red on main before the 2026-10-28 batch and taken out of seon.agent-test then (the owner's rule: a red of unknown cause the batch did not make leaves its test, named here): an agent spawned after main gained 200 forms has a :state phase of 616,608 bytes against 460,304 before, over the bound 1.1x + 64 KiB. A spawn's own work must not grow with main's program (the owner, 2026-10-25). Find what the :state phase reads or builds per form (seon.agent/spawn-phases; the ctx record's pull, the reach graph or index handed at fork, the branch views), fix it at the cause, and restore the deftest from git (it is a-spawns-start-costs-the-same-on-a-bigger-program in test/seon/agent_test.clj at 139bbb75ff)."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-agent-is-the-unit-not-the-run"
+  :seon.task/plan "The owner, 2026-10-29: \"get rid of runs, the concept doesn't really exist and is just X amount of forms being evaluated ... An agent is just writing evals ... an attribute for the turn limit and extend the turn limit to extend a run ... by default show everything: get rid of the limits for evals and turns; messages at the newest 100 is fine\"; then \"Do it\".
+
+What exists: a run (:seon.run/run-fact, ~280 src and ~200 test references; seon.reconcile 138, seon.task 72, seon.problems 40) is the reconciler's unit of work. It holds four kinds of data: lifecycle (status, outcome, reason, start-ms, end-ms, error, taken, holder, boot), the judge's verdict (results, deferred, deferred-results, conflicts, unmerged, changed, uncontracted, caused, behind, gate-unread, failures, costs, task-conflicts, commit, commit-error, merged-t, basis-t, plan), identity (id, task, agent, branch, env, model) and the turn budget (max-turns, turns, tokens, model-calls, waste). Turns (:seon.turn/run) and messages (:seon.message/to) point at a run; the agent's pull pattern (:seon.db/agent-fact's :seon.ctx/pattern) reaches its task through [:seon.run/_agent :as :runs], windowed by :seon.config.ctx/window (100) on runs, evals, turns and catch-ups. seon.render.ui/render-ctx and chat-ctx find the task through the-run and held-task.
+
+Where each part goes:
+- lifecycle on the agent (:seon.agent/status exists; its last end as :seon.agent/outcome and :seon.agent/reason; start and end are its first and last turn);
+- the verdict on the task, as facts keyed by the commit it judged (with seon.proofs/test-results-are-a-few-facts);
+- identity deleted (the agent holds its key, branch and task: a new ref :seon.agent/task);
+- the budget as :seon.agent/max-turns, raised to extend the agent; turns, tokens and model calls derived from its turns; waste derived or deleted.
+
+Cut 1, the agent is the unit for the context and the page (the reconciler unchanged):
+1. Schema (resources/seon/schemas/seon.facts.edn): :seon.agent/task (ref to the task), :seon.agent/max-turns, :seon.turn/agent (ref to the agent); messages joined to the agent (:seon.message/agent, written beside :seon.message/to by seon.task/message-tx's taker, the turn that takes it).
+2. The agent's pattern: [* {:seon.agent/task :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :limit :seon.config.ctx/window :reverse true] [*]}]: no window on turns and evals; runs and catch-ups out of the pull (catch-ups stay facts on the branch; their one reader is the pull).
+3. seon.agent/begin-run! writes :seon.agent/task; seon.turn writes :seon.turn/agent on every turn (beside :seon.turn/run, which the reconciler still reads), and work! reads its budget from :seon.agent/max-turns when set.
+4. seon.render.ui: the-run and held-task replaced by (:task c) and (:turns c) in render-ctx, chat-ctx, conversation, status and run-head.
+5. seon.context/records and turn-pages query by the agent (:seon.turn/agent, :seon.message/agent), not through :seon.run/agent.
+
+Cut 2, the reconciler schedules agents: seon.reconcile/actions, advance and classify read :seon.agent/status and the task; judge-tx and verdict-body write the verdict on the task by commit; seon.task/run-start-tx, run-value, runs and end-members become the agent's spawn facts; seon.problems/run-rows becomes agent and task rows; my.root and seon.server list agents; a message is to a task's agent (or the task, before one exists); turn ids become <agent-key>/<n>, n counting on across wakes. The owner's choices (2026-10-29): a message is addressed to the agent, whose entity root writes on main when it decides to work a task, before the process forks; the verdict is on the task, one fact per branch commit judged, read one hop out from the agent; an agent at its turn limit, extended (:seon.agent/max-turns raised) or woken by a message, goes on as the same agent entity, branch and conversation, its turns counting on (a dead process's successor takes up the same entity). Planned in detail after cut 1 merges, with the owner.
+
+Cut 3: :seon.run/* and :seon.config.ctx/window on turns and evals deleted from the schemas, docs/ctx.md, docs/render.md and the help. The standing store is erased when cut 3 merges (the owner, 2026-10-29: erase when cut 3 merges, asked once more then; AGENTS 9).
+
+Replaces: the run entity, its pattern join and the window on an agent's own record. Deletes, at cut 3: :seon.run/run-fact and its ~280 src references."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ctx-test/an-agents-record-holds-its-task-and-every-turn-and-eval}}]

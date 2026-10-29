@@ -176,4 +176,19 @@ No part needs a paid run (step 6 measures). New attributes: none."
  {:seon.task/name "a-render-reaches-no-process-after-a-repl-redefinition"
   :seon.task/plan "Reproduction (root's end-to-end reuse measurement, 2026-10-27, .worktrees/reuse-end-to-end's root at main 6b34178937): attach an outside agent to any task; evaluate in it, in one eval, `(in-ns 'seon.merge)`, seon.merge/divergence's shipped defn with its local `x` renamed `name`, and `(in-ns 'user)` (answered :recorded [seon.merge/divergence]); then `(my.agent/prove)` selects the 8 automatic tests reaching seon.merge/divergence and seon.render-test/a-render-reaches-no-process is red among them (pass 26, fail 1). A second agent on another branch with the same change reuses that red. Not reproduced by recording the same form into a program db (seon.program-test/record over test-runner/program-db of the same tree): there the renders' :process? stays false, so the cause is not the recorded form's reach but what the agent's (src-program) holds: the agent's own branch program, which graph-index reads in the test child. Correct: a render reaches no process on any branch an agent works. Owner: seon.render-test (whose src-program the agent's program feeds); first find which reached form of the agent's program uses a process var (seon.program/process-path over its graph)."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.render-test/a-render-reaches-no-process}}]
+  :seon.task/proofs #{seon.render-test/a-render-reaches-no-process}}
+ {:seon.task/name "a-value-is-rendered-by-the-newest-render-of-its-schema"
+  :seon.task/plan "The owner, 2026-10-29: \"automatic per eval result auto rendering and to override by just writing a function that renders that. A render function is just a function that takes in the data we need to render and optional args we can auto inject like the current db or even the current ctx if they define the inputs and returns hiccup (seon.render/html) ... just a query which gets the default and any other render functions and sorts them by newest first\"; \"if we don't know what something is we return a warning/error so the agents are encouraged to fix it and we only auto render things we know what they are and have specified render functions\".
+
+What exists: seon.render/render-of selects a render by the value's own :seon.render/html, then the one its schema declares (:seon.render/html on the schema entry, seon.render/declared), then the printer; seon.render/reads fills :seon.ctx/ctx and :seon.db/db when a render's opts contract names them; the program db holds each var's contract (:var/contract). A schema's declared render is global: an agent re-pointing it changes everyone's view at merge.
+
+Correct:
+1. A render is any function whose contract is [:=> [:cat opts K] :seon.render/html] for a named schema K; its opts contract names what it is injected (:seon.ctx/ctx, :seon.db/db).
+2. A value's renders are one query over the db's :var/contract: the functions taking K, newest first by the transaction of their contract; the first is used. The schema's declared render is the oldest candidate, the default. The answer is a cache keyed by the db's t (AGENTS 5).
+3. What a value is: a ctx key is its schema; an entity its identity attribute's schema; an eval's value the named return schema of its outermost call (after macroexpansion) when that is a program var.
+4. Unknown: printed by the one printer, never guessed (no validation against candidates). When the outermost call is a program var whose return schema is generic (:any, :map), the answer carries a warning naming the var and the fix (name its return schema); code that is not the program's (clojure.core, interop, a literal) is printed with no warning, since there is nothing in the program to fix.
+5. Each eval whose value has a render is drawn as a tile beside the conversation (render-ctx's p-tiles today).
+
+Replaces: the schema-declared render as the only way to choose one. Scoping: a render the agent defines wins on its branch at once; merged, it is the newest on main."
+  :seon.task/kind :design
+  :seon.task/proofs #{}}]

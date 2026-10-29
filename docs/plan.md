@@ -19,7 +19,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Where it stands (2026-10-29)
 
-The eval protocol is settled and merged: a call is prose and one form, its answer Clojure's value as data with timing and work, a top-level `do` unrolled as Clojure does, the whole conversation sent ([prompt](prompt.md), DECISIONS 2026-10-28). Since then the work has been the machine: what Seon costs on an ordinary MacBook, and what crashes or hangs.
+The eval protocol is settled and merged: a call is prose and a form (several forms answer `:forms` and each one's value, DECISIONS 2026-10-29), its answer Clojure's value as data with timing and work, a top-level `do` unrolled as Clojure does, the whole conversation sent ([prompt](prompt.md), DECISIONS 2026-10-28). Since then the work has been the machine: what Seon costs on an ordinary MacBook, and what crashes or hangs.
 
 **Memory, measured.** An idle root on a resumed store went 1,438 to 1,106 MB, and its fork server 438 to 381 MB (the fork server preloads main, root returns free pages past 10%, the node cache weighs what it retains); `e2e calc` 927 to ~836 MB. Ten agents working at once (`bin/check swarm`, scripted, a scratch store) peaked at 2.4 GB: root 845 MB, fork server 124 MB, each agent ~140 MB. On the standing store root is ~2.0 GB once it has embedded (the embedding model alone is 380-500 MB) and the fork server 670 MB, so ten agents are ~4.1 GB today. Of root's static 740 MB boot image, 213 MB is Chez's expanded source for every procedure (measured; dropping it keeps every frame's file:line) ([machine](machine.md#roots-heap)).
 
