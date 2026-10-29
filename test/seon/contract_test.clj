@@ -108,7 +108,7 @@
     ;; md-scan #18: refused at [:seon.ref/blocks 0 :seon.ref/text-from], the block that lacked the key was never seen
     (is (clojure.string/includes? (str msg) "in {:from 0, :to nil}") (str "and the map that holds it: " msg)))
   (let [f (contract/wrap 'x.c/blocks (contract/schema [:=> [:cat] [:map [:blocks [:vector [:map [:kind :keyword] [:text-from :int]]]]]])
-                         (fn [] {:blocks [{:kind :para} {:kind :fence}]}))
+                         (fn [] {:blocks [{:kind :para} {:kind :code}]}))
         msg (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
     (is (clojure.string/includes? (str msg) "at [:blocks 0 :text-from]") msg)
     (is (clojure.string/includes? (str msg) "in {:kind :para}") (str "a missing key: the map without it: " msg))))
