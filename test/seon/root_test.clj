@@ -261,7 +261,7 @@
   ;; test running start-root!, or the last --started-by its arguments name. A store of this test's
   ;; own, as a-second-boot-resumes-the-same-main's (root-answers names its fifo and log after the
   ;; store); removed at the end.
-  (let [path (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid))
+  (let [path (ts/clone-process-store! (str (.getCanonicalPath (java.io.File. ".")) "/target/runs/root-test-ends-" (random-uuid)))
         ev (fn [code] {:op :eval :agent "root" :code code})
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))
         by (ev "(:started-by (seon.task/root @(:conn sys)))")

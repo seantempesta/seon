@@ -369,20 +369,51 @@
     st))
 
 (defn- health!
-  "St with main's health (the report the problems tile draws) in root's walk, beside root's process:
-  the held one changed by the datoms that moved between the main held and db (seon.problems/health-moved,
-  which reads the runs and sections they touched and not the closed history), or read whole when none is
-  held. When no class changed, the held report stays and nothing is framed."
-  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db] :seon.host/db [:maybe [:sequential :any]]] :map]}
-  [st held db moved]
+  "St with main's health (the report the problems tile draws) in root's walk, beside root's process, as
+  of the main it holds: derived data, read only when a reader is there (a tab, a waiting page, a
+  `:context` request: `pass`, `with-context`), never per commit. It is kept with the point of the
+  main it was read at (:health-at, `seon.db/point`, never a db: a kept db pins its version of the
+  index); it is changed by the datoms that moved between that main (made again with
+  `seon.db/at-commit`) and this one (`seon.problems/health-moved`, which reads the runs and sections
+  they touched and not the closed history, however many commits the gap holds), or read whole when
+  none is held or the held one was read from a db ahead of its commit. When no class changed, the held report stays and nothing is framed.
+  See docs/render.md#health-is-what-flows."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
   (if-let [{:keys [w a]} (:root-walk st)]
-    (let [prev (:health @a)
-          h (if (and prev held moved) (problems/health-moved prev held db moved) (problems/health db))]
-      (if (= (:classes h) (:classes prev))
+    (let [db (:main-db st) pt (seon.db/point db) from (:health-at st) prev (:health @a)]
+      (if (= pt from)
         st
-        (do (reset! a (assoc @a :health h))
-            (render/frame! w nil)
-            (update st :dirty (fnil conj #{}) :root))))
+        (let [base (when (and prev from) (seon.db/at-commit (:conn st) (first from)))
+              ;; the commit's own value, as the held health was read from it; a db ahead of its commit is read whole
+              h (if (and base (= (:max-tx base) (second from)))
+                  (problems/health-moved prev base db (apply concat (d/datoms-diff base db :eavt [])))
+                  (problems/health db))
+              st (assoc st :health-at pt)]
+          (if (= (:classes h) (:classes prev))
+            st
+            (do (reset! a (assoc @a :health h))
+                (render/frame! w nil)
+                (update st :dirty (fnil conj #{}) :root))))))
+    st))
+
+(defn- with-context
+  "St with root's context (what root reads: the render of its ctx, each component's hiccup by its id,
+  printed once at root's context budget, what is wrong first: its tiles, its evals, its head, its
+  agents) current for root's walk as of main's t. Derived data, kept as :context under :context-key
+  (the walk's value and main's t) and printed again only when either moved: the one print serves
+  every reader (root's debug page, the :context request), and a pass nobody reads it in costs
+  nothing (docs/render.md#the-page)."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (if-let [{:keys [w a]} (:root-walk st)]
+    (let [v @a t (:max-tx (:main-db st)) k (:context-key st)]
+      (if (and k (identical? v (k 0)) (= t (k 1)))
+        st
+        (let [r (print/print-value (apply array-map (mapcat identity (render/placed-hiccup w ["#p-tiles" "#c-rows" "#p-head" "#c-side"])))
+                                   {:budget (config/value :seon.config.render/root-context-budget)})
+              ctx (or (:text r) (:seon.error/message r))]
+          (assoc st :context {:text ctx :tokens (select/estimate ctx)} :context-key [v t]))))
     st))
 
 (defn- root-page
@@ -483,7 +514,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (-> (root-walk (main-info st db moved) db held) (health! held db moved))
+        (cond-> (root-walk (main-info st db moved) db held)
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- pass-view
@@ -585,15 +616,11 @@
                                 :ev-seq (+ seq0 (count evs)))
                true (assoc :new-events []))
           st (process! st (process-value st))
-          ;; what root reads: its page, the render of its ctx, each component's hiccup by its id (as an
-          ;; agent's screen is its page), printed once at root's context budget, what is wrong first
-          ;; (its tiles: its process, main's problems and runs), then its evals, its head, its agents
-          ctx (when-let [w (:w (:root-walk st))]
-                (let [r (print/print-value (apply array-map (mapcat identity (render/placed-hiccup w ["#p-tiles" "#c-rows" "#p-head" "#c-side"])))
-                                           {:budget (config/value :seon.config.render/root-context-budget)})]
-                  (or (:text r) (:seon.error/message r))))
-          st (assoc st :context (when ctx {:text ctx :tokens (select/estimate ctx)}))
           views (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))
+          ;; what root reads (its context) is printed only for a page that shows it ([:debug :root]) or
+          ;; when asked (:context, below): a pass nobody reads it in prints nothing
+          st (cond-> st (seq views) health!)
+          st (cond-> st (contains? views [:debug :root]) with-context)
           st (assoc (ask-parts st o) :last-walked [])
           [st patches] (reduce (fn [[st ps] v]
                                  (let [[st p] (view-pass st o v)]
@@ -803,7 +830,7 @@
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
-                          :context (do (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
+                          :context (let [st (-> st health! with-context)] (step/out! o :to-web {:op :text :k (:k m) :text (get-in st [:context :text] "")}) st)
                           ;; the end of a view's list scrolled into view: the next rows are rendered
                           :more (if (contains? (:watch st) (:view m)) (pass (update-in st [:shown (:view m)] (fnil + (history-cap)) (history-cap)) o) st)
                           ;; a row's <details> opened or closed: its whole content is rendered while it is open

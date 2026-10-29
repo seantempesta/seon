@@ -513,23 +513,28 @@
   measured carrying :fns, what each contracted function it called cost (seon.profile/touched).
   Each measure opens its own epoch of contracted calls (seon.profile/begin!), so a caller's epoch
   open around an in-process run counts from the last test on (bin/test's shards open none)."
-  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] :seon.host/fn] :nil]}
-  [n vars ticks done]
+  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]] :seon.host/fn] :nil]}
+  [n vars ticks budgets done]
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
+        ;; a test's own budget: its history's (budgets, seon.fx/test-budgets), raised to the
+        ;; ^{:seon.test/ticks n} on its deftest (in its digest, being its source), never past ticks
+        budget (fn [v] (when ticks (min ticks (max (get budgets (test-symbol (str v)) ticks) (or (:seon.test/ticks (meta v)) 0)))))
         one (fn [v]
-              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) ticks)
+              (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    (catch Throwable e
                      (if-let [spent (:jolt/ticks-spent (ex-data e))]
-                       (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget ticks
-                                     :message (str "the test spent its budget of " ticks " engine ticks (work done, not time): a test that never ends, or more work than one test may do")})
+                       (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget (budget v)
+                                     :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): max(floor, factor x its median green ticks) capped by the config's test-ticks "
+                                                   "(docs/merging.md#a-tests-tick-budget). A test that never ends, or more work than one test may do: fix the loop, or, for work it needs, "
+                                                   "mark the deftest ^{:seon.test/ticks N}")})
                        (throw e)))))
         ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
-        measured (fn [v] (let [m (volatile! nil)] (profile/measure! #(one v) #(vreset! m %)) (done v (assoc @m :fns (profile/touched)))))
+        measured (fn [v] (let [m (volatile! nil)] (profile/measure! #(one v) #(vreset! m %)) (done v (assoc @m :fns (profile/touched) :budget (budget v)))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
                (fn [] (doseq [v vars :when (:test (meta v))] (each (fn [] (measured v))))))]
     (if ticks
-      (jolt.host/run-interruptible (jolt.host/make-interrupt) body (* ticks (inc (count vars))))
+      (jolt.host/run-interruptible (jolt.host/make-interrupt) body (+ ticks (reduce + (map budget vars))))
       (body))
     nil))
 
@@ -542,9 +547,11 @@
   :ns n} for a red namespace's clojure.test output. It only runs: its caller caches the verdicts
   (seon.fx/write-verdicts!). Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result (:unreported true: no verdict of its own, never
-  stored) and an :error report carrying that throw's message and data. Each test runs within ticks engine ticks of work of its own (Jolt's
-  run-interruptible; nil or 0: unbounded), so a test's verdict is a function of the test alone,
-  never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
+  stored) and an :error report carrying that throw's message and data. Each test runs within its budget of engine ticks of work of its own (Jolt's
+  run-interruptible): the one from budgets ({test ticks}, seon.fx/test-budgets: from the test's own
+  green history, docs/merging.md#a-tests-tick-budget) else ticks, and never more than ticks (nil or 0:
+  unbounded). The budget used is on the result (:budget). A test's verdict is a function of the test
+  alone, never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
   the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
   and the run goes on to the next (test-vars, which bounds a namespace's fixtures too: a throw
   that ends a namespace, its budget's included, makes its unreported tests :error). Each result
@@ -554,15 +561,18 @@
   {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn]
                              [:map-of :qualified-symbol :map]]
                   [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
+                   [:map-of :qualified-symbol :map]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]
                    [:map-of :qualified-symbol :map]]]}
-  ([tests digests note!] (run-tests! tests digests note! nil))
-  ([tests digests note! ticks]
+  ([tests digests note!] (run-tests! tests digests note! nil nil))
+  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil))
+  ([tests digests note! ticks budgets]
   (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
                          done! (fn [tv m] (let [v (test-symbol (str tv))
                                                 r (assoc (merge {:pass 0 :fail 0 :error 0} (@counts v)) :test v :digest (digests v)
-                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m))]
+                                                         :ms (quot (:wall-ns m) 1000000) :ticks (:ticks m) :bytes (:bytes m) :fns (:fns m) :budget (:budget m))]
                                             (vswap! ran assoc v r)
                                             (note! r)))
                          thrown (binding [t/*test-out* out
@@ -578,7 +588,7 @@
                                                                                   (note! {:seon.test/report m :test v}))
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
-                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks done!) nil
+                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks budgets done!) nil
                                        (catch Throwable e e)))
                          unreported (for [tst ts :when (not (@ran tst))]
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))

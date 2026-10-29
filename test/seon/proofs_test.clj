@@ -295,6 +295,23 @@
     (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
+(deftest a-tests-budget-is-its-own-and-its-mark-raises-it
+  ;; 2026-10-29: a runaway test ends within its own history's budget, typed and naming it; a test marked
+  ;; ^{:seon.test/ticks n} may run n (never over the cap); the budget used is on its result
+  (record (ts/test-db) 'user "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))"
+          'app.pv-own-budget-test "(deftest spins (loop [] (recur)))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 3000000} marked (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 999999999999} marked-over-the-cap (loop [] (recur)))")
+  (let [notes (atom [])
+        ts '[app.pv-own-budget-test/spins app.pv-own-budget-test/marked app.pv-own-budget-test/marked-over-the-cap]
+        ran (proofs/run-tests! ts {} #(swap! notes conj %) 50000000 (zipmap ts (repeat 200000)))]
+    (is (= 200000 (:budget (ran 'app.pv-own-budget-test/spins))) "the budget it ran under, from its history")
+    (is (= 1 (:error (ran 'app.pv-own-budget-test/spins))) "past it: red, named")
+    (is (< (:ticks (ran 'app.pv-own-budget-test/spins)) 2000000) "after about its budget's work, not the cap's")
+    (is (proofs/green? (ran 'app.pv-own-budget-test/marked)) "a marked test runs past its history's budget")
+    (is (= 3000000 (:budget (ran 'app.pv-own-budget-test/marked))))
+    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/marked-over-the-cap))) "and never past the cap")))
+
 (deftest shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
   ;; into it; by each test's last measured ms they end together

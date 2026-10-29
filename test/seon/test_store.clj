@@ -55,6 +55,16 @@
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
            path)))
 
+(defn kept-program-store
+  "The path of the plan's program store (:seon.config.proofs/program-store, keyed by kept-program-digest): the
+  one bin/test's plan imported the checkout's tree into before any shard started, so a test that reads the
+  checkout's own program (test-runner/program-db of the working directory) reads that tree's branch and
+  imports nothing (3.4 G ticks a shard process, to the first test in it that read the program). A test that
+  imports another tree takes program-store, a store of its process's own: its branches are scratch, and
+  never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
+
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):
   seon.program/graph-index over a graph built from db (seon.program/reach-graph). A test's helper: production
@@ -103,6 +113,22 @@
   (let [path (kept-store! (str checkout "/target/runs/test-store"))]
     (.mkdirs (.getParentFile (java.io.File. ^String path)))
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+    path))
+
+(defn clone-process-store!
+  "A store of a test's own at path (made, its directory with it): an APFS copy-on-write clone of the
+  process store's data file (the program, the wiki and the source fact seed-program! put on :db, as
+  bin/check takes its store), so a root booting its first main there imports and loads nothing
+  more than a root on a branch of the process store, and no other test sees what this one writes.
+  For the tests whose subject is a store's restart or resume, which cannot share a main
+  (docs/machine.md#a-root-boots-from-a-seeded-store). Answers path."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path]
+  (.mkdirs (java.io.File. ^String path))
+  (let [r (sh/sh "cp" "-c" (str (process-store) "/data.mdb") (str path "/data.mdb"))]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "the process store could not be cloned to " path ": " (:err r))
+                      {:seon.error/type :seon.test-store/clone-failed :path path})))
     path))
 
 (defn test-db

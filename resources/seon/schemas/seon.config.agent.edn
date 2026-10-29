@@ -11,4 +11,6 @@
  :seon.config.agent/form-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one form the model or an outside agent sends may do before it stops with :seon.repl/ticks-spent. 0: none."}]
  :seon.config.agent/form-top-fns [:int {:min 0 :seon.config/unit "functions" :description "How many of a form's costliest contracted functions its reply item keeps (seon.repl/wrap-cost)."}]
  :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one test may do, wherever it runs (a turn, the judge, bin/test); past it that test is an :error of :seon.test/ticks-spent naming it, and the run goes on. 0: none."}]
+ :seon.config.agent/test-ticks-floor [:int {:min 1 :seon.config/unit "engine ticks" :description "The least one test may run; a test's budget is min(test-ticks, max(this, test-ticks-factor x its median green ticks)), so a test with no green history gets this."}]
+ :seon.config.agent/test-ticks-factor [:int {:min 1 :seon.config/unit "times" :description "How many times its median green ticks (at any digest) a test may run, above the floor and under test-ticks."}]
  :seon.config.agent/stall-ms [:int {:min 0 :seon.config/unit "ms" :description "Silence after which an agent with a request in flight is observed stalled, and a running bin/test test is named STALLED; recorded, never an end. 0: no check."}]}

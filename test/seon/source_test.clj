@@ -311,7 +311,7 @@
         ;; (app.proofs/gens-test) has a digest that leaves the var out, so a green another run
         ;; stored there closed its task with no turn and merged nothing
         ;; this test started the root (start-root!'s --started-by): its loop merges' gate leaves it out
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+        root0 {:store (ts/clone-process-store! (str dir "/runs/store")) :main "main" :runs (str dir "/runs")
                :env {"SEON_RESULTS_PORT" "0"}}
         ;; any failure or error in this test keeps its boot logs: each report passes through
         red (volatile! false)
@@ -679,8 +679,9 @@
     [(pt/record db 'app.ft "(defn- h [x] x)" 'app.ft "(defn f0 [x] (h x))") 'app.ft]))
 
 (def ^:private refresh-sizes
-  "Forms in the other files: a fixed change costs the same at each."
-  [10 100 1000])
+  "Forms in the other files: a fixed change costs the same at each: a program 25 times the smallest's
+  shows it (at 10 100 1000 the proof cost 2.3 G ticks, nearly all of it building its inputs)."
+  [10 50 250])
 
 (deftest a-fixed-change-costs-the-same-at-any-program-size
   (doseq [e [{:of 'seon.source/read-nss :input 'seon.source-test/read-of
@@ -912,7 +913,7 @@
         probe! (fn [d n] (let [f (str d "/src/seon/follow_probe_" n ".clj")]
                            (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
                            (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
+        root0 {:store (ts/clone-process-store! (str dir "/runs/store")) :main "main" :runs (str dir "/runs")
                :env {"SEON_RUN_CHECKOUT" main "SEON_RESULTS_PORT" "0"}}
         args ["--set" (str ":seon.config.source/root=" (pr-str wb))
               "--set" ":seon.config.source/dirs=[\"src\" \"test\" \"resources/seon/schemas\"]"]
