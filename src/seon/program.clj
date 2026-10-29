@@ -66,6 +66,21 @@
                  (coll? v) (every? edn-value? v)
                  :else false)))
 
+(defn non-edn
+  "The first value in v that is no EDN (`edn-value?`), depth first, as [path value] (path the keys
+  and indices that reach it, a set member by its place in the set's seq), or nil when v is EDN: what
+  a refusal names, so its reader fixes that value (a predicate written unquoted, nat-int?, is a
+  function value, its symbol 'nat-int? the data)."
+  {:malli/schema [:=> [:cat :any] [:maybe [:tuple [:vector :any] :any]]]}
+  [v]
+  (letfn [(walk [path x]
+            (cond (record? x) [path x]
+                  (or (nil? x) (boolean? x) (number? x) (string? x) (keyword? x) (symbol? x)) nil
+                  (map? x) (some (fn [[k y]] (or (walk path k) (walk (conj path k) y))) x)
+                  (coll? x) (some (fn [[i y]] (walk (conj path i) y)) (map-indexed vector x))
+                  :else [path x]))]
+    (walk [] v)))
+
 ;; ---- the compiler's account of one form ------------------------------------------------
 
 (def banned

@@ -72,7 +72,9 @@
   (let [text (binding [*print-namespace-maps* false] (sedn/encode v))
         judged (if (program/edn-value? v)
                 (judged db k (assoc (merge contract/forms (program/schema-changes db)) k (sedn/decode text)))
-                (refused k :unreadable "a schema form is EDN data: it must print and read back equal"))]
+                (let [[path x] (program/non-edn v)]
+                  (refused k :unreadable (str "a schema form is EDN data, and " (pr-str x) (when (seq path) (str " at " (pr-str path)))
+                                              " is no EDN: a predicate is its symbol, so quote the form ('[:vector nat-int?]) or the predicate ('nat-int?)"))))]
     (if (contract/error? judged)
       judged
       (let [e (some->> (pdb/eid db :schema/key k) (d/entity db))

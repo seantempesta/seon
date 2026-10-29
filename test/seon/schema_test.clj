@@ -108,3 +108,11 @@
         rep (d/with main (:tx (schema/registration main :seon.run/status (read-string paused-status) false)))]
     (is (= [] (program/load-changes! (:db-after rep) (pdb/report->tx rep))))
     (is (= :paused (status-of :paused)) "re-armed against main's :seon.run/status")))
+
+(deftest an-unquoted-predicate-is-refused-naming-it
+  ;; 2026-10-29: the md-scan bench's run registered [:vector [:tuple nat-int? nat-int?]] unquoted,
+  ;; was refused :unreadable, and spent its last turns finding which part did not read back
+  (let [r (schema/registration (main-db) :x.schema-test/pairs [:vector [:tuple nat-int? 'nat-int?]] false)]
+    (is (= :unreadable (:seon.schema/refused-because r)))
+    (is (str/includes? (:seon.error/message r) "at [1 1]") "where the value that is no EDN is")
+    (is (str/includes? (:seon.error/message r) "quote the form") "and how to write it as data")))
