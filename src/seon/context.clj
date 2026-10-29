@@ -1153,7 +1153,11 @@
   (let [e (:db/id a)
         model? (= :model (:origin basis))
         id (str (:run basis) (if model? "/" "/read-") (:turn basis))
-        [_ prev-tx prev-m] (peek (filterv #(not= id (first %)) (calls-of db e (:origin basis))))
+        ;; this turn's own tx: the request is the turn's as it was, whatever came after it on db (a read of
+        ;; history on a later db answered the newest turn's request), so the call before it is the last one
+        ;; below it and the records are those at or before it
+        now (or (when model? (d/q '[:find ?tx . :in $ ?id :where [?t :seon.turn/id ?id] [?t :seon.turn/origin _ ?tx]] db id)) (:max-tx db))
+        [_ prev-tx prev-m] (last (filter #(and (not= id (first %)) (< (second %) now)) (calls-of db e (:origin basis))))
         prev (when prev-m (sent-of db prev-m))
         cut? (boolean (and prev (trimmed? db e prev)))
         old (when-not cut? (some #(when (= :hashes (first %)) (second %)) prev))
@@ -1164,13 +1168,12 @@
         ids (into (vec (for [k (keys live) :when (or whole? (not= (get old k) (get hs k)))] k))
                   (when old (sort (remove #(contains? live %) (keys old)))))
         ref [:parts e (d/commit-id db) whole? ids id]
-        now (or (when model? (d/q '[:find ?tx . :in $ ?id :where [?t :seon.turn/id ?id] [?t :seon.turn/origin _ ?tx]] db id)) (:max-tx db))
         current [[:parts id] (delay {:ref ref :whole (parts-message live ids)}) nil (if whole? 0 now)]
         ;; what the previous request sent, its refs in order: this process's print of them, else read back from the records
         before (when (and model? (not whole?)) (into [] (remove #(#{:section :hashes} (first %))) prev))
         base (when before
                (if (= before (mapv #(:ref (get-in printed [:parts %])) (:ids printed))) printed (cache-of db before)))
-        rs (if model? (mapv (fn [[tx v k]] [(ref-of v) v k tx]) (records db e (when before prev-tx))) [])
+        rs (if model? (into [] (comp (filter (fn [[tx]] (<= tx now))) (map (fn [[tx v k]] [(ref-of v) v k tx]))) (records db e (when before prev-tx))) [])
         items (sort-by (fn [[_ _ _ tx]] (or tx Long/MAX_VALUE)) (concat rs [current]))
         cache (printed-run items base)
         ps (mapv #(get-in cache [:parts %]) (:ids cache))]

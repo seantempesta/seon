@@ -1524,3 +1524,25 @@
       (is (= '#{demo/f} (names db)) "a draw reads the fact, never the text again")
       (is (= '#{demo/g} (names (d/db-with db (task/rederive-tx db (task/task db "demo/c")))))
           "and a write of the plan derives them again"))))
+
+(deftest an-old-turns-request-holds-what-it-held-then
+  ;; the optimization session, 2026-10-29: turn 0 re-rendered on a later db took the newest call as
+  ;; the one before it and every later record as its own; a request is bounded by its turn's tx
+  (ts/test-branch!
+    (fn [_ conn]
+      ;; the wiki, which holds the system prompt every request opens with
+      (d/transact conn (docs/load-tx @conn "docs" (docs/pages (seon.config/checkout) "docs")))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+      (let [basis (fn [i] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn i :max-turns 9 :origin :model :agent "b/a1"})
+            turn! (fn [i] (let [b (basis i)]
+                            (d/transact conn [{:db/id "turn" :seon.turn/id (str "demo/g#1/" i) :seon.turn/run {:seon.run/id "demo/g#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n i :seon.turn/origin :model}
+                                              {:seon.model-call/id (str "demo/g#1/" i) :seon.model-call/turn "turn" :seon.model-call/basis b}])
+                            (d/transact conn [{:seon.model-call/id (str "demo/g#1/" i) :seon.model-call/sent (:sent (context/render @conn b))}])
+                            (d/transact conn [{:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
+                                               :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "e" i)) :value i} :line (str i) :run "demo/g#1" :call-id (str "c" i) :call 0}}])
+                            b))
+            b0 (turn! 0) _ (turn! 1) _ (turn! 2)
+            evals (fn [sent] (set (keep (fn [[k x]] (when (= :eval k) x)) sent)))]
+        (is (empty? (evals (:sent (context/render @conn b0)))) "turn 0 on the db after turn 2: no eval made after it")
+        (is (= #{"e0" "e1"} (evals (:sent (context/render @conn (assoc b0 :turn 2))))) "turn 2: the evals before it")))))
