@@ -234,10 +234,10 @@
         notes (atom [])
         ran (proofs/run-tests! tests dg #(swap! notes conj %))
         db (store! dir ran {'app.pv-red-test/red-test [{:type :fail :message "1 is not 2"}]})]
-    (is (= [1 2 2] (sort (map count (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
+    (is (= [1 2 2] (sort (map count (proofs/shards tests 3 (zipmap tests [1 1 1 1 2])))))
         "a namespace over half a shard's share is split: five tests of 6 ms over three shards")
-    (is (= (set tests) (set (apply concat (runner/shards tests 3 (zipmap tests [1 1 1 1 2]))))) "and none is lost")
-    (is (= 2 (count (runner/shards tests 2 {}))) "never more shards than jobs")
+    (is (= (set tests) (set (apply concat (proofs/shards tests 3 (zipmap tests [1 1 1 1 2]))))) "and none is lost")
+    (is (= 2 (count (proofs/shards tests 2 {}))) "never more shards than jobs")
     (is (not (contract/error? db)) "every result recorded")
     (is (= (set tests) (set (keys ran))) "every test has a result")
     (is (= {:pass 0 :fail 1 :error 0} (select-keys (ran 'app.pv-red-test/red-test) [:pass :fail :error])))
@@ -298,11 +298,11 @@
 (deftest shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
   ;; into it; by each test's last measured ms they end together
-  (is (= '#{[x/a] [y/b y/c z/d]} (set (runner/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
+  (is (= '#{[x/a] [y/b y/c z/d]} (set (proofs/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
       "the longest alone, the rest together")
-  (is (= '#{[p/a p/c q/e] [p/b p/d]} (set (runner/shards '[p/a p/b p/c p/d q/e] 2 '{p/a 5 p/b 5 p/c 5 p/d 5 q/e 1})))
+  (is (= '#{[p/a p/c q/e] [p/b p/d]} (set (proofs/shards '[p/a p/b p/c p/d q/e] 2 '{p/a 5 p/b 5 p/c 5 p/d 5 q/e 1})))
       "a namespace over half a shard's share is split into parts of at most that")
-  (is (= 2 (count (runner/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
+  (is (= 2 (count (proofs/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
 
 (deftest a-test-s-weight-in-the-deal-is-its-median-ms-not-its-largest
   ;; 2026-10-29: a merge's 217 tests were dealt by the largest ms any verdict measured; one 17 s test

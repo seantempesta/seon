@@ -238,32 +238,6 @@
   [tests]
   (if (seq tests) (fx/typical-ms (vec tests)) {}))
 
-(defn shards
-  "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
-  never measured counts as the mean of those measured), so the shards end together: a
-  namespace's tests (and so its fixtures) in one, unless the namespace alone is more than half a
-  shard's share, when it is split into parts of at most that (its fixtures run in each); the
-  longest part first into the shard with least so far; no empty shard."
-  [tests jobs ms]
-  (let [mean (if (seq ms) (quot (reduce + (vals ms)) (count ms)) 1)
-        cost #(get ms % mean)
-        ;; a part at most half a shard's share, so the parts of one large namespace (root-test: 13 tests, ~500 s
-        ;; in one shard while three others ended at 340-390 s, 2026-10-29) fill the gaps the largest leave
-        share (max 1 (quot (reduce + (map cost tests)) (* 2 (max 1 jobs))))
-        parts (mapcat (fn [[_ ts]]
-                        (let [ts (vec (sort-by (juxt (comp - cost) str) ts))]
-                          (if (<= (reduce + (map cost ts)) share)
-                            [ts]
-                            ;; longest first into the lightest part of as many as the share needs
-                            (let [k (int (Math/ceil (/ (reduce + (map cost ts)) (double share))))]
-                              (remove empty? (reduce (fn [ps t] (update ps (apply min-key #(reduce + (map cost (ps %))) (range k)) conj t))
-                                                     (vec (repeat k [])) ts))))))
-                      (sort-by (comp str key) (group-by (comp symbol namespace) tests)))
-        parts (sort-by (juxt #(- (reduce + (map cost %))) (comp str first)) parts)
-        n (max 1 (min jobs (count parts)))]
-    (vec (remove empty? (reduce (fn [sh p] (update sh (apply min-key #(reduce + (map cost (sh %))) (range n)) into p))
-                                (vec (repeat n [])) parts)))))
-
 (defn deal-mg
   "The generative check's keys (mg, {key digest}) added to shards sh (shards' answer: vectors of tests), each longest
   first (by its median measured ms, ms; one never measured counts as the mean of those measured, else 1) to the
@@ -286,7 +260,7 @@
   lines, for bin/stalls). Answers the shard count."
   [out tests digests tree mg]
   (let [ms (measured-ms tests)
-        sh (shards tests (config/value :seon.config.proofs/jobs) ms)
+        sh (proofs/shards tests (config/value :seon.config.proofs/jobs) ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]

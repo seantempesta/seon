@@ -1113,26 +1113,43 @@
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
-        run-all (fn [say]
-            (if (empty? run)
-              {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              ;; a child that dies loses the test it was running (its :error stays) and the rest
-              ;; run in a new child: the death of one test never costs the run its other results
-              (loop [todo run reports [] fns {} heap {} measured {}]
+        ;; one child's run of todo: a child that dies loses the test it was running (its :error stays) and the
+        ;; rest of its todo run in a new child: the death of one test never costs the run its other results
+        run-child (fn [todo say]
+              (loop [todo todo reports [] fns {} heap {} measured {}]
                 (let [c (test-child plan ticks todo forked say)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))
                           reports (-> reports (into (:streamed c)) (into (:reports (:answer c))))
                           done (into (:ended c) (keep :var) died)
-                          rest-todo (filterv #(not (done (str "#'" %))) todo)
-                          counts (frequencies (map :type reports))]
+                          rest-todo (filterv #(not (done (str "#'" %))) todo)]
                       ;; a death with something to show for it (a test ended, or the one it died in is
-                      ;; named) leaves the rest to a new child; none, and the run ends on it
+                      ;; named) leaves the rest to a new child; none, and the child's run ends on it
                       (if (and (seq rest-todo) (seq died) (or (seq (:ended c)) (some :var died)))
                         (recur rest-todo reports (merge fns (:fns c)) (merge heap (:heap c)) (merge measured (:measured c)))
-                        {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
-                         :reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :measured (merge measured (:measured c)) :ms (profile/ms-since t0) :pid (:pid c) :exit (:exit c)})))))))
+                        {:reports reports :fns (merge fns (:fns c)) :heap (merge heap (:heap c)) :measured (merge measured (:measured c))
+                         :pid (:pid c) :exit (:exit c)}))))))
+        ;; every selected test green at its digest (a turn's run of the same tree, a session's): nothing to run, so no
+        ;; child is forked. Else the tests are dealt by the one deal bin/test uses (proofs/shards, by each test's
+        ;; median measured ms) into at most :seon.config.proofs/jobs children, each run on a fiber of its own (a
+        ;; park on its pipe lets the others run) and every one read to its end; one child is the 1-child case
+        run-all (fn [say]
+            (if (empty? run)
+              {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
+              (let [fibers (mapv #(let [g (a/io-thread (run-child % say))] [g (a/go-monitor g)])
+                                 (proofs/shards run (cfg/value :seon.config.proofs/jobs) (fx/typical-ms run)))
+                    ;; all are taken before a throw is raised, so no child outlives the run
+                    cs (mapv (fn [[g died]] (or (a/<!! g) {::threw (a/<!! died)})) fibers)]
+                (if-let [e (some ::threw cs)]
+                  (throw e)
+                  (if-let [e (first (filter contract/error? cs))]
+                    e
+                    (let [reports (into [] (mapcat :reports) cs)
+                          counts (frequencies (map :type reports))]
+                      {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
+                       :reports reports :fns (into {} (map :fns) cs) :heap (into {} (map :heap) cs) :measured (into {} (map :measured) cs)
+                       :ms (profile/ms-since t0) :pid (:pid (first cs)) :exit (:exit (first cs))})))))) 
         ;; the answer, once the run is read (by the loop: it records and it sends)
         finish (fn [res]
     ;; what ran, cached by digest (seon.fx/write-verdicts!), whoever asked for the run; a file the

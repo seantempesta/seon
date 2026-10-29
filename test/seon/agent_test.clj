@@ -435,6 +435,21 @@
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 2 :error 1 :died ["#'app.die-test/b-dies"] :passed ["#'app.die-test/a-first" "#'app.die-test/c-last"]} v) (pr-str r))))
 
+(deftest a-test-run-is-dealt-across-children-and-loses-none
+  ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
+  ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
+  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2
+  (let [ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1))) (deftest b (is (= 2 2)))"
+                             (when (= n 3) " (deftest dies (seon.lib/c-exit 7))")))
+        run #(str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.par0-test app.par1-test app.par2-test app.par3-test})]"
+                  " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
+                  "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
+        [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
+                                      {:sets [":seon.config.proofs/jobs=2"]})
+        v #(some-> (:value %) clojure.edn/read-string)]
+    (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
+    (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
+
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
