@@ -205,7 +205,7 @@
                                          [{:op :context :agent agent} "(my.task/status)"
                                           {:op :eval :agent "root"
                                            :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
-                                                      " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?t :seon.turn/sent _] [?t :seon.turn/n ?n]] db))")}]))
+                                                      " (datahike.api/q '[:find [?n ...] :where [?t :seon.turn/origin :outside] [?m :seon.model-call/turn ?t] [?m :seon.model-call/sent _] [?t :seon.turn/n ?n]] db))")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(seon.repl/render-ctx-hiccup)") "the form that shows the render of ctx now")
@@ -302,7 +302,7 @@
     (is (>= 100 (:tokens (:value told))) "a swap! is told in what it changed")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
     (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
-    (is (not (clojure.string/includes? (:context next-turn) ":seon.turn/basis")) "and the read before it by its id, never its record")
+    (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")
     (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
 
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why

@@ -48,7 +48,7 @@ A patch costs its change, flat in the session (at 100 and 1,000 evals): a new ev
 
 The other facts a view reads:
 - A catch-up (``seon.agent/merge-main!``) is a `:seon.catch-up/*` entity written in the merge's own transaction: the branch and t merged, what applied and what conflicted. It is no join of the agent's pull (the pull holds the agent's task, every turn and eval, and its newest messages): a reader queries it, or adds `{[:seon.catch-up/_agent :as :catch-ups] [*]}` to its pattern (`seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base`).
-- Proof results and the done rule's reasons are each turn's `:seon.turn/basis` `:observed`, already in ctx under `[:turns tid]`. A message the turn takes is written on the branch (``seon.turn``'s `take!`, with `:seon.message/agent`) and sits under `[:messages]`.
+- Proof results and the done rule's reasons are each turn's model call's `:seon.model-call/basis` `:observed`: the model call is its own entity pointing at its turn (see [the record is the agent's work](#the-record-is-the-agents-work)), so the status component reads it from the db and ctx holds the turn alone. A message the turn takes is written on the branch (``seon.turn``'s `take!`, with `:seon.message/agent`) and sits under `[:messages]`.
 
 ## What the model reads, and what the page draws
 
@@ -83,6 +83,10 @@ Refused, nothing written, with the error that says why (`seon.ctx-test/a-swap-wr
 The record's environment is read-only; everything else is writable, and history keeps what a write retracts.
 
 **The page is the agent's to change.** The page is the render :seon.render/render-ctx declares (```seon.render.ui/render-ctx```, the layout), composed of components keyed by what they show ([render](render.md#components)); an agent overrides the layout or any sub-render by registering its own render on its branch, and its model reads the same output (```seon.repl/render-ctx-hiccup```).
+
+## The record is the agent's work
+
+The agent's record holds facts about its work, and telemetry and derived data live on their own entities pointing at what they describe, so `*` never pulls them and the agent's ctx diff moves only when its work does (owner, 2026-10-29: "The agent's record is facts about its work ... a model call at its turn"; task seon.ctx/the-record-is-facts-about-the-work, whose moves 2 and 3 are the process and the embedding). A turn keeps its reply, reasoning, calls, finish and error. Its **model call** (`:seon.model-call/*`, one entity a turn keyed by the turn's id, `:seon.model-call/turn` its ref) holds the request's bookkeeping, written by ``seon.turn/act!`` and ``seon.turn/context-block``: the basis its context was built from, the refs it sent, where its time went, its tokens and prefix-cache counts, its model, and the counts of its forms, errors and red proofs. The debug page reads it by its own entity (``seon.render.ui/debug-input``), the turn's header and the status by a lookup on the turn's id (``seon.render.ui/turn-item``, ``seon.render.ui/status``, db components that read it), and ``seon.context/turn-pages`` by its reverse ref. `seon.ctx-test/an-agents-record-holds-only-its-work`.
 
 ## Provenance: who made each fact
 

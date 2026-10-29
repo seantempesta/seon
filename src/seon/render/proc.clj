@@ -197,7 +197,7 @@
 
 (defn- debug-value
   "View [:debug id]'s page: what agent id's model was sent, each model turn that recorded it
-  (:seon.turn/sent) on its branch as this proc last read it, newest first, only the rows its tab
+  (:seon.model-call/sent) on its branch as this proc last read it, newest first, only the rows its tab
   scrolled to (:shown, as the agent's page: the rest are counted, and load as their end scrolls
   into view). Each row is a unit drawn by seon.render.ui/sent-request when its input (its turn,
   whether its tab has it open) changes: it reads its turn and the one before it, shows what its
@@ -219,8 +219,8 @@
   (let [bdb (get-in st [:branches view :db])]
     (let [open (get-in st [:open view] #{})
           shown (get-in st [:shown view] (history-cap))
-          ;; newest first: entity ids are issued in the order turns were written
-          ts (->> (d/q '[:find [?e ...] :where [?e :seon.turn/sent _]] bdb) sort reverse vec)
+          ;; newest first: entity ids are issued in the order model calls were written
+          ts (->> (d/q '[:find [?e ...] :where [?e :seon.model-call/sent _]] bdb) sort reverse vec)
           on (take shown ts)
           vp (ui/view-param view)]
       (ui/debug (second view)

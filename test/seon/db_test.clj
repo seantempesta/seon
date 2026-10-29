@@ -317,13 +317,13 @@
   ;; the last resort: what is proved is a root's open of a kept store; removed at the end
   (let [path (str (System/getProperty "user.dir") "/target/db-test-types-" (random-uuid))
         made (pdb/made-cfg (pdb/store-cfg :lmdb path))
-        old (mapv #(if (= :seon.turn/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
+        old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)]
     (try
       (d/create-database made)
       (let [c0 (d/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
-        (is (= {:seon.turn/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
+        (is (= {:seon.model-call/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-value-with-no-one-type-is-plain-data-by-its-shape
@@ -426,12 +426,13 @@
   printed data: a slurp, a source, a test's report): a repeated letter compressed ~3x better
   than real turn text and made LZ4 look like the fix (2026-10-22)."
   [k]
-  [{:seon.turn/id (str "att/" k) :seon.turn/run {:seon.run/id "att"} :seon.turn/n k :seon.turn/origin :model
-    :seon.turn/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
-                                       :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
-                                                  :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}
+  [{:db/id "turn" :seon.turn/id (str "att/" k) :seon.turn/run {:seon.run/id "att"} :seon.turn/n k :seon.turn/origin :model
     :seon.turn/reply (slice @prose k 1500)
     :seon.turn/calls [{:id "call-0" :code "(f 2)" :eval (str "e" k)}]}
+   {:seon.model-call/id (str "att/" k) :seon.model-call/turn "turn"
+    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
+                            :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
+                                       :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}}
    ;; the call's eval, whose record holds its response as the next turn reads it
    {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}}])
 

@@ -246,9 +246,9 @@
                done? (every? #(r/done? idx %) ["calc/add-merge" "calc/twice-merge" "calc/square-merge" "calc/sum-sq-merge"])
                blocked (r/blocked-by idx "calc/abs")
                sq-db (:db @(c/branch-db sys (task/default-branch "calc/square")))
-               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.turn/sent (d/pull sq-db [:seon.turn/sent] e)))))) s])
-                                            (d/q '[:find ?n ?e ?s :where [?e :seon.turn/n ?n] [?e :seon.turn/origin :model]
-                                                   [?e :seon.turn/basis _] [?e :seon.turn/split ?s]] sq-db)))
+               sq-turns (sort-by first (map (fn [[n e s]] [n (str/join "\n\n" (keep :content (into [] (mapcat second) (context/parts-of sq-db (:seon.model-call/sent (d/pull sq-db [:seon.model-call/sent] e)))))) s])
+                                            (d/q '[:find ?n ?e ?s :where [?t :seon.turn/n ?n] [?t :seon.turn/origin :model] [?e :seon.model-call/turn ?t]
+                                                   [?e :seon.model-call/basis _] [?e :seon.model-call/split ?s]] sq-db)))
                read-failure? (and (= 2 (count sq-turns))
                                   (str/includes? (second (second sq-turns)) ":assert (= 9 (app.calc/square 3))")
                                   (str/includes? (second (second sq-turns)) ":got (= 9 0)")

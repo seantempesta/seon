@@ -177,6 +177,27 @@
     (is (= [:seon.message/_agent] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on the turns and evals: the messages alone are windowed")
     (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
 
+(deftest an-agents-record-holds-only-its-work
+  ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
+  ;; own entities, pointing at what they describe ... a model call at its turn" (seon.ctx/the-record-is-facts-about-the-work,
+  ;; move 1): a turn's request bookkeeping is its model call's entity, which the agent's pull never reaches.
+  ;; Moves 2 (a process's telemetry, :seon.process/*) and 3 (an embedding, :seon.vector/*) extend this test.
+  (let [db (:db-after (d/with (ts/test-db)
+                              [{:seon.agent/key k :seon.agent/id :a1 :seon.agent/task {:seon.task/id "lab/ctx"}}
+                               {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
+                                :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}
+                               {:seon.turn/id "lab/ctx#1/0" :seon.turn/agent [:seon.agent/key k] :seon.turn/n 0 :seon.turn/reply "I will check f0."}
+                               {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/turn [:seon.turn/id "lab/ctx#1/0"]
+                                :seon.model-call/tokens 1200 :seon.model-call/cache-hit-tokens 1000 :seon.model-call/cache-miss-tokens 100
+                                :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0
+                                :seon.model-call/split {:context-ms 2 :model-ms 5} :seon.model-call/sent [[:eval "e1"]]}]))
+        t (:tree (ctx/build db (aid db) :b))
+        keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
+    (is (= ["I will check f0."] (map :seon.turn/reply (vals (:turns t)))) "the turn is in the record, with its reply")
+    (is (empty? (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))) "no :seon.model-call/* key anywhere in the record")
+    (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/turn ?t] [?t :seon.turn/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
+        "the model call is reached by a query on its turn")))
+
 (deftest ctx-is-the-record-after-every-transaction
   ;; the patch holds what a build holds, its map and its index, after each of 150 changes of a
   ;; session's kinds (a seeded random choice, so a failure repeats): the map is never a second

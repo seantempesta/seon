@@ -169,7 +169,7 @@
   (let [ev (h/html (ui/evaluation {} {:seon.eval/record {:code "(f 2)" :prose "f doubles?"
                                                          :response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}}
                                       :seon.eval/by "a3"}))
-        turn (h/html (ui/turn {} {:seon.turn/n 0 :seon.turn/tokens 1200 :seon.turn/basis {:max-turns 8}}))]
+        turn (h/html (ui/turn {} {:seon.turn/n 0 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
     (is (str/includes? ev "f doubles?") "the prose beside the call")
     (is (str/includes? ev "1.5 ms · <span>2.0 KB</span>") "its cost as recorded, each number with its unit")
     (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1,200 ticks · 1.5 ms") "ticks too, when recorded; nothing not recorded")
@@ -301,10 +301,11 @@
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
                                              {:code "(f 3)" :response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:db/id "run" :seon.run/id "demo/f#1"}
-                         {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "it doubles"
-                          :seon.turn/forms 2 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 5 :seon.turn/tokens 1200
-                          :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model :observed {}}
-                          :seon.turn/calls [{:id "c0" :code "(f 2)" :eval "e1"} {:id "c1" :code "(f 3)" :eval "e2"}]}]
+                         {:db/id "turn" :seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "it doubles"
+                          :seon.turn/calls [{:id "c0" :code "(f 2)" :eval "e1"} {:id "c1" :code "(f 3)" :eval "e2"}]}
+                         {:seon.model-call/id "demo/f#1/0" :seon.model-call/turn "turn"
+                          :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
+                          :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model :observed {}}}]
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e3" "user"
                                              {:code "(g)" :text "{:handle result/e3, :ex {:seon.error/message \"boom\"}}"
                                               :response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
@@ -529,7 +530,7 @@
         [st1 _] (#'p/pass-view st :a3)
         err (seon.contract/error :seon.writer/refused 'seon.writer/writer-proc "no branch :task-demo-f" {})
         st2 (#'p/answered st1 o [:branch :task-demo-f] err)
-        branch' (d/db-with branch [{:seon.turn/id "demo/f#1/0" :seon.turn/tokens 4321}])
+        branch' (d/db-with branch [{:seon.model-call/id "demo/f#1/0" :seon.model-call/tokens 4321}])
         st3 (#'p/answered st2 o [:branch :task-demo-f] {:db branch'})]
     (is (not (str/includes? (p/view-html st1 :a3) "4,321 tokens")))
     (is (str/includes? (p/view-html st3 :a3) "4,321 tokens") "the turn's tokens, written while its branch was unread")))
@@ -713,7 +714,7 @@
         (is (= [:debug :a1] (#'seon.web/view-of "a1/context")) "/agent/a1/context")
         (testing "a turn whose call failed shows what it sent and its typed error"
           (let [db (d/db-with (get-in st [:branches [:debug :a1] :db])
-                              [{:db/id e0 :seon.turn/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
+                              [{:seon.turn/id "demo/f#1/0" :seon.turn/error {:seon.error/type :seon.model/no-provider :seon.error/operation 'seon.model/complete
                                                             :seon.error/message "no model provider"}}])
                 [st'' _] (#'p/pass-view (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db)) [:debug :a1])
                 html (p/view-html st'' [:debug :a1])]
@@ -730,9 +731,9 @@
             b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
                :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"}
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
-            db1 (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 2 :seon.turn/origin :model
-                                :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
-            db' (d/db-with db1 [{:seon.turn/id "demo/f#1/2" :seon.turn/sent (:sent (seon.context/render db1 b))}])
+            db1 (d/db-with db [{:db/id "turn" :seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 2 :seon.turn/origin :model}
+                               {:seon.model-call/id "demo/f#1/2" :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
+            db' (d/db-with db1 [{:seon.model-call/id "demo/f#1/2" :seon.model-call/sent (:sent (seon.context/render db1 b))}])
             [st2 patch] (#'p/pass-view (assoc-in st1 [:branches [:debug :a1] :db] db') [:debug :a1])]
         (is (= 3 (get-in st1 [:counts :rendered])) "the first pass renders both turns and the list's end")
         (is (= 5 (get-in st2 [:counts :rendered])) "the next renders the new turn alone, and the list's end it moved")
@@ -877,8 +878,9 @@
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"})
                     [{:db/id "run" :seon.run/id "t/x#1"}]
-                    [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model
-                      :seon.turn/sent [[:no-such-part "x"]] :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}]])
+                    [{:db/id "turn" :seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model}
+                     {:seon.model-call/id "t/x#1/0" :seon.model-call/turn "turn"
+                      :seon.model-call/sent [[:no-such-part "x"]] :seon.model-call/tokens 100 :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}]])
         debug [:debug :a1]
         o (volatile! {})
         st {:rid 1 :pending {} :watch #{debug :a1} :waiting {1 debug 2 :a1} :kf-wanted #{} :new-events [] :events [] :views {}
@@ -954,10 +956,11 @@
         k (seon.task/agent-key "b1" :a3)
         ;; the cited var's namespace, the program's as a store records it (seon.program/program-names)
         branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
-                                  {:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :model
-                                   :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
-                                                     :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
-                                                                :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
+                                  {:db/id "turn" :seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :model}
+                                  {:seon.model-call/id "demo/f#1/1" :seon.model-call/turn "turn"
+                                   :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
+                                                           :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
+                                                                      :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
         rid (seon.db/eid branch :seon.agent/key k)
         draw #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
@@ -992,9 +995,10 @@
   ;; the newest turn of either origin; an outside read has no turn count
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        branch (d/db-with branch [{:seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :outside
-                                   :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
-                                                     :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
+        branch (d/db-with branch [{:db/id "turn" :seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :outside}
+                                  {:seon.model-call/id "demo/f#1/read-1" :seon.model-call/turn "turn"
+                                   :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
+                                                           :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
         w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx)))
         status (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html status)]

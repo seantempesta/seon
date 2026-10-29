@@ -117,16 +117,16 @@
     reason (assoc :reason reason)))
 
 (defn usage
-  "What completion c cost, as the turn records it: its tokens (prompt and completion), and the
+  "What completion c cost, as the turn's model call records it (:seon.model-call/*): its tokens (prompt and completion), and the
   prompt tokens the provider's prefix cache served and did not; each absent when the provider
   did not report it (unknown, never 0)."
-  {:malli/schema [:=> [:cat :map] [:map [:seon.turn/tokens {:optional true} :int]
-                                   [:seon.turn/cache-hit-tokens {:optional true} :int] [:seon.turn/cache-miss-tokens {:optional true} :int]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:seon.model-call/tokens {:optional true} :int]
+                                   [:seon.model-call/cache-hit-tokens {:optional true} :int] [:seon.model-call/cache-miss-tokens {:optional true} :int]]]}
   [{:keys [prompt-tokens completion-tokens cache-hit-tokens cache-miss-tokens]}]
   (cond-> {}
-    (and prompt-tokens completion-tokens) (assoc :seon.turn/tokens (+ prompt-tokens completion-tokens))
-    cache-hit-tokens (assoc :seon.turn/cache-hit-tokens cache-hit-tokens)
-    cache-miss-tokens (assoc :seon.turn/cache-miss-tokens cache-miss-tokens)))
+    (and prompt-tokens completion-tokens) (assoc :seon.model-call/tokens (+ prompt-tokens completion-tokens))
+    cache-hit-tokens (assoc :seon.model-call/cache-hit-tokens cache-hit-tokens)
+    cache-miss-tokens (assoc :seon.model-call/cache-miss-tokens cache-miss-tokens)))
 
 (defn- observed
   "The context inputs observe's map holds, beyond the proofs' results: every reason of the
@@ -170,7 +170,7 @@
   basis, not its prompt): the commit it reads (the run-ahead writes committed now, as the
   model call's wait would), the task, run and turn, the observations no db holds, with the
   messages the turn took (taken, take!)."
-  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :map] :seon.turn/basis]}
+  {:malli/schema [:=> [:cat :seon.task/id :seon.run/id :int :int :seon.turn/origin :map :map] :seon.model-call/basis]}
   [task run turn max-turns origin observed taken]
   (agent/commit!)
   (cond-> {:commit (d/commit-id (agent/db)) :task task :run run :turn turn :max-turns max-turns
@@ -267,11 +267,12 @@
         _ (observed! (:seon.task/id t) {:turn turn :max-turns max-turns :origin :model :observed ob :merge? merge?})
         basis (assoc (basis! (:seon.task/id t) run turn max-turns :model ob taken) :agent (:key @agent/state))
         id (str run "/" turn)
-        ;; the turn first, what it was made from: its page is drawn on the db that holds it (its
-        ;; proofs as this turn observed them), then what it sent, committed, so a page shows the
+        ;; the turn first, what it was made from (its model call's basis): its page is drawn on the db that
+        ;; holds it (its proofs as this turn observed them), then what it sent, committed, so a page shows the
         ;; call in flight and a call that fails keeps what it sent
         _ (agent/transact! (into [{:db/id "run" :seon.run/id run}
-                                  {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model :seon.turn/basis basis}]
+                                  {:db/id "turn" :seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn :seon.turn/origin :model}
+                                  {:seon.model-call/id id :seon.model-call/turn "turn" :seon.model-call/basis basis}]
                                  (included-tx (:seon.task/id t))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
@@ -281,7 +282,7 @@
         {:keys [block messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :pages {(d/commit-id db) page}})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
-        _ (when sent (agent/transact! [{:seon.turn/id id :seon.turn/sent sent}]))
+        _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
         _ (agent/commit!)
         t1 (profile/now-ns)
         ;; the provider as the config stands at this turn (main's, over the task's own), never one copied at boot
@@ -295,8 +296,9 @@
         prev (get-in @agent/state [:requests run])]
     (if (contract/error? r)
       ;; the call failed: its typed error on the turn (an error is data), and to the run's end
-      (do (agent/transact! [{:seon.turn/id id :seon.turn/error r :seon.turn/ms model-ms
-                             :seon.turn/split {:context-ms context-ms :model-ms model-ms}}])
+      (do (agent/transact! [{:seon.turn/id id :seon.turn/error r}
+                            {:seon.model-call/id id :seon.model-call/ms model-ms
+                             :seon.model-call/split {:context-ms context-ms :model-ms model-ms}}])
           r)
       (let [;; a request answered is the next one's baseline (a failed call stored no prefix); a short
             ;; hit is the model call's outcome, an error this agent folds as :effect (seon.error/note)
@@ -334,7 +336,7 @@
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
-            used (:seon.turn/tokens (usage c))
+            used (:seon.model-call/tokens (usage c))
             t3 (profile/now-ns)]
         ;; a reply with prose and no call is a message to the user: the turn ends, and the run
         ;; waits for the user (the design's tool_choice auto)
@@ -343,26 +345,27 @@
         (swap! agent/state assoc-in [:turn :last] (cond-> {:seon.turn/calls (mapv #(select-keys % [:id :code]) calls)
                                                            :prose (str/join "\n\n" (keep :prose calls))}
                                                     (:truncated? c) (assoc :seon.turn/truncated true)))
-        ;; what the model read, as its basis (seon.context/render makes the text from it), what
-        ;; it answered and how it stopped, which evals its calls are, and where the turn's time
-        ;; went as this agent saw it
+        ;; what it answered and how it stopped, and which evals its calls are, on the turn; its model call
+        ;; (seon.model-call, beside the basis it read: seon.context/render makes the text from it) gets the
+        ;; reply's usage, model and counts, and where the turn's time went as this agent saw it
         (agent/transact! [{:db/id "run" :seon.run/id run}
-                          (cond-> (merge (usage c) {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn
+                          (cond-> {:seon.turn/id id :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n turn
                                    :seon.turn/calls (mapv (fn [{:keys [id code response]}]
                                                             (cond-> {:id id :code code} (:record response) (assoc :eval (:record response))))
                                                           calls)
-                                   :seon.turn/reply (:text c) :seon.turn/forms (count calls)
-                                   :seon.turn/errors (count (filter :ex (map :response (remove :not-run calls))))
-                                   :seon.turn/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
-                                   :seon.turn/ms (+ model-ms eval-ms)})
+                                   :seon.turn/reply (:text c)}
                             (:truncated? c) (assoc :seon.turn/truncated true)
                             (:finish-reason c) (assoc :seon.turn/finish (:finish-reason c))
-                            (:model c) (assoc :seon.turn/model (:model c))
-                            (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))])
-        (agent/transact! [{:seon.turn/id (str run "/" turn)
-                           :seon.turn/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
-                                                     :record-ms (long (profile/ms-since t3))}
-                                              tests-ms (assoc :tests-ms tests-ms))}])
+                            (:reasoning c) (assoc :seon.turn/reasoning (:reasoning c)))
+                          (cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/forms (count calls)
+                                                    :seon.model-call/errors (count (filter :ex (map :response (remove :not-run calls))))
+                                                    :seon.model-call/red (count (remove #(= :pass (val %)) (select-keys results proofs)))
+                                                    :seon.model-call/ms (+ model-ms eval-ms)})
+                            (:model c) (assoc :seon.model-call/model (:model c)))])
+        (agent/transact! [{:seon.model-call/id id
+                           :seon.model-call/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
+                                                           :record-ms (long (profile/ms-since t3))}
+                                                    tests-ms (assoc :tests-ms tests-ms))}])
         (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
                     ;; what this turn's block showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
@@ -403,10 +406,11 @@
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:db/id "run" :seon.run/id run}
-                      (cond-> {:seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n n
-                               :seon.turn/origin :outside :seon.turn/basis basis
-                               :seon.turn/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
-                        sent (assoc :seon.turn/sent sent))])
+                      {:db/id "turn" :seon.turn/id (str run "/read-" n) :seon.turn/run "run" :seon.turn/agent {:seon.agent/key (:key @agent/state)} :seon.turn/n n
+                       :seon.turn/origin :outside}
+                      (cond-> {:seon.model-call/id (str run "/read-" n) :seon.model-call/turn "turn" :seon.model-call/basis basis
+                               :seon.model-call/split (cond-> {:context-ms (long (profile/ms-since t0))} tests-ms (assoc :tests-ms tests-ms))}
+                        sent (assoc :seon.model-call/sent sent))])
     text))
 
 (defn hand-back-end
