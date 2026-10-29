@@ -227,13 +227,13 @@
                  (lib/c-kill (lib/c-getpid) 9))})))
 
 (defn- calc
-  "The six-task graph: release all, cancel neg once its agent is ready (neg sleeps 8 s on
-  its first turn), the rest merges. square's branch records what its model read each turn
+  "The six-task graph: release all, cancel neg once its agent is ready (neg's first turn derefs a
+  promise nothing delivers: seon.fixtures/calc-cancel), the rest merges. square's branch records what its model read each turn
   and where the time went: its second turn read its first answer's failure as the
   assertion and what it got (square was (twice x), and twice is still its stub on square's
   branch: 0); each turn's text is every message it sent, read back from its refs (seon.context/parts-of)."
   [path]
-  {:boot (cond-> {:max-running 2} path (assoc :path path)) :specs fx/calc :tns 'calc
+  {:boot (cond-> {:max-running 2 :provider {:kind :scripted :script 'seon.fixtures/calc-cancel}} path (assoc :path path)) :specs fx/calc :tns 'calc
    :during (fn [sys ev]
              (loop [ready #{}]
                (let [e (a/<!! ev) ready (cond-> ready (= :ready (:type e)) (conj (:agent e)))]

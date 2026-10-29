@@ -23,8 +23,9 @@ way in [failure points](failure-points.md).
 
 The sites where time decides because the owner allowed it, the provider's delayed retry among them.
 
-- `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by one core.async `timeout`.
-- `seon.cron/arm!`, with `seon.cron/cron-proc`, `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule (AGENTS section 4). At the time of day `:seon.config.proofs/full-run-at` names (UTC), one core.async `timeout` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
+- `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by `seon.step/put-after!`.
+- `seon.step/put-after!`: the one timer: a go block parks on a core.async `timeout`, then puts the message. The delayed insert, the cron's tick and root's stall check (`seon.root/api-proc`, below) all arm through it. Measured on the current Jolt pin, 25 and 1000 pending timers hold the same thread count (21) for this form and for the callback `take!` it replaced, so the saving is one mechanism, not threads (`seon.step-test/timer-threads`).
+- `seon.cron/cron-proc`, with `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule (AGENTS section 4). At the time of day `:seon.config.proofs/full-run-at` names (UTC), `seon.step/put-after!` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
 
 ## Time decides (a check's measurement, and a check's ping)
 
@@ -36,6 +37,7 @@ The sites where time decides because the owner allowed it, the provider's delaye
 
 Tests whose subject is itself a timeout or a measurement window, so the clock read there is what they test.
 
+- `seon.step-test/timer-threads`: arms timers (long ones, never fired) to count the threads they hold, the timer being its subject.
 - `seon.check/fork-cases`, `seon.lib-test/fork-case`: what they test is a timeout in a forked child (core.async's `timeout` fires there; the child's wait has a bound so a child whose runtime threads are gone ends), run in a fresh process (`target/seon forks CASE`) and asserted by the test.
 - `seon.profile-test/allocating-thread`: the window over which it measures another thread's allocation, and a call that sleeps to show ticks count work, not waiting.
 

@@ -19,6 +19,16 @@
 ;; The contract every step-fn Var carries is the registered :seon.step/step-fn
 ;; (resources/seon/schemas/seon.core.edn): describe, init, transition, transform.
 
+(defn put-after!
+  "Puts m on channel ch once ms milliseconds pass: the one timer of the system (the cron's
+  tick, the delayed insert, root's stall check; docs/clocks.md#time-decides-the-owners-exceptions).
+  A go block parks on the timeout, since Jolt's callback take! forks a thread per pending take.
+  Answers nil."
+  {:malli/schema [:=> [:cat :seon.host/chan :int :any] :nil]}
+  [ch ms m]
+  (a/go (a/<! (a/timeout (max 1 ms))) (a/>! ch m))
+  nil)
+
 (defn control-op
   "The lifecycle op of a transport message, or nil for ordinary data."
   {:malli/schema [:=> [:cat :any] :seon.step/control]}

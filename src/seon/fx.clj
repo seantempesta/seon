@@ -971,7 +971,7 @@
   (if (and (:bucket st) (:tick st) (not (:tick-due st)) (< (:busy st) (:workers st)))
     (let [b (refill (:bucket st) now)
           ms (long (Math/ceil (/ (max 1 (- (or (:est m) 0) (:tokens b))) (:per-ms b))))]
-      (a/take! (a/timeout ms) (fn [_] (a/put! (:tick st) {})))
+      (step/put-after! (:tick st) ms {})
       (assoc st :tick-due true))
     st))
 

@@ -18,3 +18,19 @@
       (let [p (step/ask-edge ch {:op :page} :closed)]
         (is (realized? p) "answered before ask-edge returns")
         (is (= :closed @p))))))
+
+(defn- timer-threads
+  "Threads alive after 25 and after 1000 pending timers, [[go25 go1000] [take25 take1000]]: the go form
+  (step/put-after!) and the callback take! it replaced."
+  []
+  (let [count-threads #(count (Thread/getAllStackTraces))
+        grow (fn [arm!] (let [c (a/chan 1) _ (arm! c 25) t25 (count-threads) _ (arm! c 975) t1000 (count-threads)] [t25 t1000]))]
+    [(grow (fn [c n] (dotimes [_ n] (step/put-after! c 600000 :due))))
+     (grow (fn [c n] (dotimes [_ n] (a/take! (a/timeout 600000) (fn [_] (a/put! c :due))))))]))
+
+(deftest pending-timers-hold-no-threads
+  ;; docs/clocks.md#time-decides-the-owners-exceptions (measured 2026-10-29: 21 threads at 25 and at
+  ;; 1000 pending, both forms)
+  (let [[[g25 g1000] [t25 t1000]] (timer-threads)]
+    (is (= g25 g1000) (str "975 more pending timers added " (- g1000 g25) " threads"))
+    (is (= t25 t1000) "the callback form, measured with it: Jolt's pin forks no thread per pending take")))
