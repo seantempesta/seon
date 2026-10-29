@@ -702,13 +702,13 @@
     (if (contract/error? done) done (select-keys done [:recorded])))))
 
 (defn typical-ms
-  "{test ms} of tests: the median of the ms their cached verdicts measured, whatever the digest: what
+  "{test ms} of tests (or of check steps' and generative-check keys, strings): the median of the ms their cached verdicts measured, whatever the digest: what
   orders a run's deal of tests into shards, never what a test proves. The median, not the largest: one
   run under load or a hang (a 17 s test once measured 625 s) must not weigh a test as that run did, which
   made one shard of a merge's run end at 62 s beside three at 640-746 (docs/merging.md#a-merge-runs-what-the-change-reaches).
   A test with none is left out; an unreadable file is passed over (an order, never a verdict)."
-  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]
-                  [:=> [:cat :string [:sequential :qualified-symbol]] [:map-of :qualified-symbol :int]]]}
+  {:malli/schema [:function [:=> [:cat [:sequential [:or :qualified-symbol :string]]] [:map-of [:or :qualified-symbol :string] :int]]
+                  [:=> [:cat :string [:sequential [:or :qualified-symbol :string]]] [:map-of [:or :qualified-symbol :string] :int]]]}
   ([tests] (typical-ms (cfg/value :seon.config.proofs/results-dir) tests))
   ([dir tests]
   (into {} (for [t (distinct tests)
