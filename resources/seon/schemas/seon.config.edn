@@ -45,6 +45,7 @@
   [:seon.config.check/ping-ms :seon.config.check/ping-ms]
   [:seon.config.check/hold-ms :seon.config.check/hold-ms]
   [:seon.config.check/pages-ms :seon.config.check/pages-ms]
+  [:seon.config.check/sample-ms :seon.config.check/sample-ms]
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]

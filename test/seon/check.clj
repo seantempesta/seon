@@ -5,6 +5,7 @@
   root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
          target/seon scale N      N agents spawned at once, each eval + transact + test
+         target/seon scale-work N N agents (10) that work: five evals and a prove of ~60 tests each
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
   are root's events (await-agents, on a tap taken before what causes them) or a watch on a
@@ -657,6 +658,230 @@
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
                 :root-threads-as-declared (every? empty? [th-ready th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
+
+;; ---- scale-work: agents that work --------------------------------------------------
+
+(defn- ps-tree
+  "{pid [ppid cpu-s]} of every process on the machine (ps): its parent and the CPU seconds it has used."
+  []
+  (into {} (for [l (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-axo" "pid=,ppid=,time=")))
+                 :let [[p pp t] (re-seq #"[\d:.]+" l)] :when t]
+             [(parse-long p) [(parse-long pp) (reduce (fn [acc x] (+ (* 60 acc) (parse-double x))) 0 (clojure.string/split t #":"))]])))
+
+(defn- footprints
+  "{pid {:fp :peak}} in bytes for pids, as macOS's footprint tool reads the kernel's ledger
+  (phys_footprint, and the peak it has been): the one reading of a process that is not this one."
+  [pids]
+  (if (empty? pids)
+    {}
+    (loop [ls (clojure.string/split-lines (:out (apply clojure.java.shell/sh "footprint" "--noCategories" "-f" "bytes"
+                                                       (mapcat #(vector "-p" (str %)) pids))))
+           cur nil acc {}]
+      (if (empty? ls)
+        acc
+        (let [l (first ls)
+              [_ p f] (re-find #"\[(\d+)\]: 64-bit\s+Footprint: (\d+) B" l)
+              [_ pk] (re-find #"phys_footprint_peak: (\d+) B" l)]
+          (cond p (recur (rest ls) (parse-long p) (assoc acc (parse-long p) {:fp (parse-long f)}))
+                pk (recur (rest ls) cur (assoc-in acc [cur :peak] (parse-long pk)))
+                :else (recur (rest ls) cur acc)))))))
+
+(defn- categories
+  "Where pid's dirty memory is, by VM category: [[category dirty-mb]] largest first, of those at
+  least 5 MB (the rest, summed, last as :others)."
+  [pid]
+  (let [rows (for [l (clojure.string/split-lines (:out (clojure.java.shell/sh "footprint" "-f" "bytes" "-p" (str pid))))
+                   :let [[_ d _ _ _ c] (re-find #"^\s*(\d+) B\s+(\d+) B\s+(\d+) B\s+(\d+)\s+(.+?)\s*$" l)]
+                   :when c]
+               [c (/ (parse-long d) 1048576.0)])
+        big (filter #(>= (second %) 5) rows)]
+    (vec (concat (map (fn [[c d]] [c (lib/r2 d)]) (sort-by (comp - second) big))
+                 [[:others (lib/r2 (reduce + 0 (map second (remove #(>= (second %) 5) rows))))]]))))
+
+(defn- anon-mb
+  "The machine's anonymous memory in MB (vm_stat's anonymous pages): what processes hold privately, with the
+  file cache (the store's maps, the binary's pages) that free plus inactive counts left out."
+  []
+  (let [o (:out (clojure.java.shell/sh "vm_stat"))
+        [_ ps] (re-find #"page size of (\d+) bytes" o) [_ n] (re-find #"Anonymous pages:\s+(\d+)" o)]
+    (lib/r2 (/ (* (parse-long ps) (parse-long n)) 1048576.0))))
+
+(defn- faults
+  "{pid [cow faults]} of every process, cumulative since it began (top): its copy-on-write faults and all its
+  page faults. A forked process's private copies are at least cow pages and at most faults pages (a read fault
+  on an inherited page maps it shared and copies nothing), a bracket of what it added to the machine's memory
+  that no other process on the machine moves."
+  []
+  (into {} (for [l (clojure.string/split-lines (:out (clojure.java.shell/sh "top" "-l" "1" "-n" "100000" "-stats" "pid,cow,faults")))
+                 :let [[_ p c f] (re-find #"^\s*(\d+)\s+(\d+)\s+(\d+)\s*$" l)] :when f]
+             [(parse-long p) [(parse-long c) (parse-long f)]])))
+
+(defn- sample
+  "One reading, as a map: the machine's available MB and the footprints (MB) of root (this
+  process), root's fork server (fs, a pid), its direct children (the agents, :agents, of the pids
+  agents, and the standby) and theirs (:children: the agents' test children), each by pid;
+  :cpu the CPU seconds of each of them; :ms since t0 and :cost-ms, what the reading took."
+  [fs agents phase t0]
+  (let [t (profile/now-ns) tree (ps-tree) kids (fn [p] (map key (filter #(= p (first (val %))) tree)))
+        d1 (kids fs) d2 (mapcat kids (filter agents d1))
+        me (lib/c-getpid) ps (concat [me fs] d1 d2)
+        fp (footprints ps)
+        mb (fn [p] (lib/r2 (/ (get-in fp [p :fp] 0) 1048576.0)))]
+    {:ms (profile/ms-since t0) :phase @phase :avail-mb (:available-mb (lib/sysmem))
+     :root (mb me) :fork-server (mb fs)
+     :agents (into {} (for [p d1 :when (agents p)] [p (mb p)]))
+     :standby (reduce + 0 (for [p d1 :when (not (agents p))] (mb p)))
+     :children (into {} (for [p d2] [p (mb p)]))
+     :cpu (into {} (for [p ps] [p (second (tree p))]))
+     :peaks (into {} (for [[p v] fp] [p (lib/r2 (/ (:peak v) 1048576.0))]))
+     :cost-ms (lib/r2 (/ (- (profile/now-ns) t) 1e6))}))
+
+(defn- phase-row
+  "What the samples taken in one phase read: the lowest available memory, the highest footprint
+  of root, the fork server and the agents together, of the test children together and of one,
+  and how many test children ran at once."
+  [ss]
+  (let [sum #(reduce + 0 (vals %))]
+    {:samples (count ss) :avail-min-mb (lib/r2 (apply min (map :avail-mb ss)))
+     :root-max (apply max (map :root ss)) :fork-server-max (apply max (map :fork-server ss))
+     :agents-sum-max (lib/r2 (apply max (map (comp sum :agents) ss)))
+     :children-at-once-max (apply max (map (comp count :children) ss))
+     :children-sum-max (lib/r2 (apply max (map (comp sum :children) ss)))
+     :child-max (apply max 0 (mapcat (comp vals :children) ss))
+     :footprint-sum-max (lib/r2 (apply max (map #(+ (:root %) (:fork-server %) (:standby %) (sum (:agents %)) (sum (:children %))) ss)))}))
+
+(defn scale-work
+  "n agents (default 10; with search? false, the third eval, my.agent/tests-reaching, is left out:
+  what it alone costs an agent) that work, where scale's only evaluate and test one new test each: every
+  agent does five evals (a namespace with a function and its test, a read of main's vars, a
+  search of what reaches a function, five transactions, and an edit of seon.error/dirty?, a
+  function some 60 tests reach, each agent's edit its own) and then proves (c/run-tests!, the judge's run: the
+  tests its edit reaches, dealt across test children, none reused since each digest is its own).
+  Evals run in one pass, proves in a second at once, so each is a phase of its own. A sampler
+  reads the machine's available memory and every process under root's fork server every
+  :seon.config.check/sample-ms (sample); the cost is the machine's drop (as scale charges it)
+  from before the agents to its lowest reading, plus root's and the fork server's footprints
+  before it, against :seon.config.machine/memory-mb (docs/machine.md#ten-agents-at-once)."
+  [n search?]
+  (run-check "SCALE-WORK" {:datoms 0 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs)}}
+   (fn [sys]
+    (let [_ (when (pos? (seon.config/value :seon.config.vector/texts))
+              (seon.root/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
+          t0 (profile/now-ns)
+          phase (atom :ready) samples (atom []) stop (atom false)
+          ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale-work " i)})) (range n))))
+          ;; the baseline: every agent ready (its standby parent forked it, so it is charged), none yet working
+          st0 (c/state sys)
+          fs-pid (get-in st0 [:fork-server :pid]) agent-pids (set (keep #(get-in st0 [:agents % :pid]) ids))
+          base (sample fs-pid agent-pids phase t0)
+          mem0 (assoc (lib/sysmem) :anon-mb (anon-mb))
+          faults0 (faults)
+          ;; two readers: the machine's available memory alone is one native call (the drop that is
+          ;; judged), the processes' footprints a ps and a footprint (the attribution)
+          avails (atom [])
+          avail-reader (future (loop [] (swap! avails conj (let [tree (ps-tree)] {:ms (profile/ms-since t0) :phase @phase :avail-mb (:available-mb (lib/sysmem)) :anon-mb (anon-mb)
+                                                                  :children-n (count (filter #(agent-pids (first (val %))) tree))}))
+                                 (when-not @stop (Thread/sleep (seon.config/value :seon.config.check/sample-ms)) (recur))))
+          sampler (future (loop [] (swap! samples conj (sample fs-pid agent-pids phase t0))
+                            (when-not @stop (Thread/sleep (seon.config/value :seon.config.check/sample-ms)) (recur))))
+          probe "{:fp (seon.lib/real-mb) :gen-mb (/ (seon.lib/generation-bytes) 1048576.0) :heap-mb (/ (seon.lib/bytes-in-heap) 1048576.0)}"
+          probed (fn [id] (let [r @(c/submit! sys id probe)] (or (ts/value-of r) r)))
+          p0 (into {} (pmap (fn [id] [id (probed id)]) ids))
+          timed (fn [id form] (let [t (profile/now-ns) r @(c/submit! sys id form)] [r (/ (- (profile/now-ns) t) 1e6)]))
+          _ (reset! phase :eval)
+          evals (vec (pmap (fn [id]
+                             (let [k (subs (name id) 1)
+                                   forms [(str "(ns app.w" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
+                                                (deftest f-test (is (= (* 2 " k ") (f 2)))) (f 21)")
+                                        "(count (my.db/q '[:find ?e :where [?e :var/name]]))"
+                                        (if search? "(count (my.agent/tests-reaching 'seon.error/dirty?))" "(+ 1 1)")
+                                        (str "(my.db/transact! (vec (for [i (range 5)] {:note/text (str \"note \" i \" from " k "\") :note/agent " id "})))")
+                                        (str "(in-ns 'seon.error) (defn dirty? \"Has f a signature to write (one not yet written)? Edited by " k ".\" {:malli/schema [:=> [:cat :map] :boolean]} [f] (boolean (some :dirty? (vals f))))")]
+                                   rp (mapv (fn [f] (let [r (timed id f)] [r (probed id)])) forms)
+                                   rs (mapv first rp)]
+                               {:id id :probes (mapv second rp) :ok (every? #(and (map? (first %)) (not (:ex (first %)))) rs) :evals-ms (mapv (comp lib/r2 second) rs)
+                                :reaching (when search? (ts/value-of (first (nth rs 2))))
+                                :failed (vec (for [[r _] rs :when (or (not (map? r)) (:ex r))] (select-keys r [:ex :text])))}))
+                           ids))
+          p1 (into {} (pmap (fn [id] [id (probed id)]) ids))
+          mem-evals (assoc (lib/sysmem) :anon-mb (anon-mb))
+          _ (reset! phase :prove)
+          t-prove (profile/now-ns)
+          proves (vec (pmap (fn [id] (let [[r ms] (let [t (profile/now-ns) r @(c/run-tests! sys id)] [r (/ (- (profile/now-ns) t) 1e6)])]
+                                       {:id id :tests-ms (lib/r2 ms) :ran (:ran r) :pass (:pass r) :fail (:fail r) :error (:error r) :reused (:reused r)
+                                        :deferred (count (:deferred r)) :ex (:ex r)}))
+                            ids))
+          prove-ms (profile/ms-since t-prove)
+          _ (reset! phase :after)
+          p2 (into {} (pmap (fn [id] [id (probed id)]) ids))
+          mem-after (assoc (lib/sysmem) :anon-mb (anon-mb))
+          _ (reset! stop true)
+          _ @sampler
+          _ @avail-reader
+          st (c/state sys)
+          fin (sample fs-pid agent-pids (atom :end) t0)
+          faults1 (faults)
+          page-mb (/ 16384 1048576.0)
+          added (fn [i p] (* page-mb (- (get-in faults1 [p i] 0) (get-in faults0 [p i] 0))))
+          all-samples (conj @samples fin)
+          by-phase (into (sorted-map) (for [[p ss] (group-by :phase all-samples)] [p (phase-row ss)]))
+          pid-peaks (apply merge-with max (map :peaks all-samples))
+          children-pids (set (mapcat (comp keys :children) all-samples))
+          root0 (:root base) fs0 (:fork-server base)
+          drop-of (fn [m] (lib/r2 (- (:available-mb mem0) (:available-mb m))))
+          drop-peak (lib/r2 (- (:available-mb mem0) (apply min (map :avail-mb (concat all-samples @avails)))))
+          anon-peak (lib/r2 (- (apply max (map :anon-mb @avails)) (:anon-mb mem0)))
+          need #(+ root0 fs0 %)
+          budget (seon.config/value :seon.config.machine/memory-mb)
+          mean (fn [xs] (lib/r2 (/ (reduce + 0 xs) (max 1 (count xs)))))
+          gen (fn [p k] (mean (map #(get-in (p %) [k]) ids)))
+          ok-prove? (fn [r] (and (nil? (:ex r)) (zero? (+ (:fail r 0) (:error r 0))) (pos? (:pass r 0)) (<= 50 (:ran r 0) 100)))]
+      {:report {:agents n :load (clojure.string/trim (:out (clojure.java.shell/sh "sysctl" "-n" "vm.loadavg")))
+                :wall-ms {:ready (lib/r2 (profile/ms-since t0)) :prove-all-ten (lib/r2 prove-ms)}
+                :evals-ms-per-form (vec (for [i (range 5)] (lib/summ (map #(nth (:evals-ms %) i) evals))))
+                :prove {:tests-ms (lib/summ (map :tests-ms proves)) :ran (lib/summ (keep :ran proves)) :reused (lib/summ (keep :reused proves))
+                        :pass (lib/summ (keep :pass proves)) :deferred (lib/summ (map :deferred proves))}
+                :per-eval-growth-mb-mean {:footprint (vec (for [i (range 5)] (mean (map #(- (get-in (nth (:probes %) i) [:fp]) (get-in (p0 (:id %)) [:fp] 0)) evals))))
+                                          :non-static-gen (vec (for [i (range 5)] (mean (map #(- (get-in (nth (:probes %) i) [:gen-mb]) (get-in (p0 (:id %)) [:gen-mb] 0)) evals))))}
+                :tests-reaching-dirty? (lib/summ (keep :reaching evals))
+                :baseline-before-work-mb {:available (:available-mb mem0) :root root0 :fork-server fs0 :standby (:standby base)
+                                          :agents-sum (lib/r2 (reduce + 0 (vals (:agents base))))}
+                :machine-drop-mb {:after-evals (drop-of mem-evals) :peak drop-peak :after-prove (drop-of mem-after)
+                                  :per-agent-at-peak (lib/r2 (/ drop-peak n)) :per-agent-after-evals (lib/r2 (/ (drop-of mem-evals) n))
+                                  :per-agent-after-prove (lib/r2 (/ (drop-of mem-after) n))}
+                :anonymous-memory-drop-mb {:after-evals (lib/r2 (- (:anon-mb mem-evals) (:anon-mb mem0))) :peak anon-peak :after-prove (lib/r2 (- (:anon-mb mem-after) (:anon-mb mem0)))
+                                           :per-agent-at-peak (lib/r2 (/ anon-peak n))}
+                :need-mb {:peak (lib/r2 (need drop-peak)) :after-evals (lib/r2 (need (drop-of mem-evals))) :after-prove (lib/r2 (need (drop-of mem-after)))
+                          :budget budget}
+                :by-phase by-phase
+                :machine-drop-by-phase-mb (into (sorted-map) (for [[p as] (group-by :phase @avails)]
+                                                              [p {:max (lib/r2 (- (:available-mb mem0) (apply min (map :avail-mb as))))
+                                                                  :last (lib/r2 (- (:available-mb mem0) (:avail-mb (last as))))
+                                                                  :test-children-at-once-max (apply max (map :children-n as))}]))
+                :peak-footprints-mb {:root (get pid-peaks (lib/c-getpid)) :fork-server (get pid-peaks fs-pid)
+                                     :agent-summ (lib/summ (keep pid-peaks agent-pids))
+                                     :test-children-seen (count children-pids) :test-child-summ (lib/summ (keep pid-peaks children-pids))}
+                :per-agent-before-evals-after-evals-after-prove
+                {:footprint-mb [(gen p0 :fp) (gen p1 :fp) (gen p2 :fp)]
+                 :non-static-gen-mb [(gen p0 :gen-mb) (gen p1 :gen-mb) (gen p2 :gen-mb)]
+                 :heap-incl-static-mb [(gen p0 :heap-mb) (gen p1 :heap-mb) (gen p2 :heap-mb)]}
+                :dirty-memory-by-category-mb {:root (categories (lib/c-getpid)) :fork-server (categories fs-pid)
+                                              :agent (categories (first agent-pids))}
+                :private-pages-added-mb {:note "per agent since all were ready, bracketed by top's copy-on-write faults (at least) and all faults (at most)"
+                                         :agents-cow (lib/summ (map #(added 0 %) agent-pids)) :agents-faults (lib/summ (map #(added 1 %) agent-pids))
+                                         :root-cow (lib/r2 (added 0 (lib/c-getpid))) :root-faults (lib/r2 (added 1 (lib/c-getpid)))
+                                         :fork-server-cow (lib/r2 (added 0 fs-pid)) :fork-server-faults (lib/r2 (added 1 fs-pid))}
+                :readings {:footprint (count all-samples) :cost-ms (lib/summ (map :cost-ms all-samples)) :available (count @avails) :test-children-at-once-max (apply max 0 (map :children-n @avails))
+                           :test-children-at-once-p50 (lib/r2 (lib/percentile (map :children-n (filter #(= :prove (:phase %)) @avails)) 0.5))}
+                :cpu-s {:root (lib/r2 (- (get-in fin [:cpu (lib/c-getpid)]) (get-in base [:cpu (lib/c-getpid)])))
+                        :fork-server (lib/r2 (- (get-in fin [:cpu fs-pid]) (get-in base [:cpu fs-pid])))
+                        :agents-sum (lib/r2 (reduce + 0 (for [p agent-pids] (- (get-in fin [:cpu p] 0) (get-in base [:cpu p] 0)))))
+                        :test-children-last-seen-sum (lib/r2 (reduce + 0 (for [c children-pids]
+                                                                           (apply max 0 (keep #(get-in % [:cpu c]) all-samples)))))}
+                :failed (vec (for [e evals :when (not (:ok e))] (select-keys e [:id :failed])))}
+       :checks {:every-eval-passed (every? :ok evals)
+                :every-prove-ran-50-to-100-tests-green (every? ok-prove? proves)
+                :fits-the-machine (<= (need drop-peak) budget)}}))))
 
 (defn orphan
   "Root dies while its agents are busy (one in a loop, one in a forever test, one clone):
@@ -1691,6 +1916,7 @@
      "window-write" (fn [n more] (window-write n))
      "window-read" (fn [n more] (window-read n))
      "scale" (fn [n more] (scale (n-or n "100")))
+     "scale-work" (fn [n more] (scale-work (n-or n "10") (not= "no-search" (first more))))
      "robust" (fn [n more] (robust))
      "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
      "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
