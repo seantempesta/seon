@@ -153,6 +153,8 @@
  ;; id, its 10 costliest contracted functions ([{:var :calls :ms}], seon.profile), the vars it
  ;; recorded, and what its prose cites (:cites, seon.ref/references parsed once as it is recorded)
  :seon.eval/record [:map {:seon.render/html seon.render.ui/evaluation} [:code :string] [:response :map]
+                    ;; the namespace the REPL is in after the eval (seon.repl/record!): where the next one runs
+                    [:ns {:optional true} :symbol]
                     [:printed {:optional true} :string] [:type {:optional true} :string]
                     ;; a value that names its basis (@ctx, seon.ctx): its schema and the basis it is
                     ;; rendered from, in place of a copy (seon.repl/record-details); a data value its schema alone

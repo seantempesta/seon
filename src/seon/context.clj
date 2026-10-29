@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -730,6 +730,48 @@
   "Citation c's one key on a page: the name it cites, else its address."
   {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
   [c] (str (or (:seon.ref/name c) (:seon.ref/address c) (:seon.ref/path c))))
+
+(defn current-ns
+  "The namespace agent a's REPL is in on db: the one its newest eval left it in (seon.repl/record!'s
+  :ns), or nil before it has evaluated anything there. Where its next eval runs."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
+  [db a]
+  (some->> (d/q '[:find ?tx ?r :in $ ?a :where [?e :seon.eval/agent ?a ?tx] [?e :seon.eval/record ?r]] db a)
+           (keep (fn [[tx rec]] (when (:ns rec) [tx (:ns rec)]))) seq (apply max-key first) second))
+
+(defn namespace-data
+  "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
+  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns, 2026-10-29): its
+  aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
+  and its deftests, how many are green and which are red. nil when db records no such namespace."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :map]]}
+  [db nsym]
+  (when-let [e (pdb/eid db :ns/name nsym)]
+    (let [src (d/q '[:find ?src . :in $ ?n :where [?f :form/defines ?n] [?f :form/src ?src]] db e)
+          ;; its definitions; its deftests are :tests
+          defs (->> (d/q '[:find ?o ?v :in $ ?n :where [?x :var/ns ?n] [?x :var/name ?v] [(get-else $ ?x :var/kind :fn) ?k] [(not= ?k :test)]
+                           [(get-else $ ?x :var/form -1) ?f] [(get-else $ ?f :form/order -1) ?o]] db e)
+                    (sort-by (fn [[o v]] [(if (neg? o) Long/MAX_VALUE o) (str v)])) (mapv (comp symbol name second)))
+          tests (d/q '[:find ?v ?st :in $ ?n :where [?x :var/ns ?n] [?x :var/kind :test] [?x :var/name ?v]
+                       [(get-else $ ?x :seon.test/status :none) ?st]] db e)
+          by (group-by second tests)]
+      (cond-> {:ns nsym}
+        src (assoc :aliases (into (sorted-map) (learn/aliases [src])))
+        (seq defs) (assoc :defines defs)
+        (seq tests) (assoc :tests (cond-> {:deftests (count tests) :green (count (by :green))}
+                                    (seq (by :red)) (assoc :red (vec (sort (map first (by :red)))))))))))
+
+(defn namespaces-of
+  "The namespaces agent a's work on task t touches, each as `namespace-data`: the one its REPL is in
+  (`current-ns`), then those of what the plan cites (a var's, a namespace itself) and of the task's
+  proofs, once each, those db records. What the page's namespaces part shows the model."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:vector :map]]}
+  [db t a]
+  (let [{:keys [plan proofs]} (:seon.task/accumulated t)
+        cited (for [{n :seon.ref/name} (ref/references db (str plan "\n" (:seon.task/instructions t)))
+                    :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
+    (into [] (keep #(namespace-data db %))
+          (distinct (concat (some-> (current-ns db a) vector) cited (map (comp symbol namespace) proofs))))))
 
 (defn citations
   "The citations of task t's plan and instructions (seon.ref/references, the one parser), one per

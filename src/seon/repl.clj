@@ -555,7 +555,9 @@
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
     (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
-                                                 (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
+                                                 ;; where the REPL is after it: the next eval runs there, and the agent's part shows it
+                                                 (cond-> (record-details (agent/db) code r req (get-in @agent/state [:turn :run]))
+                                                   (:ns @agent/state) (assoc :ns (ns-name (:ns @agent/state)))))))
           (assoc r :record id))
       r)))
 

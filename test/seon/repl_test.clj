@@ -69,6 +69,18 @@
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
+(deftest an-agents-namespace-is-recorded-where-its-eval-left-it
+  ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
+  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns)
+  (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
+                                   [(str "(ns " ns ".here)")
+                                    "(+ 1 1)"
+                                    {:op :eval :agent "root"
+                                     :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
+                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a]] b)]"
+                                                " (seon.context/current-ns b a))")}]))]
+    (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
+
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
   ;; owner, 2026-10-29: "don't some repls output a warning ... you are overwriting symbols in this
   ;; namespace?": an agent in-ns'd to seon.render.ui, whose own source shadows the REPL's, and read

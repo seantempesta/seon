@@ -980,6 +980,27 @@
     (with-meta r {:seon.render/schema :seon.context/related})
     [:section [:h2 "related"] [:p {:class "muted"} "nothing related yet"]]))
 
+(defn namespaces-html
+  "The namespaces the work touches as the page shows them (the declared html render of
+  :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
+  aliases, definitions and tests by the one printer. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts [:sequential :map]] :any]}
+  [_opts v]
+  [:details
+   [:summary {:class "kicker"} (str "namespaces · " (str/join ", " (map :ns v)))]
+   (into [:div {:class "mt-1 flex flex-col gap-1"}]
+         (for [n v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} n]))])
+
+(defn namespaces
+  "The namespaces the agent's work touches (a component over ctx and the db): the one its REPL is in,
+  those of what the plan cites and of its proofs, each its aliases, definitions and deftests
+  (seon.context/namespaces-of), a part (its data, :seon.context/namespaces:
+  docs/render.md#a-part-answers-data). Nothing before the task's record is read."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (when-let [t (some->> (:task c) :seon.task/id (task/task db))]
+    (with-meta (context/namespaces-of db t aid) {:seon.render/schema :seon.context/namespaces})))
+
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
   run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
@@ -994,10 +1015,13 @@
         cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
         n (count (:turns c))
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
-        sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)]
+        sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)
+        ;; the namespace the REPL is in: the one its newest eval left it in
+        in-ns (context/current-ns db aid)]
     ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
     ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
     (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}
+                 in-ns (assoc :ns in-ns)
                  sent (assoc :tokens-sent sent)
                  (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
                  (assoc :your-last-reply "cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."))
@@ -1005,11 +1029,11 @@
 
 (defn run-html
   "The run as the page shows it (the declared html render of :seon.context/run; the model is sent the
-  value): its turn of its cap, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
+  value): its turn of its cap, the namespace its REPL is in, the tokens it sent in all, a cut reply. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [turn tokens-sent your-last-reply]}]
+  [_opts {:keys [turn ns tokens-sent your-last-reply]}]
   [:section
-   [:p (str "turn " turn (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
+   [:p (str "turn " turn (when ns (str " · in " ns)) (when tokens-sent (str " · " (print/tokens-text tokens-sent) " sent in all")))]
    (when your-last-reply [:p {:class "err"} (str "your last reply was " your-last-reply)])])
 
 (defn own-problems
@@ -1265,6 +1289,8 @@
                        ;; each var the plan cites beside its proofs (the proofs are the task's data)
                        ;; each thing its plan cites, a part each, at the depth its citation asks
                        (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {} aid (context/cite-key cite)])
+                       ;; where the code lives: each namespace the work touches, its aliases, definitions and tests
+                       [#'namespaces {} aid]
                        [#'related {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                        [#'status {} aid]))
