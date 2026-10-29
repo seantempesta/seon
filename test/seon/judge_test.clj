@@ -37,6 +37,11 @@
   (is (= {:acted false :right-var false :right-test false :waste 1 :uncompiled 0 :green false}
          (move "(clojure.repl/source seon.judge/score)" "(clojure.repl/doc seon.judge/fact)"))
       "reading the shown var again is waste; the one cited by name only was not shown")
+  ;; in an agent clojure.repl/source is my.agent/source, whose expansion quotes the name it reads: the same read
+  ;; (task seon.agent/a-read-in-an-agent-names-the-var-it-reads)
+  (is (= {:acted false :right-var false :right-test false :waste 1 :uncompiled 0 :green false}
+         (move "(my.agent/source seon.judge/score)"))
+      "an agent's source of the shown var is the same waste")
   (is (= {:acted true :right-var false :right-test false :waste 1 :uncompiled 0 :green false}
          (move "(defn helper [x] (inc x))" "(clojure.repl/source seon.judge/score)"))
       "an act off the task beside a read of the cited var is not green")
