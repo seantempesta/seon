@@ -63,7 +63,49 @@ An agent keeps every eval's whole response (value included) for its process's li
 
 ### Ten agents at once
 
-Ten agents working at once cost root, the fork server and about 140 MB each: `bin/check swarm 10 10` (scripted agents, a scratch store, 2026-10-29) peaked at 2,415 MB with all ten live (root 845 MB, fork server 124 MB, standby 31 MB, agents 138-144 MB each), and `bin/check scale 10` reports about 97 MB an agent. On the standing store root is about 1.1 GB with the model out of it (it was 1.7 GB with the model loaded; the model now runs in a helper process, 350-550 MB, only while embedding work is queued: [vector](vector.md#the-model)) and the fork server 670 MB, so ten light agents there are about 4.1 GB. Agents running their tests were not measured, and each may grow 1 GiB (`:seon.config.agent/heap-extra-bytes`). The target is an ordinary MacBook: root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([plan](plan.md)).
+Ten agents working at once cost root, the fork server and about 140 MB each: `bin/check swarm 10 10` (scripted agents, a scratch store, 2026-10-29) peaked at 2,415 MB with all ten live (root 845 MB, fork server 124 MB, standby 31 MB, agents 138-144 MB each), and `bin/check scale 10` reports about 97 MB an agent. On the standing store root is about 1.1 GB with the model out of it (it was 1.7 GB with the model loaded; the model now runs in a helper process, 350-550 MB, only while embedding work is queued: [vector](vector.md#the-model)) and the fork server 670 MB, so ten light agents there are about 4.1 GB. Agents that work are measured below ([ten agents that work](#ten-agents-that-work)); each may grow 1 GiB (`:seon.config.agent/heap-extra-bytes`). The target is an ordinary MacBook: root idle at or under 650 MB, the fork server under 300 MB, ten working agents under 3 GB ([plan](plan.md)).
+
+### Ten agents that work
+
+`bin/check scale-work [N] [no-search]` (`seon.check/scale-work`) starts N agents (10) on a scratch main that holds Seon's own program (`:source` the checkout, about 1,140 tests), where `bin/check scale` has agents that only evaluate and test one new test. Each agent does five evals (a namespace with a function and its test; a read of main's vars; `my.agent/tests-reaching`; five transactions; an edit of `seon.error/dirty?`, a function 73 tests reach, each agent's edit its own so no digest is shared) and then proves (`seon.root/run-tests!`, the judge's run: 64 tests run, 451 assertions, none reused, 10 left to the judge as process tests), the evals of all ten first and then the proves of all ten at once. It reads the machine's available memory (`seon.lib/sysmem`) and anonymous memory (`vm_stat`) every `:seon.config.check/sample-ms`, and every process under root's fork server (`footprint`, `ps`, `top`'s fault counts) as fast as that reading goes (2.6-3.6 s for ~25 processes, the tool walking each 64 GiB store map). It reports the drop from before the work to the lowest reading, plus root's and the fork server's footprints before it, against `:seon.config.machine/memory-mb`.
+
+Measured 2026-10-29 on 10 agents, load 6-17, with other sessions' test runs on the machine (`bin/test` in two other worktrees, a root): six runs.
+
+| | run a | b | f (quietest) |
+|---|---|---|---|
+| root + fork server before the work (footprint) | 1,362 MB | 1,358 MB | 1,406 MB |
+| machine drop after the five evals, per agent | 125 MB | 167 MB | 104 MB |
+| machine drop at the lowest reading, all ten | 3,167 MB | 3,088 MB | 1,498 MB |
+| anonymous memory drop at its peak | not read | not read | 1,552 MB |
+| root + fork server + the drop | 4,529 MB | 4,446 MB | 2,904 MB |
+
+Runs c, d and e read peak drops of 6.7, 6.2 and 12.4 GB, and d an after-prove drop of -8.8 GB: other sessions' processes moved the machine's available memory by gigabytes, so those three say nothing about ours. Runs a and b agree with each other (3.1 GB) and run f read half that; which of them holds another session's memory is not known, so the peak is **1.5 to 3.1 GB of agents and their test children, 2.9 to 4.5 GB with root and the fork server, against 4,096 MB**: inside the budget on the quietest machine, over it by 350-430 MB on two noisier ones, and the footprints (below) give 4.6 GB as an upper bound. The after-evals reading, a short window with ten agents idle in it, is the steady one: 104-167 MB an agent in all five runs that read it (1.0 to 1.7 GB for ten). `fits-the-machine` is judged on one run and so can read red on a busy machine; read the drop over runs on a quiet one.
+
+**Where an agent's memory goes** (footprints, mean of 10 agents; an agent starts at 66 MB):
+- the first eval, a new namespace with a function and its test: +48 MB;
+- a read of main's vars (`my.db/q`): +10 MB;
+- `my.agent/tests-reaching`, the first use of the reach graph: +116 MB of footprint and +24 MB of live heap outside static, and the same 116 MB at the first prove of an agent that skips it. **The cause was a rebuild, not first-touch:** the eval defined a new namespace with its first deftest, and `seon.program/reach-update` built the whole reach graph again whenever a namespace gained its first test (its quoted names become edges), 721 MB allocated, 135 M ticks, 0.6 s, a 24 MB graph the agent kept (measured one agent, per step, 2026-10-29: `seon.agent/branch-graph` alone). The forms the namespace already held are now re-edged as added and only a namespace losing its last test rebuilds ([source](source.md#tests-run-by-reach), `seon.program-test/a-namespace-gaining-its-first-test-is-updated-not-rebuilt`): `branch-graph` 66 MB allocated and +20 MB of footprint, live heap +0.8 MB; ten agents: the third eval +24 MB (it was +118), the prove +33 MB, an agent ends at 188 MB (it was 262-277), its live heap outside static 10 MB (it was 50);
+- the transacts and the edit: +1 and +4 MB; the prove, after the graph is made: +22 MB;
+- so an agent ended at 262-277 MB of footprint before that change (live heap outside static 50 MB, 580 MB of heap with static), 3.9x what an idle agent's 66 MB reads, and at 185-192 MB after it. Its private pages are between its copy-on-write faults (60 MB median) and its faults (285 MB), and the machine's drop puts it at 104-167 MB while idle.
+
+**Test children** are the other holder: at most four run at once whatever the agents' number (the test service deals each prove's tests across children, 64 tests in four children an agent, 38-40 children over the run), each 65-160 MB of footprint (median 87-157, the largest 256 MB) of which the part they write is real. Four at once are 0.4-0.5 GB of footprint, and the machine's drop rises by 0.3-0.4 GB with the proves under way.
+
+**Root and the fork server** grow while agents work: root 930-990 MB to 960-1,010 (peak 1,009-1,021 over its life), the fork server 405-470 to 505-590 MB (it records and reads each judge's run on main; its life's peak is 720-890 MB, its boot). Both hold their dirty pages in the one untagged heap region (root 730-780 MB, malloc 207 MB), the fork server 480-570 MB.
+
+**Time** (the proves ran with other sessions' tests on the machine, so wall is not the number): ten agents ready in 11 s on a main holding the program (measured 2026-10-29, load 3; the 100-119 s first reported here was the report's `:ready` read after the proves, the whole run's wall, now `:end-to-end`, 65 s at load 3), and what those 11 s are is [below](#what-a-spawn-costs), the five evals 20 ms to 1.7 s each (the first, defining the namespace, 1-1.7 s with ten at once), the ten proves at once 67-87 s (194 s when the machine was loaded with 17), CPU for root 6-10 s, the fork server 0.3 s, ten agents 13-29 s and their test children at least 100-216 s (as last seen; children that ended between readings are undercounted).
+
+### What a spawn costs
+
+`bin/check spawn-phases N` (`seon.check/spawn-phases`) spawns N agents at once, twice, on a scratch main holding Seon's own program (2,616 forms, an import of 155,987 datoms), and prints each agent's phases (`seon.agent/spawn-phases`). Measured 2026-10-29, load 3:
+
+| | 1 agent, first | 10 agents, first wave | 10 agents, second wave (main unmoved) |
+|---|---|---|---|
+| request to the fork server taking the fork (`fork-server-in`) | 9,438 ms | 10,335-10,349 ms | 0.02 ms (all ten ready in 172 ms) |
+| graph brought to main (`reach-graph`, once, the first fork) | 1,377 ms | 1,385 ms | 0 |
+| index, freeze (`index`, `static`) | 9 + 88 ms | 9 + 83 ms | 0 + 0.1 ms |
+| the agent's own start (`child-init` to `hello`) | 15 ms | 12-20 ms each | 12-20 ms each |
+
+A spawn on an unmoved main costs the agent's own start, about 17 ms, and the fork server forks ten in a row without queueing behind any heavy work (the second wave's ten were ready within 172 ms of the request). The 9-10 s of the first wave is not a spawn's: it is the fork server loading the program the writer committed (`seon.program/load-changes!` of the import, 9.6 s for 2,616 forms, timed in the server's loop), which the first fork waits behind because commits and forks arrive on one FIFO pipe (an agent forked after commit k sees exactly k). With 25 s between the import and the first spawn the first wave took 1.7 s (the graph's 1.4 s and the freeze). So a spawn pays per main move: the load of the forms that move changed (1.6-5 ms a form) and the graph's update at the next fork (20-45 ms for a merge's forms, 1.4 s for the whole program), never per fork.
 
 ### What a turn costs
 
