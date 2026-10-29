@@ -475,29 +475,28 @@
   ;; shouldn't be printing thousands of items anywhere. The value printer is made to show as much
   ;; of the structure that is possible and to have ellipses for data that just continues so the
   ;; agent can know what's there and can dig into it". A cited source is whole in its data, never
-  ;; swapped for its doc by size; its part returns it as a call of the printer with its budget and
-  ;; the form that reads it ([#'seon.render/html opts value]), and the printer prints that call's
-  ;; value at that budget for the model as the page's writer does for the page: the same cut,
+  ;; swapped for its doc by size; its part is that data (docs/render.md#a-part-answers-data), and the
+  ;; one printer cuts it where it is shown, for the page (cited-html) as for the model, the cut
   ;; naming the form that reads the rest
   (binding [*ns* *ns*]
     (eval '(ns ctx-big))
     (eval '(defn big "Does much." {:malli/schema [:=> [:cat] :int]} [] 1)))
   (let [src (str "(defn big \"Does much.\" [] " (str/join " " (repeat 8000 "(inc 1)")) ")")
         db (d/db-with (db-with-program) (program-facts [['ctx-big/big src []]]))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
         ;; the task's record as ctx holds it: its task citing the var, with its form
-        c {:task {:cited {2 {:var/name 'ctx-big/big :form {:form/src src}}}}}
-        hiccup (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 'ctx-big/big)
-        html (seon.web.html/html hiccup)
-        model (print/text (vary-meta hiccup assoc :seon.print/full true))]
-    (is (= {:symbol 'ctx-big/big :source (print/code src)} r) "the source whole as code, never swapped for its doc by size")
+        c {:task {:seon.task/id "demo/r" :cited {2 {:var/name 'ctx-big/big :form {:form/src src}}}}}
+        part (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 (context/cite-key (first (context/citations db (task/task db "demo/r")))))
+        html (seon.web.html/html (seon.render/html {:schema :seon.context/cited :as :block} part))
+        model (print/text (seon.render.ui/cited-model {} part))]
+    (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
+    (is (= (print/code src) (:source part)) "the part holds it whole, as data")
     (is (< (:context seon.print/budgets) (select/estimate src)) "a source over the context's budget")
     (is (< (count html) (count src)) "the page cuts it where it is written")
-    (is (str/includes? html "seon.render.ui/cited-of") "its cut names the form that reads the rest")
-    (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the call's budget: " (select/estimate model) " tokens"))
-    (is (str/includes? model "#'seon.render/html") "the call as returned")
-    (is (str/includes? model "seon.render.ui/cited-of") "and the cut names the form that reads the rest")
-    (is (= "[#'seon.context/cited 1 {:a 1}]" (print/text [#'seon.context/cited 1 {:a 1}])) "a vector headed by a var with no budget is data")))
+    (is (str/includes? html "seon.render.ui/cited {") "its cut names the form that reads the rest")
+    (is (< (select/estimate model) (select/estimate src)) (str "the model reads it cut too, at the printer's budget: " (select/estimate model) " tokens"))
+    (is (str/includes? model "seon.render.ui/cited {") "and the cut names the form that reads the rest")))
 
 ;; a made unit vector, dim i weighted as a Matryoshka model's are (seon.vector-test/vectors)
 (defn- made-vector [seed]
@@ -1163,9 +1162,12 @@
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
         task (html "task-data-")]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
-    (is (str/includes? task "(deftest g-test (is (= :one (g))))") "D1: the proof written, its source")
+    (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
+    (is (str/includes? (html "status-") "demo-test/g-test") "D1: the proof written is the status's, by name")
+
     (is (str/includes? (html (str "cited-" rid "-demo_2Fg")) "(defn g [])") "D2: the cited var's source, its own component")
-    (is (str/includes? task "Section 1 says one thing.") "D3: the cited section's text, not its address")
+    (is (str/includes? (html (str "cited-" rid "-docs_2Fvector.md")) "Section 1 says one thing.") "D3: the cited section's text, not its address, in its own component")
+    (is (not (str/includes? task "Section 1 says one thing.")) "and not the task's again")
     (render/dispose-walk! w)))
 
 (deftest a-db-component-runs-again-on-what-it-read

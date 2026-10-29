@@ -71,7 +71,7 @@
  ;; each repair of a model's code: where (line, column, the whole line of the code as it ran) and what was dropped or inserted
  :seon.eval/repairs [:vector [:map [:near [:map [:line pos-int?] [:column pos-int?] [:text :string]]] [:dropped {:optional true} :string] [:inserted {:optional true} :string]]]
  ;; seon.repl/edit! refused, nothing changed: the var has no recorded source, the old text is not in
- ;; it, or it is there more than once; each line the refusal names [line text] (the near or the candidates)
+ ;; it, or it is there more than once; each line the error names [line text] (the near or the candidates)
  :seon.repl/edit-refused [:and :seon.error/base
                           [:map [:seon.error/type [:enum :seon.repl/edit-refused]] [:seon.repl/var :symbol]
                            [:seon.repl/refused-because [:enum :no-source :not-found :ambiguous]]

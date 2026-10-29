@@ -861,15 +861,33 @@
             fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
         (with-meta (merge {:cites k :kind kind :depth depth} view fn-extra) {:seon.render/schema :seon.context/cited})))))
 
+(defn- cited-call
+  "The one printer's call for a cited part's value v (shown without the part's schema mark, or html would draw
+  it by its render again), its cuts reading the rest through the form that makes the part whole again
+  (`cited`, the same ctx and db the page was drawn from). See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
+  [{:keys [cites]} shown]
+  [#'render/html {:budget (config/value :seon.config.render/value-budget)
+                  :handle (list 'seon.render.ui/cited {:seon.ctx/ctx '(deref seon.ctx/ctx) :seon.db/db '(seon.agent/db)} 0 cites)}
+   (with-meta shown nil)])
+
 (defn cited-html
   "A thing the plan cites as the page shows it (the declared html render of :seon.context/cited; the
-  model is sent the value): what it is and the depth it is shown at, then its view by the one printer.
-  See docs/render.md#a-part-answers-data."
+  model is sent `cited-model`): what it is and the depth it is shown at, then its view by the one
+  printer. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_opts {:keys [cites kind depth] :as v}]
   [:details (when (not= :summary depth) {:open true})
    [:summary {:class "kicker"} (str (name kind) " · " cites " · " (name depth))]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (dissoc v :cites :kind :depth)]])
+   (cited-call v (dissoc v :cites :kind :depth))])
+
+(defn cited-model
+  "A thing the plan cites as the model is sent it (the declared model render of :seon.context/cited):
+  its value (the name it cites, its kind and depth, then its view) as a call of the one printer,
+  whose cuts name the form that reads the rest (`cited-call`). See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
+  [_opts v]
+  (cited-call v v))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
