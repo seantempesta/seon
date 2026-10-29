@@ -21,7 +21,7 @@
   Agents transact facts on their own branch; root reacts: the writer applies them, and
   only a merge task's octopus merge (the reconciler's, seon.writer) advances main."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.docs :as docs] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
@@ -869,13 +869,27 @@
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
   ([db checkout] (wiki-tx db checkout {}))
   ([db checkout baseline]
-   ;; each of the checkout's wiki dirs in turn, on the db the ones before it made (a page links to the
-   ;; sections of the others, which are stored by then)
-   ;; twice: a link from a dir's page to a later dir's page is a dead link until that page's sections are
-   ;; stored, and the second pass resolves it, so the load is a fixpoint (an unchanged wiki writes nothing)
-   (let [dirs (cfg/value :seon.config.root/wiki-dirs)]
-     (reduce (fn [tx dir] (into tx (docs/load-dir-tx (d/db-with db tx) checkout dir baseline)))
-             [] (concat dirs dirs)))))
+   (docs/load-dir-tx db checkout (cfg/value :seon.config.root/wiki-dirs) baseline)))
+
+(defn wiki-digest
+  "The digest of what the boot's wiki load reads: the pages of the checkout's wiki dirs, the program db
+  holds (seon.program/program-digest: the vars a section's names and references resolve to, and the forms
+  its read ids come from) and its task ids (a prose word may name a task). docs/root.md#boot."
+  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
+  [db checkout]
+  (err/digest (str (program/program-digest db) "\n" (str/join " " (map :v (d/datoms db :avet :seon.task/id))) "\n"
+                   (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (docs/pages checkout dir)] (str p "\n" t))))))
+
+(defn wiki-boot-tx
+  "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
+  fact, or [] when main already holds that digest (the load is a function of that input, so it would write
+  nothing). baseline: a function answering wiki-tx's baseline, called only when it loads. docs/root.md#boot."
+  {:malli/schema [:=> [:cat :seon.host/db :string :seon.host/fn] [:vector :any]]}
+  [db checkout baseline]
+  (let [digest (wiki-digest db checkout)]
+    (if (= digest (when-let [e (pdb/eid db :seon.root/id :root)] (:seon.root/wiki (d/pull db [:seon.root/wiki] e))))
+      []
+      (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -1031,7 +1045,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running) (into (task/earlier-agents-tx db)) (into (cfg/facts config cfg/sources))
-                                                                                  (into (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))))
+                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]

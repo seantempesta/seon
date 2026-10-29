@@ -374,3 +374,28 @@
     (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
     (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
     (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.docs/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))
+
+(deftest the-wiki-of-two-dirs-loads-in-one-pass
+  ;; docs/references.md#the-wiki-in-the-store: a link from one dir's page to another's resolves in the one load
+  ;; of the dirs (the boot used to load each dir twice for it), and a reload of the same pages writes nothing
+  (let [db (ts/test-db)
+        pages {"demo/a.md" "# A\n\nSee [b](../other/b.md#b).\n" "other/b.md" "# B\n\nIt is the target.\n"}
+        tx (docs/load-tx db ["demo" "other"] pages)
+        db' (d/db-with db tx)]
+    (is (not-any? #(and (map? %) (:seon.section/dead-links %)) tx) "the link reaches the section of the other dir")
+    (is (= 1 (count (:seon.section/references (d/pull db' [{:seon.section/references [:seon.section/address]}] [:seon.section/address "demo/a.md#a"]))))
+        "and is stored as a reference")
+    (is (= [] (docs/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")
+    (is (seq (docs/load-tx db' ["demo" "other"] (dissoc pages "other/b.md"))) "a page gone retracts its sections under the other dir")))
+
+(deftest a-boot-whose-wiki-digest-is-recorded-loads-nothing
+  ;; docs/root.md#boot: the digest of what the load reads (the pages, the program, the task ids) rides on root's
+  ;; fact; a boot that computes the same writes no wiki and reads none, and a change of any input loads again
+  (let [co (seon.config/checkout)
+        db0 (ts/test-db)
+        tx (seon.root/wiki-boot-tx db0 co (constantly {}))
+        db (d/db-with db0 tx)]
+    (is (seq tx) "a first boot loads the wiki")
+    (is (= (seon.root/wiki-digest db0 co) (:seon.root/wiki (d/pull db [:seon.root/wiki] [:seon.root/id :root]))) "and records its digest")
+    (is (= [] (seon.root/wiki-boot-tx db co (constantly {}))) "the same inputs load nothing")
+    (is (seq (seon.root/wiki-boot-tx (d/db-with db [{:seon.task/id "demo/new-task"}]) co (constantly {}))) "a new task id loads again")))

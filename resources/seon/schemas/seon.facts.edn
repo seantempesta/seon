@@ -352,6 +352,8 @@
  ;; ---- root's boot and config keys (main) ----
  :seon.root/id [:and {:seon.db/identity true} :keyword]
  :seon.root/boot :string
+ ;; the digest of what the wiki load read (seon.root/wiki-digest): a boot that computes the same writes no wiki
+ :seon.root/wiki [:string {:description "The digest of what the wiki load of the boot that wrote it read: the pages of the wiki dirs, the program and the task ids of main before the boot. A boot that computes the same loads nothing (seon.root/wiki-digest, docs/root.md#boot)."}]
  :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
@@ -408,6 +410,7 @@
  :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.process/_agent :as :processes] [*]} {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
+                          [:seon.root/wiki {:optional true} :seon.root/wiki]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]

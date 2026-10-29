@@ -6,7 +6,7 @@
   the rule needs (ATX headings, fenced and indented code, code spans, inline links,
   paragraph boundaries) in one pass over the text."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb] [seon.reader :as reader]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb]
             [clojure.string :as str] [clojure.java.io :as io] [datahike.api :as d] [seon.config :as cfg] [malli.registry :as mr]))
 
 (def roots
@@ -362,6 +362,31 @@
                         (and (or (Character/isLetterOrDigit c) (= \- c) (= \_ c) (and (= \. c) (not= \. prev)))
                              (recur (inc i) c)))))))))
 
+(defn- qualified-name
+  "The qualified symbol or keyword span is exactly one of (a/b, :a/b), as the reader reads it, or nil.
+  Read by its characters: the reader allocates ~18 KB a call (half of it its options rebuilt), on every
+  span of a page that holds a / (docs/references.md#cost); `seon.ref-test/a-name-is-read-as-the-reader-reads-it`
+  holds the two equal. A token is letters, digits and *+!-_?.<>=&%$'#: with one / inside it; neither part
+  begins with a digit, a sign before a digit or one of ' # :, and the name does not end in a colon."
+  {:malli/schema [:=> [:cat :string] [:maybe [:or :qualified-symbol :qualified-keyword]]]}
+  [^String span]
+  (let [name-char? (fn [c] (or (Character/isLetterOrDigit ^char c) (str/index-of "*+!-_?.<>=&%$'#:" (str c))))
+        name-start? (fn [^String s] (let [c (.charAt s 0)]
+                                      (not (or (Character/isDigit c) (str/index-of "'#:" (str c))
+                                               (and (or (= \- c) (= \+ c)) (< 1 (count s)) (Character/isDigit (.charAt s 1)))))))
+        kw? (str/starts-with? span ":")
+        ^String body (if kw? (subs span 1) span)
+        n (count body)
+        slash (str/index-of body "/")]
+    (when (and slash (pos? slash) (< (inc slash) n)
+               (not (str/index-of body "/" (inc slash)))
+               (not (str/index-of body "::"))
+               (not (str/ends-with? body ":"))
+               (loop [i 0] (or (= i n) (let [c (.charAt body (int i))] (and (or (= i slash) (name-char? c)) (recur (inc i))))))
+               (name-start? body)
+               (name-start? (subs body (inc slash))))
+      (if kw? (keyword body) (symbol body)))))
+
 (defn- span-candidate
   "A code span or prose word read as a based path (its first segment one of the checkout's
   top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as
@@ -380,9 +405,7 @@
       (if-not (str/index-of span "/")
         (when (namespace-name? span) {:seon.ref/name (symbol span) :seon.ref/resolve-only true})
         (when (and (not (str/index-of span " ")) (not (str/index-of span "\t")) (not (str/ends-with? span "*")))
-          (let [[x & more] (reader/read-text span 'user)]
-            (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= span (str x)))
-              {:seon.ref/name x})))))))
+          (when-let [x (qualified-name span)] {:seon.ref/name x}))))))
 
 (defn- link-candidate
   "A link destination as a candidate: one with a scheme (https:, mailto:) is no reference; an
