@@ -59,7 +59,9 @@
     (try
       (vec (for [{:keys [form ns]} (:forms (binding [*read-eval* false] (source/read-forms nsym (:text (reader/forgive code)))))]
              (try (let [{:keys [units]} (source/analyze-form (if (and (seq? form) (= 'ns (first form))) nsym (or ns nsym)) form)]
-                    {:defs (into #{} (comp (mapcat :defs) (map :var)) units) :refs (into #{} (mapcat :refs) units)})
+                    ;; its refs with its quoted data's (the analyzer's :quoted): an agent's source quotes the name it
+                    ;; reads ((source f) expands to a let of 'f), a plain REPL's names it bare, and both read f
+                    {:defs (into #{} (comp (mapcat :defs) (map :var)) units) :refs (into #{} (mapcat #(concat (:refs %) (:quoted %))) units)})
                   (catch Exception e (uncompiled e)))))
       (catch Exception e [(uncompiled e)]))))
 
