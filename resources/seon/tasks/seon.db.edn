@@ -114,4 +114,7 @@ Not yet known: which of root's values holds (2). compute-size over 'static reach
 The fix is at the producer that pulls the whole store: it reads what its view needs, through the bounded node cache, and the cache weighs a node by its real size. Owner rule: never pull the whole db."
   :seon.task/kind :work
   :seon.task/proofs #{seon.root-cost-test/a-roots-live-heap-is-flat-in-its-recorded-runs}}
-]
+ {:seon.task/name "the-node-cache-weighs-what-it-holds-and-root-holds-what-it-reads"
+  :seon.task/plan "Measured 2026-10-29 (heap census, idle scratch root, 189k datoms on main): the Datahike node cache holds 568-588 nodes the weigher counts as 125.7 MB (cap :seon.config.store/node-cache-bytes, 128 MiB) that retain 204-226 MB (1.6-1.8x: pvec 97 MB, vector 63 MB, strings 39 MB; datoms themselves 3 MB). An idle root reads one index's hot set, ~20 MB. Correct: the weigher counts what a node retains (its pvec/vector children, Jolt's datahike.index.node-cache weigher), so the cap means bytes; then root's cap is sized from what it reads (measured, not guessed), the agents' from theirs. Proof: a cost proof that the cache's weighed total is within 10% of compute-size of its nodes; root idle heap before and after."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
