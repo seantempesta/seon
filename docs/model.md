@@ -16,6 +16,10 @@ The profiles (aero's `#profile`, read by ```seon.config/profile```) are:
 
 Every request declares one tool, `eval` (`seon.model/eval-tool`), which the model may call or not (`tool_choice` auto: a reply with no call is prose to the user): its code is the REPL's input, so the model sees each evaluation's answer before its next call. A reply's prose is read as comments. Every request sets `temperature 0` and streams its reply with its usage (`:stream true`, `:stream_options {:include_usage true}`, `seon.model/request-body`), so no clock has to guess a reply's length. What a request holds and in which order is the context's: [render](render.md#the-models-context-a-cached-prefix-then-the-turn).
 
+## One function answers a request
+
+```seon.model/complete``` takes the provider value and the request and answers a completion or a typed failure, by the provider's kind: `:none` answers `:seon.model/no-provider`, `:scripted` the fixture's reply, `:openai-compat` posts `seon.model/request-body` to the endpoint's chat-completions path with the key read at the call. A 200 body is read by ```seon.model/parse-reply``` as a stream of server-sent events (```seon.model/sse-reply```: content and reasoning concatenated in order, each tool call's pieces joined by its index, the last finish reason, the usage the final chunk carries) or as one chat-completion JSON document, and either way becomes the one completion shape (`seon.model/reply-of`). Anything but 200 is a provider error with the response body ([failures](#failures)).
+
 ## Thinking is off by default
 
 `:seon.config.ai/thinking` is `:disabled`: a task whose next step needs long reasoning is a context or instruction defect to fix, not a cost to pay every turn (owner: "if we can't have intuitive function calling based on the context our context is bad and instructions need help"). A model or a task turns it on through the resolver ([config](config.md#the-resolver)), with `:seon.config.ai/reasoning-effort`.

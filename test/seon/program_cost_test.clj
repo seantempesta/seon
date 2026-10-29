@@ -232,7 +232,7 @@
 
 (deftest the-reach-walk-is-one-pass-whatever-the-keys
   (cost/proof
-    {:of 'seon.program/reach-index :input 'seon.program-cost-test/keyed-chain
+    {:of 'seon.test-store/reach-index :input 'seon.program-cost-test/keyed-chain
      :n "forms (and n/10 keys, each reaching the forms below it)"
      :work (str "the live forms read and digested once, each form's neighbours once, the components once "
                 "(Tarjan's) and each one's Merkle digest once, sinks first; then per key its starting "

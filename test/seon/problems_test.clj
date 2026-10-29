@@ -900,7 +900,8 @@
                :work "three aevt scans of the sections, the var and task names, the catch forms, and for the stale sections only the names the branch changed (seon.merge/changed-vars) and the sections that differ; candidates only through the rule"
                :growth :linear
                :per-n {:ticks 5900 :bytes 32500 :calls 0}
-               :fixed {:ticks 800000 :bytes 3800000 :calls 32}
+               ;; 37: :uncited-var's read of the changed vars (5 contracted calls, measured 2026-10-29 on main: 37 at n=10)
+               :fixed {:ticks 800000 :bytes 3800000 :calls 37}
                :sizes [10 100 1000]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
@@ -1220,4 +1221,61 @@
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Prose, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
         (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
+(defn- var-forms
+  "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
+  by (spec i) -> {:src :doc :kind}."
+  [db0 n spec]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))
+        nsym (:ns/name (d/entity db0 ns-e))]
+    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
+                         (mapcat (fn [i] (let [{:keys [src doc kind]} (spec i)]
+                                           [{:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
+                                            (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/kind (or kind :fn)}
+                                              doc (assoc :var/doc doc))]))
+                                 (range 1 (inc n)))))))
+
+(defn- cite-ns "The namespace var-forms' vars are in: the test db's first var's." [db0]
+  (str (:ns/name (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))))
+
+(defn uncited-var-input
+  "The cost proof's input at n: n public vars with a docstring citing nothing, named for the check."
+  [n] [(var-forms (ts/test-db) n (fn [_] {:src "(defn f [])" :doc "Does a thing."})) {}
+       (into #{} (map #(symbol (cite-ns (ts/test-db)) (str "v" %))) (range 1 (inc n)))])
+
+;; See docs/health.md#a-function-that-cites-no-section
+(deftest a-public-var-cites-the-section-that-describes-it
+  (let [db (var-forms (ts/test-db) 6
+                      (fn [i] (case (int i)
+                                1 {:src "(defn f [])" :doc "Does a thing."}
+                                2 {:src "(defn g [])" :doc "Does a thing. See docs/health.md#a-dead-citation."}
+                                3 {:src "(defn- h [])" :doc "A private thing."}
+                                4 {:src "(defn k [])"}
+                                5 {:src "(deftest t [])" :doc "A test." :kind :test}
+                                6 {:src "(defn m [])" :doc "See docs/errors.md#problems."})))
+        v #(symbol (cite-ns db) (str "v" %))
+        rows #(mapv (comp :var :evidence) (problems/uncited-vars db {} (into #{} (map v) %)))]
+    (is (= [(v 1) (v 4)] (rows [1 2 3 4 5 6])) "a documented public var citing nothing and an undocumented one; a cited one, a private one and a test are not")
+    (is (= [] (problems/uncited-vars db {} #{})) "no changed var, nothing read")
+    (is (= [] (problems/uncited-vars db {} #{'app.nowhere/x})) "a name no var has")
+    (testing "attention: a branch that adds an uncited public var is told, never refused (AGENTS section 4), and a var the base already left uncited is not its problem"
+      (let [base (var-forms (ts/test-db) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
+            head (var-forms (ts/test-db) 2 (fn [i] {:src "(defn f [])" :doc "Does a thing."}))
+            split (problems/caused-split base head)]
+        (is (some #(re-find #"/v2 is public" %) (:attention split)))
+        (is (empty? (:caused split)) "and it refuses nothing")
+        (is (not-any? #(re-find #"/v1 is public" %) (:attention split)))))
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-var))))
+
+;; See docs/health.md#a-function-that-cites-no-section
+(deftest uncited-vars-follow-the-vars-asked-for
+  (cost/proof {:of 'seon.problems/uncited-vars :input 'seon.problems-test/uncited-var-input
+               :n "changed public vars, each with a docstring that cites nothing"
+               :work "once: the program's namespaces (seon.program/program-nss); per named var: one AVET seek, its entity, its docstring and its form's text, and one row"
+               :growth :linear
+               ;; measured 2026-10-27: 130k ticks / 406 KB / 22 calls at 10, 3.87M / 11.9 MB / 602 at 300
+               :per-n {:ticks 13000 :bytes 39500 :calls 2}
+               :fixed {:ticks 10000 :bytes 30000 :calls 2}
+               :sizes [10 100 1000]}))
+
 

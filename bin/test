@@ -31,10 +31,11 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 [[ " $* " == *" --all "* ]] && export SEON_COST_MAX_N=100000
 # and draws every randomized property test's seeds (:seon.config.proofs/seeds)
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
+OWN=0
 case ${1:-} in
   --plan|--shard|--store-steps|--health) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
-  *) WHAT=tests OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
+  *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
 runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
@@ -67,5 +68,6 @@ done
 [[ -n $W ]] && kill $W 2>/dev/null
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
-if (( st == 0 )); then echo "TEST OK"; else echo "TEST FAILED (logs: $OUT)"; fi
+# a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
+if (( st == 0 )); then echo "TEST OK"; (( OWN )) && rm -rf "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st

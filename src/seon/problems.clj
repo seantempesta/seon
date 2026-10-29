@@ -497,9 +497,29 @@
            (derived-row ans s nil (str id " (" path ") uses the old word \"" w "\": AGENTS.md section 7a says what to say instead")
                         {:kind :old-word :path path :word w :place kind :id id} {:path path :word w :place kind :id id})))))
 
+(defn uncited-vars
+  "Each of the named vars (a set of symbols, the vars a branch changed) that is public in a
+  namespace of the program's own source and has a docstring citing no docs/ section, or none, as
+  an :uncited-var row: a function states its mechanism by citing the wiki section that describes
+  it (docs/references.md#the-delimiter-picks-the-depth), and does not restate it. A private var
+  (defn-) and a test are not judged. Closed by citing a section in the docstring.
+  Cost: one seek per named var, and its form's text for a var with no citation."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [program (delay (program/program-nss db))]
+    (vec (for [v (sort names)
+               :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))
+                     doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
+               :when (and ent (not= :test (:var/kind ent)) (not (and doc (str/includes? doc "docs/")))
+                          (contains? @program nsym)
+                          (some->> ent :var/form :form/src (re-find #"^\((?:defn|defmacro|def|defmulti)\s")))
+               :let [s (str "uncited-var " v)]]
+           (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
+                        {:kind :uncited-var :var v} {:var v})))))
+
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:dead-citation :unnamed-site :stale-section :old-word})
+  #{:dead-citation :unnamed-site :stale-section :old-word :uncited-var})
 
 (defn- split-rows
   "{:made :closed} of the derived rows (`caused-classes`, with ans's answers) the branch at head has
@@ -538,7 +558,8 @@
                (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved :sections (eids state)}))
-                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved :sections text-secs :tasks task-ids}))))
+                       (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved :sections text-secs :tasks task-ids}))
+                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved))))
         had (vec (rows base bs (fn [fact] (set (keep #(:e ((lf base fact) %)) (changed-forms fact))))))
         has (vec (rows head hs (fn [fact] (set (keep #(:e ((lf head fact) %)) (changed-forms fact))))))
         sigs (fn [rs] (into #{} (map :signature) rs))]

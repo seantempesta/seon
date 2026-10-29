@@ -27,6 +27,7 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base value, from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
+;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :pages (seon.turn/context-block: {run {commit page}}, the newest page it drew, which the next read's diff takes its earlier page from: seon.context/world)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -148,6 +149,70 @@
   (:main; the record's :main-commit and :main-t, seon.ctx). Every read of main's head is this one."
   {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (let [m (pdb/head (:store-conn @state) (pdb/main-branch (:cfg @state)))] (swap! state assoc :main m) m))
+
+(declare branch-changes)
+
+(defn main-changes
+  "What main changed since base, reduced to what main-line reads and held keyed by the two points
+  (commit, t) it is a function of: {:after {program-key (hash of its content on main)}}, from
+  seon.merge/delta-changes (declared data left out). The diff itself, whose values carry the forms
+  and so pin the dbs they were read from, is let go at once (AGENTS section 4, a kept db value is a
+  reference); the newest pair is held on the state (:main-changes), evicted by the next and
+  regenerated from the two dbs. {} when main's point is base's.
+  See docs/merging.md#main-moved-is-said-at-every-eval."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map-of :any :int]]}
+  [base main]
+  (let [at (juxt d/commit-id :max-tx)
+        k [(at base) (at main)]
+        {held :key after :after} (:main-changes @state)]
+    (cond (= (k 0) (k 1)) {}
+          (= k held) after
+          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
+                  (swap! state assoc :main-changes {:key k :after after})
+                  after))))
+
+(defn main-line
+  "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
+  nothing of the program since base: how many names main changed (main-changes, held per pair of
+  points), those of them b changed too (branch-changes), those b's changed functions call, and
+  those both changed to different content (what a merge of main would leave unmerged), each list
+  cut by the one printer; and the form that merges main
+  (docs/merging.md#main-moved-is-said-at-every-eval). Cost: O(1) while main is the base; the first
+  call at a main costs the diff of main since base, and a later one only the diff of b (held per
+  turn) and one query over b's changed vars; measured in docs/merging.md."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] [:maybe :string]]}
+  [base b main]
+  (let [theirs (main-changes base main)]
+    (when (seq theirs)
+      (let [ours-ch (branch-changes base b)
+            moved (into #{} (keep (fn [[kind x]] (when (#{:var :schema} kind) x))) (keys theirs))
+            changed (pm/changed-vars ours-ch)
+            ours (filter moved changed)
+            conflicts (sort-by str (for [[k [_ after]] ours-ch :let [t (theirs k)] :when (and t (not= (hash after) t))] (second k)))
+            reached (remove (set ours) (filter moved (d/q '[:find [?r ...] :in $ [?v ...] :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs ?r]] b (vec changed))))
+            names #(print/text (vec (sort-by str %)) (:part print/budgets))]
+        (str "main moved since your base: " (count moved) " names changed"
+             (when (seq ours) (str "; ones you changed too: " (names ours)))
+             (when (seq reached) (str "; ones your changes call: " (names reached)))
+             (when (seq conflicts) (str "; a merge of main would conflict on: " (names conflicts)))
+             ". Merge it when you choose: (my.branch/merge-main!)")))))
+
+(defn main-difference
+  "main-line for this agent now: its merge base, its branch and main as last heard (:main, held by
+  heard-main, which each turn's readers call); which an outside agent's seon_eval answers carry
+  (seon.repl/eval-string, seon.server op-answer :eval; a model agent's turn reads the recorded eval,
+  which holds no :main); nil with no base, or when main as last heard is still the base. Computed at
+  t, never stored, and it reads no store: a read of main's head (heard-main, seon.db/head,
+  datahike.writing/read-head) on each eval held the agent's heap past its ceiling in
+  seon.agent-test/an-agent-finds-no-repository (OutOfMemoryError, exit 70). So an agent that never
+  hears main (no turn) is told what it last heard; telling it main moved needs root to push the commit
+  (task seon.writer/main-notices-carry-a-commit-not-a-db)."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (when-let [base (:base @state)]
+    (when-let [main (:main @state)]
+      (when-not (= (d/commit-id base) (d/commit-id main))
+        (main-line base (db) main)))))
 
 (defn untaken-entries
   "The entries main holds to the runs of this agent's session (the runs on its branch, as main
@@ -628,7 +693,7 @@
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
-  (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
+  (seon.program/graph-index) against base's (main at its merge base), the greens stored at
   those digests (the verdict cache, greens and reds, whoever ran them: seon.fx/stored-results) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
@@ -645,7 +710,7 @@
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :graph (the reach graph it
-  walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
+  walked) and :process, the tests that reach a process of their own (seon.program/graph-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
   are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it

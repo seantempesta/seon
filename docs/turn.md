@@ -41,6 +41,18 @@ Words to the agent and what root decided of its runs are facts on main, and a tu
 
 A run the done rule refuses (`:green` or `:red` by the agent's own word, but not done by root's facts) is told why rather than held: root's judge writes a `:verdict` entry with the reasons and results it judged on and parks the run, and the entry wakes the session ([processes](processes.md#a-parked-process)). The same reasons again hold the task. A merge task's refused run holds at once, and so does an outside agent's, which read the verdict as `seon_done`'s answer.
 
+## Effects from an agent
+
+An agent reaches outside only through root's owner procs ([fx](root.md)): ```seon.agent/fx!``` asks an effect kind and waits for its outcome (`{:value ...}` or its declared error), recorded with the eval that asked; ```seon.agent/fx-send!``` starts it and answers its key at once, and the outcome arrives later as a message `{:from :fx :k :kind :body}` in the inbox. Inside a test fork nothing leaves the process: the test binds ```seon.agent/*fx-stub*``` to a function of kind and request that answers the outcome, and with none bound the effect is the typed `:seon.fx/in-test` error.
+
+## Folding a run's turns into waste
+
+At a run's end the agent folds its turns into the waste charged to producers ([errors](errors.md#learn)). ```seon.learn/aliases``` reads the aliases the forms set up (`(require '[ns :as a])`), ```seon.learn/form-reads``` reads one form by its shape (does a head in it look for code, and which qualified symbols and namespaces it names, aliases resolved), ```seon.learn/final-symbols``` is what the error-free definitions of the turns kept, and ```seon.learn/summary``` counts the charged forms and turns by producer.
+
+## The test run in a fork of the agent
+
+The tests a turn or the judge runs execute in a fork of the agent, within the per-test tick bound ([above](#who-runs-which-tests)), so the plan is selected in the parent and run in the child. What the selection reads: ```seon.agent/test-inputs``` (the reach inputs of the tests: root's binary's when it was built from its source, else blank), ```seon.agent/branch-graph``` (the branch's reach graph, the base's updated to the branch's db and held while that db is the newest asked: a second ask is a key lookup) and ```seon.agent/judges?``` (a `deftest` of a namespace that is not scratch). The plan, the forked run and the test service are in [merging](merging.md#the-test-service). Each test is written as it starts on a pipe to the parent, so a death names the test that was running. The parent reads the pipe with ```seon.agent/read-to-exit``` (to the pipe's end of file or the child's exit, whichever comes first, because a process the child forked may hold the write end) and answers the run with ```seon.agent/test-run-answer``` (the last line when it is the result; else the child died while running the test last started, and the run is one error report on it; a pipe still held is an error report of its own). ```seon.agent/test-report``` keeps one `clojure.test` report as the run does: type, test var, message, the failing assertion's expected and actual by the one printer, and a cost proof's rows and verdict.
+
 ## A session parks, wakes on a message and is loaded at a commit
 
 A session is the agent's branch across its runs, and a run that ends waiting or out of turns parks its process until the next message to the session wakes it for its next run ([processes](processes.md#a-parked-process)); a parked agent costs its memory and nothing else. A message is a fact on main first and a turn takes it onto the branch (above), so a wake that was lost, or a process that died, loses no word.

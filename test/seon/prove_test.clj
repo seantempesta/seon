@@ -356,8 +356,9 @@
 (deftest two-runs-on-one-checkout-each-end-with-their-own-result
   ;; two bin/prove runs at once on one checkout wrote the same target/prove (shard files, logs):
   ;; one run's start removed the other's shards and a plain run destroyed a --merge run's logs.
-  ;; Each run writes under a directory of its own, named on its first line, and each ends with
-  ;; its own complete log and plan
+  ;; Each run writes under a directory of its own, named on its first line, ends with its own
+  ;; complete result (its output holds its plan line and PROVE OK), and a green run's directory is
+  ;; removed with the run: its logs are read by no one (a red or killed run's stay, the evidence)
   (let [run (fn [] (clojure.java.shell/sh "bin/prove" "--tests" "seon.step-test"))
         pa (promise) pb (promise)
         _ (doto (Thread. #(deliver pa (run))) .start)
@@ -367,8 +368,8 @@
     (doseq [r rs]
       (is (zero? (:exit r)) (str (:out r) (:err r)))
       (is (some? (dir r)) "a run says where its logs are")
-      (is (clojure.string/includes? (:out r) "PROVE OK")))
+      (is (clojure.string/includes? (:out r) "PROVE OK"))
+      (is (re-find #"prove: \d+ keys" (:out r)) "and holds its own plan line"))
     (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
-    (doseq [r rs :let [d (dir r)]]
-      (is (clojure.string/includes? (slurp (str d "/prove.log")) "PROVE OK") (str "its own complete log: " d))
-      (is (.isFile (java.io.File. (str d "/tests.edn"))) (str "and its own plan: " d)))))
+    (doseq [r rs]
+      (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it"))))
