@@ -79,7 +79,7 @@
   smallest size's cost (a twenty-fifth of growth-share, twice the 0.5% variance of a measure): a
   step in the cost (an index's depth, between two sizes) leaves the size before it a few bytes
   over the smallest, and the fit read 409k over 300 B as n^3.1
-  (seon.program-diff-test/a-diff-costs-the-change-never-the-program, 2026-10-29)."
+  (seon.program-diff-test/a-diff-costs-the-change-never-the-program; docs/cost.md#how-growth-is-judged)."
   0.01)
 
 (def loose

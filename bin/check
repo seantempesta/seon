@@ -3,7 +3,7 @@
 # mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, threads, instrument, record,
 # problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
 # durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
-# resume, scale N (default N = 100). A run's steps run at once, :seon.config.proofs/jobs at a
+# resume, scale N (default N = 100), scale-work N [no-search], spawn-phases N (N = 10 agents that work: evals and a prove of ~60 tests each; a single mode, not in a full run). A run's steps run at once, :seon.config.proofs/jobs at a
 # time, the longest first, each on a clone of the one seeded store; scale alone, last.
 # bin/check MODE [ARGS] runs one mode. bin/check with no argument is bin/prove --checks: only
 # the steps whose reach digest has no green result run (seon.proofs/check-steps); a number is
