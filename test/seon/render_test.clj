@@ -206,7 +206,7 @@
   ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
   ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
   ;; as reaching a process and was left out of bin/prove. A render runs no process
-  (let [idx (seon.program/reach-index (src-program) {:env "e" :tree "t" :config {}}
+  (let [idx (ts/reach-index (src-program) {:env "e" :tree "t" :config {}}
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
     (is (= {"agent" false "root" false "root-ctx" false "render-ctx" false} (update-vals idx :process?))
         "no render reaches a process var (:seon.config.source/process-vars)")))
@@ -286,7 +286,9 @@
                          :seon.task/references (set (seon.ref/names walked-plan))}]
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
-                       (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g")
+                       (update (seon.task/message-tx "m-1" :message "owner" "demo/f#1" "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
+                       ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
+                       [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL
                        (seon.repl/record-tx {:seon.root/id :root} "root-1" "outside" {:code "(my.root/problems sys)" :response {:handle 'result/e1 :value {}}})])
         branch (reduce d/db-with main0
@@ -299,7 +301,7 @@
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e2" "a3"
                                              {:code "(f 3)" :response {:handle 'result/e2 :value 6 :ms 0.4 :bytes 512 :ticks 40}})
                         [{:db/id "run" :seon.run/id "demo/f#1"}
-                         {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "it doubles"
+                         {:seon.turn/id "demo/f#1/0" :seon.turn/run "run" :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model :seon.turn/reply "it doubles"
                           :seon.turn/forms 2 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 5 :seon.turn/tokens 1200
                           :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model :observed {}}
                           :seon.turn/calls [{:id "c0" :code "(f 2)" :eval "e1"} {:id "c1" :code "(f 3)" :eval "e2"}]}]
@@ -728,7 +730,7 @@
             b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
                :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"}
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
-            db1 (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/n 2 :seon.turn/origin :model
+            db1 (d/db-with db [{:seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 2 :seon.turn/origin :model
                                 :seon.turn/basis b :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}])
             db' (d/db-with db1 [{:seon.turn/id "demo/f#1/2" :seon.turn/sent (:sent (seon.context/render db1 b))}])
             [st2 patch] (#'p/pass-view (assoc-in st1 [:branches [:debug :a1] :db] db') [:debug :a1])]
@@ -875,7 +877,7 @@
                     (seon.task/agent-tx "b1" :a1 {:status :busy})
                     (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a1} "e1" "a1" {:code "(+ 1 2)" :response {:handle 'result/e1 :value 3} :run "t/x#1"})
                     [{:db/id "run" :seon.run/id "t/x#1"}]
-                    [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/n 0 :seon.turn/origin :model
+                    [{:seon.turn/id "t/x#1/0" :seon.turn/run [:seon.run/id "t/x#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 0 :seon.turn/origin :model
                       :seon.turn/sent [[:no-such-part "x"]] :seon.turn/tokens 100 :seon.turn/forms 1 :seon.turn/errors 0 :seon.turn/red 0 :seon.turn/ms 1}]])
         debug [:debug :a1]
         o (volatile! {})
@@ -936,7 +938,7 @@
   ;; wrong): they are drawn above the plan, whole
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
-        h (h/html (ui/task-data {:seon.ctx/ctx {:runs {1 {:task {:seon.task/id "demo/w"}}}} :seon.db/db db} 1))]
+        h (h/html (ui/task-data {:seon.ctx/ctx {:task {:seon.task/id "demo/w"}} :seon.db/db db} 1))]
     (is (str/includes? h "reproduce what the plan says is wrong") "the whole instructions are on the page")
     (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "reproduce what the plan says is wrong") (str/index-of h "Make w true.")) "above the plan")))
@@ -952,11 +954,11 @@
         k (seon.task/agent-key "b1" :a3)
         ;; the cited var's namespace, the program's as a store records it (seon.program/program-names)
         branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
-                                  {:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :model
+                                  {:seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :model
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
                                                      :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
                                                                 :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
-        rid (seon.db/eid branch :seon.run/id "demo/f#1")
+        rid (seon.db/eid branch :seon.agent/key k)
         draw #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
                 (try (r/placed-units w) (finally (r/dispose-walk! w))))
@@ -990,7 +992,7 @@
   ;; the newest turn of either origin; an outside read has no turn count
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        branch (d/db-with branch [{:seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/n 1 :seon.turn/origin :outside
+        branch (d/db-with branch [{:seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :outside
                                    :seon.turn/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
                                                      :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
         w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx)))
@@ -1156,9 +1158,10 @@
         main (d/db-with main [{:seon.run/id "demo/f#1" :seon.run/status :closed :seon.run/outcome :done}])
         [st _] (#'p/pass-view (assoc (proc-state main branch) :view {:agents {}}) :a3)
         tile (some (fn [[id u]] (when (str/starts-with? id "run-head-") (:html u))) (get-in st [:views :a3 :units]))]
+    ;; the tile is the agent's record's (its status, turn cap and turns taken: seon.agent/the-agent-is-the-unit-not-the-run,
+    ;; cut 1); the run's own status and outcome leave the page at cut 2
     (is (some? tile) "the run's tile, from the agent's record")
-    (is (not (str/includes? (str tile) "closed")) (str "not main's status: " tile))
-    (is (str/includes? (str tile) (name (:seon.run/status (d/pull branch [:seon.run/status] [:seon.run/id "demo/f#1"])))) "the branch's")))
+    (is (not (str/includes? (str tile) "closed")) (str "not main's status: " tile))))
 
 (deftest a-collection-keyed-by-id-prints
   ;; a collection of ctx (a join's members, keyed by their ids, newest first) holds no override key and no
@@ -1220,7 +1223,7 @@
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
-            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn h [] 1)"))
+            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)"))
             [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
@@ -1251,7 +1254,9 @@
                   [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make demo/f." :seon.task/execution :running
                     :seon.task/branch :task-demo-f :seon.task/kind :whole :seon.task/proofs #{'demo/f-test}}]
                   (seon.task/agent-tx "b1" :a3 {:status :idle :branch :task-demo-f})
-                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")]]
+                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+                  ;; the agent's task, its record's :task (task seon.agent/the-agent-is-the-unit-not-the-run)
+                  [{:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/task {:seon.task/id "demo/f"}}]]]
         (d/transact conn tx))
       (let [c0 (d/commit-id @conn)
             k (seon.task/agent-key "b1" :a3)
@@ -1340,12 +1345,13 @@
 
 (deftest an-agents-chat-reads-as-a-conversation
   ;; docs/render.md#the-page (owner, 2026-10-28: a chat a person reads): the task opens it, a model turn is a
-  ;; bubble of its reply with its thinking folded, a message a bubble with its sender, the run's end its last line
-  (let [c {:runs {1 {:task {:seon.task/id "seon.print/a-long-string" :seon.task/plan "Make `seon.print/text` share its budget."}
-                     :seon.run/status :closed :seon.run/outcome :cap :seon.run/turns 8 :seon.run/max-turns 8 :seon.run/reason "it reached its cap"
-                     :turns {2 {:seon.turn/n 1 :seon.turn/reply "The string takes the whole budget; I'll **reproduce** it first." :seon.turn/reasoning "Read select first."}
-                             3 {:seon.turn/n 2 :seon.turn/reply "" :seon.turn/reasoning ""}}
-                     :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}}}
+  ;; bubble of its reply with its thinking folded, a message a bubble with its sender, the agent's status its last line
+  ;; (the agent's record holds the task, turns and messages: seon.agent/the-agent-is-the-unit-not-the-run)
+  (let [c {:task {:seon.task/id "seon.print/a-long-string" :seon.task/plan "Make `seon.print/text` share its budget."}
+           :seon.agent/status :idle :seon.agent/max-turns 8
+           :turns {2 {:seon.turn/n 1 :seon.turn/reply "The string takes the whole budget; I'll **reproduce** it first." :seon.turn/reasoning "Read select first."}
+                   3 {:seon.turn/n 2 :seon.turn/reply "" :seon.turn/reasoning ""}}
+           :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
     (testing "the task is the opening message, its plan as written"
       (let [o (h (ui/chat-opening {:seon.ctx/ctx c} 1))]
@@ -1362,8 +1368,8 @@
       (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
         (is (str/includes? m "user"))
         (is (str/includes? m "Is the premise right?"))))
-    (testing "the run's end is the last line"
-      (is (= "— cap · turn 8 of 8 · it reached its cap —" (second (ui/chat-end {:seon.ctx/ctx c} 1)))))))
+    (testing "the agent's status and turns of its cap are the last line"
+      (is (= "— idle · turn 2 of 8 —" (second (ui/chat-end {:seon.ctx/ctx c} 1)))))))
 
 (deftest a-page-path-names-its-view-and-back
   ;; docs/render.md#the-page: an agent's chat, debug view and model context, by its id or its branch, and back

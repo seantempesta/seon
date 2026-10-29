@@ -27,7 +27,7 @@
     :proof "(deftest abs-test (is (= 5 (app.calc/abs -5))) (is (= 5 (app.calc/abs 5))))"}])
 
 (defn- calls
-  "A scripted reply of eval calls: the text is prose, and each code string (exactly one form)
+  "A scripted reply of eval calls: the text is prose, and each code string (its forms)
   is a call that carries the same prose (docs/prompt.md)."
   {:malli/schema [:=> [:cat :string [:* :string]] :seon.model/script-reply]}
   [prose & codes]
@@ -141,7 +141,7 @@
                        " (:dynamic (meta #'app.newns/*depth*)) (binding [app.newns/*depth* 1] app.newns/*depth*)"
                        " ((juxt :test :pass :fail :error) (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test)))"
                        " (some? (resolve 'user/scratch-x))"
-                       " (some? ((seon.program/reach-digests (seon.agent/db) {:env \"\" :tree \"\" :config {}}) 'app.newns-test/triple-test))]")
+                       " (some? ((update-vals (seon.program/graph-index (seon.program/reach-graph (seon.agent/db) nil) {:env \"\" :tree \"\" :config {}} nil) :digest) 'app.newns-test/triple-test))]")
            :expect ["[9 (inc 1) [a b] true 1 [1 1 0 0] false true]"]
            ;; the plan asks for triple and a passing test that refers it
            :model {:check (str "(let [r (binding [clojure.test/*test-out* (java.io.StringWriter.)] (clojure.test/test-ns 'app.newns-test))]"
@@ -280,8 +280,8 @@
                {:prose "Increment a." :code "(inc a)"}]})
 
 (defn two-forms-in-a-call
-  "The scripted model of a reply whose first call holds two forms (seon.agent-test): it is not
-  run, and the call after it is answered not run (docs/prompt.md)."
+  "The scripted model of a reply whose first call holds two forms (seon.agent-test): they run in
+  order, and the call after it runs too (docs/prompt.md)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] {:calls [{:prose "Define g and increment it." :code "(def g 1) (inc g)"}
                {:prose "Add five and six." :code "(+ 5 6)"}]})

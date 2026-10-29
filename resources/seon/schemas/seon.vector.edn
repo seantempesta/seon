@@ -1,8 +1,15 @@
-;; A text's embedding (seon.vector, docs/vector.md), on the entity whose text it embeds: a form
-;; (its :form/src, content-addressed, so it is embedded once) or a wiki section (its
-;; :seon.section/text). One stored vector serves every level of the pyramid: a Matryoshka
-;; vector's prefix is itself an embedding.
-{;; the model that made it (its file's sha256): a vector of another model is due again
+;; A text's embedding (seon.vector, docs/vector.md#a-vector-is-its-own-entity), on its own entity
+;; pointing at the entity whose text it embeds (:seon.vector/of): a form (its :form/src,
+;; content-addressed, so it is embedded once), a wiki section (its :seon.section/text), a task's
+;; plan or an eval's record, so what is embedded never appears in that entity's own pull. One
+;; stored vector serves every level of the pyramid: a Matryoshka vector's prefix is itself an
+;; embedding.
+{;; the entity this vector embeds: the vector entity's identity, one per embedded entity, so a vector
+ ;; written again (a changed text, another model) replaces it in place (Datahike's upsert on a
+ ;; unique identity ref; a [of model] tuple would keep a vector of each model, which nothing reads:
+ ;; a vector of another model is due again, docs/vector.md#what-is-embedded)
+ :seon.vector/of [:and {:seon.db/identity true :description "The entity this vector embeds (docs/vector.md#a-vector-is-its-own-entity)."} :seon.db/ref]
+ ;; the model that made it (its file's sha256): a vector of another model is due again
  :seon.vector/model :string
  ;; the whole vector, f16 (768 dims, 1,536 bytes)
  :seon.vector/f16 bytes?
@@ -15,6 +22,7 @@
  ;; the text's whole token count; past :seon.config.vector/max-tokens its first were embedded
  :seon.vector/tokens :int
  :seon.vector/fact [:map {:seon.db/attributes true}
+                    [:seon.vector/of :seon.vector/of]
                     [:seon.vector/model :seon.vector/model]
                     [:seon.vector/text-t :seon.vector/text-t]
                     [:seon.vector/tokens :seon.vector/tokens]

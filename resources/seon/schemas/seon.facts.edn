@@ -148,6 +148,11 @@
  :seon.agent/id [:and {:seon.db/index true} :keyword]
  :seon.agent/root :seon.db/ref
  :seon.agent/branch :keyword
+ ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
+ ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
+ ;; :max-turns bounds the loop)
+ :seon.agent/task :seon.db/ref
+ :seon.agent/max-turns :int
  :seon.agent/pid :int
  :seon.agent/mem-mb :double
  :seon.agent/running :string
@@ -175,7 +180,7 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/stall :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]} {[:seon.catch-up/_agent :as :catch-ups :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.run/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/stall :seon.agent/pid :seon.agent/branch :seon.agent/running :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status] [:seon.agent/pid {:optional true} :seon.agent/pid]
@@ -183,6 +188,7 @@
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/forked-ms {:optional true} :seon.agent/forked-ms] [:seon.agent/ended-ms {:optional true} :seon.agent/ended-ms]
                        [:seon.agent/stall {:optional true} :seon.agent/stall]
+                       [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
                        [:seon.agent/included {:optional true} :seon.agent/included]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]]
@@ -393,7 +399,7 @@
  :seon.root/stopped :seon.root/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
  :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] :seon.db/agent-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
+ :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.run/_agent :as :runs :limit :seon.config.ctx/window :reverse true] :seon.run/run-fact} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/html seon.render.ui/root}
                           [:seon.root/id :seon.root/id] [:seon.root/boot :seon.root/boot]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
@@ -435,13 +441,15 @@
  :seon.message/from [:and {:seon.db/index true} :string]
  ;; the run it is to (the agent working it takes it)
  :seon.message/to [:and {:seon.db/index true} :seon.db/ref]
+ ;; the agent that took it (written beside :seon.message/to by the turn that takes it, seon.agent/entries-tx)
+ :seon.message/agent [:and {:seon.db/index true} :seon.db/ref]
  :seon.message/body [:string {:seon.render/prose true}]
  ;; what an entry is (design one-derivation 4.1 section 5): a person's words (:message), root's at a
  ;; stage boundary (:stage), the judge's verdict with its reasons (:verdict); each wakes its session
  :seon.message/kind [:and {:seon.db/index true} [:enum :message :stage :verdict]]
  :seon.message/reply-to [:and {:seon.db/index true} :string]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/message} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
-                     [:seon.message/to {:optional true} :seon.message/to] [:seon.message/body :seon.message/body]
+                     [:seon.message/to {:optional true} :seon.message/to] [:seon.message/agent {:optional true} :seon.message/agent] [:seon.message/body :seon.message/body]
                      [:seon.message/kind {:optional true} :seon.message/kind]
                      [:seon.message/reply-to {:optional true} :seon.message/reply-to]]
  ;; ---- written by an agent on its own branch; they reach main with its merge ----
@@ -461,6 +469,8 @@
                       [:seon.catch-up/applied :seon.catch-up/applied] [:seon.catch-up/conflicts :seon.catch-up/conflicts]]
  :seon.turn/id [:and {:seon.db/identity true} :string]
  :seon.turn/run [:and {:seon.db/index true} :seon.db/ref]
+ ;; the agent whose turn it is (its record holds every turn; the run stays for the reconciler)
+ :seon.turn/agent [:and {:seon.db/index true} :seon.db/ref]
  :seon.turn/n :int
  :seon.turn/reply [:string {:seon.render/prose true}]
  :seon.turn/forms :int
@@ -490,7 +500,7 @@
  :seon.turn/not-observed [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-observed]]]]
  ;; a model's eval call left unrun because an earlier call of its reply threw (seon.repl/unrun): :after, that call's id
  :seon.turn/not-run [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/not-run]] [:after :string]]]
- ;; a model's eval call that is not prose and one form, not run (seon.turn/call-problem): :problem why, :forms how many it held
+ ;; a model's eval call with no prose or no form, not run (seon.turn/call-problem): :problem why, :forms 0 for an empty one
  :seon.turn/invalid-call [:and :seon.error/base [:map [:seon.error/type [:= :seon.turn/invalid-call]] [:problem [:enum :no-prose :forms]] [:forms {:optional true} nat-int?]]]
  ;; a name an agent asked about (my.agent/source, callers, callees) that is no var on its branch nor
  ;; in its process: said, never answered as no callers or silence; :nearest the nearest existing
@@ -525,7 +535,7 @@
  :seon.end/turns :int
  :seon.end/tokens :int
  :seon.turn/turn-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/turn}
-                          [:seon.turn/id :seon.turn/id] [:seon.turn/run :seon.turn/run] [:seon.turn/n :seon.turn/n]
+                          [:seon.turn/id :seon.turn/id] [:seon.turn/run :seon.turn/run] [:seon.turn/agent {:optional true} :seon.turn/agent] [:seon.turn/n :seon.turn/n]
                           [:seon.turn/reply :seon.turn/reply] [:seon.turn/forms :seon.turn/forms] [:seon.turn/errors :seon.turn/errors]
                           [:seon.turn/red :seon.turn/red] [:seon.turn/ms :seon.turn/ms] [:seon.turn/tokens {:optional true} :seon.turn/tokens]
                           [:seon.turn/cache-hit-tokens {:optional true} :seon.turn/cache-hit-tokens]

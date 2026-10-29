@@ -23,7 +23,7 @@
  :seon.db/open [:map [:cfg :seon.db/cfg] [:conn :seon.host/conn] [:recovered? :boolean]]
  ;; the program as facts
  ;; a checkout's inputs with no program facts (seon.fx/inputs): what every reach digest holds
- ;; beside the program's forms (seon.program/reach-digests)
+ ;; beside the program's forms (seon.program/graph-index)
  :seon.program/inputs [:map [:env :string] [:tree :string] [:config [:map-of :qualified-keyword :string]] [:data-refs {:optional true} [:map-of :qualified-symbol [:set :qualified-symbol]]]]
  :seon.program/error [:map [:ns :symbol] [:message [:maybe :string]] [:form {:optional true} :string] [:lead {:optional true} :string]]
  :seon.program/load-report [:map [:loaded nat-int?] [:errors [:vector :seon.program/error]]]
@@ -72,6 +72,8 @@
  :seon.eval/repairs [:vector [:map [:near [:map [:line pos-int?] [:column pos-int?] [:text :string]]] [:dropped {:optional true} :string] [:inserted {:optional true} :string]]]
  :seon.eval/response [:map {:seon.render/html seon.render.ui/evaluation}
                       [:handle :qualified-symbol] [:value {:optional true} :any]
+                      ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
+                      [:forms {:optional true} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.context/repaired)
                       [:repaired {:optional true} :seon.eval/repairs]
                       ;; each existing var whose contract or docstring this eval changed, its before and

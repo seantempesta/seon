@@ -220,6 +220,14 @@ The rules of the OS and Chez that no code may "fix" by adding a thread or a chec
 
 - **A child that cannot end.** A child stuck in a mutex wait with a zombie grandchild ignores SIGTERM, so only SIGKILL ends it, and `kill -INFO` writes nothing for it. Jolt's all-asleep check never ends a process: it throws to the waiters it finds and counts a timed wait, a blocking foreign call or a thread in `recv` as running, so a process whose starter died before `-main` left its watch empty lives on. A test child that reaches Jolt's heap ceiling (about 2.14 GB on 25010632) may park instead of dying, and its `kill -INFO` answers "fiber dump failed: out of memory". Take `sample`, `lsof` and the thread list before killing ([AGENTS §2](../AGENTS.md)).
 
+## A model's reply is read after it is forgiven
+
+Source text arrives from a model or a person as a string that may not read, and the loaders and the REPL need its forms, their comments and their arglists. ```seon.reader/opts``` is edamame's options for text written in a namespace: every Clojure syntax (`#()`, regex, var, syntax-quote, `#=` as data), `::kw` resolved against the namespace, any tag read as its form and the `:clj` branch of a reader conditional. ```seon.reader/read-all``` reads every form of a text with them. ```seon.reader/arglists``` reads one definition's params vector (or each arity's) from its recorded source, never from a process's var meta, and answers nil for text that is no `defn`, `defn-` or `defmacro`.
+
+A form's lead is what its writer said before it (a definition's `:form/lead`, an evaluation's thought): ```seon.reader/line-starts``` gives each line's offset, ```seon.reader/lead-end``` skips whitespace, commas and `;` comments to where the next form starts, and ```seon.reader/lead``` answers the comments between two forms, trimmed, or nil. A comment on the line the previous form ended on is that form's, so a lead starts on the next line.
+
+```seon.reader/forgive``` turns a model's reply into source a REPL reads and reports every change it made: prose becomes comments, and unbalanced delimiters are repaired (a reply whose delimiters balance gets no column-zero closes). It answers `{:text :repairs}`, so the account of the repairs covers every changed character. A reply with no code block is a comment, and a reply with one reads only its code. The failure it forgives, a text that does not read, is the edge above (`seon.reader/read-text` answers nil for it).
+
 ## Contracts over host objects are proved by deftests, never by generation
 
 The mg/check gate (`bin/check mg-check`) runs `malli.generator/check` only on the pure
