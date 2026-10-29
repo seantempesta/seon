@@ -305,7 +305,7 @@
                           :seon.turn/calls [{:id "c0" :code "(f 2)" :eval "e1"} {:id "c1" :code "(f 3)" :eval "e2"}]}
                          {:seon.model-call/id "demo/f#1/0" :seon.model-call/turn "turn"
                           :seon.model-call/forms 2 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 5 :seon.model-call/tokens 1200
-                          :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model :observed {}}}]
+                          :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 8 :origin :model}}]
                         (seon.repl/record-tx {:seon.agent/key k :seon.agent/id :a3} "e3" "user"
                                              {:code "(g)" :text "{:handle result/e3, :ex {:seon.error/message \"boom\"}}"
                                               :response {:handle 'result/e3 :ex {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code :seon.error/message "boom"}}})])
@@ -728,8 +728,7 @@
       (let [[st _] (debug-state conn)
             [st1 _] (#'p/pass-view st [:debug :a1])
             db (get-in st1 [:branches [:debug :a1] :db])
-            b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model
-               :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"}
+            b {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 4 :origin :model :agent "b/a1"}
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
             db1 (d/db-with db [{:db/id "turn" :seon.turn/id "demo/f#1/2" :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 2 :seon.turn/origin :model}
                                {:seon.model-call/id "demo/f#1/2" :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/red 0 :seon.model-call/ms 1}])
@@ -864,7 +863,7 @@
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
   ;; of the render proc throw, so no page answered; each ref kind seon.context/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["status-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["status-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
+  (doseq [ref [[:section 397 536870918] [:parts 12 #uuid "00000000-0000-0000-0000-000000000001" true ["standing-1"] "demo/f#1/0"] [:parts 12 #uuid "00000000-0000-0000-0000-000000000002" false ["standing-1"] "demo/f#1/1"] [:turn "demo/f#1/2"] [:eval "e3"] [:eval "e4" {:since 'result/e3}] [:message "m1"]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-view-that-throws-answers-its-page-with-the-error
@@ -958,9 +957,10 @@
         branch (d/db-with branch [{:ns/name 'seon.render :ns/file "src/seon/render.clj"}
                                   {:db/id "turn" :seon.turn/id "demo/f#1/1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :model}
                                   {:seon.model-call/id "demo/f#1/1" :seon.model-call/turn "turn"
-                                   :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model
-                                                           :observed {:results {'demo/f-test :fail} :reds [{:test 'demo/f-test :expected '(= 4 (f 2)) :actual 5}]
-                                                                      :reasons [{:reason :proof-red :symbol 'demo/f-test}]}}}])
+                                   :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 8 :origin :model}}
+                                  ;; the proof's verdict, as the run recorded it on the proof's var entity
+                                  {:var/name 'demo/f-test :seon.test/status :red
+                                   :seon.test/failures [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]}])
         rid (seon.db/eid branch :seon.agent/key k)
         draw #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
@@ -971,18 +971,17 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
-        "the task, what is related, what its newest turn observed, the run, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
-    (let [h (:html (unit-of task "status-"))]
-      (is (str/includes? h "demo/f-test") "each proof as the newest turn observed it, (my.task/status)'s")
-      (is (str/includes? h ":fail"))
-      (is (str/includes? h "2 of 8") "the turn of how many"))
+    (is (= [(str "task-data-" rid) (str "related-" rid) (str "standing-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, what is related, how the work stands, the run, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
+    (let [h (:html (unit-of task "standing-"))]
+      (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
+      (is (str/includes? h ":fail")))
     (let [h (:html (unit-of task "task-data-"))]
       (is (str/includes? h "demo/f") "drawn by task-data")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
     (is (str/includes? (:html (unit-of task "related-")) "nothing related yet") "related, drawn from the db: none yet here")
-    (is (= [(str "message-item-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
-            (str "turn-item-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "turn-item-" rid "-" (eid :seon.turn/id "demo/f#1/1"))]
+    (is (= [(str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
+            (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1")) (str "chat-end-" rid)]
            (mapv :id conv))
         "the conversation in the order it was written: by eid, each a component keyed by its entity")
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
@@ -1015,22 +1014,19 @@
       (is (str/includes? h ":green"))
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
-(deftest the-status-shows-what-an-outside-read-observed
-  ;; task seon.render/the-status-before-any-model-turn: an outside read (seon.turn/context-block,
-  ;; origin :outside) records what it observed as a model turn does, so the status is drawn from
-  ;; the newest turn of either origin; an outside read has no turn count
+(deftest the-standing-is-drawn-from-facts-with-no-turn-of-the-reader
+  ;; task seon.render/the-status-before-any-model-turn: the standing reads the branch's facts, never a
+  ;; turn's record, so it is drawn for an agent whatever turns it has taken, a proof's verdict
+  ;; included; the turn count is the run's (seon.render.ui/run-head), not the standing's
   (let [[_ branch _] (paged-dbs)
         k (seon.task/agent-key "b1" :a3)
-        branch (d/db-with branch [{:db/id "turn" :seon.turn/id "demo/f#1/read-1" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key k} :seon.turn/n 1 :seon.turn/origin :outside}
-                                  {:seon.model-call/id "demo/f#1/read-1" :seon.model-call/turn "turn"
-                                   :seon.model-call/basis {:commit #uuid "00000000-0000-0000-0000-000000000000" :task "demo/f" :run "demo/f#1" :turn 1 :max-turns 1 :origin :outside
-                                                           :observed {:results {'demo/f-test :pass} :reds [] :reasons []}}}])
+        branch (d/db-with branch [{:var/name 'demo/f-test :seon.test/status :green}])
         w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared :seon.render/render-ctx)))
-        status (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
-        h (:html status)]
-    (is (some? status) "the status, from the outside read")
-    (is (str/includes? h ":pass") (str "what it observed: " h))
-    (is (not (str/includes? h " of ")) "an outside read has no turn count")))
+        standing (try (unit-of (r/placed-units w) "standing-") (finally (r/dispose-walk! w)))
+        h (:html standing)]
+    (is (some? standing) "the standing is drawn")
+    (is (str/includes? h ":pass") (str "the verdict the branch holds: " h))
+    (is (not (str/includes? h " of ")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
   ;; the blind agent's plan was cut "+86 chars" at a part's budget: the task itself took an eval to read
@@ -1245,39 +1241,45 @@
      {:db/id (str "form " v) :form/id (str v " " src) :form/src src :form/ns (str "ns " n) :form/order 0 :form/defines [(str v)]}
      {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
 
-(deftest the-merge-views-draw-what-the-merge-functions-answer
+(deftest the-standing-draws-what-the-merge-functions-answer
   ;; owner, 2026-10-27: what is derived for the reader is the hiccup's, drawn when what it reads
-  ;; moves; a view of main and the merge base takes their commits as children (the agent's :seon.agent/main-commit
-  ;; and :seon.agent/base-commit, facts its turn writes) and reads them from the branch's own store, so it is a function of its args
+  ;; moves; the standing takes main's commit as an option and the agent's base commit from its fact
+  ;; (:seon.agent/base-commit), reads both from the branch's own store, and answers the merge's views
+  ;; from the one diff of the branch against its base (docs/render.md#a-part-answers-data)
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (defn-facts 'demo/f "(defn f [x] x)"))
       (let [base (d/commit-id @conn)
             _ (d/transact conn (defn-facts 'demo/k "(defn k [] 2)"))
             main (d/commit-id @conn)
-            ours (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)"))
-            [caused gaps carries merge] (vec (ui/branch-views {:seon.db/db ours} base main))
+            agent-on (fn [db] (d/db-with db [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}]))
+            ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
+            a (seon.db/eid ours :seon.agent/key "b1/a3")
+            st (seon.context/standing ours a {:main main})
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
-        (is (nil? caused) "nothing caused")
-        (is (= [gaps carries merge]
-               [(ui/gaps-view ch) (ui/divergence-view ch) (ui/merge-view (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)))])
-            "the one diff draws what each view draws from its own read")
-        (let [merge (h/html merge) carries (h/html carries) gaps (h/html gaps)]
+        (is (not (contains? st :caused)) "nothing caused")
+        (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
+            "the merge's readiness, as its own function answers it")
+        (is (= (seon.merge/divergence ch) (:its-merge-carries st)) "and what the branch's merge carries, from the one diff")
+        (let [merge (h/html (ui/standing-html {} {:merge (:merge st)}))
+              carries (h/html (ui/standing-html {} {:its-merge-carries (:its-merge-carries st)}))
+              gaps (h/html (ui/standing-html {} {:without-a-contract (:without-a-contract st)}))]
           (is (str/includes? merge "demo/k") "what main changed since the base")
           (is (str/includes? merge ":conflicts") "and which of those the branch changed too (none)")
           (is (str/includes? carries "demo/h") "what the branch's merge carries")
           (is (not (str/includes? carries "demo/k")) "never main's change")
           (is (str/includes? gaps "demo/h") "a function the branch defined with no contract")
           (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
-        ;; a branch that changed nothing: its views draw nothing, not a header over an empty answer
-        (let [same (d/commit-as-db conn base)]
-          (is (every? nil? (ui/branch-views {:seon.db/db same} base nil))
-              "a view with no rows is nil"))))))
+        ;; a branch that changed nothing: the standing holds none of them, not a header over an empty answer
+        (let [same (agent-on (d/commit-as-db conn base))
+              st0 (seon.context/standing same (seon.db/eid same :seon.agent/key "b1/a3") {})]
+          (is (not-any? #(contains? st0 %) [:caused :attention :without-a-contract :its-merge-carries :merge :unmerged])
+              "a branch with no changes holds none of them"))))))
 
 (deftest an-unrelated-change-redraws-none-of-the-merge-views
   ;; task seon.turn/observe-reads-are-renders: a turn no longer computes these; their one component
-  ;; (branch-views, from the one diff of the branch against its base: docs/render.md#the-branchs-views)
+  ;; (standing, from the one diff of the branch against its base: docs/render.md#a-part-answers-data)
   ;; is drawn again only when what it reads moves. An unrelated change of ctx redraws it not; main
   ;; moving redraws it (its merge section reads main)
   (ts/test-branch!
@@ -1295,7 +1297,7 @@
             tree (assoc (:tree (seon.ctx/build @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
             w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var :seon.render/render-ctx) {}])
-            views '#{seon.render.ui/branch-views}
+            views '#{seon.render.ui/standing}
             ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
         (try
           (r/frame! w nil)

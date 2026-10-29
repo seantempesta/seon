@@ -812,7 +812,7 @@
                                  [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 2})")
                                   (str "(let [db (seon.agent/db)]"
                                        " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
-                                       "                                       :turn 2 :max-turns 2 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                       "                                       :turn 2 :max-turns 2 :origin :model :agent (:key @seon.agent/state)}))"
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
                              {:sets [":seon.config.ai/script=seon.fixtures/two-calls"]})
         end (:value end)
@@ -833,7 +833,7 @@
                                [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
-                                     "                                       :turn 1 :max-turns 1 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                     "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:sets [":seon.config.ai/script=seon.fixtures/calls-one-throws"]})
         [r0 r1 r2 :as rs] (:value msgs)]
@@ -857,7 +857,7 @@
                                [(str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str run) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
                                      " (->> (:messages (seon.context/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :run " (pr-str run)
-                                     "                                       :turn 1 :max-turns 1 :origin :model :observed {} :agent (:key @seon.agent/state)}))"
+                                     "                                       :turn 1 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
                                      "      (filter #(= \"tool\" (:role %))) (mapv :content)))")]))
                            {:sets [":seon.config.ai/script=seon.fixtures/two-forms-in-a-call"]})
         [r0 r1 :as rs] (:value msgs)]
@@ -1148,21 +1148,21 @@
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole run whose proof is red is not merged. Its run does not end red: it
   ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
-  ;; rule's reasons as data in what it observed (a run root refuses at its end gets root's verdict
+  ;; rule's reasons as data in the standing it reads (a run root refuses at its end gets root's verdict
   ;; instead: seon.reconcile-test/a-whole-task-works-in-parallel-and-its-green-merges). The wait
   ;; ends on the run's own end, which always comes
   (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wr\" :seon.task/plan \"Make wr.\"})"
                    " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"" % "/wr#1\"]))))"
                    " db @(:conn sys) r (seon.task/run db \"" % "/wr#1\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
-                   " obs (datahike.api/q '[:find ?b . :where [?r :seon.run/id \"" % "/wr#1\"] [?u :seon.turn/run ?r] [?u :seon.turn/n 1] [?u :seon.turn/origin :model] [?m :seon.model-call/turn ?u] [?m :seon.model-call/basis ?b]] b)]"
-                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (get-in obs [:observed :reasons]))])")
+                   " a (datahike.api/q '[:find ?a . :where [?r :seon.run/id \"" % "/wr#1\"] [?r :seon.run/agent ?a]] b)]"
+                   " [(:seon.run/status r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.context/standing b a {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {:sets [":seon.config.ai/script=seon.fixtures/whole-red"]})
         [status state reasons] (:value r)]
     (is (= :parked status) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (= [:proof-red] reasons) "its next turn carries why, as data: the proof is red")))
+    (is (= [:proof-red] reasons) "the standing carries why, as data: the proof is red")))
 
 (deftest a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
@@ -1319,8 +1319,8 @@
 (deftest a-model-turn-records-its-prose-and-the-message-it-took
   ;; task seon.render/a-debug-view-of-any-agent: the owner's message is a fact root writes on
   ;; main (from "owner", to the run the agent works); the turn that takes it writes the same
-  ;; fact on its branch before its commit and names it by id in its basis, so the window and every
-  ;; later reading read its text from that commit; the reply's prose (here the scripted model's)
+  ;; fact on its branch before its commit, naming the agent (:seon.message/agent), so the conversation
+  ;; and every later reading read its text from that commit (the basis names no message); the reply's prose (here the scripted model's)
   ;; is the turn's reply and its call's eval's prose, and the call names its one eval
   ;; (docs/render.md)
   (let [names (volatile! nil)
@@ -1330,21 +1330,23 @@
                                         (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#think")) " :max-turns 1})")
                                         (str "(let [db (seon.agent/db) t (datahike.api/pull db '[*] [:seon.turn/id " (pr-str (str ns "/t#think/0")) "])"
                                              "      m (datahike.api/pull db '[*] [:seon.model-call/id " (pr-str (str ns "/t#think/0")) "])"
-                                             "      ids (get-in m [:seon.model-call/basis :observed :message-ids])]"
-                                             "  {:calls (mapv #(select-keys % [:code :eval]) (:seon.turn/calls t)) :ids ids :reply (:seon.turn/reply t)"
-                                             "   :committed (seon.context/taken-messages (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])) {:message-ids ids})"
+                                             "      msgs (fn [db] (vec (datahike.api/q '[:find ?id ?f ?b ?k :where [?m :seon.message/id ?id] [?m :seon.message/from ?f] [?m :seon.message/body ?b] [?m :seon.message/agent ?a] [?a :seon.agent/key ?k]] db)))]"
+                                             "  {:calls (mapv #(select-keys % [:code :eval]) (:seon.turn/calls t)) :reply (:seon.turn/reply t) :basis-keys (set (keys (:seon.model-call/basis m)))"
+                                             "   :agent-key (:key @seon.agent/state) :on-branch (msgs db)"
+                                             "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :prose (mapv #(:prose (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/record ?r]] db %)) (keep :eval (:seon.turn/calls t)))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
                                                     " [?m :seon.message/to ?r] [?r :seon.run/id ?to] [(= ?to " (pr-str run) ")] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:sets [":seon.config.ai/script=seon.fixtures/thinking-call"]})
         end (:value end)
-        {:keys [calls ids committed prose reply]} (:value turn)
+        {:keys [calls on-branch committed prose reply agent-key basis-keys]} (:value turn)
         [[mid from to body] :as facts] (vec (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
     (is (= [["owner" (:run @names) "use demo/g"]] (mapv #(subvec % 1) facts)) "one fact on main: from the owner, to the run the agent works")
-    (is (= [mid] ids) "the turn's basis names the fact root wrote, by its id")
-    (is (= [{:id mid :from "owner" :body "use demo/g"}] committed) "and its text is read from the commit the turn read")
+    (is (= [[mid "owner" "use demo/g" agent-key]] on-branch) "the turn wrote the fact root wrote, by its id, naming the agent")
+    (is (= on-branch committed) "and it is in the commit the turn read")
+    (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     ;; the prose comes in the eval call (docs/prompt.md); the scripted reply's text is the same prose
     (is (= "check the sum before the proof" reply) "the reply's text: the prose")
     (is (string? (:eval (first calls))) (str "the call names its one eval: " (pr-str calls)))

@@ -207,8 +207,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
   [n]
   (let [[db a] (session-of n)
-        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn t :max-turns 9 :origin :model
-                       :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"})
+        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn t :max-turns 9 :origin :model :agent "b/a1"})
         turn (fn [t] [{:db/id (str "t" t) :seon.turn/id (str "demo/f#1/" t) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"}
                        :seon.turn/n t :seon.turn/origin :model}
                       {:seon.model-call/id (str "demo/f#1/" t) :seon.model-call/turn (str "t" t) :seon.model-call/basis (basis t)}])
@@ -216,7 +215,7 @@
         opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
         e {:db/id a}
         part (fn [k text] [:section {:id k} text])
-        parts (fn [t] {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" (str t " of 9"))})
+        parts (fn [t] {"task-1" (part "task-1" "Make f.") "standing-1" (part "standing-1" (str t " of 9"))})
         db1 (d/db-with db (turn 0))
         r0 (seon.context/request e (opts db1 0 (parts 1) nil))
         db2 (d/db-with db1 (concat (sent 0 r0) (turn 1)))

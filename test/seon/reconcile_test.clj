@@ -561,7 +561,7 @@
     [@conn]))
 
 (deftest an-index-is-listed-at-the-cost-of-its-tasks
-  ;; an agent's first request build lists the index (seon.turn/index!); every reconciler helper
+  ;; an agent's first request build lists the index (seon.agent/reconcile-index); every reconciler helper
   ;; takes the index, so its contract checks it shallowly (each entry is checked where it enters)
   (do
     (cost/proof {:of 'seon.reconcile/index :input 'seon.reconcile-test/listed-input
