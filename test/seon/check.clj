@@ -657,8 +657,11 @@
         th-end (thread-diff (declared-threads sys) (threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
-        ;; system's free memory dropped per agent (its own pages, its page tables, the kernel's share)
-        per-agent (/ (- (:free-mb mem0) (:free-mb mem1)) n)
+        ;; machine's free plus inactive memory dropped per agent from before the agents started to their
+        ;; peak (its own written pages, its page tables, the kernel's share): never the sum of their
+        ;; footprints, which charges every inherited page an agent only reads (docs/cost.md#how-we-measure)
+        footprint-sum (reduce + agent-mb)
+        per-agent (/ (- (:available-mb mem0) (:available-mb mem1)) n)
         need (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) per-agent))
         budget (seon.config/value :seon.config.machine/memory-mb)]
       {:report {:agents n :all-ok (count (filter :ok results))
@@ -666,9 +669,10 @@
                 :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
                 :server-fork-ms-p50 (get-in st [:fork-server :fork-ms-p50])
                 :eval+transact-ms (lib/summ (map :eval-ms results)) :tests-ms (lib/summ (map :tests-ms results))
-                :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 (reduce + agent-mb))
-                :system-free-drop-mb-per-agent (lib/r2 per-agent)
-                :system-free-returned-mb-per-agent (lib/r2 (/ (- (:free-mb mem2) (:free-mb mem1)) n))
+                :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 footprint-sum)
+                :system-available-drop-mb-per-agent (lib/r2 per-agent)
+                :system-available-returned-mb-per-agent (lib/r2 (/ (- (:available-mb mem2) (:available-mb mem1)) n))
+                :footprint-need-mb (lib/r2 (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) (/ footprint-sum n))))
                 :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
                 :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
                 :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
@@ -943,6 +947,30 @@
                                           (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
                                           (< 28 (- (lib/real-mb) b0) 60))))]
         {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
+   "touch-gauge"
+   ;; a parent holds 200 MB it wrote; one child only reads every page, another writes every page. Each
+   ;; sends its footprint growth and the machine's drop in free plus inactive MB (lib/sysmem) on a
+   ;; socket. The ledger charges both 200 MB; only the write costs the machine its copy.
+   #(let [mb 200
+          block (byte-array (* mb 1024 1024))
+          _ (java.util.Arrays/fill block (byte 7))
+          [r w] (sock/socketpair)
+          touch (fn [write?]
+                  (let [pid (lib/fork! {:child (fn []
+                                                 (let [f0 (lib/real-mb) m0 (:available-mb (lib/sysmem))
+                                                       sum (volatile! 0)]
+                                                   (doseq [i (range 0 (* mb 1024 1024) 16384)]
+                                                     (if write? (aset block i (byte 1)) (vswap! sum + (aget block i))))
+                                                   (sock/write-line! w (pr-str {:charged (- (lib/real-mb) f0)
+                                                                                :machine-drop (- m0 (:available-mb (lib/sysmem)))
+                                                                                :sum @sum}))
+                                                   (lib/c-exit 0)))
+                                        :refused (fn [n] {:refused n}) :parent identity})
+                        st (lib/wait-status pid)
+                        rd (sock/line-reader r)
+                        line (loop [] (let [ls (rd)] (if (seq ls) (first ls) (recur))))]
+                    (assoc (sedn/decode line) :exit st)))]
+      {:read (touch false) :write (touch true)})
    "go-blocks"
    #(let [c (a/chan) r (a/go (a/<! c))]
       (a/>!! c 41)

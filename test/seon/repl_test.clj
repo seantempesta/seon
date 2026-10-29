@@ -107,6 +107,8 @@
               ["(/ 1 0)" :text "Divide by zero"]
               ["(some? *e)" :text "true"]
               ["(pst)" :text "Divide by zero"]
+              ;; *e keeps the error as data (seon.repl/error-kept), not the thrown exception's frames
+              ["(some? (:seon.error/message (ex-data *e)))" :text "true"]
               ["(in-ns 'seon.reconcile)" :text "seon.reconcile"]
               ;; the same source twice: each answer prints it whole, whatever came before (docs/render.md)
               ["(clojure.repl/source root-causes)" :text "(defn root-causes"]

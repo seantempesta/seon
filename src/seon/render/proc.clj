@@ -86,16 +86,20 @@
   it held and moved by what changed (seon.reconcile/index over the watched datoms that differ:
   seon.render-cost-test/a-move-of-main-costs-what-moved), whose runs
   give how each agent's work ended (:agent-run, the words root's process tile uses for its
-  events). Nothing per task or per datom of main is read again."
-  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
-  [st db]
+  events). Nothing per task or per datom of main is read again. moved: the datoms that differ
+  between the main held and db, read once by advance-main; the index moves by those of its watched
+  attributes, so no second diff of each of them is made (one descent apiece: 90 attributes, 14.6 MB)."
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map]
+                  [:=> [:cat :map :seon.host/db [:maybe [:sequential :seon.host/datom]]] :map]]}
+  ([st db] (main-info st db nil))
+  ([st db moved]
   ;; a db no newer than the one held (a first read answered after a commit already came) changes nothing
   (if (<= (:max-tx db) (get-in st [:main :t] -1))
     st
     (let [held (:main-db st)
-          idx (if (and (:idx st) held) (reconcile/index (:idx st) held db) (reconcile/index db))]
+          idx (if (and (:idx st) held) (if moved (reconcile/index (:idx st) held db moved) (reconcile/index (:idx st) held db)) (reconcile/index db))]
       (assoc st :main {:t (:max-tx db)} :main-db db :idx idx
-             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a]))))))
+             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a])))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -479,7 +483,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (-> (root-walk (main-info st db) db held) (health! held db moved))
+        (cond-> (-> (root-walk (main-info st db moved) db held) (health! held db moved))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- pass-view

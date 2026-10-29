@@ -122,7 +122,6 @@
 (defc nthreads "e13_nthreads" [] :long)
 (defc sysmem* "e13_sysmem" [:pointer] :long)
 
-(def PAGE 16384)
 (defn ignore-sigpipe! {:malli/schema [:=> [:cat] :seon.ffi/address]}
   [] (c-signal 13 1))
 
@@ -140,16 +139,28 @@
 
 (defn real-mb
   "This process's memory as macOS charges it, in MB: its phys_footprint (what Activity Monitor and
-  jetsam charge: private dirty pages, compressed ones included). A forked child is charged what
-  it writes, never what it only shares with its parent, and the parent keeps its own charge
-  (docs/cost.md#how-we-measure)."
+  jetsam charge: private dirty pages, compressed ones included). A forked child is charged every
+  inherited page it touches, read or written, and the parent keeps its own charge: the gauge of
+  one process, never summed over forked ones (docs/cost.md#how-we-measure)."
   {:malli/schema [:function [:=> [:cat] :seon.lib/mb] [:=> [:cat :seon.lib/probe] :seon.lib/mb]]}
   ([] (real-mb (mp-probe)))
   ([p] (double (:phys-fp p))))
 
-(defn sysmem {:malli/schema [:=> [:cat] :seon.lib/sysmem]}
-  [] (let [b (ffi/alloc 24)] (sysmem* b)
-                  {:free-mb (/ (* PAGE (ffi/read b :long 0)) 1048576.0) :internal-mb (/ (* PAGE (ffi/read b :long 8)) 1048576.0)}))
+(defn sysmem
+  "The machine's memory in MB as host_statistics64 counts it (native/probe.c e13_sysmem): :free-mb,
+  :inactive-mb, :compressed-mb, and :available-mb, free plus inactive, what a process can take
+  without the system paging. A machine-wide reading, moved by every process on it (other apps
+  ±100 MB); a drop between two readings is judged against a bound that size, never to the MB
+  (docs/cost.md#how-we-measure)."
+  {:malli/schema [:=> [:cat] :seon.lib/sysmem]}
+  []
+  (let [b (ffi/alloc 24)
+        r (sysmem* b)
+        mb #(/ (ffi/read b :long %) 1048576.0)]
+    (if (neg? r)
+      (throw (ex-info "host_statistics64 refused the machine's memory"
+                      {:seon.error/type :seon.lib/sysmem-refused :seon.error/message "host_statistics64 refused the machine's memory"}))
+      {:free-mb (mb 0) :inactive-mb (mb 8) :compressed-mb (mb 16) :available-mb (+ (mb 0) (mb 8))})))
 
 (defn dir-texts
   "The text of each file in dir whose name ends with suffix, by name, sorted: the one read of a

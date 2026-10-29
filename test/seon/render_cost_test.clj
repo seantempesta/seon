@@ -105,14 +105,15 @@
 
 (defn moved-of
   "The input of size n: the render state holding main with n tasks (main-info's first read), and
-  main one agent status later (one of the four status and running commits an eval makes)."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
+  main one agent status later (one of the four status and running commits an eval makes), and the
+  datoms that differ between them, which advance-main reads once and main-info takes."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
         db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx "b1" :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
         db1 (d/db-with db0 (seon.task/agent-tx "b1" :a1 {:status :busy}))]
-    [st db1]))
+    [st db1 (vec (apply concat (d/datoms-diff db0 db1 :eavt [])))]))
 
 (deftest a-move-of-main-costs-what-moved
   ;; the 1.2 s an agent's page took after an eval (root's baseline, 2026-10-27): each of an eval's
@@ -124,7 +125,9 @@
      :n "tasks on main"
      :work "the index moved by the one status datom (seon.reconcile/index over the watched datoms that differ), never one step per task"
      :growth :constant
-     :per-n {:calls 4 :bytes 16000000}
+     ;; measured 2026-10-29: 9.1 KB and 3 calls at the sizes; before, one datoms-diff for each of the 90 watched
+     ;; attributes: 14.6 MB at 25 tasks, 20.1 MB at 50
+     :per-n {:calls 4 :bytes 12000}
      :sizes [25 50 100]}))
 
 (defn agent-of
