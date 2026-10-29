@@ -165,7 +165,7 @@ The places that cut a value where it is made, not in the printer, each with its 
 Uses of take, subs and the like in display code that choose what to find or read, not what to cut from output.
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
-- `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives, each kept as written; a name's first letter made capital: text rearranged, nothing left out.
+- `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `seon.context/related`: what a search ranked (`seon.context/relevance`), cut by its chance (`:seon.config.render/relevance-summary`) and counted (`take` the config's `:seon.config.render/related`), the cited ones left out; what the cut left out is counted with the form that lists it: a search's answer, not a cut of output.
 - `seon.context/search`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.

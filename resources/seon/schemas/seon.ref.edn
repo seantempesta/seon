@@ -33,7 +33,7 @@
  ;; one block of the scan, by the kind its first line starts: an ATX heading (its level, its
  ;; text and the offsets of its content), a fenced or indented code block, a paragraph, a list,
  ;; a block quote, a table or a thematic break; :from and :to are offsets into the text, and the
- ;; block after a heading carries its own text
+ ;; block after a heading carries its own text; a fence its content's offsets, a list its items
  :seon.ref/kind [:enum :heading :fence :code :para :list :quote :table :break]
  :seon.ref/block [:multi {:dispatch :seon.ref/kind}
                   [:heading [:map {:closed true}
@@ -47,7 +47,13 @@
                                         [:seon.ref/kind [:enum :fence :code :para :list :quote :table :break]]
                                         [:seon.ref/from nat-int?] [:seon.ref/to nat-int?]
                                         [:seon.ref/line :seon.ref/line] [:seon.ref/end-line :seon.ref/line]
-                                        [:seon.ref/text {:optional true} :string]]]]
+                                        [:seon.ref/text {:optional true} :string]
+                                        ;; a fence's content: the offsets between its opening line and its closing one
+                                        [:seon.ref/text-from {:optional true} nat-int?] [:seon.ref/text-to {:optional true} nat-int?]
+                                        ;; a list's items, the offsets of each item's content after its marker, and
+                                        ;; whether its first marker is a number
+                                        [:seon.ref/items {:optional true} [:vector [:tuple nat-int? nat-int?]]]
+                                        [:seon.ref/ordered {:optional true} :boolean]]]]
  :seon.ref/scan [:map {:closed true}
                  [:seon.ref/blocks [:vector :seon.ref/block]]
                  [:seon.ref/spans [:vector :seon.ref/span]]

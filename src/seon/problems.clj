@@ -422,6 +422,7 @@
    "test/seon/problems_test.clj" "this class's tests name the old words"
    "src/seon/reader.clj" "a Markdown code fence, CommonMark's word"
    "src/seon/ref.clj" "a Markdown code fence, CommonMark's word"
+   "src/seon/render/ui.clj" "draws the scan's :fence block kind, CommonMark's word"
    "resources/seon/schemas/seon.ref.edn" "the :fence block kind is CommonMark's"
    "test/seon/reader_test.clj" "a Markdown code fence"
    "test/seon/ref_test.clj" "a Markdown code fence"
