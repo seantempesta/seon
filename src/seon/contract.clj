@@ -137,8 +137,11 @@
 (clojure.core/defn- first-problem
   "The first reason v does not satisfy s, in one line for an error's message: where (its :in path),
   what it got, and what was expected (its schema's form), each printed at the printer's :part budget, malli's kind for a
-  missing or refused key; and how many reasons more. md-scan #14: \"its value does not
-  satisfy its contract\" sent an agent digging through ex-data for twelve evals to find one nil key.
+  missing or refused key; then the map or vector that holds it (the value at its path's parent: what a
+  REPL would print, which the failed check keeps from its caller); and how many reasons more. md-scan
+  #14: \"its value does not satisfy its contract\" sent an agent digging through ex-data for twelve
+  evals to find one nil key; #18's scan output was refused at [:seon.ref/blocks 0 :seon.ref/text-from],
+  and the agent spent ten evals, one looking for an unchecked scan, to see that its block never got the key.
   See docs/errors.md#errors."
   {:malli/schema [:=> [:cat :seon.host/schema :any] :string]}
   [s v]
@@ -152,6 +155,10 @@
                :malli.core/missing-key "a key it must hold is missing"
                :malli.core/extra-key "a key its closed map does not admit"
                (str (print/text value (:part print/budgets)) ", expected " expected))
+             ;; the value holding it, as the caller would have seen it had the check let it through
+             (let [holder (if (seq in) (get-in v (vec (butlast in))) v)]
+               (when (and (coll? holder) (not (identical? holder value)))
+                 (str ", in " (print/text holder (:part print/budgets)))))
              (when (next es) (str " (and " (dec (count es)) " more in :seon.error/problems)")))))))
 
 (clojure.core/defn- invalid
