@@ -888,7 +888,11 @@
        ;; waits on, never a sleep: one arriving from here on stops it
        (intr/clear-pending!)
        (agent/send! {:op :started :id (:id m)})
-       [st {:sock [{:op :reply :id (:id m) :response (dissoc (eval-string (:forms m) (select-keys m [:ticks :origin])) :value)
+       ;; its value goes with the reply only when it is plain data (seon.db/plain?: what the socket and the wire carry);
+       ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
+       ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
+       [st {:sock [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))]
+                                                        (cond-> (dissoc r :value) (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r))))
                     :t (:max-tx (agent/db))}]}])
      :else [st (when-let [ms (agent/handle! m)] {:sock ms})])))
 

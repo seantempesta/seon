@@ -286,13 +286,16 @@
   [root] {:drained (boolean (re-find #"\(drained\)" (:out (root-sh root "kill" []))))})
 
 (defn value-of
-  "The value a response r showed (an eval's, :seon.eval/response), read back from its :text (the
-  response printed under its handle, as Clojure prints it: a var reads as (var x); tagged
-  literals kept; nothing evaluated): its :value, or nil when that text does not read back (a cut)."
+  "The value a response r showed (an eval's, :seon.eval/response): its :value as data when the answer
+  carries it (plain data, seon.server's :eval answer), else read back from its :text (the response
+  printed under its handle, as Clojure prints it: a var reads as (var x); tagged literals kept; nothing
+  evaluated), or nil when that text does not read back (a cut, or an :out printed verbatim)."
   {:malli/schema [:=> [:cat [:maybe :map]] :any]}
-  [r] (try (let [m (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string (str (:text r))))]
-             (:value m))
-           (catch Exception _ nil)))
+  [r] (if (contains? r :value)
+        (:value r)
+        (try (let [m (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string (str (:text r))))]
+               (:value m))
+             (catch Exception _ nil))))
 
 (defn ask
   "One request m to a started root's server (bin/ask: its line on a socket, one reply line read,

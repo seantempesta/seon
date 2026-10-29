@@ -1414,6 +1414,25 @@
                         {:own-root? true})]
     (is (= [:whole :green :merged true] (:value r)) (pr-str r))))
 
+(deftest a-run-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
+  ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
+  ;; judge judges them, before it is done. md-scan #24 ended green on its proofs and the judge found 18 reds its change
+  ;; made: here a green proof beside a change that breaks main's edit test (seon.fixtures/whole-stray) does not end
+  ;; green, and its next turn's status names the red
+  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"ws\" :seon.task/plan \"Make ws.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-stray}})"
+                   " _ (seon.root/await-db sys \"the run ended\" #(#{:parked :held :done :closed :merged :dead} (:seon.run/status (datahike.api/entity % [:seon.run/id \"" % "/ws#1\"]))))"
+                   " db @(:conn sys) r (seon.task/run db \"" % "/ws#1\")"
+                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
+                   " a (datahike.api/q '[:find ?a . :where [?r :seon.run/id \"" % "/ws#1\"] [?r :seon.run/agent ?a]] b)]"
+                   " [(:seon.run/outcome r) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.context/status b a {})))])")
+        [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
+                        {})
+        [outcome state reasons] (:value r)]
+    (is (not= :green outcome) (pr-str r))
+    (is (not= :merged state) "not merged")
+    (is (some #{[:stray-red 'seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition]} reasons)
+        (str "its status names the test its change broke: " (pr-str reasons)))))
+
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole run whose proof is red is not merged. Its run does not end red: it
   ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
