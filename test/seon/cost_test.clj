@@ -122,6 +122,13 @@
             r (cost/growth t (rows t (fn [n] {:ticks ({10 406785.0 100 424921.0 1000 479600.0} n)})) :ticks)]
         (is (= :bounded-fixed (:basis r)))
         (is (< (:exponent r) (:allowed r)))))
+    (testing "a step in the cost (an index's depth) between two sizes: the flat side's few bytes are no shape"
+      ;; seon.program/diff-plan's bytes on Jolt 546c3d1f at 10, 100, 1,000 forms: 738,336, 738,640 and 1,147,520
+      ;; (the 304 B over the smallest, read as increments, fitted n^3.1 against the n^0.60 a log allows)
+      (let [t (assoc linear :growth :log :per-n {:bytes 85000.0} :fixed {:bytes 480000.0} :sizes [10 100 1000])
+            rows' (rows t (fn [n] {:bytes ({10 738336.0 100 738640.0 1000 1147520.0} n)}))]
+        (is (empty? (:steeper (cost/judge t rows'))))
+        (is (< (:exponent (cost/growth t rows' :bytes)) 0.3))))
     (testing "constant work: its cost itself, which a creep of a few percent barely moves"
       (let [c (assoc linear :growth :constant :per-n {} :fixed {:bytes 1290000.0} :sizes [10 100 1000])
             r (g c {10 1230000.0 100 1290000.0 1000 1430000.0})]
