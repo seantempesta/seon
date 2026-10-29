@@ -761,13 +761,16 @@
   [db nsym]
   (when-let [e (pdb/eid db :ns/name nsym)]
     (let [src (d/q '[:find ?src . :in $ ?n :where [?f :form/defines ?n] [?f :form/src ?src]] db e)
-          ;; its definitions; its deftests are :tests
-          defs (->> (d/q '[:find ?o ?v :in $ ?n :where [?x :var/ns ?n] [?x :var/name ?v] [(get-else $ ?x :var/kind :fn) ?k] [(not= ?k :test)]
-                           [(get-else $ ?x :var/form -1) ?f] [(get-else $ ?f :form/order -1) ?o]] db e)
-                    (sort-by (fn [[o v]] [(if (neg? o) Long/MAX_VALUE o) (str v)]))
-                    (mapv (fn [[_ v]] (symbol (name v)))))
-          tests (d/q '[:find ?v ?st :in $ ?n :where [?x :var/ns ?n] [?x :var/kind :test] [?x :var/name ?v]
-                       [(get-else $ ?x :seon.test/status :none) ?st]] db e)
+          ;; its vars in one pass over the index of :var/ns, each read for the attributes it shows: its
+          ;; definitions, and its deftests
+          vars (for [dt (d/datoms db :avet :var/ns e) :let [x (d/entity db (:e dt))]]
+                 {:var/name (:var/name x) :var/kind (:var/kind x) :seon.test/status (:seon.test/status x)
+                  :var/form {:form/order (:form/order (:var/form x))}})
+          {tests true defs false} (group-by #(= :test (:var/kind %)) vars)
+          defs (->> defs
+                    (sort-by (fn [{v :var/name {o :form/order} :var/form}] [(or o Long/MAX_VALUE) (str v)]))
+                    (mapv #(symbol (name (:var/name %)))))
+          tests (for [{v :var/name st :seon.test/status} tests] [v (or st :none)])
           by (group-by second tests)]
       (cond-> {:ns nsym}
         src (assoc :aliases (into (sorted-map) (learn/aliases [src])))

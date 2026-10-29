@@ -487,7 +487,7 @@
         r (seon.docs/resolve-ref db 'ctx-big/big :code)
         ;; the task's record as ctx holds it: its task citing the var, with its form
         c {:task {:seon.task/id "demo/r" :cited {2 {:var/name 'ctx-big/big :form {:form/src src}}}}}
-        part (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 (first (context/citations db (task/task db "demo/r"))))
+        part (seon.render.ui/cited {:seon.ctx/ctx c :seon.db/db db} 0 (context/cite-key (first (context/citations db (task/task db "demo/r")))))
         html (seon.web.html/html (seon.render/html {:schema :seon.context/cited :as :block} part))
         model (print/text (seon.render.ui/cited-model {} part))]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")

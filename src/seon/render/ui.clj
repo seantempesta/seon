@@ -847,28 +847,30 @@
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
-  "One thing the task's plan cites (a component over ctx and the db), its citation cite as the layout
-  read the task's citations once a draw (seon.context/citations): a function, a wiki section, a schema key, a namespace, a file or a task, at
+  "One thing the task's plan cites (a component over ctx and the db), named by its key
+  (seon.context/cite-key), its citation in opts (:seon.ref/citation) as the layout read the task's
+  citations once a draw (seon.context/citations), else found among them by its key (its handle,
+  called with the key alone): a function, a wiki section, a schema key, a namespace, a file or a task, at
   the depth its citation's delimiter asks (docs/references.md#the-delimiter-picks-the-depth), as the
   reference system shows it (seon.docs/cited); a function at :doc or :code with its direct tests and
   callers (`cited-of`). A part: the page draws it by cited-html, the model is sent the value
   (docs/render.md#a-part-answers-data)."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :seon.ref/citation] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _ cite]
-  (when-let [[kind view] (docs/cited db cite)]
-    (let [depth (:seon.ref/depth cite)
-          fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
-      (with-meta (merge {:cites (context/cite-key cite) :kind kind :depth depth} view fn-extra)
-        {:seon.render/schema :seon.context/cited ::cite cite}))))
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:seon.ref/citation {:optional true} :seon.ref/citation]]] :int :string] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db cite :seon.ref/citation} _ k]
+  (when-let [cite (or cite (some #(when (= k (context/cite-key %)) %) (some->> (:task c) :seon.task/id (task/task db) (context/citations db))))]
+    (when-let [[kind view] (docs/cited db cite)]
+      (let [depth (:seon.ref/depth cite)
+            fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
+        (with-meta (merge {:cites k :kind kind :depth depth} view fn-extra) {:seon.render/schema :seon.context/cited})))))
 
 (defn- cited-call
   "The one printer's call for a cited part's value v (shown without the part's schema mark, or html would draw
   it by its render again), its cuts reading the rest through the form that makes the part whole again
   (`cited`, the same ctx and db the page was drawn from). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
-  [v shown]
+  [{:keys [cites]} shown]
   [#'render/html {:budget (config/value :seon.config.render/value-budget)
-                  :handle (list 'seon.render.ui/cited {:seon.ctx/ctx '(deref seon.ctx/ctx) :seon.db/db '(seon.agent/db)} 0 (::cite (meta v)))}
+                  :handle (list 'seon.render.ui/cited {:seon.ctx/ctx '(deref seon.ctx/ctx) :seon.db/db '(seon.agent/db)} 0 cites)}
    (with-meta shown nil)])
 
 (defn cited-html
@@ -1310,7 +1312,7 @@
       (when task (list [#'task-data {} aid]
                        ;; each var the plan cites beside its proofs (the proofs are the task's data)
                        ;; each thing its plan cites, a part each, at the depth its citation asks
-                       (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {} aid cite])
+                       (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {:seon.ref/citation cite} aid (context/cite-key cite)])
                        ;; where the code lives: each namespace the work touches, its aliases, definitions and tests
                        [#'namespaces {} aid]
                        [#'related {} aid]

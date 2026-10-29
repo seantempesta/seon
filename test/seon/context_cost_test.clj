@@ -161,10 +161,12 @@
   ;; definitions' datoms, a name each, never their forms read again (agents work in namespaces of hundreds)
   (cost/proof {:of 'seon.context/namespace-data :input 'seon.context-cost-test/namespace-of
                :n "definitions in the namespace"
-               :work "the namespace's entity, its ns form's source for its aliases, then one query over its definitions' var datoms (name, kind, form, order) and one over its deftests: a name per definition, linear in them, no form read"
+               :work "the namespace's entity and its ns form's source for its aliases, then one pass over its :var/ns datoms, each var read for its name, kind, test status and its form's order (five seeks, ~7 KB each on Datahike's index): a name per definition, linear in them, no form read"
                :growth :linear
-               :per-n {:bytes 2000}
-               :fixed {:calls 3 :bytes 200000}
+               ;; measured on Jolt 546c3d1f: 410 KB at 10, 3.49 MB at 100 (34 KB a definition); the two queries it
+               ;; replaced (get-else per tuple) 1.36 MB and 5.87 MB, a pull each 837 KB and 7.76 MB
+               :per-n {:bytes 35000}
+               :fixed {:calls 2 :bytes 80000}
                :sizes [10 100 1000]}))
 
 (deftest task-data-costs-what-the-plan-names
