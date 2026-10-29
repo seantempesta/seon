@@ -177,8 +177,11 @@
 
 (clojure.core/defn checked
   "f checked by contract form c (compiled once, here: seon.contract/wrap), errors
-  named fn-sym; f itself when instrumentation is off."
-  {:malli/schema [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn]}
+  named fn-sym; f itself when instrumentation is off. Not inlined (:redef): every
+  contracted definition calls it once, at its definition, and a spliced copy of its
+  body (wrap, schema, seon.profile/counted) at each of the 1,500 definitions was 5 MB of
+  code that runs once (docs/machine.md#roots-heap)."
+  {:malli/schema [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn] :redef true}
   [fn-sym c f]
   (if on? (wrap fn-sym (schema c) f) f))
 
