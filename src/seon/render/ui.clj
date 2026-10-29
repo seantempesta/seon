@@ -110,23 +110,22 @@
 
 (defn markdown
   "Markdown text (a plan, an agent's prose, a message) as a person reads it: its blocks by the one
-  parse (seon.ref/scan): a heading at its level, a paragraph, a list (numbered when its first
-  marker is a number), a code block highlighted, a quote or a table as its lines. Each block's text
+  parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
+  when its first marker is a number), a code block highlighted (a fenced block's content as the scan gives it), a quote or a table as its lines. Each block's text
   is kept as written, its backticks too: the model reads this page, and a plan's delimiters pick
   what its citations pull (docs/references.md#the-delimiter-picks-the-depth). See docs/render.md#prose-and-the-one-string-cutter."
   {:malli/schema [:=> [:cat :string] :any]}
   [text]
   (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
-        (for [{:seon.ref/keys [kind from to heading heading-level]} (:seon.ref/blocks (ref/scan text))
+        (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} (:seon.ref/blocks (ref/scan text))
               :let [body (subs text from to)]]
           (cond
             (= :heading kind) [(keyword (str "h" (min 6 (+ 2 (or heading-level 1))))) {:class "font-bold text-text-100"} heading]
-            ;; a code block: indented, or opened by ``` or ~~~ (whose marks are no text of it)
-            (or (= :code kind) (re-find #"\A\s*(```|~~~)" body))
-            (code (str/replace body #"(?m)\A\s*(```|~~~).*\n|\n?\s*(```|~~~)\s*\z" "") (config/value :seon.config.render/value-budget))
-            (= :list kind) (let [ol? (re-find #"\A\s*\d" body)]
-                             (into [(if ol? :ol :ul) {:class (if ol? "list-decimal pl-5" "list-disc pl-5")}]
-                                   (for [item (rest (str/split (str "\n" body) #"\n(?:[-*+]|\d+[.)])\s+"))] [:li item])))
+            ;; a code block: indented, or fenced, whose content the scan gives (its marks are no text of it)
+            (= :code kind) (code body (config/value :seon.config.render/value-budget))
+            (= :fence kind) (code (subs text text-from text-to) (config/value :seon.config.render/value-budget))
+            (= :list kind) (into [(if ordered :ol :ul) {:class (if ordered "list-decimal pl-5" "list-disc pl-5")}]
+                                 (for [[a b] items] [:li (subs text a b)]))
             (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
             (= :break kind) [:hr]
             :else [:p body]))))
