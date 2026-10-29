@@ -932,20 +932,32 @@
   (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
     (with-meta (context/status db aid {:main main}) {:seon.render/schema :seon.context/status})))
 
+(defn related-html
+  "What is related as the page shows it (the declared html render of :seon.context/related; the model
+  reads the same value, the forms that read more among it, by its model render, the value itself):
+  folded to how many of each kind, opened to one line each, as related-view lines them. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts v]
+  (let [kinds (filter (comp sequential? val) (dissoc v :read :more))]
+    [:details
+     [:summary {:class "kicker"} (str "related · " (str/join ", " (for [[k xs] kinds] (str (count xs) " " (name k)))))]
+     [:ul {:class "mt-1 flex flex-col gap-1"}
+      (for [[_ xs] kinds x xs]
+        [:li {:class "text-text-300"} (if (string? x) x [#'render/html {:budget (config/value :seon.config.render/value-budget)} x])])]]))
+
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
   ctx and the db): the units its last turn included (:seon.agent/included, seon.context/selected:
   what its plan and recent evals point to, each whole with its chance, in the order they entered), as
-  seon.context/related-view lines them (with the forms that read more), as a call of the one printer;
-  a line saying so when there is nothing yet. No relevance call here: the turn decides, the page draws."
+  seon.context/related-view lines them (with the forms that read more), a part (its data,
+  :seon.context/related: docs/render.md#a-part-answers-data); a line saying so when there is nothing
+  yet. No relevance call here: the turn decides, the page draws."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
-  (let [r (some->> (not-empty (:seon.agent/included c)) context/shown (context/related-view db))]
-    [:section [:h2 "related"]
-     ;; its budget the selection's (seon.context/selected fills relevance-budget) and a value's for the
-     ;; forms beside it, so the printer never cuts a unit the selection chose
-     (if r [#'render/html {:budget (+ (config/value :seon.config.render/relevance-budget) (config/value :seon.config.render/value-budget)) :handle '(my.task/related)} r]
-         [:p {:class "muted"} "nothing related yet"])]))
+  (if-let [r (some->> (not-empty (:seon.agent/included c)) context/shown (context/related-view db))]
+    (with-meta r {:seon.render/schema :seon.context/related})
+    [:section [:h2 "related"] [:p {:class "muted"} "nothing related yet"]]))
 
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
@@ -1014,7 +1026,7 @@
   line, whether it came out well (✓) or threw (✗), the prose the agent wrote beside it (else its code,
   cut by the page's width only), how long it ran and the tokens it puts in the model's context (its
   messages as seon.context/eval-messages makes them, by the one sizer); opened, its code and what
-  came of it, each whole, once, in place. Opened (:seon.eval/opened: a reader opened it, a fact the
+  came of it, each whole, once, in place (drawn inside the closed details once a revision). Opened (:seon.eval/opened: a reader opened it, a fact the
   agent takes before it draws its page) it is drawn open. Root's evals (a ctx with no agent key) post
   nothing. Its <details> carries its handle's anchor (eval-<id>): a handle printed anywhere links here.
   See docs/render.md#the-page."
@@ -1034,15 +1046,18 @@
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
-            [(if err [:span {:class "text-error"} "✗"] [:span {:class "text-success"} "✓"])
+            [(if err [:span {:class "shrink-0 text-error"} "✗"] [:span {:class "shrink-0 text-success"} "✓"])
              (if (str/blank? (:prose rec))
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or (:code rec) "")))]
                [:span {:class "seon-prose min-w-0 flex-1"} (:prose rec)])
-             ;; how responsive it was and what it costs the context: quiet
-             (when ms [:span {:class "seon-ms text-2xs text-text-500"} (ms-str ms)])
-             [:span {:class "text-2xs text-text-500"} (print/tokens-text tokens)]
-             [:code {:class "seon-handle text-2xs"} (str handle)]])
-      (when (or opened? (nil? k))
+             ;; how responsive it was and what it costs the context: quiet, at the line's end
+             [:span {:class "ml-auto flex shrink-0 gap-2 text-2xs text-text-500"}
+              (when ms [:span {:class "seon-ms"} (ms-str ms)])
+              [:span (print/tokens-text tokens)]
+              [:code {:class "seon-handle"} (str handle)]]])
+      ;; drawn once a revision, inside the closed details, so opening it shows it at once, on a live agent's
+      ;; page and on one root draws from its branch (whose opened facts no process takes)
+      (do
         [:div {:class "ml-5 flex flex-col gap-1 py-1"}
          ;; the code as the agent wrote it, whole, highlighted
          (emit/marked-hiccup :seon.print/code (or (:code rec) ""))
@@ -1122,7 +1137,7 @@
        [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(str "agent" (when n (str " · turn " n))) (when tokens (str (print/tokens-text tokens) " sent"))]))]
        (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
        (when-not (str/blank? reply) (markdown reply))
-       (when (seq evals) [:ol {:class "flex flex-col"} (for [e evals] [#'eval-item {} e])])])))
+       (when (seq evals) [:ol {:class "seon-turn flex flex-col"} (for [e evals] [#'eval-item {} e])])])))
 
 (defn chat-message
   "A message to the agent as the chat shows it (a component over ctx): who sent it, its body as
