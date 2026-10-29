@@ -600,3 +600,30 @@
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]
                [tst (result tst)])))))
+
+(defn shards
+  "tests (var symbols) dealt into at most jobs shards by their measured ms ({test ms}; a test
+  never measured counts as the mean of those measured), so the shards end together (bin/test's, and an agent's test run, seon.agent/run-tests-forked: the one deal, docs/merging.md#a-merge-runs-what-the-change-reaches): a
+  namespace's tests (and so its fixtures) in one, unless the namespace alone is more than half a
+  shard's share, when it is split into parts of at most that (its fixtures run in each); the
+  longest part first into the shard with least so far; no empty shard."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] pos-int? [:map-of :qualified-symbol :int]] [:vector [:vector :qualified-symbol]]]}
+  [tests jobs ms]
+  (let [mean (if (seq ms) (quot (reduce + (vals ms)) (count ms)) 1)
+        cost #(get ms % mean)
+        ;; a part at most half a shard's share, so the parts of one large namespace (root-test: 13 tests, ~500 s
+        ;; in one shard while three others ended at 340-390 s, 2026-10-29) fill the gaps the largest leave
+        share (max 1 (quot (reduce + (map cost tests)) (* 2 (max 1 jobs))))
+        parts (mapcat (fn [[_ ts]]
+                        (let [ts (vec (sort-by (juxt (comp - cost) str) ts))]
+                          (if (<= (reduce + (map cost ts)) share)
+                            [ts]
+                            ;; longest first into the lightest part of as many as the share needs
+                            (let [k (int (Math/ceil (/ (reduce + (map cost ts)) (double share))))]
+                              (remove empty? (reduce (fn [ps t] (update ps (apply min-key #(reduce + (map cost (ps %))) (range k)) conj t))
+                                                     (vec (repeat k [])) ts))))))
+                      (sort-by (comp str key) (group-by (comp symbol namespace) tests)))
+        parts (sort-by (juxt #(- (reduce + (map cost %))) (comp str first)) parts)
+        n (max 1 (min jobs (count parts)))]
+    (vec (remove empty? (reduce (fn [sh p] (update sh (apply min-key #(reduce + (map cost (sh %))) (range n)) into p))
+                                (vec (repeat n [])) parts)))))
