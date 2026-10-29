@@ -452,7 +452,8 @@
    [:form/timeouts :timeouts] [:form/catches :catches]])
 
 (def ^:private form-set-keys
-  "form-sets as a map, {attribute -> row key}."
+  "form-sets as a map, {attribute -> row key}: what form-row folds one seek's datoms by. See
+  docs/source.md#tests-run-by-reach."
   (into {} form-sets))
 
 (defn- form-of
