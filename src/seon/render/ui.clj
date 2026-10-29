@@ -764,15 +764,15 @@
   its plan's delimiters ask under :sections; the id and kind, which :task holds). See
   docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [_opts v] (dissoc v :sections-cited :id :kind :execution))
+  [_opts v] (dissoc v :id :kind :execution))
 
 (defn task-html
   "The task as the page shows it (the declared html render of :seon.context/task; the model is sent the
   value): its name as a title, its namespace above it, how its kind is worked (folded), its plan as
   Markdown, the rest of its data folded, the sections it cites. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [id sections-cited] :as v}]
-  (let [t {:sections (into {} (map-indexed vector sections-cited))}]
+  [_opts {:keys [id] :as v}]
+  (let []
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
@@ -780,10 +780,11 @@
      [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
      ;; its instructions (how its kind is worked: the template's text) and its plan (what the task is;
      ;; cut at a part's budget an agent read "+86 chars"), each whole under the value budget, as
-     ;; prose here, then each section it cites, its text as prose (ctx's :sections), and
-     ;; the rest of its data by the printer (each cited var is its own component); each proof how to
+     ;; prose here, then the rest of its data by the printer (each thing it cites is its own part,
+     ;; `cited`); each proof how to
      ;; run it and, written, its source (its last result is the status's)
-     (let [data v]       ;; a cut names the form that answers the whole at the agent's REPL
+     ;; a cut names the form that answers the whole at the agent's REPL
+    (let [data v]
        (remove nil?
          (list ;; a premise main may already answer comes first, so it is checked in turn 1
                (when-let [g (seq (:green-on-main data))]
@@ -798,15 +799,10 @@
                (let [p (prose plan (config/value :seon.config.render/value-budget) {:whole '(:seon.task/plan (:task (my.task/data)))})]
                  (if (string? p) (markdown plan) [:p {:class "seon-prose"} p])))
              ;; the rest folds: a person opens what they want, the model reads it all
-             (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main :id :kind :execution :sections-cited))]
+             (let [shown (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) (dissoc data :task :sections :green-on-main :id :kind :execution))]
                (when (seq shown)
                  [:details [:summary "proofs and data"]
-                  [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown]]))
-             (when (seq (:sections t))
-               [:details [:summary (str "sections it cites (" (count (:sections t)) ")")]
-                (for [{:keys [address heading text]} (vals (:sections t))]
-                  (list [:h3 heading " " [:code address]]
-                        [:p {:class "seon-prose"} (prose (str text) (part) {:whole (list :seon.ref/text (list 'my.agent/help address))})]))]))))]))
+                  [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(dissoc (my.task/data) :task :write-set :sections)} shown]])))))]))
 
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
@@ -827,14 +823,14 @@
                            [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
                                             (seq (:seon.test/failures v)) (assoc :failures (mapv context/failure (:seon.test/failures v))))]))]
     ;; a part: the page draws it by task-html, the model is sent the value (docs/render.md#a-part-answers-data)
-    (with-meta (assoc (let [data (cond-> (context/task-data db (task/task db id) false)
+    ;; what the plan cites is a part each (`cited`, at its depth), not again here
+    (with-meta (assoc (let [data (cond-> (dissoc (context/task-data db (task/task db id) false) :sections)
                   (or (seq sources) (seq results))
                   (update :to-prove #(into (empty %) (for [[s run] %]
                                                        [s (if (or (sources s) (results s))
                                                             (cond-> (merge {:run run} (results s)) (sources s) (assoc :source (sources s)))
                                                             run)]))))] data)
-                      :id id :kind kind :execution execution
-                      :sections-cited (vec (for [{:seon.section/keys [address heading text]} (vals (:sections t))] {:address address :heading heading :text text})))
+                      :id id :kind kind :execution execution)
       {:seon.render/schema :seon.context/task})))
 
 (defn cited-of
@@ -864,43 +860,29 @@
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
-  "A var the task's plan cites (a component over ctx and the db): its source, then its tests with
-  their last results and its other callers (`cited-of`), each a call of the one printer under its
-  own budget, so a long source never crowds the tests out (the model reads the data)."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :symbol] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _ var]
-  ;; a part: the page draws it by cited-html, the model is sent the value (docs/render.md#a-part-answers-data)
-  (with-meta (assoc (cited-of db c var) :var var) {:seon.render/schema :seon.context/cited}))
+  "One thing the task's plan cites (a component over ctx and the db), named by its key
+  (seon.context/cite-key): a function, a wiki section, a schema key, a namespace, a file or a task, at
+  the depth its citation's delimiter asks (docs/references.md#the-delimiter-picks-the-depth), as the
+  reference system shows it (seon.docs/cited); a function at :doc or :code with its direct tests and
+  callers (`cited-of`). A part: the page draws it by cited-html, the model is sent the value
+  (docs/render.md#a-part-answers-data)."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :string] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _ k]
+  (when-let [cite (some #(when (= k (context/cite-key %)) %) (some->> (:task c) :seon.task/id (task/task db) (context/citations db)))]
+    (when-let [[kind view] (docs/cited db cite)]
+      (let [depth (:seon.ref/depth cite)
+            fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
+        (with-meta (merge {:cites k :kind kind :depth depth} view fn-extra) {:seon.render/schema :seon.context/cited})))))
 
 (defn cited-html
-  "A var the plan cites as the page shows it (the declared html render of :seon.context/cited; the model
-  is sent the value): its source, then its tests and other callers, each by the one printer. See
-  docs/render.md#a-part-answers-data."
+  "A thing the plan cites as the page shows it (the declared html render of :seon.context/cited; the
+  model is sent the value): what it is and the depth it is shown at, then its view by the one printer.
+  See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [var source] :as data}]
-  (let [whole (list 'seon.render.ui/cited-of '(seon.agent/db) '@seon.ctx/ctx (list 'quote var))
-        others (dissoc data :source :var)
-        budget (config/value :seon.config.render/value-budget)]
-    (cond-> [:section [:h2 (str "cites " var)]]
-      source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
-      (seq others) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} others]))))
-
-(def ^:private reason-words
-  "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page."
-  {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
-   :stray-red "red test that is no proof" :contract-gap "functions without a contract" :unmerged "unmerged entries"
-   :open-problem "problems the work caused" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
-   :behind "judged before main moved"})
-
-(defn- verdict-badge
-  "A proof's verdict as one mark and its colour: green, red, deferred to root's gate, or none yet."
-  {:malli/schema [:=> [:cat :keyword] :any]}
-  [st]
-  (case st
-    :pass [:span {:class "text-success"} "✓"]
-    (:fail :error) [:span {:class "text-error"} "✗"]
-    :deferred [:span {:class "text-text-500"} "⋯"]
-    [:span {:class "text-text-500"} "○"]))
+  [_opts {:keys [cites kind depth] :as v}]
+  [:details (when (not= :summary depth) {:open true})
+   [:summary {:class "kicker"} (str (name kind) " · " cites " · " (name depth))]
+   [#'render/html {:budget (config/value :seon.config.render/value-budget)} (dissoc v :cites :kind :depth)]])
 
 (defn status-html
   "How the work stands as the page shows it (the declared html render of :seon.context/status; the
@@ -1276,8 +1258,8 @@
      [:div {:id "p-task"}
       (when task (list [#'task-data {} aid]
                        ;; each var the plan cites beside its proofs (the proofs are the task's data)
-                       (let [proved (set (map :var/name (vals (:proved task))))]
-                         (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
+                       ;; each thing its plan cites, a part each, at the depth its citation asks
+                       (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {} aid (context/cite-key cite)])
                        [#'related {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                        [#'status {} aid]))

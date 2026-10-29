@@ -622,22 +622,36 @@
   [db c] (second (reached db c)))
 
 (defn citation-kind
-  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :view, a
-  namespace, a task, or a path with no problem (cited-view); nil, nothing pulled (a keyword, a
-  path:N line reference)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :view]]]}
+  "What citation c reaches on db: :var, a qualified name that is no task (resolve-ref); :schema, a
+  qualified keyword the db holds a schema entry of (schema-view); :view, a namespace, a task, or a
+  path with no problem (cited-view); nil, nothing pulled (any other keyword, a path:N line reference)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:enum :var :schema :view]]]}
   [db {:seon.ref/keys [name path problem-kind]}]
   (cond (and (qualified-symbol? name) (not (ref/task? db name))) :var
+        (and (qualified-keyword? name) (pdb/eid db :schema/key name)) :schema
         (or (symbol? name) (and path (not problem-kind))) :view))
+
+(defn schema-view
+  "Schema key k as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
+  :summary its key and the file that declares it; :doc and :code its form as written there (code),
+  read from the db's schema entry (:schema/form), so it changes as the db does."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :seon.ref/depth] :map]}
+  [db k depth]
+  (let [e (d/entity db (pdb/eid db :schema/key k))]
+    (cond-> {:schema k}
+      (:schema/file e) (assoc :file (:schema/file e))
+      (and (not= :summary depth) (:schema/form e)) (assoc :form (print/code (:schema/form e))))))
 
 (defn cited
   "Citation c pulled at its depth, as citation-kind reaches it, and what it reached: [:var view]
-  by resolve-ref ([:unresolved view] when it resolves to nothing), anything else by reached; nil
-  when it reaches nothing pulled (a keyword, a path:N line reference)."
+  by resolve-ref ([:unresolved view] when it resolves to nothing), [:schema view] by schema-view,
+  anything else by reached; nil when it reaches nothing pulled (a keyword the db holds no schema of,
+  a path:N line reference)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] [:maybe [:tuple :seon.render/kind :map]]]}
   [db c]
   (case (citation-kind db c)
     :var (let [v (resolve-ref db (:seon.ref/name c) (:seon.ref/depth c))] [(if (:unresolved v) :unresolved :var) v])
+    :schema [:schema (schema-view db (:seon.ref/name c) (:seon.ref/depth c))]
     :view (reached db c)
     nil))
 

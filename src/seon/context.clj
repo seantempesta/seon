@@ -710,6 +710,28 @@
 
 (declare cited)
 
+(defn cite-key
+  "Citation c's one key on a page: the name it cites, else its address."
+  {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
+  [c] (str (or (:seon.ref/name c) (:seon.ref/address c) (:seon.ref/path c))))
+
+(defn citations
+  "The citations of task t's plan and instructions (seon.ref/references, the one parser), one per
+  name, in first-mention order, each at the depth its delimiter asks
+  (docs/references.md#the-delimiter-picks-the-depth): each that pulls something
+  (seon.docs/citation-kind), the task's own proofs left out (the status shows them). What the page and
+  the model are shown of what the task cites, one part each (seon.render.ui/cited)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
+  [db t]
+  (let [{:keys [plan proofs]} (:seon.task/accumulated t)
+        proof? (set proofs)]
+    (let [cs (into [] (comp (filter #(docs/citation-kind db %)) (remove #(proof? (:seon.ref/name %))))
+                   (ref/references db (str plan "\n" (:seon.task/instructions t))))
+          by (group-by cite-key cs)]
+      ;; a name cited twice is shown once, at the deepest depth it is cited at
+      (mapv (fn [k] (apply max-key #(get {:summary 0 :doc 1 :code 2} (:seon.ref/depth %) 0) (by k)))
+            (distinct (map cite-key cs))))))
+
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each var the plan

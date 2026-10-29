@@ -48,7 +48,7 @@
                     ;; an eval row's cuts opened on the page, each its continuation form as EDN text (seon.web/open-form read it)
                     [:opened {:optional true} [:set :string]]]
  ;; what a citation reached (seon.docs/reached: a var, a namespace, a task, a section, a file, or nothing)
- :seon.render/kind [:enum :entity :value :var :namespace :task :section :file :unresolved]
+ :seon.render/kind [:enum :entity :value :var :schema :namespace :task :section :file :unresolved]
  ;; the schema a value is drawn by: its entity schema, or a value's attribute
  :seon.render/schema :qualified-keyword
  ;; an agent's proofs as its newest turn observed them (test -> {:status :failure}), its [:proofs]
