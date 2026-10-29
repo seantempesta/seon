@@ -317,6 +317,26 @@
   [form nsx]
   (boolean (and (seq? form) (symbol? (first form)) (= #'clojure.core/ns (ns-resolve nsx (first form))))))
 
+(defn- unmapped
+  "The vars form removed with clojure.core/ns-unmap, as this branch records them: each
+  (ns-unmap 'n 's) it calls (its namespace quoted, or *ns*, read in ns, where the form ran), whose var
+  db records with a definition and n no longer interns, {var its-entity form-entity}. What the eval
+  records as removed: Clojure's ns-unmap, observed, as v1's REPL recorded it (my.program/unmap-subject!;
+  docs/source.md#an-agent-changes-code-at-its-repl). md-scan #19 unmapped a scratch helper, and its
+  branch kept it as program, uncontracted, which the done rule refused at the cap."
+  {:malli/schema [:=> [:cat :seon.host/db :any :seon.host/namespace] [:vector [:tuple :qualified-symbol :int :int]]]}
+  [db form ns]
+  (let [quoted (fn [x] (when (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x)))]
+    (vec (for [x (tree-seq coll? seq form)
+               :when (and (seq? x) (symbol? (first x)) (= #'clojure.core/ns-unmap (ns-resolve ns (first x))))
+               :let [[_ a b] x
+                     n (if (= '*ns* a) (ns-name ns) (quoted a))
+                     s (quoted b)]
+               :when (and n s (find-ns n) (not (contains? (ns-interns (find-ns n)) s)))
+               :let [v (symbol (str n) (str s)) e (pdb/eid db :var/name v) f (some-> e (#(d/entity db %)) :var/form :db/id)]
+               :when f]
+           [v e f]))))
+
 (defn wrap-record
   "What a form leaves that is program becomes facts on this branch (agent mode) as it runs
   (seon.program): the compiler's account of the form (jolt.analyzer/*unit-tap* around its
@@ -352,6 +372,11 @@
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
                    (when l (vreset! last nil))
+                   ;; a var the form unmapped is no longer program on this branch: its definition retracted
+                   (let [gone (when (and l (= :agent (:mode @agent/state)) contract/record? (contains? m :repl/value))
+                                (not-empty (unmapped (agent/db) (:repl/form m) (the-ns (:ns l)))))
+                         _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
+                         m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
                      (let [tx (when contract/record? (program/record-tx (agent/db) acct))
                            ;; what this form's own transaction changes of an existing var's contract or
@@ -363,7 +388,7 @@
                          redefined (assoc :redefined redefined)))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
-                       nested? (assoc :not-program "a def beside calls is not program: it stays this eval (seon.program/definition-form?); define at a form's top level to make it program")))))))))))
+                       nested? (assoc :not-program "a def beside calls is not program: it stays this eval (seon.program/definition-form?); define at a form's top level to make it program"))))))))))))
 
 (defn- branch-registry
   "The registry this agent's evaluation binds (seon.program/schema-registry of its branch's
@@ -505,6 +530,8 @@
       ;; what it made program on the branch: each var it defined, an ns form's namespace
       (some :recorded fs) (assoc :recorded (into [] (mapcat :recorded) fs))
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))
+      ;; and what it removed from the branch's program (seon.repl/unmapped)
+      (some :unmapped fs) (assoc :unmapped (into [] (mapcat :unmapped) fs))
       (seq warnings) (assoc :warnings warnings)
       (joined :out) (assoc :out (joined :out))
       (joined :err-out) (assoc :err (joined :err-out))

@@ -91,15 +91,28 @@
     (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
+(deftest an-unmapped-definition-is-no-longer-the-branchs-program
+  ;; docs/source.md#an-agent-changes-code-at-its-repl: md-scan #19 unmapped a scratch helper and its branch kept it,
+  ;; uncontracted, so the done rule refused the work at the cap; Clojure's ns-unmap, observed, retracts it
+  (let [[_ gone branch] (at/in-agent (fn [{:keys [ns task]}]
+                                       [(str "(ns " ns ".um) (defn scratch [] 1)")
+                                        (str "(ns-unmap '" ns ".um 'scratch)")
+                                        {:op :eval :agent "root"
+                                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                    " (:var/form (datahike.api/entity b [:var/name '" ns ".um/scratch])))")}]))]
+    (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
+    (is (nil? (:value branch)) (str "the branch records no definition of it: " (pr-str branch)))))
+
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
-  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns)
+  ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.context/current-ns). The agent
+  ;; is the one with a key: main's evals, root's, are on the branch too (any one agent was root's by chance)
   (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
                                    [(str "(ns " ns ".here)")
                                     "(+ 1 1)"
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
-                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a]] b)]"
+                                                " a (datahike.api/q '[:find ?a . :where [_ :seon.eval/agent ?a] [?a :seon.agent/key _]] b)]"
                                                 " (seon.context/current-ns b a))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
