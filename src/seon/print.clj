@@ -57,6 +57,11 @@
   {:malli/schema [:=> [:cat :string] [:map [:seon.print/code :string]]]}
   [s] {:seon.print/code s})
 
+(defn tokens-text
+  "A count of tokens as a reader is shown it: seon.print.emit/tokens-text, the printer's one wording of a size."
+  {:malli/schema [:=> [:cat nat-int?] :string]}
+  [n] (emit/tokens-text n))
+
 (defn text
   "`v` as text under budget tokens: the printed text, or the error's message when even
   its first part does not fit."

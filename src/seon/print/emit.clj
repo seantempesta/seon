@@ -88,6 +88,13 @@
   {:malli/schema [:=> [:cat nat-int?] :int]}
   [n] (long (Math/floor (/ n chars-per-token))))
 
+(defn tokens-text
+  "A count of tokens as every reader is shown one, estimated and short: ~840 tok, ~12.4k tok (owner,
+  2026-10-29: \"only report tokens (estimates are fine) not characters\"). The one wording of a size,
+  beside the one sizer (`chars-tokens`) and the cut that names what it left (`cut-words`)."
+  {:malli/schema [:=> [:cat nat-int?] :string]}
+  [n] (if (< n 1000) (str "~" n " tok") (str "~" (/ (Math/round (/ n 100.0)) 10.0) "k tok")))
+
 (defn cut-words
   "The words of a text's cut, the same in a value (after its string's shown prefix) and in prose:
   `…+~N tokens` of what it omitted (omitted, its characters, sized by `chars-tokens`, at least one)

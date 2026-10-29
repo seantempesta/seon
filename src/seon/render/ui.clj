@@ -66,11 +66,6 @@
         (< b (* 1024 1024)) (str (fmt1 (/ b 1024.0)) " KB")
         :else (str (fmt1 (/ b 1048576.0)) " MB")))
 
-(defn- tok-str
-  "A count of tokens as the page shows it, estimated (~), short: ~840 tok, ~12.4k tok."
-  {:malli/schema [:=> [:cat nat-int?] :string]}
-  [n] (if (< n 1000) (str "~" n " tok") (str "~" (/ (Math/round (/ n 100.0)) 10.0) "k tok")))
-
 (defn ms-str {:malli/schema [:=> [:cat :any] :string]}
   [ms] (cond (not (number? ms)) "–" (< ms 1) (str (fmt2 ms) " ms") (< ms 100) (str (fmt1 ms) " ms") :else (str (long ms) " ms")))
 
@@ -974,7 +969,7 @@
      ;; and the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
      [:p (str "turn " n (when cap (str " of " cap))
               (when-let [sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)]
-                (str " · " (tok-str sent) " sent in all")))]
+                (str " · " (print/tokens-text sent) " sent in all")))]
      ;; its last reply cut at the model's token limit: what followed it was lost
      (when (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
        [:p {:class "err"} "your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
@@ -1045,7 +1040,7 @@
                [:span {:class "seon-prose min-w-0 flex-1"} (:prose rec)])
              ;; how responsive it was and what it costs the context: quiet
              (when ms [:span {:class "seon-ms text-2xs text-text-500"} (ms-str ms)])
-             [:span {:class "text-2xs text-text-500"} (tok-str tokens)]
+             [:span {:class "text-2xs text-text-500"} (print/tokens-text tokens)]
              [:code {:class "seon-handle text-2xs"} (str handle)]])
       (when (or opened? (nil? k))
         [:div {:class "ml-5 flex flex-col gap-1 py-1"}
@@ -1124,7 +1119,7 @@
         tokens (d/q '[:find ?k . :in $ ?t :where [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db eid)]
     (when (or (not (str/blank? reply)) (not (str/blank? reasoning)) (seq evals))
       [:section {:class "flex flex-col gap-1"}
-       [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(str "agent" (when n (str " · turn " n))) (when tokens (str (tok-str tokens) " sent"))]))]
+       [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(str "agent" (when n (str " · turn " n))) (when tokens (str (print/tokens-text tokens) " sent"))]))]
        (when-not (str/blank? reasoning) [:details [:summary {:class "text-xs text-text-500"} "thinking"] (markdown reasoning)])
        (when-not (str/blank? reply) (markdown reply))
        (when (seq evals) [:ol {:class "flex flex-col"} (for [e evals] [#'eval-item {} e])])])))
