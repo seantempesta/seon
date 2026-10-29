@@ -533,8 +533,10 @@
       ;; and what it removed from the branch's program (seon.repl/unmapped)
       (some :unmapped fs) (assoc :unmapped (into [] (mapcat :unmapped) fs))
       (seq warnings) (assoc :warnings warnings)
-      (joined :out) (assoc :out (joined :out))
-      (joined :err-out) (assoc :err (joined :err-out))
+      ;; what it printed, verbatim, as a REPL shows *out* (seon.print/code: never a string literal, whose escapes
+      ;; md-scan #20 copied back as code, every \\( doubled, its case constants broken)
+      (joined :out) (assoc :out (print/code (joined :out)))
+      (joined :err-out) (assoc :err (print/code (joined :err-out)))
       (= :err (:tag lst)) (assoc :ex (or (:err lst) {:seon.error/message (str (:err-text lst))}))
       (sum :ms) (assoc :ms (/ (Math/round (* 1000.0 (sum :ms))) 1000.0))
       (sum :ticks) (assoc :ticks (sum :ticks))

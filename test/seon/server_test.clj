@@ -121,8 +121,10 @@
 (deftest an-agent-reads-its-task-running
   ;; task seon.task/an-agent-reads-its-task-as-main-holds-it: an attached agent's branch is cut
   ;; before main writes the task's release, so (my.task/current) and its page read :held
+  ;; the page as a person reads it: its parts' HTML (seon.repl/render-ctx; the hiccup is each part as the model
+  ;; reads it, and the model's task part leaves the execution to :task)
   (let [[current page] (at/in-agent ["(:seon.task/execution (my.task/current))"
-                                     "(pr-str (seon.repl/render-ctx-hiccup))"])]
+                                     "(apply str (map :html (:units (seon.repl/render-ctx))))"])]
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (clojure.string/includes? (:value page) "· running") "and so does its page")))
 
