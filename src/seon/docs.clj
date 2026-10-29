@@ -21,8 +21,11 @@
   [path text]
   (let [{:seon.ref/keys [sections citations]} (ref/parse path text)
         starts (mapv :seon.ref/line sections)
-        ;; the index of the last section whose heading is at or before line l, or nil
-        owner (fn [l] (let [i (dec (count (take-while #(<= % l) starts)))] (when-not (neg? i) i)))
+        ;; the index of the last section whose heading is at or before line l, or nil (a binary search)
+        owner (fn [l] (loop [lo 0 hi (count starts)]
+                        (if (< lo hi)
+                          (let [mid (quot (+ lo hi) 2)] (if (<= (nth starts mid) l) (recur (inc mid) hi) (recur lo mid)))
+                          (when (pos? lo) (dec lo)))))
         by-section (group-by #(owner (:seon.ref/line %)) citations)]
     (vec (for [[i {:seon.ref/keys [address heading lead parent text]}] (map-indexed vector sections)]
            (cond-> {:seon.section/address address :seon.section/heading heading
@@ -34,9 +37,11 @@
 ;; ---- resolving a section's citations ----------------------------------------------------
 
 (defn- under?
-  "Is address a section of a page under dir? \".\" is the checkout's top level: a page with no directory."
-  {:malli/schema [:=> [:cat :string :string] :boolean]}
-  [dir address] (if (= "." dir) (boolean (re-find #"^[^/#]+#" address)) (str/starts-with? address (str dir "/"))))
+  "Is address a section of a page under dir (or any of dirs)? \".\" is the checkout's top level: a page with no directory."
+  {:malli/schema [:=> [:cat [:or :string [:vector :string]] :string] :boolean]}
+  [dir address]
+  (boolean (some (fn [d] (if (= "." d) (re-find #"^[^/#]+#" address) (str/starts-with? address (str d "/"))))
+                 (if (string? dir) [dir] dir))))
 
 (defn- citation-target
   "What citation c of a section reaches: [:section address] (a section this load holds, or one
@@ -44,7 +49,7 @@
   section (kept as a dead link), or nil (a schema key, a file, or a name that names nothing: not stored). stored:
   the db's sections, address -> entity id; firsts: each loaded page's path -> its first
   section's address, what a link with no anchor reaches."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:map-of :string :int] [:map-of :string :any] [:map-of :string :string] :seon.ref/citation]
+  {:malli/schema [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :int] [:map-of :string :any] [:map-of :string :string] :seon.ref/citation]
                   [:maybe [:tuple :keyword :any]]]}
   [db dir stored loaded firsts {:seon.ref/keys [name path anchor]}]
   (cond
@@ -106,7 +111,9 @@
   "The qualified names section s (parsed) cites that name something on db (seon.ref/kept)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.section/parsed] [:set :qualified-symbol]]}
   [db s]
-  (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?)) (ref/kept db (:seon.ref/citations s))))
+  ;; only a name can be one of these: kept would resolve each path citation too (a page's anchors, read from the file)
+  (into #{} (comp (map :seon.ref/name) (filter qualified-symbol?))
+        (ref/kept db (filterv (comp qualified-symbol? :seon.ref/name) (:seon.ref/citations s)))))
 
 (defn load-tx
   "The transaction making db hold exactly the sections of pages (path -> text), the wiki
@@ -114,8 +121,8 @@
   section under dir that no page holds. A section that already states it writes nothing, so
   an unchanged wiki answers []. A link (or cited path#anchor) that reaches no section is kept
   on its section as :seon.section/dead-links, and the rest of the wiki loads as it is."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:map-of :string :string]] [:vector :any]]
-                  [:=> [:cat :seon.host/db :string [:map-of :string :string] :map] [:vector :any]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] [:vector :any]]
+                  [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] [:vector :any]]]}
   ([db dir pages] (load-tx db dir pages {}))
   ([db dir pages baseline]
   (let [baseline (fn [a] (get baseline a))
@@ -255,13 +262,14 @@
   (into (sorted-map) (for [[n text] (lib/dir-texts (str checkout "/" dir) ".md")] [(if (= "." dir) n (str dir "/" n)) text])))
 
 (defn load-dir-tx
-  "The one load of the wiki under dir of the checkout onto db: load-tx over its pages (an
-  unchanged wiki answers [], a link to no section kept on its section as a dead link). Root's
-  boot and my.root/load-docs! both write it."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :string :string] [:vector :any]]
-                  [:=> [:cat :seon.host/db :string :string :map] [:vector :any]]]}
+  "The one load of the wiki under dir of the checkout (or under each of dirs, in one parse and one
+  transaction) onto db: load-tx over its pages (an unchanged wiki answers [], a link to no section
+  kept on its section as a dead link). Root's boot and my.root/load-docs! both write it."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:or :string [:vector :string]]] [:vector :any]]
+                  [:=> [:cat :seon.host/db :string [:or :string [:vector :string]] :map] [:vector :any]]]}
   ([db checkout dir] (load-dir-tx db checkout dir {}))
-  ([db checkout dir baseline] (load-tx db dir (pages checkout dir) baseline)))
+  ([db checkout dir baseline]
+   (load-tx db dir (into (sorted-map) (mapcat #(pages checkout %)) (if (string? dir) [dir] dir)) baseline)))
 
 ;; ---- the baseline: what a section was written against, from git ---------------------------
 
@@ -284,7 +292,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] [:vector :map]]}
   [db pages]
   (let [stored (into {} (map (juxt :v :e)) (d/datoms db :avet :seon.section/address))]
-    (vec (for [[p t] (sort pages) :let [lines (section-lines p t)] s (page-sections p t)
+    (vec (for [[p t] (sort pages) :let [lines (delay (section-lines p t))] s (page-sections p t)
                :let [a (:seon.section/address s) e (stored a)]
                :when (not (and e (:seon.section/read (d/pull db [:seon.section/read] e))))
                :let [files (into {} (keep (fn [n] (when-let [ve (pdb/eid db :var/name n)]
@@ -292,7 +300,7 @@
                                                       (when (:ns/file nsx) [n {:file (:ns/file nsx) :ns (:ns/name nsx)}])))))
                                  (section-names db s))]
                :when (seq files)]
-           {:path p :address a :lines (lines a) :files files}))))
+           {:path p :address a :lines (@lines a) :files files}))))
 
 (defn baseline-failed
   "The baseline of plan when the history could not be asked at all (the :history effect failed with

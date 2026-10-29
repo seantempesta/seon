@@ -6,7 +6,7 @@
   sentence; the scanner meets CommonMark 0.31.2's examples for its subset in one pass."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is are testing]] [seon.contract :refer [defn defn-]]
-            [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref]))
+            [clojure.string :as str] [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.ref :as ref] [seon.reader :as reader]))
 
 (defn- kinds
   "What text cites, each once at its strongest depth: [name path anchor problem-kind depth]."
@@ -323,10 +323,12 @@
      :work (str "one pass over the text: index-of finds each line's end, a few chars of each line pick its block, and "
                 "each prose char is read once by charAt (~15 ns, nothing allocated); per block a map (~0.5 us, ~0.5 KB); "
                 "per inline (a code span, link or word holding a /) its string, its span and citation maps and ~3 "
-                "contracted calls (~2 us, ~3 KB); per candidate name one seon.reader/read-text (edamame: ~13 us, ~18 KB, "
-                "3 calls); per section its heading, anchor (1 call) and lead copy (~3 us, ~3 KB). The unit here, 226 "
+                "contracted calls (~2 us, ~3 KB); per candidate name one seon.ref/qualified-name (its characters: "
+                "1 call, a few hundred bytes; the reader's ~13 us, ~18 KB, 3 calls only for the corpus test); per section its heading, anchor (1 call) and lead copy (~3 us, ~3 KB). The unit here, 226 "
                 "bytes, holds 7 inlines, 3 reads, 4 blocks and 1 section: ~61 us, ~80 KB and 31 calls, so per byte "
-                "~270 ns, ~360 B and 0.14 calls; the reads are two thirds of the bytes")
+                "~270 ns, ~360 B and 0.14 calls with the reader reading every name. Measured 2026-10-29 with the names read "
+                "by characters: AGENTS.md (41 KB) 1.7 ms, 2.3 MB and 700 calls (~56 B and 0.017 calls a byte), the wiki's 37 pages "
+                "70 B a byte; the numbers below are the bound the reader set")
      :growth :linear
      :per-n {:ns 270 :bytes 360 :calls 0.14}
      :fixed {:ns 20000 :bytes 20000 :calls 5}
@@ -385,3 +387,18 @@
         "and how many characters of the lead it left (the lead's text after the summary sentence, trimmed)")
     (is (nil? (:seon.ref/read-at (more "docs/flow.md#the-api-1"))) "a lead that is one sentence left nothing: no key")
     (is (nil? (:seon.ref/left (more "docs/flow.md#the-api-1"))))))
+
+(deftest a-name-is-read-as-the-reader-reads-it
+  ;; docs/references.md#cost: a span is read by its characters (seon.ref/qualified-name), not by the reader, which
+  ;; allocates ~18 KB a call on every span of a page that holds a /. The two agree on a span of every shape the
+  ;; wiki holds (the distinct spans of AGENTS.md and docs/references.md) and on the edge ones.
+  (let [oracle (fn [s] (let [[x & more] (reader/read-text s 'user)]
+                         (when (and (nil? more) (or (qualified-symbol? x) (qualified-keyword? x)) (= s (str x))) x)))
+        edge ["seon.ref/parse" ":seon.task/id" "a/b" "a.b/c-d?" "7888/7777" "call/1cc" "a/b/c" "/" "a/" "/a" ":a" "::a/b" "a/b:"
+              "x/y*" "-1/2" "+a/b" "'a/b" "#a/b" "a b/c" "(a/b)" "a/b)" "@a/b" "~a/b" "a//b" "<id>/x" "a/b.c" ".a/b" "a/b#c" "a#b/c"
+              "a/b'" "e/\u00fc" ":a.b/c" ":a/b/c" "my.agent/prove!" "$a/b" "a/&b"]
+        spans (into edge (comp (mapcat #(:seon.ref/citations (ref/parse nil (slurp %)))) (keep :seon.ref/name) (map str))
+                    ["AGENTS.md" "docs/references.md"])]
+    (is (< 100 (count spans)) "the corpus holds the wiki's own spans")
+    (doseq [s (distinct spans)]
+      (is (= (oracle s) (#'ref/qualified-name s)) (str "span " (pr-str s))))))

@@ -15,7 +15,7 @@
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
                                  (for [s (range 1 (min 10 n))]
-                                   (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f" s "` does, see [the page](#page-" p ").\n")))]))
+                                   (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f" s "` does, see [the page](#page-" p ") and the cost in docs/references.md#cost.\n")))]))
         tx (docs/load-tx db "demo" pages)]
     [(d/db-with db tx) "demo" pages]))
 
@@ -26,10 +26,10 @@
      :work (str "per section of ~90 bytes: its parse (seon.ref's estimate, ~270 ns and ~360 B per byte, the read of "
                 "its one name included: ~25 us, ~32 KB); on db, one AVET seek for its var and one EAVT seek per "
                 "stated attribute, five (seon.task/entity-tx) (~5 seeks at ~17 us and ~33 KB each, seon.db/avet-seek-allocates: ~85 us, "
-                "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
+                "~165 KB); ~19 contracted calls (own-text, cited, two citation-targets, kept and its alias check of the one name (seon.ref/kept: the names it keeps), wanted, entity-tx and one eid; the parse's ~3 per inline for its two inlines and the read's 3; the stored-section scan and page split amortized). Its second inline, a section of a file named by its address, costs a candidate and its target and reads no file (seon.docs/section-names keeps the names only: it used to parse the file for each, 1.2 MB a section). Since the wiki records what each section was written against, a stored section is also pulled once (its text, :seon.section/read, :seon.section/baseline-unread: one more seek each, ~+40 KB, ~+100 us) to keep that record while its text is unchanged. The stored sections are read once, one datom each, so a section's "
                 "parent and link targets are map lookups. Nothing is written: the answer is []")
      :growth :linear
-     :per-n {:ns 225000 :bytes 245000 :calls 19.3}
+     :per-n {:ns 170000 :bytes 190000 :calls 23}
      :fixed {:ns 50000 :bytes 50000 :calls 10}
      :sizes [10 100 1000]}))
 
