@@ -53,6 +53,24 @@
            (is (contains? b :value) "a person's repeat answers the value: only the model's conversation holds it"))
          (finally (reset! agent/state old)))))
 
+(deftest a-move-into-a-namespace-that-hides-a-helper-says-so
+  ;; owner, 2026-10-29: "don't some repls output a warning ... you are overwriting symbols in this
+  ;; namespace?": an agent in-ns'd to seon.render.ui, whose own source shadows the REPL's, and read
+  ;; an nth error four times; Clojure warns when a definition replaces a referred var
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(ns x.repl-shadow) (defn source [x] x) (in-ns 'user)" {})
+         (let [r (repl/eval-string "(in-ns 'x.repl-shadow)" {})
+               w (some #(when (= :helper-shadowed (:seon.repl/finding %)) %) (:warnings r))]
+           (is (= '{source x.repl-shadow/source} (:shadowed w)) "the move names what hides the helper")
+           (is (str/includes? (:seon.repl/fix w) "clojure.repl/source") "and the qualified helper to call")
+           (is (not-any? #(= :helper-shadowed (:seon.repl/finding %)) (:warnings (repl/eval-string "(+ 1 1)" {})))
+               "once, as it moves: an eval that stays says nothing"))
+         ;; root's evals (no agent db) read no citations: a prose of root's is answered, not refused
+         (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (is (= 2 (:value (repl/eval-string "(+ 1 1)" {:prose "Adds, see seon.ref/scan."}))) "an eval with prose outside an agent")
+         (finally (reset! agent/state old) (remove-ns 'x.repl-shadow)))))
+
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
   ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a

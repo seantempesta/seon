@@ -78,6 +78,18 @@
     (when (seq free) (binding [*ns* ns] (refer 'clojure.repl :only free)))
     ns))
 
+(defn- shadowed
+  "The REPL helpers (`equip-ns!`'s names) namespace ns holds a var of its own for, {name its-var}:
+  there the name is that var and not the REPL's, as Clojure warns when a definition replaces a
+  referred var (an agent in seon.render.ui called its source with a function and read an nth
+  error four times, 2026-10-29). nil when none."
+  {:malli/schema [:=> [:cat :seon.host/namespace] [:maybe [:map-of :symbol :symbol]]]}
+  [ns]
+  (not-empty (into {} (for [s '[source apropos dir pst doc find-doc]
+                            :let [v (ns-resolve ns s)]
+                            :when (and (var? v) (not= 'clojure.repl (ns-name (:ns (meta v)))))]
+                        [s (symbol (str (ns-name (:ns (meta v)))) (str s))]))))
+
 (defn- do-parts
   "The inner forms of a top-level form written as (do ...), each as [text lead]: its exact text and the
   ; comments its writer put before it, taken from the reader's positions in src (the form's own
@@ -142,7 +154,9 @@
                    (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e (error-kept v)}))
                    (when (= tag :ret) (keep-source! v (:repl/src common)))
                    (if (= tag :ret)
-                     (do (reply (merge common {:repl/value v :tag :ret}))
+                     (do (reply (cond-> (merge common {:repl/value v :tag :ret})
+                                  ;; a move into a namespace whose own vars hide a helper says so, once, as it moves
+                                  (not= ns ns') (merge (some->> (shadowed ns') (hash-map :shadowed)))))
                          [(equip-ns! ns') :ok])
                      (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                                         "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
@@ -443,7 +457,12 @@
                           :uncontracted (vec (sort-by str left)) :count (count left)})
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
-                   (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)}))]
+                   (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
+                   (some :shadowed fs)
+                   (conj (let [sh (some :shadowed fs)]
+                           {:seon.repl/finding :helper-shadowed :shadowed sh
+                            :seon.repl/fix (str "In this namespace " (clojure.string/join ", " (map (fn [[k v]] (str k " is " v)) sh))
+                                                ", not the REPL's: call clojure.repl/" (key (first sh)) " qualified")})))]
     (cond-> {:handle handle}
       (next tops) (assoc :forms (count tops)
                          :value (into [] (comp (map last) (filter #(contains? % :repl/value)) (map :repl/value)) tops))
