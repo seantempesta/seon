@@ -322,6 +322,19 @@
         (is (= (:n cut) (max 1 (emit/chars-tokens (count rest)))) "the form reads the characters whose tokens it says it left")))))
 
 
+(deftest code-prints-a-multi-line-string-as-pr-does
+  ;; docs/render.md: a newline inside a string literal in code is `\\n`, never layout-indented
+  (let [src "(= \"a\nb\n  c\" x)"
+        v {:a 1 :src (seon/code src)}
+        {:keys [text elisions]} (seon/print-value v {:handle 'result/e1})]
+    (is (zero? elisions) text)
+    (is (str/includes? text "\"a\\nb\\n  c\"") "the string reads as pr prints it, no indent entered")
+    (is (= '(= "a\nb\n  c" x) (:src (edn/read-string text))) "and it reads back to the same string")
+    (testing "a cut keeps the width estimate honest"
+      (let [big (seon/code (str/join "\n" (repeat 30 src)))
+            {:keys [text]} (seon/print-value {:a 1 :src big} {:handle 'result/e1 :budget 150})]
+        (is (<= (select/estimate text) 150) text)))))
+
 (deftest a-map-shows-its-first-entry-whenever-its-least-form-fits
   ;; a vector of the same size shows its first member at this budget (`[0 …29 (drop 1 result/h1)]`)
   (let [m (zipmap (range 30) (range 30))

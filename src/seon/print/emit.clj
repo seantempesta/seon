@@ -31,11 +31,49 @@
   [s]
   (str "\"" (str/escape s #(when-not (= \newline %) (char-escape-string %))) "\""))
 
+(defn- scan-code
+  "Calls (on-break i) for each newline of code `s` outside a string literal and (on-escape i) for
+  each inside one, left to right (strings, character literals and `;` comments), so a prefix of
+  `s` classifies as the whole does. Each of the characters that change what a newline is, and the
+  newline itself, is searched for (`indexOf`) once per occurrence: its next place is kept until
+  passed, so a line costs a few native calls and a character that never comes is searched for
+  once."
+  [^String s on-break on-escape]
+  (let [n (.length s)
+        find (fn [ch from] (let [j (.indexOf s (int ch) (int from))] (if (neg? j) n j)))]
+    (loop [i 0 mode :code nl (find \newline 0) q (find \" 0) sc (find \; 0) bs (find \\ 0)]
+      (let [nl (if (< nl i) (find \newline i) nl)
+            q (if (< q i) (find \" i) q)
+            sc (if (< sc i) (find \; i) sc)
+            bs (if (< bs i) (find \\ i) bs)]
+        (case mode
+          :comment (when (< nl n) (on-break nl) (recur (inc nl) :code nl q sc bs))
+          :string (let [j (min q bs)]
+                    (if (< nl j)
+                      (do (on-escape nl) (recur (inc nl) mode nl q sc bs))
+                      (cond (>= j n) nil
+                            (= j q) (recur (inc j) :code nl q sc bs)
+                            :else (recur (if (and (< (inc j) n) (not= (inc j) nl)) (+ j 2) (inc j)) mode nl q sc bs))))
+          (let [j (min q sc bs)]
+            (if (< nl j)
+              (do (on-break nl) (recur (inc nl) mode nl q sc bs))
+              (cond (>= j n) nil
+                    (= j q) (recur (inc j) :string nl q sc bs)
+                    (= j sc) (recur (inc j) :comment nl q sc bs)
+                    :else (recur (if (and (< (inc j) n) (not= (inc j) nl)) (+ j 2) (inc j)) mode nl q sc bs)))))))))
+
 (defn code-text
-  "Code text `s` at its place: verbatim, every line after the first indented `indent` columns."
+  "Code text `s` at its place: verbatim, every line after the first indented `indent` columns;
+  a newline inside a string literal is printed escaped (backslash-n), never indented.
+  See docs/render.md#cut-where-a-value-is-made."
   {:malli/schema [:=> [:cat :string nat-int?] :string]}
-  [s indent]
-  (if (pos? indent) (str/replace s "\n" (str "\n" (apply str (repeat indent \space)))) s))
+  [^String s indent]
+  (let [pad (apply str "\n" (repeat indent \space))
+        sb (StringBuilder.)
+        at (volatile! 0)
+        put (fn [i r] (.append sb s (int @at) (int i)) (.append sb ^String r) (vreset! at (inc i)))]
+    (scan-code s (fn [i] (put i pad)) (fn [i] (put i "\\n")))
+    (str (.append sb s (int @at) (.length s)))))
 
 (defn path-form
   "The plain clojure.core form that reads `path` from `source`: runs of keys and indices as one
