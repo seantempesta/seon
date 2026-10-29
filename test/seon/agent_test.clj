@@ -825,7 +825,8 @@
         [r0 r1 :as rs] (:value msgs)]
     (is (= 2 (count rs)) (str "each call its one result: " (pr-str msgs)))
     (is (not (str/includes? r0 "invalid-call")) "the two-form call runs")
-    (is (str/includes? r0 ":value 2") "its value is its last form's, (inc g) after (def g 1)")
+    (is (str/includes? r0 ":forms 2") "each of its two forms ran")
+    (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
 (deftest an-agent-that-throws-ends-with-its-cause

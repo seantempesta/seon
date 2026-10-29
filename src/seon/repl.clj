@@ -91,11 +91,12 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
-        ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err
-        forms! (fn forms! [code ns]
+        ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
+        ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
+        forms! (fn forms! [code ns top]
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
-                   (loop [ns ns prev 0]
+                   (loop [ns ns prev 0 k 0]
                      (let [form (try (binding [*ns* ns] (read {:eof ::eof} r)) (catch Throwable e e))
                            ;; where the reader stopped after the form (an eval never moves it), its text and the comments before it
                            end (when-not (or (= ::eof form) (instance? Throwable form))
@@ -114,8 +115,8 @@
                          ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
                          ;; the comments before the do leading the first of them
                          (and (seq? form) (= 'do (first form)) (next form) src (re-find #"^\(\s*do\s" src))
-                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns)]
-                           (if (= :eof how) (recur ns' end) [ns' how]))
+                         (let [[ns' how] (forms! (str (some-> lead (str "\n")) (do-body src)) ns (or top k))]
+                           (if (= :eof how) (recur ns' end (inc k)) [ns' how]))
 
                          :else
                          (let [n (dec (:n (swap! agent/state update :n (fnil inc 0))))
@@ -129,17 +130,17 @@
                                                       (catch Throwable e [:err e ns (outer-frames)]))
                                ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                                common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form
-                                               :repl/src src}
+                                               :repl/src src :top (or top k)}
                                         lead (assoc :lead lead))]
                            (swap! agent/state assoc :repl-vars (if (= tag :ret) {:v1 v :v2 v1 :v3 v2 :e e1} {:v1 v1 :v2 v2 :v3 v3 :e v}))
                            (when (= tag :ret) (keep-source! v (:repl/src common)))
                            (if (= tag :ret)
                              (do (reply (merge common {:repl/value v :tag :ret}))
-                                 (recur (equip-ns! ns') end))
+                                 (recur (equip-ns! ns') end (inc k)))
                              (do (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
                                                        "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])}))
                                  [ns :err]))))))))
-        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)))]
+        [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
     (when-not (= :read how) (swap! agent/state assoc :ns ns))
     (reply {"status" ["done"]})))
@@ -367,9 +368,10 @@
     (:eval-n (swap! agent/state update :eval-n #(inc (or % from))))))
 
 (defn response
-  "A request's answers (in order) as its one response (:seon.eval/response): its handle, the
-  last form's value (:value, as load-string answers and *1 holds it, so (do (+ 1 1) (+ 2 2))
-  answers 4; docs/prompt.md),
+  "A request's answers (in order) as its one response (:seon.eval/response): its handle, its
+  value (:value: one top-level form's value as Clojure answers it, so (do (+ 1 1) (+ 2 2)) answers
+  4; code of several top-level forms answers each one's value in order, as a REPL prints them, a
+  vector beside :forms, how many ran, so (+ 1 1) (+ 2 2) answers :forms 2 :value [2 4]; docs/prompt.md),
   what its forms wrote to *out* and *err*, the error that stopped it (:ex, the one error map),
   what its forms changed of an existing var's contract or docstring (:redefined, wrap-record's,
   seon.program/meaning-changes), what its definitions warn (:warnings, from instrument's account
@@ -383,6 +385,8 @@
   [answers handle]
   (let [fs (filterv :tag answers)
         lst (peek fs)
+        ;; the top-level forms that ran, each its answers (a do's forms are one form's)
+        tops (partition-by :top fs)
         joined (fn [k] (not-empty (apply str (keep k fs))))
         sum (fn [k] (when (some k fs) (reduce + (keep k fs))))
         is (into [] (mapcat :instrumented) fs)
@@ -399,7 +403,9 @@
                    (some :not-program fs)
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)}))]
     (cond-> {:handle handle}
-      (contains? lst :repl/value) (assoc :value (:repl/value lst))
+      (next tops) (assoc :forms (count tops)
+                         :value (into [] (comp (map last) (filter #(contains? % :repl/value)) (map :repl/value)) tops))
+      (and (not (next tops)) (contains? lst :repl/value)) (assoc :value (:repl/value lst))
       ;; what it made program on the branch: each var it defined, an ns form's namespace
       (some :recorded fs) (assoc :recorded (into [] (mapcat :recorded) fs))
       (some :redefined fs) (assoc :redefined (into [] (mapcat :redefined) fs))

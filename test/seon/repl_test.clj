@@ -6,24 +6,26 @@
             [seon.config :as cfg] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [datahike.api :as d]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
-  ;; owner, 2026-10-28: match Clojure for the eval's output: forms run in order and the response
-  ;; is the last one's value (as load-string answers, *1 holds it), with the evaluation's facts
-  ;; as data; (do (+ 1 1) (+ 2 2)) answers 4, never each form's value. A form that throws ends it.
+  ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
+  ;; order and each one's value is answered, as a REPL prints them (:forms, :value their vector),
+  ;; with the evaluation's facts as data; (do (+ 1 1) (+ 2 2)) is one form and answers 4. A form
+  ;; that throws ends it, after the values of those before it.
   (let [old @agent/state
         ev (fn [code] (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
                            (repl/eval-string code {})
                            (finally (reset! agent/state old))))
         r (ev "(+ 1 2) (str \"a\" \"b\") [:x]")]
-    (is (= [:x] (:value r)) "the last, as *1 holds it")
-    (is (not (contains? r :values)) "no list of each form's value")
-    (is (= [:x] (:value @(resolve (:handle r)))) "and its handle reads it")
+    (is (= [3 "ab" [:x]] (:value r)) "each top-level form's value, in order")
+    (is (= 3 (:forms r)) "and how many ran")
+    (is (= [3 "ab" [:x]] (:value @(resolve (:handle r)))) "and its handle reads it")
+    (is (= {:value 3} (select-keys (ev "(+ 1 2)") [:value :forms])) "one form: its value, no :forms")
     (is (contains? r :ms) "the evaluation's facts: its cost")
-    (is (= 4 (:value (ev "(do (+ 1 1) (+ 2 2))"))) "a do answers its last form's value")
+    (is (= {:value 4} (select-keys (ev "(do (+ 1 1) (+ 2 2))") [:value :forms])) "a do is one form: its last form's value")
     (let [rec (repl/record-details nil "(atom 1)" {:handle 'result/e9 :value (atom 1)} {} nil)]
       (is (:printed rec) "a value that is no plain data: the response as it printed"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
       (is (contains? e :ex) "the error stops it")
-      (is (not (contains? e :value)) "and the forms after it never ran"))))
+      (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))))
 
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
