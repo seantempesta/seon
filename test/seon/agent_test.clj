@@ -385,6 +385,21 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(deftest root-holds-no-test-code-and-its-agents-hold-mains-tests
+  ;; task seon.root/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
+  ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
+  ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
+  (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
+        _ [#'seon.root/boot! #'seon.writer/main-commit #'seon.fork-server/main]
+        t "(some-> (resolve 'seon.reader-test/prose-without-a-fence-is-a-comment) bound?)"
+        [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
+                                                {:op :eval :agent "root" :code (str "(boolean " t ")")}
+                                                {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
+                                               {:dirs ["src" "test"]})]
+    (is (true? (:value agent-held)) "the agent holds main's test compiled")
+    (is (false? (:value root-held)) "root does not")
+    (is (true? (:value facts)) "though main's program holds it as facts")))
+
 (defn- statuses
   "The code of {test status} over the run that code x answers, every test it ran or reused (its
   :digests): an answer carries only its proofs' passes and its reds (seon.proofs/answer), so every

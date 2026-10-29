@@ -897,7 +897,7 @@
             open-ms (profile/ms-since t0)
             load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
-            program (program/load-all! @conn)
+            program (program/load-all! @conn {:tests? false})
             program-ms (profile/ms-since t1)
             contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])]
         (warm! conn)
