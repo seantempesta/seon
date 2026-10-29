@@ -1427,7 +1427,9 @@
       ;; the conversation is what a person follows: it has the middle column; how the work stands and the
       ;; task (#p-task) and the tiles sit beside it, sticky, so they stay in view while the chat scrolls;
       ;; on a narrow screen they follow the conversation
-      [:div {:class (str "grid grid-cols-1 gap-4 " (if (or (seq (in "#p-task")) (seq (in "#p-tiles"))) "lg:grid-cols-[12rem_minmax(0,1fr)_26rem]" "lg:grid-cols-[12rem_minmax(0,1fr)]"))}
+      ;; three columns always: a page's side parts may arrive after its first frame (an agent's walk answers
+      ;; later), and a layout chosen from the first frame's units wrapped them under the agents list
+      [:div {:class "grid grid-cols-1 gap-4 lg:grid-cols-[12rem_minmax(0,1fr)_26rem]"}
        [:aside {:class "min-w-0 lg:sticky lg:top-14 lg:self-start"}
         [:h2 {:class "kicker mb-1 hidden lg:block"} "agents"]
         [:ol {:id "c-side" :class "flex gap-2 overflow-x-auto pb-1 text-xs lg:flex-col lg:gap-0.5"} (for [u (in "#c-side")] (slot (:id u)))]]
