@@ -10,7 +10,7 @@
   away); its request names the day (\"full-yyyy-mm-dd\"), so one day's request that the
   service already ran is answered from its result, not run again."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [clojure.core.async :as a]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [clojure.core.async :as a]
             [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (def ^:private day-ms 86400000)
@@ -53,12 +53,6 @@
         m (if (< mp 10) (+ mp 3) (- mp 9))]
     (format "%04d-%02d-%02d" (if (<= m 2) (inc y) y) m d)))
 
-(defn- arm!
-  "One tick on port tick at epoch milliseconds due (a timeout to it, now-ms being now)."
-  {:malli/schema [:=> [:cat :seon.host/chan :int :int] :any]}
-  [tick due now-ms]
-  (a/take! (a/timeout (max 1 (- due now-ms))) (fn [_] (a/put! tick {}))))
-
 (defn cron-proc
   "The cron proc. Args :tick (its clock's channel, an external in-port) and :at. In :tick, the
   time came; out :to-prove (one full-run request for main, then the next day's armed)."
@@ -70,13 +64,13 @@
        :ping-map-fn (fn [st] (select-keys st [:at :due :fired]))})
   ([{:keys [tick at]}]
    (let [now (epoch-ms) due (next-fire-ms now (or at ""))]
-     (when due (arm! tick due now))
+     (when due (step/put-after! tick (- due now) {}))
      (cond-> {:at at :tick tick :fired 0 ::flow/in-ports {:tick tick}} due (assoc :due due))))
   ([st _] st)
   ([st in m]
    (if (or (nil? m) (not= :tick in) (nil? (:due st)))
      [st nil]
      (let [due (:due st) now (max (epoch-ms) due) next-due (next-fire-ms now (:at st))]
-       (arm! (:tick st) next-due now)
+       (step/put-after! (:tick st) (- next-due now) {})
        [(-> st (assoc :due next-due) (update :fired inc))
         {:to-prove [{:branch :main :digest (str "full-" (day-of due)) :mode :full}]}]))))
