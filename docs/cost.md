@@ -80,6 +80,10 @@ Measured 2026-10-27 (load 30-50): a call of a two-key predicate 10 ticks; counti
 
 These measures are the data for a function's cost bound (```seon.cost/bound```): what one call of it costs on the inputs the tests give it.
 
+## A diff per attribute costs a descent each
+
+`d/datoms-diff` of one attribute's range skips the subtrees two commits share, but each call still descends from both roots and opens the unshared leaf, a fixed ~160 KB measured on the test store (2026-10-29), whatever the attribute holds. `seon.reconcile/index` made one call for each of the 90 attributes the watched namespaces declare: 14.6 MB at 25 tasks and 20.1 MB at 50 for a move of one datom (`seon.render-cost-test/a-move-of-main-costs-what-moved`, estimate 16 MB, red once the schema grew past it: the cost followed the schema, which that test's digest did not, [source](source.md#tests-run-by-reach)). A caller that read the diff already (`seon.render.proc/advance-main` reads main's one `:eavt` diff) hands it over, and the index takes its watched datoms: 9 KB, 3 calls at 25, 50 and 100 tasks. A caller with no diff in hand (the turn, the fork server) still pays the descents, so reads the diff once and passes it when it can.
+
 ## Where it is used
 
 An agent's task names its cost proofs as goals ([agent](agent.md)); `bin/test` runs them with every other test; a proof's `:ops` are priced in ticks, bytes and time from the unit table `seon.cost/units`, which `seon.cost-test/the-unit-table-is-current` measures again and holds to 1.25x. Clocks that order events are `seon.profile/now-ns` ([machine](machine.md#the-clock)); `cpu-ns` orders nothing ([clocks](clocks.md)).

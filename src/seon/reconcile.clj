@@ -356,14 +356,21 @@
   the index of db from, the index of db observed from it over the datoms of the watched
   attributes that differ (datahike.api/datoms-diff of each attribute's range, which skips the
   stored subtrees both share): the cost of the watched datoms and what changed, never of the
-  program's (task seon.turn/context-render-observes-what-changed)."
+  program's (task seon.turn/context-render-observes-what-changed). Given moved too, the datoms
+  that differ between from and db that the caller read already (one :eavt diff), the watched ones
+  among them: no diff of its own, where each watched attribute's descent costs a fixed ~160 KB
+  (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :map]
-                  [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]]}
+                  [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db] :map]
+                  [:=> [:cat :seon.reconcile/index :seon.host/db :seon.host/db [:sequential :seon.host/datom]] :map]]}
   ([db] (observe empty-index db (concat (for [e (task/entity-ids db)] [:db/add e :seon.task/id nil])
                                         (for [dt (d/datoms db :aevt :seon.message/to)] [:db/add (:e dt) :seon.message/to (:v dt)]))))
   ([idx from db]
-   (observe idx db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
-                         dt (apply concat (d/datoms-diff from db :aevt [a]))]
+   (index idx from db (for [a (sort (into #{} (filter #(and (keyword? %) (watched-ns (namespace %)))) (concat (keys (:schema from)) (keys (:schema db)))))
+                            dt (apply concat (d/datoms-diff from db :aevt [a]))]
+                        dt)))
+  ([idx _from db moved]
+   (observe idx db (for [dt moved :let [a (:a dt)] :when (and (keyword? a) (watched-ns (namespace a)))]
                      [:db/add (:e dt) a]))))
 
 (defn done-input

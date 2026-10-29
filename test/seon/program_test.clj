@@ -503,8 +503,9 @@
     (spit (str b "/resources/seon/config/default.edn") "{:a 1}")
     (is (= (:env in-a) (:env (fx/inputs b))) "the shipped config file is no input of every test")
     (spit (str b "/resources/seon/schemas/x.edn") "{:x :string}")
-    (is (= (select-keys in-a [:env :config]) (select-keys (fx/inputs b) [:env :config]))
-        "a schema resource is no input: its entries are program facts, taken by the tests whose reach names them")
+    (is (= (:env in-a) (:env (fx/inputs b))) "a schema resource is no input of every test: its entries are program facts, taken by the tests whose reach names them")
+    (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in (fx/inputs b) [:config :seon.env/schemas]))
+        "and a class of its own, for a reach that walks a db's whole schema (seon.reconcile/index)")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
     (.mkdirs (java.io.File. (str b "/native")))
@@ -523,7 +524,12 @@
         moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
                         (set (for [[t d] a :when (not= d (b t))] t))))
         all-tests (set (keys a))
-        bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)]
+        bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
+        schemas (moved :seon.env/schemas)]
+    ;; a-move-of-main-costs-what-moved went red when 14 attributes joined the schema, its digest unmoved:
+    ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
+    (is (schemas 'seon.render-cost-test/main-info-reads-what-the-page-shows) "a test reaching seon.reconcile/index takes the schema class")
+    (is (not (schemas 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test takes no schema class")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
       ;; and a test that reads files or runs a process takes every class
       (is (every? m ['seon.test-store-test/n-roots-open-the-process-store-at-once]) (str "a test starting processes takes the " c " class")))
