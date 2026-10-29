@@ -626,9 +626,10 @@
   so neither does its graph (AGENTS §5, results reused by input), and the db itself is not held. A new base (merge-main!, a
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
-  with, main's, kept by the fork server (:graph), and built here only when there is none or
-  its :data-refs are not inputs'. Measured on Seon's program (2,616 forms): the
-  graph 640 ms, 816 MB; a one-form change's update and index 20-45 ms."
+  with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
+  here only when there is none or its :data-refs are not inputs'. The graph held keeps its index
+  across the update, so the base's is the answers of the tests the move touched, never of every test
+  (docs/source.md#tests-run-by-reach)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs] :map]}
   [base inputs]
   (let [{w-at :point g0 :graph :as w} (:base-graph @state)
@@ -638,7 +639,8 @@
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
                     (= at w-at) g0
                     :else (program/reach-update g0 base))
-            v {:graph g :index (program/graph-index g inputs nil)}]
+            g (program/reach-indexed g inputs)
+            v {:graph g :index (program/index-of g)}]
         (swap! state assoc :base-graph {:point at :graph g :inputs inputs :value v})
         v))))
 
@@ -747,7 +749,8 @@
   (let [[_ in] (test-inputs db)
         b (when base (base-graph base in))
         g (branch-graph db base in)
-        idx (into {} (filter (comp judges? key)) (program/graph-index g in nil))
+        g (program/reach-indexed g in)
+        idx (into {} (filter (comp judges? key)) (program/index-of g))
         cd (update-vals idx :digest)
         unrecorded (sort-by str (filter #(and (judges? %) (not (cd %))) proofs))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test

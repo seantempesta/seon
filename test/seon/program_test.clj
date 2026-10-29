@@ -464,6 +464,42 @@
     (is (= (ts/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
         "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
+(deftest an-index-held-by-the-graph-moves-with-it
+  ;; task seon.agent/an-agents-reach-index-is-incremental: the index a graph holds (reach-indexed) after reach-update
+  ;; steps is a rebuild's at every step (a redefinition, a test added, a namespace's plain form changed, a
+  ;; test removed, back to the first program), and only the tests a step can move are :stale
+  (let [in {:env "e" :tree "t" :config {}}
+        db0 (calc-db)
+        db1 (record db0 'app.pt-calc "(defn add [a b] (+ b a))")
+        db2 (record db1 'app.pt-calc-test "(deftest neg2-test (is (= -2 (app.pt-calc/neg 2))))")
+        db3 (record db2 'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]] [app.pt-calc :refer [add neg]]))")
+        db4 (record db3 'app.pt-calc "(defn neg [x] (- 0 x))")
+        rebuilt (fn [db] (ts/reach-index db in))
+        held #(program/index-of (program/reach-indexed % in))
+        g0 (program/reach-indexed (program/reach-graph db0 nil) in)
+        step (fn [g db] (program/reach-update g db))]
+    (is (= (rebuilt db0) (program/index-of g0)) "built whole once")
+    (let [g1 (step g0 db1)]
+      (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (:stale g1)) "a redefined add: the tests reaching it only")
+      (is (= (rebuilt db1) (held g1)) "and the held index is a rebuild's")
+      (let [g2 (step g1 db2) ]
+        (is (= '#{app.pt-calc-test/neg2-test} (:stale (step (program/reach-indexed g1 in) db2))) "a test added: that test only")
+        (is (= (rebuilt db2) (held g2)) "the changes of two steps, with the first not yet indexed: a rebuild's")
+        (let [g3 (step (program/reach-indexed g2 in) db3)]
+          (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test app.pt-calc-test/neg-test app.pt-calc-test/neg2-test} (:stale g3))
+              "a namespace's plain form changed (its ns form): every test of it")
+          (is (= (rebuilt db3) (held g3)))
+          (let [g4 (step (program/reach-indexed g3 in) db4)]
+            (is (= '#{app.pt-calc-test/neg-test app.pt-calc-test/neg2-test} (:stale g4)) "neg redefined: its two tests")
+            (is (= (rebuilt db4) (held g4)))
+            (let [g5 (step (program/reach-indexed g4 in) db0)]
+              (is (= (rebuilt db0) (held g5)) "back to the first program (tests removed): its index again")
+              (is (not-any? #{'app.pt-calc-test/neg2-test} (keys (program/index-of g5))) "the removed test has no answer"))))))
+    (testing "other inputs: every answer again"
+      (let [in2 (assoc in :env "f") g (program/reach-indexed g0 in2)]
+        (is (= (ts/reach-index db0 in2) (program/index-of g)))
+        (is (not= (program/index-of g0) (program/index-of g)))))))
+
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f] (let [dir (str (System/getProperty "user.dir") "/target/tmp/verdicts-" (random-uuid))]
@@ -572,6 +608,36 @@
     (is (not= (before 'app.pt-sk-test/names-test) (changed 'app.pt-sk-test/names-test)) "the test naming the entry moves with it")
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
+
+(deftest a-schema-entry-added-changed-or-removed-is-updated-not-rebuilt
+  ;; task seon.program/reach-update-takes-schema-entries: a merge that adds a schema entry rebuilt the graph (154M
+  ;; ticks, 892 MB on Seon's program, 4,702 forms). The update is a rebuild's at every step: an entry added that a
+  ;; contract, another entry and a form's keyword already name (they gain the edge), changed, removed, and back
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        unschema (fn [db k] (d/db-with db [[:db/retractEntity [:schema/key k]]]))
+        in {:env "e" :tree "t" :config {}}
+        db0 (-> (record (empty-db) 'user "(ns app.pt-su)" 'user "(ns app.pt-su-test (:require [clojure.test :refer [deftest is]]))"
+                        'app.pt-su "(defn f {:malli/schema [:=> [:cat :app.su/late] :int]} [x] 1)"
+                        'app.pt-su "(defn other [x] 2)"
+                        'app.pt-su-test "(deftest contract-test (is (= 1 (app.pt-su/f 1))))"
+                        'app.pt-su-test "(deftest names-test (is (= 1 (count [:app.su/late]))))"
+                        'app.pt-su-test "(deftest other-test (is (= 2 (app.pt-su/other 1))))")
+                (schema :app.su/k ":int") (schema :app.su/entry "[:map [:a :app.su/late]]"))
+        db1 (schema db0 :app.su/late ":string")
+        db2 (schema db1 :app.su/k ":keyword")
+        db3 (unschema db2 :app.su/late)
+        db4 (-> db3 (schema :app.su/late ":int") (unschema :app.su/k))
+        rebuilt #(ts/reach-index % in)
+        update #(program/reach-update % %2)
+        g0 (program/reach-indexed (program/reach-graph db0 nil) in)
+        g1 (update g0 db1) g2 (update (program/reach-indexed g1 in) db2) g3 (update g2 db3) g4 (update (program/reach-indexed g3 in) db4)]
+    (doseq [[label g db] [["an entry that a contract, an entry and a keyword name is added" g1 db1] ["one changed" g2 db2]
+                          ["the added one removed, with the indexed step skipped" g3 db3] ["one added, another removed" g4 db4]]]
+      (is (= (rebuilt db) (program/graph-index g in nil)) (str label ": the update's digests are a rebuild's"))
+      (is (= (rebuilt db) (program/index-of (program/reach-indexed g in))) (str label ": and the index it holds")))
+    (is (= '#{app.pt-su-test/contract-test app.pt-su-test/names-test} (:stale g1)) "the tests reaching the new entry are what moved")
+    (is (= (:rows g1) (:rows (program/reach-graph db1 nil)) ) "rows as a rebuild's, the keyword edges kept up")
+    (is (= (rebuilt db0) (program/graph-index (update g4 db0) in nil)) "and back to the first program")))
 
 (defn- path
   "The shortest chain of forms (as the vars each defines, or its id) from var a's form (or the
