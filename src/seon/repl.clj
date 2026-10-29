@@ -53,6 +53,8 @@
   [e]
   (ex-info (step/error-msg e) (agent/error-map e)))
 
+(declare error-data)
+
 (defn- keep-source!
   "A definition keeps its exact text on its var (owner: source reads the live var), so
   clojure.repl/source shows what this process runs, a REPL-typed defn included."
@@ -117,8 +119,9 @@
 
                          (instance? Throwable form)
                          (let [n (:n (swap! agent/state update :n (fnil inc 0)))]
-                           (reply {:repl/ex form :tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
-                                   :err-text (nrepl/err->msg form {:phase :read-source})})
+                           (reply (let [m {:tag :err "status" ["eval-error"] :repl/phase :read :id (dec n)
+                                           :err-text (nrepl/err->msg form {:phase :read-source})}]
+                                   (assoc m :repl/ex (error-data form m))))
                            [ns :read])
 
                          ;; its text is (do ...) as written (not a reader macro's or metadata's): its forms,
@@ -146,8 +149,9 @@
                            (if (= tag :ret)
                              (do (reply (merge common {:repl/value v :tag :ret}))
                                  (recur (equip-ns! ns') end (inc k)))
-                             (do (reply (merge common {:repl/ex v :tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
-                                                       "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])}))
+                             (do (reply (let [m (merge common {:tag :err :err-text (str err (nrepl/err->msg v {:outer outer}))
+                                                                "status" (if (:interrupted (ex-data v)) ["interrupted"] ["eval-error"])})]
+                                         (assoc m :repl/ex (error-data v m))))
                                  [ns :err]))))))))
         [ns how] (forms! (get req "code") (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state)) nil)]
     ;; a read error leaves the agent's namespace as it was
@@ -188,8 +192,18 @@
           sym (assoc :seon.error/in sym)))
       {})))
 
+(defn- error-data
+  "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
+  terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
+  carries error data and never the Throwable, whose frames and ex-data would pin the system for as
+  long as the reply is held (AGENTS 4, a kept value is a reference; docs/errors.md#an-error-keeps-data)."
+  {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
+  [e m]
+  (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))]
+    (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)))
+
 (defn wrap-caught
-  "An eval error also as the one error map (seon.agent/error-map, the answer's :err: its
+  "An eval error also as the one error map (made with the reply: `error-data`, the answer's :err: its
   message and fix as data, which the response carries as :ex), and
   noted in this agent's error fold (seon.error/note): its next commit carries the fold to
   root, which counts each signature across agents."
@@ -197,11 +211,9 @@
   [h]
   (fn [req]
     (h (around-reply req
-         (fn [m] (if-let [e (:repl/ex m)]
-                   (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))
-                         em (if (= :seon.agent/eval-error (:seon.error/type em)) (merge em (located e m)) em)]
-                     (swap! agent/state update :errors err/note em :eval (:form m) (System/currentTimeMillis))
-                     (assoc m :err em))
+         (fn [m] (if-let [em (:repl/ex m)]
+                   (do (swap! agent/state update :errors err/note em :eval (:form m) (System/currentTimeMillis))
+                       (assoc m :err em))
                    m))))))
 
 (defn wrap-cost
@@ -502,6 +514,26 @@
           (assoc r :record id))
       r)))
 
+(defn- keep-result!
+  "Hold response r under its handle (result/e<n>, the var a printed cut reads through, as the REPL's
+  *1 is read, and :results in this agent's state, which (my.agent/$ :e<n>) reads) for the newest
+  :seon.config.agent/result-window handles; the oldest past that are let go (dissoc'd, and their
+  vars unmapped), so an agent's memory does not grow with each eval's value. A let-go response is
+  derived data (cacheable, evictable at any time: AGENTS 5): its eval's record on the branch holds
+  it, and my.agent/$ re-creates it from there, or answers :seon.repl/result-evicted. `ns-unmap`
+  and `intern` are used here as a REPL harness uses them, to build and retire vars in the namespace
+  `result` this ns owns, where no definition form exists (AGENTS 5, resolution). See
+  docs/agent.md#your-turn."
+  {:malli/schema [:=> [:cat :qualified-symbol :map] :any]}
+  [handle r]
+  (let [k (keyword (name handle))
+        ks (conj (vec (:result-keys @agent/state)) k)
+        n (max 0 (- (count ks) (cfg/value :seon.config.agent/result-window)))
+        old (subvec ks 0 n)]
+    (swap! agent/state #(-> % (assoc-in [:results k] r) (assoc :result-keys (subvec ks n)) (update :results (fn [m] (apply dissoc m old)))))
+    (intern (create-ns 'result) (symbol (name handle)) r)
+    (run! #(ns-unmap (the-ns 'result) (symbol (name %))) old)))
+
 (defn eval-string
   "Evaluate code through the one REPL path (the handler and its middleware) and answer its one
   response (`response`) with the text its caller reads (:text, seon.print/response-text) and what its forms
@@ -529,9 +561,7 @@
                                 (let [em (agent/error-map e)]
                                   (vswap! answers conj {:tag :err :err em :err-text (nrepl/err->msg e)})
                                   (answered))))]
-            (swap! agent/state assoc-in [:results (keyword (name handle))] r)
-            ;; the handle a printed cut reads through, as the REPL's *1 is read
-            (intern (create-ns 'result) (symbol (name handle)) r)
+            (keep-result! handle r)
             ;; how main differs from the branch, said with the answer an outside agent's seon_eval gets, and never recorded
             ;; (seon.agent/main-difference): computed at t, so the agent is never surprised at done
             (let [res (record! (cond-> (assoc r :text text) (some :fns @answers) (assoc :fns (into [] (mapcat :fns) @answers)))
@@ -548,7 +578,7 @@
   [code req e]
   (let [handle (symbol "result" (str "e" (eval-n!)))
         r (repaired (response [{:tag :err :err e}] handle) req)]
-    (swap! agent/state assoc-in [:results (keyword (name handle))] r)
+    (keep-result! handle r)
     (record! (assoc r :text (print/response-text r render/summarized)) code req)))
 
 (defn- layout
@@ -567,6 +597,17 @@
         (swap! agent/state assoc :walk w)
         w)))
 
+(defn- walked-db
+  "The db the walk last framed at, from its reference {:branch :commit :t}: this branch's current
+  db when that is the commit, else made from the store (seon.db/at-commit, which reads the commit
+  and lets it go with its caller). The state keeps the reference, never the db value, which would
+  pin its whole version of the index (AGENTS 4, a kept db value is a reference)."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.host/db]]}
+  [{:keys [commit]}]
+  (when commit
+    (let [db (agent/db)]
+      (if (= commit (d/commit-id db)) db (pdb/at-commit (:store-conn @agent/state) commit)))))
+
 (defn- framed
   "This agent's walk drawn as of now (seon.render/frame!), under its branch's schemas: what changed
   since the last frame re-run (the reactions ctx's patch reached, the db components the datoms
@@ -574,9 +615,10 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (with-branch-schemas
-    #(let [w (the-walk) db (agent/db) db0 (:walk-db @agent/state)]
-       (render/frame! w (when (and db0 db (not (identical? db0 db))) (ctx/moved db0 db nil)))
-       (swap! agent/state assoc :walk-db db)
+    #(let [w (the-walk) db (agent/db) held (:walk-db @agent/state)
+           ref (when db {:branch (:branch @agent/state) :commit (d/commit-id db) :t (:max-tx db)})]
+       (render/frame! w (when (and held db (not= held ref)) (ctx/moved (walked-db held) db nil)))
+       (swap! agent/state assoc :walk-db ref)
        w)))
 
 (defn render-ctx
@@ -602,7 +644,7 @@
   draw, seon.context/drawn-parts, costs every component). [db parts]: the db it framed at, which the request is
   made on, and {element-id hiccup}, in order (seon.context/request sends what changed of them)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
-  [] (let [w (framed)] [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
+  [] (let [w (framed)] [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
