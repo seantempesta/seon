@@ -87,12 +87,19 @@
 
 (defn forms
   "The schema population this agent's branch sees, {key form}: the binary's forms with the
-  branch's registrations; (keys (forms)) are every key. With a key, that key's form, or nil
-  (agents asked (forms k) four times in step E's paid runs)."
+  branch's registrations; (keys (forms)) are every key. With a key, that key's form (agents asked
+  (forms k) four times in step E's paid runs), or, for a key no schema registers,
+  :seon.schema/unknown-key naming the keys its namespace registers: unknown is no nil (md-scan #6,
+  2026-10-29, asked for :seon.ref/names twenty times and read nil each time)."
   {:malli/schema [:function [:=> [:cat] [:map-of :qualified-keyword :any]]
                   [:=> [:cat :qualified-keyword] :any]]}
   ([] (merge contract/forms (program/schema-changes (agent/db))))
-  ([k] (get (forms) k)))
+  ([k] (let [fs (forms)]
+         (if (contains? fs k)
+           (get fs k)
+           (contract/error :seon.schema/unknown-key #'forms (str k " is no registered schema; the keys " (namespace k) " registers are listed")
+                           {:seon.schema/key k
+                            :seon.schema/registered (vec (sort (filter #(= (namespace k) (namespace %)) (keys fs))))})))))
 
 (defn register!
   "Register form v as schema k on this agent's branch. Answers {:seon.schema/key k

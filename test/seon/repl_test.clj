@@ -202,6 +202,11 @@
               ;; a namespace's ns form, its requires and aliases (step E's run 3: the real design
               ;; asked for seon.problems-test/ns 18 turns running, to write its deftest)
               ["(my.schema/forms :seon.run/status)" :text ":enum"]
+              ;; a key no schema registers is said so, with its namespace's keys (md-scan #6 read nil twenty times)
+              ["(my.schema/forms :seon.run/no-such-key)" :text ":seon.schema/unknown-key"]
+              ["(my.schema/forms :seon.run/no-such-key)" :text ":seon.run/status"]
+              ;; a help address that is no section names the sections whose text holds it
+              ["(:nearest (my.agent/help \"schema\"))" :text "docs/"]
               ["(clojure.repl/source seon.reconcile)" :text "(ns seon.reconcile"]
               ;; then every definition, privates included, a line each (pipeline 1's F4: a design took
               ;; the ns form alone for all that was recorded and spent five turns finding the privates)

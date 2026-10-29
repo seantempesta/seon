@@ -335,8 +335,10 @@
 
 (defn- help-nearest
   "What a help address that is no section may have meant: the help page's sections and the pages
-  whose address holds a word of it (four letters or more), then the nearest by Jolt's did-you-mean
-  ranking (as no-var): a few addresses, never the page ((my.agent/help) lists it)."
+  whose address holds a word of it (four letters or more), the sections whose text the search finds
+  for it (`search`: \"schema\" named no address, though the help page says how a schema changes;
+  md-scan #6, 2026-10-29), then the nearest by Jolt's did-you-mean ranking (as no-var): a few
+  addresses, never the page ((my.agent/help) lists it)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
   [db address]
   (let [sections (docs/page db context/help-page :summary)
@@ -345,7 +347,9 @@
         words (re-seq #"[a-z0-9]{4,}" (str/lower-case address))
         holds? (fn [s] (some #(str/includes? (str/lower-case s) %) words))
         ranked (jolt.analyzer/suggestions-for address (concat addresses pages))]
-    (vec (distinct (concat (filter holds? pages) (filter holds? addresses) ranked)))))
+    (vec (distinct (concat (filter holds? pages) (filter holds? addresses)
+                           (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
+                           ranked)))))
 
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
