@@ -10,7 +10,7 @@
  :seon.agent/state [:map {:seon.render/summary seon.agent/state-summary}]
  ;; how an agent's work on its task stands (seon.context/standing), a part of its page: the page draws it by
  ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
- :seon.context/standing [:map {:seon.render/html seon.render.ui/standing-html}]
+ :seon.context/standing [:map {:seon.render/html seon.render.ui/standing-html :seon.render/model seon.context/standing-model}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
  :seon.test/proved [:map {:seon.render/summary my.agent/prove-summary :seon.render/html seon.render.ui/proved}]

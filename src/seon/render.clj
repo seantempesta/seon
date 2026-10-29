@@ -464,6 +464,18 @@
     (vec (for [s sels [_ k] (get by s) :let [c (get @(:cache w) k)]]
            [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))))
 
+(defn placed-data
+  "The data of walk w's parts placed in the root's lists with element ids sels: {schema-key data} of each
+  component that answered data (a part: seon.render/part), by its schema (the metadata
+  :seon.render/schema its data names), from the same prewalk as placed-hiccup. What a reader that
+  decides from a part (the turn's done check reads the standing) takes, so the walk computes it once.
+  See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map [:sequential :string]] [:map-of :qualified-keyword :any]]}
+  [w sels]
+  (let [by (group-by first (placed w))]
+    (into {} (for [s sels [_ k] (get by s) :let [d (:data (get @(:cache w) k))] :when (some? d)]
+               [(:seon.render/schema (meta d)) d]))))
+
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
   diff changes: a walker over a reactive atom holding t, framed. Its caller reads it

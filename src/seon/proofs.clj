@@ -226,19 +226,25 @@
   task seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
   :ticks :bytes) its digest, status, failing assertions (failures, {test [assertion]}, as data) and sums; for each of
   reused ({test result}, a result the cache held at its digest) its digest, status and the failures it kept, so a
-  freshly branched agent's proofs show their reused status. A status means the verdict at the test's reach digest
+  freshly branched agent's proofs show their reused status; for each of deferred (the process tests the
+  run left to root's gate) its digest and :deferred. A status means the verdict at the test's reach digest
   now: each other test old holds whose recorded digest is not its digest in digests ({test digest}, the run's plan:
   every judging test's) loses its facts, so a stray red whose callee moved reads unknown, never red. old is {test
   entity} as the branch holds each now (:seon.test/* attributes; absent for a test it holds none of). Only what
   differs is written: [] when nothing does."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map [:map-of :qualified-symbol :string]] [:vector :any]]}
-  [old ran failures reused digests]
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map [:map-of :qualified-symbol :string]] [:vector :any]]
+                  [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol]] [:vector :any]]]}
+  ([old ran failures reused digests] (result-tx old ran failures reused digests #{}))
+  ([old ran failures reused digests deferred]
   (let [news (-> (into {} (for [[t r] ran :when (:digest r)]
                             [t {:digest (:digest r) :status (if (= :pass (status-of r)) :green :red) :failures (failures t)
                                 :measure (select-keys r [:ms :ticks :bytes])}]))
                  (into (for [[t r] reused :when (and (:digest r) (not (contains? ran t)))]
                          [t {:digest (:digest r) :status (cond (:flaky r) :flaky (green? r) :green :else :red)
-                             :failures (when-not (green? r) (:failures r))}])))
+                             :failures (when-not (green? r) (:failures r))}]))
+                 ;; a process test the run left to root's gate: that verdict at its digest
+                 (into (for [t deferred :let [dg (digests t)] :when (and dg (not (contains? ran t)) (not (contains? reused t)))]
+                         [t {:digest dg :status :deferred}])))
         stale (for [[t o] old :when (and (:seon.test/digest o) (not (contains? news t)) (not= (:seon.test/digest o) (digests t)))]
                 t)]
     (into (vec (mapcat (fn [[t n]]
@@ -249,7 +255,7 @@
                                       [:db/retract [:var/name t] k v])]
                            (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))
                        (sort-by (comp str key) news)))
-          (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v]))))
+          (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v])))))
 
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred

@@ -66,12 +66,12 @@
  ;; A TEST'S LAST RESULT, on its var entity on the branch whose agent ran it (seon.proofs/result-tx,
  ;; written by seon.agent/run-tests-forked when a run ends; task seon.proofs/test-results-are-a-few-facts,
  ;; R2a): overwritten in place, no history. The digest it was judged at; green, red, or flaky (green and red at
- ;; that digest, seon.proofs/verdict), and present only while that digest is the test's reach digest now (a
+ ;; that digest, seon.proofs/verdict), or deferred (a process test the run left to root's gate), and present only while that digest is the test's reach digest now (a
  ;; moved digest retracts them: unknown); its failing assertions as data, the test child's reports (seon.proofs/failures,
  ;; at most :seon.config.proofs/max-assertions; present only while not green, printed by the one printer where shown);
  ;; and running sums over the runs at this digest (a new digest resets them): mean = sum / runs, computed on read
  :seon.test/digest [:and {:seon.db/no-history? true} :string]
- :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky]]
+ :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky :deferred]]
  :seon.test/failures [:and {:seon.db/no-history? true} [:vector :seon.problems/assertion]]
  :seon.test/runs [:and {:seon.db/no-history? true} :int]
  :seon.test/ms [:and {:seon.db/no-history? true} :int]
@@ -536,12 +536,17 @@
  ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
  ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
  :seon.process/stall [:map [:quiet-ms :int] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]
+ ;; a test run of this process that failed as a whole (its fork refused, a namespace did not load): the
+ ;; error as data (its type, message and data keys), written on the agent's branch by its turn
+ ;; (seon.turn/observe) and retracted when a run answers; present only while it is so (seon.context/standing)
+ :seon.process/test-error :seon.error/base
  :seon.process/process-fact [:map {:seon.db/attributes true}
                           [:seon.process/id :seon.process/id] [:seon.process/agent :seon.process/agent]
                           [:seon.process/pid {:optional true} :seon.process/pid] [:seon.process/mem-mb {:optional true} :seon.process/mem-mb]
                           [:seon.process/running {:optional true} :seon.process/running]
                           [:seon.process/forked-ms {:optional true} :seon.process/forked-ms] [:seon.process/ended-ms {:optional true} :seon.process/ended-ms]
-                          [:seon.process/stall {:optional true} :seon.process/stall]]
+                          [:seon.process/stall {:optional true} :seon.process/stall]
+                          [:seon.process/test-error {:optional true} :seon.process/test-error]]
  ;; ---- a model call: the bookkeeping of one request to the model, on its own entity pointing at its turn
  ;; (seon.ctx/the-record-is-facts-about-the-work, move 1), so the agent's pull holds the turn's work and no more;
  ;; the debug page and the turn's header read it (docs/ctx.md#the-record-is-the-agents-work) ----
@@ -565,7 +570,9 @@
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
  ;; shows them. seon.context/render makes the exact user message from it on that commit.
  :seon.model-call/basis [:map [:commit :uuid] [:task :seon.task/id] [:run :seon.run/id]
-                   [:turn :int] [:max-turns :int] [:origin :seon.turn/origin] [:observed :map]
+                   [:turn :int] [:max-turns :int] [:origin :seon.turn/origin]
+                   ;; what the turn took that no fact holds yet: the ids of the entries it took, the sends of its inbox
+                   [:taken {:optional true} :map]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)
                    [:agent {:optional true} :string]]

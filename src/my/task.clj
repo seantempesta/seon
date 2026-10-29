@@ -46,33 +46,16 @@
     f))
 
 (defn status
-  "This agent's task now, as its turn reads it: each proof's status (a red one with its
-  failures, source and calls), what else the done rule refuses, a failed test run, the turn of
-  how many, what happened to its last reply and its unmerged entries (seon.context/turn-state), as
-  this turn's observe measured them; what the branch's merge carries, whether it can merge, the
-  stale wiki sections and its tests are the task render's views (seon.render.ui/branch-views,
-  tests-view). Before any turn (a model's, or an outside agent's context
-  read) has observed the task in this process: :seon.turn/not-observed, and (my.agent/prove) runs its proofs."
+  "How this agent's work on its task stands now, as its page and its model read it
+  (seon.context/standing, its model render): each proof by the verdict its branch holds (a red one
+  with its failures, source and calls), what else the done rule refuses with the form that does
+  it, the functions without a contract, the problems its work caused, what its merge carries, its
+  unmerged entries, a test run that failed as a whole. A verdict is what the branch's last run
+  recorded, reused greens included: (my.agent/prove) runs what changed since."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (if-let [{:keys [input]} (turn/input)]
-    (let [t (current)
-          ;; each proof's result at its reach digest now, wherever it was recorded and whichever call
-          ;; measured it (a named prove, a bare one, a turn's, root's judge)
-          results (agent/stored-results (:proofs (:seon.task/accumulated t)))
-          stored (update-vals results #(cond (proofs/green? %) :pass (pos? (:error % 0)) :error :else :fail))
-          known (set (keys stored))]
-      (context/turn-state (agent/db) t
-                          (-> input
-                              (update :results merge stored)
-                              ;; a red proof's failing assertions as its stored run kept them (seon.proofs/red-reports' shape)
-                              (update :reds (fn [rs] (into (vec (remove #(known (:test %)) rs))
-                                                           (for [[p r] (sort-by (comp str key) results) :when (not= :pass (stored p)) f (:failures r)]
-                                                             (-> (select-keys f [:type :message :expected :actual :got]) (assoc :test p))))))
-                              ;; the done rule's reasons about those proofs as the turn saw them, replaced by what they are now
-                              (update :reasons (fn [rs] (into (vec (remove #(and (#{:proof-unknown :proof-red} (:reason %)) (known (:symbol %))) rs))
-                                                              (for [[p s] (sort-by (comp str key) stored) :when (not= :pass s)] {:reason :proof-red :symbol p})))))))
-    (contract/error :seon.turn/not-observed #'my.task/status "no turn has observed this agent's task yet: a model turn or a context read (the server's :context, seon_context) measures it; (my.agent/prove) runs its proofs" {})))
+  (let [db (agent/db)]
+    (context/standing-model {} (context/standing db (pdb/eid db :seon.agent/key (:key @agent/state)) {}))))
 
 (defn related
   "What this task's plan, as the branch holds it now, is likely to need beyond what it cites: the

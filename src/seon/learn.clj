@@ -43,7 +43,7 @@
   is :re-read (charged to that producer: its render did not satisfy); looking for code the
   final definitions use but nothing showed is :missing, and anything else :search (both
   charged to :template); an error repeating an earlier turn's signature is :repeats-error
-  (charged to seon.context/current-state, which delivered it)."
+  (charged to seon.context/standing, which delivered it)."
   {:malli/schema [:=> [:cat [:sequential :map] [:set :symbol]] [:vector [:map [:turn :int] [:rule :keyword] [:producer :any] [:form :string]]]]}
   [turns final]
   (let [as (aliases (for [t turns it (:items t)] (:form it)))
@@ -56,7 +56,7 @@
               charged (for [{:keys [form error]} (:items t)
                             :let [{:keys [explore? targets]} (form-reads (or form "") as)]
                             r [(cond
-                                 (and error (seen (sig error))) {:rule :repeats-error :producer 'seon.context/current-state}
+                                 (and error (seen (sig error))) {:rule :repeats-error :producer 'seon.context/standing}
                                  (not explore?) nil
                                  (and (seq targets) (every? shown-by targets)) {:rule :re-read :producer (shown-by (first targets))}
                                  (some #(or (final %) (final-ns %)) targets) {:rule :missing :producer :template}
