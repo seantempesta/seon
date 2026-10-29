@@ -118,7 +118,7 @@
         ;; the previous round read the clean commit's db (it asked for what was due there), so root's node cache
         ;; holds its nodes when this round diffs from it: read them here, as that round did
         _ (vector/due (d/commit-as-db c (d/commit-id (pdb/head conn b))) "m")
-        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))}) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
+        r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))} :seen (d/commit-id (pdb/head conn b))) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
     (d/release bc)
     r))
 

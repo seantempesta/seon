@@ -354,3 +354,28 @@
       (is (< (apply max (map #(Math/abs (- %1 %2)) v1 (vector/vector-of db2 ev))) 0.001))
       (is (= #{[t "m"] [ev "m2"]} (set (for [e [t ev]] [e (:v (first (d/datoms db2 :eavt (:e (first (d/datoms db2 :avet :seon.vector/of e))) :seon.vector/model)))]))))
       (is (= [t] (map first (vector/due db2 "m2" (d/datoms db2 :aevt :seon.task/plan)))) "another model's vector is due again, the entity's own"))))
+
+;; docs/vector.md#a-vector-is-its-own-entity: retracting an embedded entity drops the datom that pointed at its
+;; vector; the round retracts the vector too, in the write of the embeddings or alone
+(deftest a-retracted-entitys-vector-is-retracted-by-the-round
+  (ts/test-branch! (fn [_ conn]
+    (let [[st db1 _] (caught-up conn)
+          x1 (:e (first (d/datoms db1 :avet :form/id "x/1")))
+          ve (:e (first (d/datoms db1 :avet :seon.vector/of x1)))
+          _ (is (some? ve) "the form is embedded")
+          db2 (with! conn db1 [[:db/retractEntity x1]])
+          _ (is (and (empty? (d/datoms db2 :avet :seon.vector/of x1)) (seq (d/datoms db2 :eavt ve :seon.vector/f16)))
+                "retracting the form leaves its vector behind")
+          _ (is (not-any? #{x1} (map first (vector/near db2 (first (vectors 1 1 1 768)) 50))) "and no search finds it")
+          ;; the write's own commit is noticed, as in a root, before the retraction
+          [st _] (vector/vectors-proc st :main (assoc (note db1) :t 11))
+          [st3 o] (vector/vectors-proc st :main (assoc (note db2) :t 12))
+          w (first (:to-api o))
+          db3 (with! conn db2 (get-in w [:req :req :tx-data]))]
+      (is (= :db (get-in w [:req :req :branch])) "nothing due: the retraction alone is written to main")
+      (is (empty? (d/datoms db3 :eavt ve)) "the vector entity is gone")
+      (is (= (dec (count (d/datoms db2 :aevt :seon.vector/coarse))) (count (d/datoms db3 :aevt :seon.vector/coarse))) "the others stay")
+      (let [[_ o2] (vector/vectors-proc st3 :answers {:tag (:tag w) :r {:ok true :t 13}})]
+        (is (empty? (:to-api o2)) "and nothing more is asked"))
+      (is (empty? (vector/orphaned db3)) "a full scan finds none left")
+      (is (= [ve] (distinct (map second (vector/orphaned db2)))) "a full scan finds it")))))
