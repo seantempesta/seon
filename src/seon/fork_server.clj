@@ -119,7 +119,7 @@
   [m ^Throwable e]
   {:ev :step-failed :op (:op m) :agent (:agent m) :gen (:gen m)
    :error (seon.contract/error :seon.fork-server/step-failed #'step-failed
-                               (str "the fork server's step threw on " (pr-str (:op m)) ": " (step/error-msg e))
+                               (str "the fork server's step threw on " (:op m) ": " (step/error-msg e))
                                {:op (:op m)})})
 
 (defn- serve
