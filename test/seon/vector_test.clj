@@ -202,6 +202,39 @@
             [_ o3] (vector/vectors-proc st :main (assoc (note written) :t 14))]
         (is (= ["title: none | text: (defn h [] 1)"] (get-in (first (:to-api o3)) [:req :req :texts]))))))))
 
+(deftest a-more-round-followed-by-nothing-due-releases-the-helper
+  ;; a request saying :more keeps the :embed kind's helper up; where the proc stops asking, an empty request without :more
+  ;; is the event that lets it close (docs/vector.md#the-model)
+  (letfn [(more-round [conn]
+            (let [[st db1 _] (caught-up conn)
+                  db2 (with! conn db1 [{:db/id "g" :form/id "x/2" :form/src "(defn h [])"} {:db/id "k" :form/id "x/3" :form/src "(defn k [])"}])
+                  [st o] (vector/vectors-proc (assoc st :texts 1) :main (assoc (note db2) :t 12))
+                  ask (first (:to-api o))]
+              (is (true? (get-in ask [:req :req :more])) "a round that leaves texts due says more are coming")
+              [st ask db2]))]
+    (testing "nothing due at the next notice"
+      (ts/test-branch! (fn [_ conn]
+        (let [[st ask db2] (more-round conn)
+              [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+              w (first (:to-api o2))
+              db3 (with! conn db2 (get-in w [:req :req :tx-data]))
+              [st _] (vector/vectors-proc st :answers {:tag (:tag w) :r {:ok true :t 13}})
+              due (vector/due db3 "m")
+              db4 (with! conn db3 (embedded due (vectors 5 (count due) 1 768) "m"))
+              [st o3] (vector/vectors-proc st :main (assoc (note db4) :t 14))
+              rel (first (:to-api o3))]
+          (is (= [] (get-in rel [:req :req :texts])) "an empty request")
+          (is (nil? (get-in rel [:req :req :more])) "without :more: its answer lets the helper close")
+          (is (= :embed (get-in rel [:req :kind])))
+          (is (empty? (:to-api (second (vector/vectors-proc st :answers {:tag (:tag rel) :r {:value {:vectors [] :tokens []}}})))) "and its answer asks nothing"))))
+    (testing "a failed write starts no next round"
+      (ts/test-branch! (fn [_ conn]
+        (let [[st ask _] (more-round conn)
+              [st o2] (vector/vectors-proc st :answers {:tag (:tag ask) :r {:value {:model "m" :vectors (vectors 1 1 1 768) :tokens [5]}}})
+              w (first (:to-api o2))
+              [_ o3] (vector/vectors-proc st :answers {:tag (:tag w) :r {:seon.error/type :seon.writer/refused :seon.error/message "no"}})]
+          (is (= [[] nil] [(get-in (first (:to-api o3)) [:req :req :texts]) (get-in (first (:to-api o3)) [:req :req :more])]) "released"))))))))
+
 (deftest a-failed-embedding-waits-for-the-next-notice
   (ts/test-branch! (fn [_ conn]
   (let [db (db-due-only conn)
@@ -425,25 +458,39 @@
         (vector/close handle)
         (is (gone? pid2))))))
 
-(deftest a-helper-killed-mid-batch-answers-an-error-and-the-next-batch-works
+(deftest a-helper-that-dies-mid-batch-answers-an-error-and-the-next-batch-works
+  ;; a scripted helper (a shell) that reads the request's first byte and exits without answering: the write
+  ;; succeeds and the answer never comes, deterministically (a real helper killed at a guessed moment
+  ;; may die before the write, which embed retries)
   (lib/ignore-sigpipe!)
   (let [handle (vector/open nil)
+        _ (.mkdirs (java.io.File. (.getParent (java.io.File. ^String (:err handle)))))
+        p (.start (doto (ProcessBuilder. ^java.util.List ["sh" "-c" "head -c 1 > /dev/null; echo oops >&2; exit 3"])
+                    (.redirectError (java.io.File. ^String (:err handle)))))
+        _ (vreset! (:helper handle) {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)})
         embed #(vector/embed {:batch [{:req {:texts %}} {:req {:texts ["x"]}}] :handle handle})
-        _ (embed ["warm"])
-        pid (:pid @(:facts handle))
-        big (vec (repeat 64 (str/join " " (repeat 400 "token"))))
-        work (future (embed big))]
-    ;; the helper is working the big batch (its answer takes about a second) or has not read it yet: either way it dies
-    (lib/c-kill pid 9)
-    (let [rs @work]
-      (is (= 2 (count rs)) "every request of the batch is answered")
-      (is (every? #(= :seon.vector/helper-died (:seon.error/type %)) rs) (pr-str (map #(select-keys % [:seon.error/type :seon.error/message]) rs)))
-      (is (every? #(contract/valid? :seon.vector/helper-died %) rs))
-      (is (integer? (:exit (first rs))) "its exit status is in the error"))
-    (is (gone? pid))
-    (testing "the next batch starts another helper"
+        rs (embed ["hello"])]
+    (is (= 2 (count rs)) "every request of the batch is answered")
+    (is (every? #(= :seon.vector/helper-died (:seon.error/type %)) rs) (pr-str (map #(select-keys % [:seon.error/type :seon.error/message]) rs)))
+    (is (every? #(contract/valid? :seon.vector/helper-died %) rs))
+    (is (integer? (:exit (first rs))) "its exit status is in the error")
+    (is (str/includes? (:stderr (first rs)) "oops") "and its stderr, read from the file it was sent to")
+    (is (nil? @(:helper handle)) "nothing is held")
+    (testing "the next batch starts a real helper"
       (let [rs (embed ["again"])]
-        (is (= 2 (count rs)))
         (is (every? #(= 1 (count (get-in % [:value :vectors]))) rs) (pr-str rs))
-        (is (not= pid (:pid @(:facts handle))))
+        (is (some? (:pid @(:facts handle))))
         (vector/close handle)))))
+
+(deftest a-helper-killed-while-idle-is-replaced-and-the-request-answered
+  (lib/ignore-sigpipe!)
+  (let [handle (vector/open nil)
+        embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
+        _ (embed ["warm"])
+        h @(:helper handle)]
+    (lib/c-kill (:pid h) 9)
+    (.waitFor (:process h))
+    (let [[r] (embed ["again"])]
+      (is (= 1 (count (get-in r [:value :vectors]))) (pr-str (select-keys r [:seon.error/type :seon.error/message])))
+      (is (not= (:pid h) (:pid @(:facts handle))) "another helper answered it"))
+    (vector/close handle)))

@@ -903,6 +903,9 @@
  ;; threads of its own (Metal's), and loading it runs ~32 that end when it has loaded; all in the
  ;; helper's process, none in root's.
  :seon.config.vector/threads 1
+ ;; Unit: characters. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
+ ;; characters; the error says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
+ :seon.config.vector/stderr-chars 4096
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048

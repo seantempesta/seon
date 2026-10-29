@@ -409,7 +409,8 @@
   `embed`). Never fails."
   {:malli/schema [:=> [:cat :any] :map]}
   [_ctx]
-  {:helper (volatile! nil) :facts (volatile! {})})
+  {:helper (volatile! nil) :facts (volatile! {})
+   :err (str (cfg/checkout) "/target/tmp/embed-helper-" (random-uuid) ".err")})
 
 (defn- helper-argv
   "The helper's command line: this checkout's binary and the config layers root was started with
@@ -420,6 +421,18 @@
         (comp (filter (comp #{"--config" "--set"} first)) cat)
         (partition 2 (rest (cfg/argv)))))
 
+(defn- stderr-tail
+  "The helper's stderr, kept in the file err (a pipe would block it at 64 KB with no reader): its last
+  :seon.config.vector/stderr-chars characters, saying how many earlier ones are left out; the file is
+  removed."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [err]
+  (let [f (java.io.File. err)
+        s (if (.exists f) (slurp f) "")
+        n (count s) k (cfg/value :seon.config.vector/stderr-chars)]
+    (.delete f)
+    (if (> n k) (str "[" (- n k) " earlier characters left out] " (subs s (- n k))) s)))
+
 (defn- finished
   "The helper h ended, however it did: its exit status and stderr, recorded in the handle's facts
   (nothing is held any more). Its pipes closed, a helper that has not exited is killed first when
@@ -428,7 +441,7 @@
   [handle h kill?]
   (let [p (:process h)
         _ (when kill? (.destroyForcibly p))
-        f {:pid (:pid h) :exit (.waitFor p) :stderr (slurp (.getErrorStream p))}]
+        f {:pid (:pid h) :exit (.waitFor p) :stderr (stderr-tail (:err handle))}]
     (vreset! (:helper handle) nil)
     (vswap! (:facts handle) assoc :exit (:exit f) :exited-ms (System/currentTimeMillis))
     f))
@@ -444,7 +457,9 @@
         bin (first (helper-argv))]
     (if-not (.exists (java.io.File. ^String path))
       (contract/error :seon.vector/model-unopened #'seon.vector/start! (str "no model file at " path " (bin/build embed fetches it)") {:path path})
-      (let [p (try (.start (doto (ProcessBuilder. ^java.util.List (helper-argv)) (.directory (java.io.File. (str (cfg/checkout) "/target")))))
+      (let [_ (.mkdirs (java.io.File. (str (cfg/checkout) "/target/tmp")))
+            p (try (.start (doto (ProcessBuilder. ^java.util.List (helper-argv)) (.directory (java.io.File. (str (cfg/checkout) "/target")))
+                             (.redirectError (java.io.File. ^String (:err handle)))))
                    (catch java.io.IOException e e))]
         (if (instance? Throwable p)
           (contract/error :seon.vector/helper-died #'seon.vector/start! (str bin " did not start: " (.getMessage ^Throwable p)) {:exit -1 :stderr ""})
@@ -460,14 +475,15 @@
                                     (str bin " ended before its model loaded (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))))))))))
 
 (defn- ask!
-  "One request frame to the helper h and its answer frame: its value, or :eof when the helper is gone
-  (its pipe closed under the write, or ended before it answered)."
+  "One request frame to the helper h and its answer frame: its value, :unsent when the write failed
+  (the helper was gone before the request: it died while idle), or :eof when it ended before it
+  answered."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [h req]
   (if (try (doto ^java.io.OutputStream (:in h) (.write ^bytes (sock/frame req)) (.flush)) true
            (catch Exception _ false))
     (sock/recv-stream! (:out h))
-    :eof))
+    :unsent))
 
 (defn embed
   "The :embed effect, a batch kind: every request's :texts embedded in one call by the helper
@@ -480,15 +496,25 @@
   (let [ns (mapv #(count (get-in % [:req :texts])) batch)
         texts (into [] (mapcat #(get-in % [:req :texts])) batch)
         model (model-id (cfg/value :seon.config.vector/model))
-        h (if (empty? texts) {} (or @(:helper handle) (start! handle)))
+        req {:texts texts}
+        ;; a helper that died while idle fails the write before any answer: one new helper, the request again
+        [h a] (if (empty? texts)
+                [{} nil]
+                (let [h (or @(:helper handle) (start! handle))]
+                  (if (contract/error? h)
+                    [h nil]
+                    (let [a (ask! h req)]
+                      (if (= :unsent a)
+                        (do (finished handle h true)
+                            (let [h2 (start! handle)] (if (contract/error? h2) [h2 nil] [h2 (ask! h2 req)])))
+                        [h a])))))
         r (cond (contract/error? h) h
                 (empty? texts) {:vectors [] :tokens []}
-                :else (let [a (ask! h {:texts texts})]
-                        (cond (= :eof a) (let [f (finished handle h true)]
-                                           (contract/error :seon.vector/helper-died #'seon.vector/embed
-                                                           (str "the embedding helper ended mid-batch (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))
-                              (:error a) (:error a)
-                              :else a)))]
+                (#{:eof :unsent} a) (let [f (finished handle h true)]
+                                      (contract/error :seon.vector/helper-died #'seon.vector/embed
+                                                      (str "the embedding helper ended mid-batch (exit " (:exit f) "): " (:stderr f)) (dissoc f :pid)))
+                (:error a) (:error a)
+                :else a)]
     (if (contract/error? r)
       (vec (repeat (count batch) r))
       (first (reduce (fn [[acc vs ts] n] [(conj acc {:value {:model model :vectors (subvec vs 0 n) :tokens (subvec ts 0 n)} :cost n})
@@ -498,7 +524,7 @@
 (defn close
   "The :embed kind's :close, told when its queue has emptied: the helper's stdin closed, which ends it
   (it exits 0 at the end of its input), and its exit recorded. Answers the helper's facts
-  {:pid :exit :stderr}, or nil when none ran."
+  {:pid :exit :stderr}, or nil when none ran. See docs/vector.md#the-model."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [handle]
   (when-let [h @(:helper handle)]
@@ -506,6 +532,18 @@
     (finished handle h false)))
 
 ;; ---- keeping main's vectors current -------------------------------------------------------
+
+(defn- release
+  "The proc's spell of asking ended (nothing due, or a write that starts no next round) while the last
+  request it sent said :more: an empty request without :more, so its answer is the event that lets the
+  :embed kind close its helper (docs/vector.md#the-model). Answers [st outs]; nothing is sent when no
+  :more is out."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (if (:more st)
+    (let [[st m] (step/ask (dissoc st :more) [:vectors :answers] [:released nil] {:op :fx :kind :embed :req {:texts []}})]
+      [st [m]])
+    [st []]))
 
 (defn- round
   "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
@@ -538,13 +576,14 @@
         st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
     (cond
       (seq due)
-      (let [[st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
-                             {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} (< (count due) (count todo)) (assoc :more true))})]
-        [(assoc st :running true) [m]])
+      (let [more? (< (count due) (count todo))
+            [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit]) gone]]
+                             {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
+        [(assoc st :running true :more more?) [m]])
       (and (seq gone) (pos? (:texts st)))
       (let [[st m] (step/ask st [:vectors :answers] [:written 0] {:op :write :req {:op :tx :branch :db :tx-data gone}})]
         [(assoc st :running true) [m]])
-      :else [(assoc st :running false) []])))
+      :else (release (assoc st :running false)))))
 
 (defn vectors-proc
   "Keeps main's vectors current (docs/vector.md#what-is-embedded). At main's commit notice
@@ -585,7 +624,7 @@
                                         (if (seq tx)
                                           (let [[st w] (step/ask st [:vectors :answers] [:recorded nil] {:op :write :req {:op :tx :branch :db :tx-data tx}})]
                                             [st [w]])
-                                          [(assoc st :running false) []]))
+                                          (release (assoc st :running false))))
                                       (let [{:keys [model vectors tokens]} (:value r)
                                             [st w] (step/ask st [:vectors :answers] [:written (count es)]
                                                              {:op :write :req {:op :tx :branch :db :tx-data (into (tx-data es ts vectors tokens model) gone)}})]
@@ -594,15 +633,16 @@
                                             (not (contract/error? r)) (-> (update :embedded + es) (assoc :written-t (:t r)))
                                             (contract/error? r) (assoc :clean nil :seen nil))
                                        l (:latest st)]
-                                   (if (and l (>= (:t l) (:written-t st)))
-                                     (round (dissoc st :latest) l)
-                                     [st []]))
+                                   (cond (and l (>= (:t l) (:written-t st))) (round (dissoc st :latest) l)
+                                         ;; a failed write commits nothing, so no notice follows: the spell ends here
+                                         (contract/error? r) (release st)
+                                         :else [st []]))
                         ;; the failure's own commit starts no round (it would ask again and fail again,
                         ;; on an idle main): the next round reads a commit after it
                         :recorded (let [st (cond-> (assoc st :running false) (not (contract/error? r)) (assoc :written-t (inc (:t r))))
                                         l (:latest st)]
-                                    (if (and l (>= (:t l) (:written-t st)))
-                                      (round (dissoc st :latest) l)
-                                      [st []]))
+                                    (cond (and l (>= (:t l) (:written-t st))) (round (dissoc st :latest) l)
+                                          (contract/error? r) (release st)
+                                          :else [st []]))
                         [st []])))]
      [st (if (seq outs) {:to-api outs} {})])))

@@ -297,7 +297,8 @@
 (defn recv-stream!
   "The next frame's value from the java.io.InputStream in (the pipe of an exec'd child: its
   stdout here, our own stdin there; no descriptor of ours, so `conn` does not read it), or :eof at
-  the stream's end, in the middle of a frame or at an end frame. Blocks: the caller's one read."
+  the stream's end, in the middle of a frame or at an end frame. Blocks: the caller's one read.
+  The embedding helper's transport: docs/vector.md#the-model."
   {:malli/schema [:=> [:cat :any] :any]}
   [in]
   (let [h (byte-array 4)]
