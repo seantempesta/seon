@@ -35,10 +35,13 @@ Merged this evening, in two batches (2943d7baa0 ... e15dcda67d): root holds no t
 
 Then (c63d45dcbe, 65a5412776): Jolt emits namespace init as data (target/seon 80 -> 64 MB, `e2e calc` root 518.5 -> 451.8 MB, start faster); every cut on what an agent sees taken back (owner: no limits on an agent's context or evals); the test deal by median, steps beside shards, mg-check 11:50 -> 1:10; the context session's R2b-1 (status from one diff); the standing store wiped for its schema.
 
+Then (ad9f049dc6, d7f1f1cee4, fbb83163a8): the contract check is per function (a one-function change re-checks its 6 contracts in 0.5 s, no build); a walk enters no linked directory and a test child works in its own directory (an agent spun 13 min on a symlink cycle in the agents' cwd); test roots boot from a seeded store (14.4 -> 7.1 s) and end with their runner; the wiki load allocates 217 MB, not 1.47 GB, and is skipped when unchanged (boot to listening ~4 s). `e2e calc` root ~465 MB (runs vary +-20 MB: compare several).
+
 **Open, biggest first:**
-- **Test time**: most of a full run is tests that boot roots (89 tests over 10 s, ~4,050 of 4,857 test-seconds). Fixing on branch jolt/boot-fast: test roots start from a seeded store (a fresh main 14.4 -> 7.1 s), and a dead runner's test roots now end with it (the fifo watcher waits with select: macOS woke one of two readers). Next there: seed only when a root-booting test is selected, own-store tests on a branch of the seeded store where their subject allows. Longer term: prove inside a standing root by forking, as agents do, instead of booting a root per test.
+- **Test time, structurally**: the slowest tests boot roots on stores of their own (restart tests, 60-270 s; one builds the binary three times). Next: a build of an unchanged tree reused by digest inside a test; then the merge gate proving inside a standing root by forking, as agents do.
+- The wiki load's steady cost (217 MB, ~280 bytes a byte of text: Datahike seeks per citation) and the fork server's 566-655 MB against ~300 MB.
 - The heap histogram on an OOM (Jolt c6d8d43e, Seon jolt/an-oom-carries-its-heap): re-test now that the fork-monitor fix is in.
-- A working agent's real cost (heap growth, test children) is still unmeasured: `bin/check scale` with ten agents doing work.
+- A working agent's real cost (heap growth, test children): `bin/check scale` with ten agents doing work.
 
 ## Now: one step
 
