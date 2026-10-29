@@ -1509,17 +1509,29 @@
   its base's at the cost of what it changed. The schema entries the two values differ in are
   rows removed and added the same way (schema-moves), with the forms whose edges they change
   touched, so a merge that adds an entry costs its dependents', not the program's. A namespace
-  gaining its first test or losing its last rebuilds (its forms' quoted names become or stop being
-  edges: reach-step's test-nss)."
+  gaining its first test or losing its last has the forms it already held re-edged and re-folded as they
+  are added (its forms' quoted names become edges: reach-step's test-nss), not the graph built again; one losing its last
+  test rebuilds (its quoted names stop being edges)."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [g db]
   (let [live (live-ids db) was (:live g)
         schemas (schema-texts db)
         [g0 gone-s added-s touched] (if (= (:schemas g) schemas) [g [] [] #{}] (schema-moves g db live schemas))
+        new-ids (set (for [[id _] live :when (not (was id))] id))
         g' (assoc (reach-step g0 db (into (vec (remove live (keys was))) gone-s)
-                              (into (vec (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false)) added-s) touched)
-                  :live live)]
-    (if (= (:test-nss g' #{}) (:test-nss g #{})) g' (reach-graph db (:data-refs g)))))
+                              (into (vec (reach-rows db (set (map live new-ids)) false)) added-s) touched)
+                  :live live)
+        ;; a namespace that gained its first test: the forms it already held, which the step did not read, are
+        ;; re-edged as if added (a test namespace's quoted names are edges), never the graph built again. One that
+        ;; lost its last, or lost a form while gaining, is rebuilt: the step takes a removed form's edges out by
+        ;; the namespaces it now knows as tests, so those it left under the old are not found
+        was-tests (:test-nss g #{}) now-tests (:test-nss g' #{})
+        flipped (into #{} (remove was-tests) now-tests)
+        redo (when (seq flipped) (vec (for [[id r] (:rows g') :when (and (flipped (:ns r)) (not (new-ids id)))] id)))]
+    (cond (or (some (complement now-tests) was-tests) (some #(flipped (:ns (get (:rows g) %))) (remove live (keys was))))
+          (reach-graph db (:data-refs g))
+          (seq redo) (assoc (reach-step g' db redo (reach-rows db (set (map live redo)) false) #{}) :live live)
+          :else g')))
 
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
