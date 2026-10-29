@@ -75,8 +75,8 @@
  :seon.config.root/gc-sweepers 0
  ;; Unit: percent, the most of root's heap kept free after a full collection (Jolt's
  ;; JOLT_MAX_HEAP_FREE_RATIO, the JVM's -XX:MaxHeapFreeRatio: P% free is P/(100-P) of the heap in
- ;; use), set at boot (seon.lib/max-heap-free-ratio!) and inherited by the fork server and agents;
- ;; it bounds the nursery's headroom over the live set by the same share. Root collects in full at
+ ;; use), set after the fork server is forked (seon.lib/max-heap-free-ratio!), so the fork server and
+ ;; agents keep Jolt's default 50; it bounds root's nursery headroom over the live set by the same share. Root collects in full at
  ;; boot and at each quiescence (the writer's :collect), which is when Chez returns pages.
  ;; Provenance: jolt/root-reserve-cap (Jolt's default 50 kept 1x, 234-450 MB free in an idle
  ;; root). At the bound: 1 returns nearly every free page and keeps the nursery at its floor.

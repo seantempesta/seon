@@ -172,7 +172,7 @@
         g (reach-graph-of db (:data-refs in) store)
         all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
         ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
-        whole (set (remove (set (map (comp symbol namespace) vars)) nss))
+        whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)

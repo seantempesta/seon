@@ -902,8 +902,6 @@
             contracts (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
-        ;; before the boot's full collection, so its free pages go back to the OS
-        (lib/max-heap-free-ratio! (cfg/value :seon.config.root/max-heap-free-ratio))
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
@@ -967,6 +965,9 @@
                  (assoc :seon.config.source/gate-checkout (:root source)))
         ;; then the GC's sweeper threads, a declared number (Chez would grow them by timing)
         sweepers (lib/gc-sweepers! (cfg/value :seon.config.root/gc-sweepers))
+        ;; root's own, set after the fork server is forked: the fork server and its agents keep
+        ;; Jolt's default, whose nursery a lower ratio would also cut (docs/machine.md#roots-heap)
+        _ (lib/max-heap-free-ratio! (cfg/value :seon.config.root/max-heap-free-ratio))
         events-in (a/chan (a/sliding-buffer 8192))
         ;; every event, for the API's taps (seon.root/events) and the render proc's (W2)
         events-mult (a/mult events-in)
