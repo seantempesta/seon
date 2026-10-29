@@ -770,6 +770,7 @@
           t0 (profile/now-ns)
           phase (atom :ready) samples (atom []) stop (atom false)
           ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale-work " i)})) (range n))))
+          ready-ms (lib/r2 (profile/ms-since t0))
           ;; the baseline: every agent ready (its standby parent forked it, so it is charged), none yet working
           st0 (c/state sys)
           fs-pid (get-in st0 [:fork-server :pid]) agent-pids (set (keep #(get-in st0 [:agents % :pid]) ids))
@@ -837,7 +838,7 @@
           gen (fn [p k] (mean (map #(get-in (p %) [k]) ids)))
           ok-prove? (fn [r] (and (nil? (:ex r)) (zero? (+ (:fail r 0) (:error r 0))) (pos? (:pass r 0)) (<= 50 (:ran r 0) 100)))]
       {:report {:agents n :load (clojure.string/trim (:out (clojure.java.shell/sh "sysctl" "-n" "vm.loadavg")))
-                :wall-ms {:ready (lib/r2 (profile/ms-since t0)) :prove-all-ten (lib/r2 prove-ms)}
+                :wall-ms {:ready ready-ms :end-to-end (lib/r2 (profile/ms-since t0)) :prove-all-ten (lib/r2 prove-ms)}
                 :evals-ms-per-form (vec (for [i (range 5)] (lib/summ (map #(nth (:evals-ms %) i) evals))))
                 :prove {:tests-ms (lib/summ (map :tests-ms proves)) :ran (lib/summ (keep :ran proves)) :reused (lib/summ (keep :reused proves))
                         :pass (lib/summ (keep :pass proves)) :deferred (lib/summ (map :deferred proves))}
@@ -882,6 +883,35 @@
        :checks {:every-eval-passed (every? :ok evals)
                 :every-prove-ran-50-to-100-tests-green (every? ok-prove? proves)
                 :fits-the-machine (<= (need drop-peak) budget)}}))))
+
+(defn spawn-phases
+  "n agents spawned at once on a scratch main holding Seon's own program, twice (wave 1: main as imported;
+  wave 2: nothing moved since): each agent's phase table (seon.agent/spawn-phases, on its :ready event),
+  the fork server's :applied and :forked events, and the wall from the request to each :ready.
+  What a spawn costs, per phase (docs/processes.md)."
+  [n]
+  (run-check "SPAWN-PHASES" {:datoms 0 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs)}}
+   (fn [sys]
+    (let [_ (when (pos? (seon.config/value :seon.config.vector/texts))
+              (seon.root/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
+          wave (fn [w]
+                 (let [ev (c/events sys) t0 (profile/now-ns)
+                       ids (vec (pmap (fn [i] (c/spawn! sys {:task (str "spawn " w "." i)})) (range n)))
+                       ids-set (set ids)
+                       evs (loop [left ids-set acc []]
+                             (if (empty? left) acc
+                                 (let [e (await-event ev #(or (#{:applied :forked} (:ev %)) (ids-set (:agent %))))]
+                                   (recur (if (= :ready (:type e)) (disj left (:agent e)) left)
+                                          (conj acc (assoc e :at-ms (lib/r2 (profile/ms-since t0))))))))
+                       _ (a/untap (:events-mult sys) ev)
+                       ready (filter #(= :ready (:type %)) evs)]
+                   {:wall-ms (lib/r2 (profile/ms-since t0))
+                    :ready (vec (sort-by :at-ms (for [e ready] (select-keys e [:agent :at-ms :start-ms :phases]))))
+                    :applied (vec (for [e evs :when (= :applied (:ev e))] (select-keys e [:t :apply-ms :lag-ms :at-ms])))
+                    :forked (vec (for [e evs :when (= :forked (:ev e))] (select-keys e [:agent :fork-ms :static-ms :at-ms])))}))
+          w1 (wave 1) w2 (wave 2)]
+      {:report {:agents n :wave-1 w1 :wave-2 w2}
+       :checks {:all-ready (= n (count (:ready w1)) (count (:ready w2)))}}))))
 
 (defn orphan
   "Root dies while its agents are busy (one in a loop, one in a forever test, one clone):
@@ -1916,6 +1946,7 @@
      "window-write" (fn [n more] (window-write n))
      "window-read" (fn [n more] (window-read n))
      "scale" (fn [n more] (scale (n-or n "100")))
+     "spawn-phases" (fn [n more] (spawn-phases (parse-long (or n "1"))))
      "scale-work" (fn [n more] (scale-work (n-or n "10") (not= "no-search" (first more))))
      "robust" (fn [n more] (robust))
      "lifecycle" (fn [n more] (lifecycle (n-or n "10")))

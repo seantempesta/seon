@@ -92,7 +92,20 @@ Runs c, d and e read peak drops of 6.7, 6.2 and 12.4 GB, and d an after-prove dr
 
 **Root and the fork server** grow while agents work: root 930-990 MB to 960-1,010 (peak 1,009-1,021 over its life), the fork server 405-470 to 505-590 MB (it records and reads each judge's run on main; its life's peak is 720-890 MB, its boot). Both hold their dirty pages in the one untagged heap region (root 730-780 MB, malloc 207 MB), the fork server 480-570 MB.
 
-**Time** (the proves ran with other sessions' tests on the machine, so wall is not the number): ten agents ready in 100-119 s (219 s at load 17) on a main holding the program (about 10 s an agent, against 0.6 s for 100 idle agents in `bin/check scale`: found, not yet explained), the five evals 20 ms to 1.7 s each (the first, defining the namespace, 1-1.7 s with ten at once), the ten proves at once 67-87 s (194 s when the machine was loaded with 17), CPU for root 6-10 s, the fork server 0.3 s, ten agents 13-29 s and their test children at least 100-216 s (as last seen; children that ended between readings are undercounted).
+**Time** (the proves ran with other sessions' tests on the machine, so wall is not the number): ten agents ready in 11 s on a main holding the program (measured 2026-10-29, load 3; the 100-119 s first reported here was the report's `:ready` read after the proves, the whole run's wall, now `:end-to-end`, 65 s at load 3), and what those 11 s are is [below](#what-a-spawn-costs), the five evals 20 ms to 1.7 s each (the first, defining the namespace, 1-1.7 s with ten at once), the ten proves at once 67-87 s (194 s when the machine was loaded with 17), CPU for root 6-10 s, the fork server 0.3 s, ten agents 13-29 s and their test children at least 100-216 s (as last seen; children that ended between readings are undercounted).
+
+### What a spawn costs
+
+`bin/check spawn-phases N` (`seon.check/spawn-phases`) spawns N agents at once, twice, on a scratch main holding Seon's own program (2,616 forms, an import of 155,987 datoms), and prints each agent's phases (`seon.agent/spawn-phases`). Measured 2026-10-29, load 3:
+
+| | 1 agent, first | 10 agents, first wave | 10 agents, second wave (main unmoved) |
+|---|---|---|---|
+| request to the fork server taking the fork (`fork-server-in`) | 9,438 ms | 10,335-10,349 ms | 0.02 ms (all ten ready in 172 ms) |
+| graph brought to main (`reach-graph`, once, the first fork) | 1,377 ms | 1,385 ms | 0 |
+| index, freeze (`index`, `static`) | 9 + 88 ms | 9 + 83 ms | 0 + 0.1 ms |
+| the agent's own start (`child-init` to `hello`) | 15 ms | 12-20 ms each | 12-20 ms each |
+
+A spawn on an unmoved main costs the agent's own start, about 17 ms, and the fork server forks ten in a row without queueing behind any heavy work (the second wave's ten were ready within 172 ms of the request). The 9-10 s of the first wave is not a spawn's: it is the fork server loading the program the writer committed (`seon.program/load-changes!` of the import, 9.6 s for 2,616 forms, timed in the server's loop), which the first fork waits behind because commits and forks arrive on one FIFO pipe (an agent forked after commit k sees exactly k). With 25 s between the import and the first spawn the first wave took 1.7 s (the graph's 1.4 s and the freeze). So a spawn pays per main move: the load of the forms that move changed (1.6-5 ms a form) and the graph's update at the next fork (20-45 ms for a merge's forms, 1.4 s for the whole program), never per fork.
 
 ### What a turn costs
 
