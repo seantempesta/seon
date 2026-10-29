@@ -244,17 +244,10 @@
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
-    [seon.procs-test/reconciler seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
-    [seon.procs-test/a-wait-on-main-is-answered-at-the-reconcilers-quiet seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read"
+    [seon.procs-test/notice seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read (the one helper the procs and reconcile tests build their notices with)"
     [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
-    [seon.reconcile-test/a-merge-behind-again-and-again-is-held-for-root seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-spawn-writes-a-refused-run seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-task-asks-again-when-main-moves seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/quiescence-is-reported-when-nothing-can-move seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/a-refused-run-holds-its-task-and-creates-none seon.profile/now-ns] "a message's :ns stamp"
-    [seon.reconcile-test/an-idle-system-does-nothing-after-a-reason seon.profile/now-ns] "a message's :ns stamp"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
     [test-runner/shard! seon.profile/now-ns] "the runner's printed shard time"})
 
@@ -326,8 +319,8 @@
     (let [[a] (spawn-ready! sys "instrument")
           bad @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
           ;; the agent's uncontracted set, as the done rule reads it (seon.repl/instrument)
-          u1 (printed @(c/submit! sys a "(defn plain [x] x) (count (:uncontracted @seon.agent/state))"))
-          u2 (printed @(c/submit! sys a "(defn plain2 [x] x) (count (:uncontracted @seon.agent/state))"))]
+          u1 (printed @(c/submit! sys a "(do (defn plain [x] x) (count (:uncontracted @seon.agent/state)))"))
+          u2 (printed @(c/submit! sys a "(do (defn plain2 [x] x) (count (:uncontracted @seon.agent/state)))"))]
       {:report {:refused (short-items bad) :uncontracted [u1 u2]}
        :checks {:armed-and-refused (re-find #"invalid-input" (str (get-in bad [:ex :seon.error/message])))
                 :uncontracted-grows (= ["1" "2"] [u1 u2])}}))))
@@ -580,8 +573,8 @@
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop), and :foreign, threads outside Jolt's
-  roster: the model's (:seon.config.vector/model-threads) while an :embed worker holds it."
+  pool; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
        ;; the C thread that ends this process with its starter (seon.lib/end-with!), outside Jolt's roster
@@ -590,13 +583,10 @@
    (let [pm (:procs @(get-in sys [:bindings :system]))
          procs (vals pm)
          mixed (count (filter #(= :mixed (or (:workload (clojure.core.async.flow.spi/describe (:proc %))) :mixed)) procs))
-         web? (true? (get-in (c/state sys) [:web :listening]))
-         ;; an :embed worker holding the model: Metal's own threads, outside Jolt's roster
-         model? (some #(get-in (ping sys %) [:state :open?]) (filter #(= "fx.embed" (namespace %)) (keys pm)))]
-     (cond-> (update (declared-threads) :roster merge
-                     (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-                       web? (assoc "clojure-agent-pool" 2)))
-       model? (assoc :foreign (seon.config/value :seon.config.vector/model-threads))))))
+         web? (true? (get-in (c/state sys) [:web :listening]))]
+     (update (declared-threads) :roster merge
+             (cond-> {"async-mixed" mixed "seon-fs-events" 1}
+               web? (assoc "clojure-agent-pool" 2))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -608,12 +598,12 @@
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
   differing name with [declared measured], :gc-sweepers likewise, and :os when the OS
-  counts threads beyond the roster, the sweepers and the declared :foreign and :native ones."
+  counts threads beyond the roster, the sweepers and the declared :native one."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [decl got]
   (let [names (into (set (keys (:roster decl))) (keys (:roster got)))
         roster (into {} (for [n names :let [d (get-in decl [:roster n] 0) g (get-in got [:roster n] 0)] :when (not= d g)] [n [d g]]))
-        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:foreign decl 0) (:native decl 0))]
+        expect-os (+ (reduce + 0 (vals (:roster got))) (:gc-sweepers got) (:native decl 0))]
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
@@ -667,8 +657,11 @@
         th-end (thread-diff (declared-threads sys) (threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
-        ;; system's free memory dropped per agent (its own pages, its page tables, the kernel's share)
-        per-agent (/ (- (:free-mb mem0) (:free-mb mem1)) n)
+        ;; machine's free plus inactive memory dropped per agent from before the agents started to their
+        ;; peak (its own written pages, its page tables, the kernel's share): never the sum of their
+        ;; footprints, which charges every inherited page an agent only reads (docs/cost.md#how-we-measure)
+        footprint-sum (reduce + agent-mb)
+        per-agent (/ (- (:available-mb mem0) (:available-mb mem1)) n)
         need (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) per-agent))
         budget (seon.config/value :seon.config.machine/memory-mb)]
       {:report {:agents n :all-ok (count (filter :ok results))
@@ -676,9 +669,10 @@
                 :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
                 :server-fork-ms-p50 (get-in st [:fork-server :fork-ms-p50])
                 :eval+transact-ms (lib/summ (map :eval-ms results)) :tests-ms (lib/summ (map :tests-ms results))
-                :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 (reduce + agent-mb))
-                :system-free-drop-mb-per-agent (lib/r2 per-agent)
-                :system-free-returned-mb-per-agent (lib/r2 (/ (- (:free-mb mem2) (:free-mb mem1)) n))
+                :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 footprint-sum)
+                :system-available-drop-mb-per-agent (lib/r2 per-agent)
+                :system-available-returned-mb-per-agent (lib/r2 (/ (- (:available-mb mem2) (:available-mb mem1)) n))
+                :footprint-need-mb (lib/r2 (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) (/ footprint-sum n))))
                 :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
                 :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
                 :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
@@ -687,13 +681,10 @@
                 :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
-       ;; started yet: it starts at the first socket wait, an agent's). With the model open, its
-       ;; foreign threads (the :os count) are judged only where root has settled, after the work and
-       ;; after the kill: right after the last encode, Metal's GCD idle workers are still parked
-       ;; until libdispatch's idle timeout ends them, and waiting that out would need a clock
-       ;; (root's ruling, 2026-10-23); Jolt's own roster is judged at every sample
+       ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
+       ;; GCD workers) are the embedding helper's, not root's, so the OS count is judged at every sample
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [(cond-> th-ready (:foreign (declared-threads sys)) (dissoc :os)) th-work th-end])
+                :root-threads-as-declared (every? empty? [th-ready th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
 
 (defn orphan
@@ -904,7 +895,7 @@
   Each cycle's row (cycle-row), read from its last line."
   [n]
   (vec (for [i (range n)]
-         (let [{:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-cycle" (str i))]
+         (let [{:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-cycle" (str i) "--profile" (name (seon.config/profile)))]
            (if (zero? exit)
              (sedn/decode (last (clojure.string/split-lines out)))
              {:cycle i :ok false :exit exit :err err :health #{}})))))
@@ -956,6 +947,30 @@
                                           (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
                                           (< 28 (- (lib/real-mb) b0) 60))))]
         {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
+   "touch-gauge"
+   ;; a parent holds 200 MB it wrote; one child only reads every page, another writes every page. Each
+   ;; sends its footprint growth and the machine's drop in free plus inactive MB (lib/sysmem) on a
+   ;; socket. The ledger charges both 200 MB; only the write costs the machine its copy.
+   #(let [mb 200
+          block (byte-array (* mb 1024 1024))
+          _ (java.util.Arrays/fill block (byte 7))
+          [r w] (sock/socketpair)
+          touch (fn [write?]
+                  (let [pid (lib/fork! {:child (fn []
+                                                 (let [f0 (lib/real-mb) m0 (:available-mb (lib/sysmem))
+                                                       sum (volatile! 0)]
+                                                   (doseq [i (range 0 (* mb 1024 1024) 16384)]
+                                                     (if write? (aset block i (byte 1)) (vswap! sum + (aget block i))))
+                                                   (sock/write-line! w (pr-str {:charged (- (lib/real-mb) f0)
+                                                                                :machine-drop (- m0 (:available-mb (lib/sysmem)))
+                                                                                :sum @sum}))
+                                                   (lib/c-exit 0)))
+                                        :refused (fn [n] {:refused n}) :parent identity})
+                        st (lib/wait-status pid)
+                        rd (sock/line-reader r)
+                        line (loop [] (let [ls (rd)] (if (seq ls) (first ls) (recur))))]
+                    (assoc (sedn/decode line) :exit st)))]
+      {:read (touch false) :write (touch true)})
    "go-blocks"
    #(let [c (a/chan) r (a/go (a/<! c))]
       (a/>!! c 41)
@@ -1063,7 +1078,8 @@
         _ (flow/pause-proc (:graph sys) a)
         ;; the proc's control channel is FIFO: this ping is taken after the pause
         paused-health (ping sys a)
-        p1 (c/submit! sys a "(def x 1) x")
+        ;; one form (a do): several top-level forms answer each one's value (DECISIONS 2026-10-29)
+        p1 (c/submit! sys a "(do (def x 1) x)")
         p2 (c/submit! sys a "(inc x)")
         ;; the measurement: no answer within the window while paused
         held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
@@ -1094,7 +1110,7 @@
   once, and this one boots none."
   [n]
   (let [rows (cycles n)
-        {:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-pause")
+        {:keys [exit out err]} (clojure.java.shell/sh "./seon" "lifecycle-pause" "--profile" (name (seon.config/profile)))
         pr (if (zero? exit) (sedn/decode (last (clojure.string/split-lines out))) {:exit exit :err err})
         [r1 r2] (get-in pr [:resumed :printed])]
     (run-check "LIFECYCLE" nil
@@ -1194,7 +1210,7 @@
   (run-check "BACKPRESSURE" {:datoms 2000}
    (fn [sys]
     (let [[a] (spawn-ready! sys "flood")
-        flood "(dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded"
+        flood "(do (dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded)"
         ev (c/events sys)
         p (c/submit! sys a flood)
         ;; the flood began (the agent said so); then what arrives while paused is the measurement
@@ -1216,7 +1232,7 @@
         _ (flow/pause-proc (:graph sys) :writer)
         ;; agents own their branches' writes: a paused writer does not hold them
         agents-ok (count (filter #(= ":ok" (printed %))
-                                 (mapv #(deref (c/submit! sys % "(transact! [{:note/text \"bp\" :note/agent :bp}]) :ok")) ids)))
+                                 (mapv #(deref (c/submit! sys % "(do (transact! [{:note/text \"bp\" :note/agent :bp}]) :ok)")) ids)))
         ;; root's own writes to main wait for it
         mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
         _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))

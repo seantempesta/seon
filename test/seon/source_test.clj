@@ -69,6 +69,33 @@
       (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
           "and so does load-changes!"))))
 
+(deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
+  ;; task seon.root/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
+  ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
+  ;; both, so every agent inherits main's tests. A form changed later follows the same rule
+  (let [files {"src/x/rnt_prog.clj" "(ns x.rnt-prog)\n\n(defn k [] 1)\n"
+               "test/x/rnt_thing_test.clj" "(ns x.rnt-thing-test (:require [clojure.test :refer [deftest is]] [x.rnt-prog :as p]))\n\n(deftest t (is (= 1 (p/k))))\n\n(defn helper [] 2)\n"}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        bound? (fn [s] (boolean (some-> (find-ns (symbol (namespace s))) (ns-resolve (symbol (name s))) bound?)))
+        forms-of (fn [db nsym] (d/q '[:find [?e ...] :in $ ?n :where [?ns :ns/name ?n] [?e :form/ns ?ns]] db nsym))]
+    (is (= #{'x.rnt-thing-test} (program/test-nss db)) "a namespace read from test/ is a test's; src/'s is the program's")
+    (testing "root's load: the program's forms, none of the test namespace's"
+      (let [r (program/load-all! db {:tests? false})]
+        (is (= [] (:errors r)))
+        (is (true? (bound? 'x.rnt-prog/k)) "src/ is evaluated")
+        (is (not (bound? 'x.rnt-thing-test/t)) "the deftest is not")
+        (is (not (bound? 'x.rnt-thing-test/helper)) "nor a helper beside it")))
+    (testing "a change main makes to the test namespace: root's load-changes! leaves it, the fork server's loads it"
+      (let [ops (vec (for [e (forms-of db 'x.rnt-thing-test) :let [s (:form/src (d/entity db e))]] [:db/add e :form/src s]))]
+        (is (seq ops))
+        (is (= [] (program/load-changes! db ops {:tests? false})))
+        (is (not (bound? 'x.rnt-thing-test/t)) "root's leaves it")
+        (is (= [] (program/load-changes! db ops)))
+        (is (true? (bound? 'x.rnt-thing-test/t)) "the default loads it")))
+    (testing "and load-all! with no option (the fork server's, an agent's) holds it all"
+      (is (= [] (:errors (program/load-all! db))))
+      (is (true? (bound? 'x.rnt-thing-test/helper))))))
+
 (deftest import-then-write-back-is-a-zero-diff
   (let [files (src-files)
         db (imported files)
@@ -303,9 +330,13 @@
     (try
       (is (zero? (:exit cloned)) (:err cloned))
       (is (some? (:port @root)) (str "the root started: " (slurp (str dir "/runs/root.log"))))
-      (let [t1 (ask "(seon.e2e/loop-turn! sys)")
+      ;; root evaluates no test namespace (task seon.root/root-holds-no-test-code); its REPL loads the
+      ;; driver it is about to call, as any REPL would
+      (let [loaded (ask "(do (seon.program/load-all! @(:conn sys)) (boolean (resolve 'seon.e2e/loop-turn!)))")
+            t1 (ask "(seon.e2e/loop-turn! sys)")
             t2 (ask "(seon.e2e/loop-turn! sys :loop-2)")
             args (ask "(my.root/resume-args sys)")]
+        (is (true? loaded) "the test namespaces load in root on request")
         (is (= [2 2] [(:root t1) (:root t2)]) (str "each merge live in place: " (pr-str [t1 t2])))
         (is (= 2 (count (:commits t2)))
             (when-not (= 2 (count (:commits t2)))
@@ -838,6 +869,33 @@
           (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
       (finally (sh/sh "rm" "-rf" tmp)))))
 
+;; task seon.fx/the-standing-root-follows-main-not-the-checkouts-head: the source tree follows the ref
+;; of the branch main, so a topic branch checked out in the main tree changes nothing root reads.
+(deftest the-standing-root-follows-main-not-the-checkouts-head
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-ref-" (random-uuid))) (.mkdirs)))
+        co (str tmp "/main") wb (str tmp "/merges")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
+        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
+    (try
+      (.mkdirs (java.io.File. (str co "/src")))
+      (git co "init" "-q" "-b" "main")
+      (let [m0 (commit! co "a.clj" "(ns a)")]
+        (git co "worktree" "add" "-q" "-b" "merges" wb)
+        (git co "checkout" "-q" "-b" "topic")
+        (let [topic (commit! co "topic.clj" "(ns topic)") r (read)]
+          (is (not= m0 topic))
+          (is (not (contract/error? r)) (pr-str r))
+          (is (= ["src/a.clj"] (keys (:value r))) "the topic branch's file is not read")
+          (is (= m0 (git wb "rev-parse" "HEAD")) "the write-back branch stays at main"))
+        (git co "checkout" "-q" "main")
+        (let [m1 (commit! co "b.clj" "(ns b)")]
+          (git co "checkout" "-q" "topic")
+          (is (= ["src/a.clj" "src/b.clj"] (keys (:value (read)))) "main's own commit is followed from a topic checkout")
+          (is (= m1 (git wb "rev-parse" "HEAD")))))
+      (finally (sh/sh "rm" "-rf" tmp)))))
+
 (deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
   ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
   ;; a clone of this one (main) and whose source root is a worktree of that clone on its own
@@ -865,6 +923,7 @@
         import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
     (try
       (is (zero? (:exit (sh/sh "git" "clone" "-q" "--local" here main))))
+      (git main "checkout" "-q" "-B" "main") ; the clone's branch main (a worktree's branch is not named main)
       ;; the built libraries, probe library and binary are this checkout's: the clone's target/ is its
       (is (zero? (:exit (sh/sh "ln" "-s" (str here "/target") (str main "/target")))))
       (git main "worktree" "add" "-q" "-b" "write-back" wb)
@@ -909,6 +968,20 @@
                :growth :constant
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
+
+(deftest a-var-the-import-makes-public-may-be-named-by-a-later-file
+  ;; the standing root's main held test-runner/tree-branch private (defn-) while the tree made it
+  ;; public and seon.proofs-test named it: every import of main failed "is not public" and root's
+  ;; program stayed stale (seon.source/analyze-form; docs/failure-points.md)
+  (binding [*ns* *ns*] (eval '(ns app.pubsrc)) (eval '(defn- g [] 1)))
+  (let [db (empty-db)
+        files {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn g [] 1)\n"
+               "src/app/pubuser.clj" "(ns app.pubuser (:require [app.pubsrc]))\n\n(defn h [] (app.pubsrc/g))\n"}]
+    (is (:private (meta (resolve 'app.pubsrc/g))) "the image holds g as private")
+    (is (vector? (source/tx-of db files true)) "the user of g analyzes after the file that makes it public")
+    (is (not (:private (meta (resolve 'app.pubsrc/g)))) "and the image's var is public, as the import defines it")
+    (is (vector? (source/tx-of db {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn- g [] 1)\n"} true)))
+    (is (:private (meta (resolve 'app.pubsrc/g))) "a definition made private again makes the var private")))
 
 (deftest a-source-the-image-cannot-analyze-is-an-error-not-a-throw
   ;; the standing root's watcher died of "var: #'seon.db/install-missing! is not public": a changed file named a var

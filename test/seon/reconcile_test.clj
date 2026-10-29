@@ -697,9 +697,10 @@
 (deftest boot-records-merge-max-running-one
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
-  (let [db (d/db-with (empty-db) (into (task/boot-tx "boot-1" 4) (cfg/facts cfg/config {})))]
+  (let [n (cfg/value :seon.config.agent/max-running)
+        db (d/db-with (empty-db) (into (task/boot-tx "boot-1" n) (cfg/facts cfg/config {})))]
     (is (= 1 (cfg/value :seon.config.merge/max-running)))
-    (is (= {:boot "boot-1" :max-running 4 :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
+    (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
 (deftest two-ready-disjoint-merges-run-one-at-a-time-by-default
   ;; x and y change disjoint definitions: an octopus merge could take both, but the config says 1

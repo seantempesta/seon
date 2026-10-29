@@ -121,6 +121,8 @@ Size: ~1,100 tests × 7 + contracted functions × 4 ≈ 14k datoms, constant; a 
 
 Proofs, to write red first: a test run writes one fact set per test that ran and nothing for a reused one (count datoms per run); the sums: two runs at one digest give runs 2 and the summed ms; a run at a new digest resets them; red → green retracts the failure (and the out-of-line output); green and red at one digest → :flaky, rerun after the code changes; noHistory holds: the history db shows no older values of the overwritten attributes; reuse: an unchanged tree's second `bin/prove` runs nothing (reads the facts); root down: `bin/test` answers UNRECORDED and exits non-zero; an agent's run writes on its branch, not main; the eval answer stays under its bound with 300 reds; cost proof: writing a run's results costs O(tests run), not O(all tests).
 
+Scoped 2026-10-29 (the owner chose \"Agent runs only\" for step R2a of seon.context/the-context-is-the-agents-evals-and-seons): an agent's test runs write these facts on its branch, and the agent's readers (seon.agent/test-plan's reuse, stored-results, my.task/status, the proofs part, the merge check) read them there; bin/test and bin/prove keep the shared file cache for now (reuse across checkouts, no root needed), their move a later step with its own design (a shared store keeps cross-checkout reuse).
+
 Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts
 and docs/storage.md updated; `bin/prove` green; a one-function prove's result lookup still milliseconds."
   :seon.task/kind :work

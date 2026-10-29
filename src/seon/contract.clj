@@ -227,9 +227,41 @@
 ;; map of :seon.error/type (the variant's registered schema key), :seon.error/operation,
 ;; :seon.error/message, optional fix and problems, and the variant's own members.
 
+(defn kept
+  "v as an error may keep it past its moment: itself when it is small plain data (nil, booleans,
+  numbers, keywords, symbols, uuids, instants, strings of at most four characters a token of the
+  form budget (a captured stderr tail is one), and maps, vectors, sets and lists of those, within the part budget's count of
+  nodes). Else a string is the printer's cut of it (`seon.print/prose`: it says what it omitted)
+  and any other value is the one printer's print of it under the part budget, marked code
+  (print/code): a db value, conn, atom, Throwable or lazy seq is always its print, so what an
+  error holds does not depend on the value's size. See docs/errors.md#an-error-keeps-data."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v]
+  (let [budget (:part print/budgets) room (* 4 (:form print/budgets))]
+    (cond
+      (or (nil? v) (boolean? v) (number? v) (keyword? v) (symbol? v) (uuid? v) (inst? v)) v
+      (string? v) (if (<= (count v) room) v (:text (print/prose v budget)))
+      :else (let [left (volatile! budget)
+                  ok (fn ok [x]
+                       (and (pos? (vswap! left dec))
+                            (cond (or (nil? x) (boolean? x) (number? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) true
+                                  (string? x) (<= (count x) room)
+                                  (clojure.core/record? x) false
+                                  (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
+                                  (or (vector? x) (set? x) (list? x)) (every? ok x)
+                                  :else false)))]
+              (if (ok v) v (print/code (print/text v budget)))))))
+
+(defn bounded
+  "The error map m with each member kept (`kept`): the one place an error's values are cut down
+  to what may be held, called by `error` and by seon.agent/error-map for an exception's ex-data."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [m] (into {} (map (fn [[k v]] [k (kept v)])) m))
+
 (defn error
   "The error map of variant `type` raised by `operation`: message plus the variant's
-  members. Checked against the variant's registered schema here, at its constructor. A raiser
+  members, each kept (`bounded`: small plain data as it is, anything else as its print). Checked
+  against the variant's registered schema here, at its constructor. A raiser
   names itself by its var, #'ns/f, the function the error is built in: the compile resolves it, so
   a rename can never leave an error naming a function that is gone (the a-map design read
   seon.render.value/show, renamed away, and searched for it); a symbol is for an operation known
@@ -244,7 +276,7 @@
                        {:seon.error/type :seon.instrument/contract-error :seon.error/operation (symbol #'seon.contract/error)
                         :seon.error/message (str "the built error does not satisfy " type)
                         :seon.error/member :malli.core/invalid-output})))
-     e)))
+     (bounded e))))
 
 (defn error?
   "Is v an error map (it carries :seon.error/type)?"

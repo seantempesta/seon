@@ -18,8 +18,8 @@
   coalescing window: no step sleeps). The answer is joined with health and the events into root's
   process value (process-value), which is part of root's ctx (process!). Every page is the render
   of a ctx through the one walk (seon.render/walker): / root's (root-walk, root's ctx on main),
-  /agent/{name} an agent's chat (drawn by root from its branch), /agent/{name}/debug every
-  render of its ctx (its process's walk, else its branch's drawn by root), /agent/{name}/context
+  /agent/{name} an agent's page, the one render of its ctx the model reads too (its process's walk,
+  else its branch's drawn by root), /agent/{name}/debug its @ctx printed, /agent/{name}/context
   what its model was sent, a name its id in this boot or its branch; each laid out by seon.render.ui/page-chrome into units. Then, per unit: inputs
   before render (an unchanged input renders nothing), bytes before send (an unchanged fragment
   sends nothing); a page renders only the rows a tab has scrolled to (:more raises them). The web
@@ -86,16 +86,20 @@
   it held and moved by what changed (seon.reconcile/index over the watched datoms that differ:
   seon.render-cost-test/a-move-of-main-costs-what-moved), whose runs
   give how each agent's work ended (:agent-run, the words root's process tile uses for its
-  events). Nothing per task or per datom of main is read again."
-  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
-  [st db]
+  events). Nothing per task or per datom of main is read again. moved: the datoms that differ
+  between the main held and db, read once by advance-main; the index moves by those of its watched
+  attributes, so no second diff of each of them is made (one descent apiece: 90 attributes, 14.6 MB)."
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map]
+                  [:=> [:cat :map :seon.host/db [:maybe [:sequential :seon.host/datom]]] :map]]}
+  ([st db] (main-info st db nil))
+  ([st db moved]
   ;; a db no newer than the one held (a first read answered after a commit already came) changes nothing
   (if (<= (:max-tx db) (get-in st [:main :t] -1))
     st
     (let [held (:main-db st)
-          idx (if (and (:idx st) held) (reconcile/index (:idx st) held db) (reconcile/index db))]
+          idx (if (and (:idx st) held) (if moved (reconcile/index (:idx st) held db moved) (reconcile/index (:idx st) held db)) (reconcile/index db))]
       (assoc st :main {:t (:max-tx db)} :main-db db :idx idx
-             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a]))))))
+             :agent-run (into {} (for [a (sort-by :seon.run/start-ms (vals (:runs idx)))] [(:seon.run/agent a) a])))))))
 
 ;;; --- units, rendered incrementally ---------------------------------------------------------
 
@@ -232,10 +236,11 @@
 
 (defn- agent-of
   "The agent entity view names on main db, and its id in root's boot (nil for an earlier boot's):
-  [entity id], or nil when view names no agent."
+  [entity id], or nil when view names no agent. An agent's chat ([:chat v]) names it; its context
+  view ([:debug v]) is a page of its model's requests, not of the agent."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] [:maybe [:tuple :any [:maybe :keyword]]]]}
   [db view]
-  (when-let [eid (when (and db (not (vector? view))) (location db view))]
+  (when-let [eid (when db (let [v (if (= :chat (first-of view)) (second view) view)] (when-not (vector? v) (location db v))))]
     (let [e (d/entity db eid)] (when (:seon.agent/key e) [e (task/this-boots db e)]))))
 
 (defn- live?
@@ -244,16 +249,16 @@
   [st id] (let [a (when id (get-in st [:view :agents id]))] (boolean (and a (not (gone (:status a)))))))
 
 (defn- ask-parts
-  "Ask each live agent a watched view shows for its page's parts ({:op :render}, seon.repl/render-ctx)
+  "Ask each live agent a watched chat shows for its page's parts ({:op :render}, seon.repl/render-ctx)
   when its branch moved since it was last asked (that view's branch read's t), one ask in flight an
   agent, held by its id, so every view of it shows one answer: the agent draws its own page, by its
-  own renders."
+  own renders, the parts its model reads."
   {:malli/schema [:=> [:cat :map :seon.host/volatile] :map]}
   [st o]
   (reduce (fn [st view]
             (let [[_ id] (agent-of (:main-db st) view)
                   t (some-> (get-in st [:branches view :db]) :max-tx)]
-              (if (and t (live? st id) (not= t (get-in st [:parts id :asked])))
+              (if (and t (= :chat (first-of view)) (live? st id) (not= t (get-in st [:parts id :asked])))
                 (-> (assoc-in st [:parts id :asked] t) (ask o [:parts id] {:op :render :id id}))
                 st)))
           st (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st)))))
@@ -267,11 +272,11 @@
   on main. Root's agents (the sidebar) are root's chrome; its input (seon.render.ui/agent-input)."
   {:malli/schema [:=> [:cat :map :any :seon.host/db pos-int?] :map]}
   [st view db eid]
-  (let [;; [:chat v]: the agent's chat, drawn by root from its branch with the chat's layout
+  (let [;; [:chat v]: the agent's page, the render of its ctx; else (its debug view) its ctx printed
         chat? (vector? view)
         [e id] (agent-of db (if chat? (second view) view))
         held (get-in st [:parts id])
-        own? (and (not chat?) (live? st id) (vector? (:units held)))
+        own? (and chat? (live? st id) (vector? (:units held)))
         berr (get-in st [:branches view :error])
         bdb (get-in st [:branches view :db])
         ;; the branch's record, drawn outside the read set: a move of the branch marks this page dirty
@@ -283,11 +288,18 @@
                                       (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))
                                   t (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                   w (binding [datahike.index.interface/*reads* nil]
-                                      (render/draw t ctx/changes bdb (render/declared-var (if chat? :seon.render/chat-ctx :seon.render/render-ctx))))]
+                                      (render/draw t ctx/changes bdb (render/declared-var :seon.render/render-ctx)))]
                               (try (render/placed-units w) (finally (render/dispose-walk! w)))))
+        ;; the debug view: @ctx printed, the agent's record as data by the one printer (its :seon.ctx/ctx render)
+        ctx-units (fn [] (let [t (binding [datahike.index.interface/*reads* nil]
+                                   (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (:seon.agent/branch e))))]
+                           [{:id "d-ctx" :container "#c-rows" :rev (:t t)
+                             :html (h/html [:li {:id "d-ctx"} (binding [datahike.index.interface/*reads* nil]
+                                                                (render/html {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         units (if own?
                 (:units held)
-                (cond bdb (branch-units)
+                (cond (and bdb (not chat?)) (ctx-units)
+                      bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/html {} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
@@ -297,7 +309,7 @@
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
-                      :caption (when-not (or own? chat?)
+                      :caption (when (and chat? (not own?))
                                  (str "drawn by root from its branch with main's renders: "
                                       (cond (:error held) (str "its process did not answer (" (:seon.error/message (:error held)) ")")
                                             (live? st id) "its process has not answered yet"
@@ -471,7 +483,7 @@
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
       (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (-> (root-walk (main-info st db) db held) (health! held db moved))
+        (cond-> (-> (root-walk (main-info st db moved) db held) (health! held db moved))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- pass-view
@@ -710,7 +722,7 @@
     ;; an agent drew its page's parts (or did not: gone, refused): held for its view, which renders again
     (and (vector? kind) (= :parts (first kind)))
     (let [id (second kind)
-          views (filter #(= id (second (agent-of (:main-db st) %))) (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))]
+          views (filter #(and (= :chat (first-of %)) (= id (second (agent-of (:main-db st) %)))) (into (:watch st #{}) (concat (vals (:waiting st)) (:kf-wanted st))))]
       (pass (-> (update-in st [:parts id] #(if (seon.contract/error? r) (-> % (dissoc :units) (assoc :error r)) (-> % (dissoc :error) (assoc :units (:units r)))))
                 (update :dirty (fnil into #{}) views))
             o))

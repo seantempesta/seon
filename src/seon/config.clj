@@ -8,17 +8,18 @@
 
   - the checkout (`SEON_CHECKOUT`, which bin/env exports for the binary, else `JOLT_PWD`,
     which `jolt run` callers set), where the file and the checkout-relative paths live;
-  - the profile (`SEON_PROFILE`, default `:default`), handed to aero's `#profile`;
-  - overrides: aero's `#env` in the file itself; the command line's `--config FILE` and
-    `--set :ns/key=edn` (every mode of the binary; taken out of the mode's args). Later layers
-    win, key by key; `sources` names the layer of each key. A checkout's `config/local.edn`
+  - overrides: aero's `#env` in the file itself (leaving: seon.config/per-run-keys-ride-the-command-line),
+    and, all on the command line (every mode of the binary; taken out of the mode's
+    args): `--profile NAME` (default `:default`; aero's `#profile` reads the file under it, and
+    `:seon.config.root/profile` records it), then `--config FILE` and `--set :ns/key=edn`.
+    Later layers win, key by key; `sources` names the layer of each key. A checkout's `config/local.edn`
     (gitignored; its ports, and the standing root's source) is no implicit layer: bin/root
     and bin/ports pass it with --config, so a check's or a test's process reads only what its
     command line gives it.
 
   The file is read once, when this namespace loads (root's boot: every process of the
   platform is root or forked from it, so agents and the fork server hold the same value and
-  read no environment). A value resolving to nil (an unset `#env` with no fallback) is
+  read no environment). A value resolving to nil (an unset `#env`) is
   absent; the result must satisfy `:seon.config/config` (a closed map: an unknown key, an
   invalid value or a missing required key refuses boot with `:seon.config/refused`). Root
   writes the resolved config as facts on main's root entity (`facts`), platform records a
@@ -30,7 +31,7 @@
   (:require [seon.edn :as sedn] [aero.core :as aero] [malli.core :as m] [malli.registry :as mr] [clojure.edn :as edn]
             [clojure.java.io :as io] [clojure.string :as str] [datahike.api :as d] [datahike.db.utils :as dbu]))
 
-;; ---- where: the checkout and the profile (the loader's own two environment reads) ----------
+;; ---- where: the checkout (the loader's bootstrap environment read) ----------
 
 (defn checkout
   "The checkout this process runs from: SEON_CHECKOUT (bin/env exports it; the binary runs
@@ -44,12 +45,6 @@
       (let [msg "neither SEON_CHECKOUT nor JOLT_PWD is set: the checkout the config file and its paths are read from (bin/env exports SEON_CHECKOUT)"]
         (throw (ex-info msg {:seon.error/type :seon.config/refused :seon.error/operation (symbol #'seon.config/checkout)
                              :seon.error/message msg}))))))
-
-(defn profile
-  "The aero profile this process reads the file under: SEON_PROFILE as a keyword, else :default."
-  {:malli/schema [:=> [:cat] :keyword]}
-  []
-  (let [p (System/getenv "SEON_PROFILE")] (if (str/blank? p) :default (keyword p))))
 
 (defn path
   "The config file in checkout dir."
@@ -206,22 +201,35 @@
 
 (defn overrides
   "The command line's config overrides, in order, and the rest of it:
-  {:layers [[source map-or-path] ...] :rest [arg ...]}. `--config FILE` is a layer read
-  from FILE; `--set :k=v` one key."
-  {:malli/schema [:=> [:cat [:sequential :string]] [:map [:layers vector?] [:rest [:vector :string]]]]}
+  {:layers [[source map-or-path] ...] :rest [arg ...] :profile NAME-or-nil}. `--config FILE` is
+  a layer read from FILE; `--set :k=v` one key; `--profile NAME` the aero profile the files
+  are read under (not a layer: the last one given wins)."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:map [:layers vector?] [:rest [:vector :string]] [:profile [:maybe :string]]]]}
   [args]
-  (loop [[a b & more :as as] (seq args) acc {:layers [] :rest []}]
+  (loop [[a b & more :as as] (seq args) acc {:layers [] :rest [] :profile nil}]
     (cond
       (empty? as) acc
+      (and (= "--profile" a) b) (recur more (assoc acc :profile b))
       (and (= "--config" a) b) (recur more (update acc :layers conj [(str "--config " b) b]))
       (and (= "--set" a) b) (recur more (update acc :layers conj ["--set" (into {} [(parse-set b)])]))
-      (#{"--config" "--set"} a) (refuse! #'seon.config/overrides (str a " needs an argument"))
+      (#{"--config" "--set" "--profile"} a) (refuse! #'seon.config/overrides (str a " needs an argument"))
       :else (recur (rest as) (update acc :rest conj a)))))
 
 (defn without-overrides
-  "args with --config and --set (and their arguments) taken out: what a mode reads."
+  "args with --profile, --config and --set (and their arguments) taken out: what a mode reads."
   {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]}
   [args] (:rest (overrides args)))
+
+(declare config)
+
+(defn profile
+  "The aero profile the config file is read under: --profile NAME on args as a keyword, else
+  :default; with no args, the profile of the config in force (:seon.config.root/profile, read
+  once from this process's command line when the config loaded: *command-line-args* is unbound
+  in an eval's thread). See docs/config.md#layers."
+  {:malli/schema [:function [:=> [:cat] :keyword] [:=> [:cat [:sequential :string]] :keyword]]}
+  ([] (or (get config :seon.config.root/profile) (profile (argv))))
+  ([args] (if-let [p (:profile (overrides args))] (keyword p) :default)))
 
 (defn- read-layer
   "One file layer read with aero under prof, #seon/checkout resolving under dir; nil values
@@ -241,18 +249,22 @@
      :sources (into {} (for [[src l] layers [k v] l :when (some? v)] [k src]))}))
 
 (defn load-layers
-  "The layers this process reads: the shipped file, then the command line's --config files
-  and --set keys, in order. The checkout's config/local.edn is a layer only when a
+  "The layers this process reads: the shipped file under the command line's --profile, the
+  profile's own record (:seon.config.root/profile), then its --config files and --set keys,
+  in order. The checkout's config/local.edn is a layer only when a
   --config names it (bin/root, bin/ports): read implicitly, it gave a check's root in the
   main tree the standing root's source tree (task seon.check/a-checks-roots-take-explicit-config)."
-  {:malli/schema [:=> [:cat :string :keyword [:sequential :string]] [:vector [:tuple :string :map]]]}
-  [dir prof args]
-  (into [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]]
-        (for [[src x] (:layers (overrides args))]
-          [src (if (string? x) (read-layer x prof dir) x)])))
+  {:malli/schema [:=> [:cat :string [:sequential :string]] [:vector [:tuple :string :map]]]}
+  [dir args]
+  (let [{:keys [layers profile]} (overrides args)
+        prof (if profile (keyword profile) :default)]
+    (into [["resources/seon/config/default.edn" (read-layer (path dir) prof dir)]
+           [(if profile (str "--profile " profile) "no --profile") {:seon.config.root/profile prof}]]
+          (for [[src x] layers]
+            [src (if (string? x) (read-layer x prof dir) x)]))))
 
 (def ^:private loaded
-  (let [dir (checkout)] (layered (load-layers dir (profile) (argv)))))
+  (let [dir (checkout)] (layered (load-layers dir (argv)))))
 
 (def config
   "This process's config: every layer, read once at load (root's boot; agents are forked

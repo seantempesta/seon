@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
 
 (deftest the-memory-probe-answers-what-the-process-holds
   ;; lib/mp-probe reads the kernel's ledger (one task_info call): this process's own memory in MB,
@@ -51,7 +51,7 @@
   (target/seon forks k): a process forks from its main carrier, where it is the one thread,
   never from this runner's, whose runtime threads would race the fork."
   [k]
-  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k :dir "target")]
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "forks" k "--profile" (name (config/profile)) :dir "target")]
     (if (zero? exit) (edn/read-string (last (str/split-lines out))) {:exit exit :err err})))
 
 (deftest a-forked-child-that-throws-exits-and-never-returns-into-its-parent
@@ -112,7 +112,18 @@
   (let [{:keys [before held child after] :as r} (fork-case "memory-gauge")]
     (is (and before held (< 285 (- held before) 330)) (str "a 300 MB block written: " (pr-str r)))
     (is (= {:exit 0} child) "a forked child is charged the 30 MB it writes")
-    (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r)))))
+    (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r))))
+  ;; the reading child (case "touch-gauge", task seon.lib/scale-charges-what-the-machine-lost): a
+  ;; parent holds 200 MB it wrote; a child that only reads every page is charged ~200 MB, as the
+  ;; one that writes them is, though only the writer takes memory from the machine. That second
+  ;; half is the machine's free plus inactive pages (lib/sysmem), which every process on the
+  ;; machine moves (measured 2026-10-29 at load 10: the writer's drop was 0 to 156 MB of its
+  ;; 200, the reader's -4 to 15), so it is recorded in the failure message and docs/cost.md, never
+  ;; judged: only the ledger's charge (a count of the child's own pages) and a reading that came back are.
+  (let [{:keys [read write] :as r} (fork-case "touch-gauge")]
+    (is (and (< 190 (:charged read) 230) (< 190 (:charged write) 230)) (str "both children are charged what they touch: " (pr-str r)))
+    (is (and (= {:exit 0} (:exit read) (:exit write)) (number? (:machine-drop read)) (number? (:machine-drop write)))
+        (str "both children ran and read the machine's memory: " (pr-str r)))))
 
 (deftest a-forked-child-runs-go-blocks-and-makes-a-store
   ;; fork(2) copies only the calling thread, so the child inherits the runtime's bookkeeping and

@@ -125,20 +125,21 @@
 
 (defn- follow-main
   "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
-  branch of the main checkout co (of the same repository: another one's commits are none of its
-  history): fast-forwarded (git merge --ff-only in base) when its HEAD is an
-  ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
-  either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
+  ref of the branch main in co's repository (of the same repository: another one's commits are none
+  of its history), never co's checked-out HEAD: fast-forwarded (git merge --ff-only in base) when
+  its HEAD is an ancestor of it, so the source follows main with no step of the owner's, whatever
+  branch the main tree has checked out (docs/source.md#mains-program-follows-the-tree). nil when
+  base is co, either is no checkout of its own, co's repository has no branch main, or base is at main already; the gap
   {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
   when base holds commits main lacks, or {:main :source :refused git's words} when the fast-forward
   is refused (a dirty tree): read-source records either and imports the tree as it is."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [base co]
   (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base) (same-repository? base co))
-                 (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
-        main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
-        source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
-    (when (and branch (not= main source))
+                 "main")
+        main (when branch (git-try co ["rev-parse" "--verify" "--quiet" "refs/heads/main"]))
+        source (when main (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
+    (when (and main (not= main source))
       (if (zero? (:exit (git-run {} base ["merge-base" "--is-ancestor" "HEAD" main] nil)))
         (let [r (git-run {} base ["merge" "--ff-only" "-q" main] nil)]
           (when-not (zero? (:exit r)) {:main main :source source :refused (str/trim (str (:err r)))}))
@@ -158,7 +159,7 @@
   inputs only for a binary built from this very tree. In a git repository also :tree, the id
   of the whole tree as it is on disk (tree-id: git's own index makes it the cost of what
   changed), which stands for every file's content.
-  With :follow (the main checkout), root's tree is first brought to that checkout's branch
+  With :follow (the main checkout), root's tree is first brought to the branch main of that checkout's repository (never its checked-out HEAD)
   (follow-main): fast-forwarded when it is behind (the files it moved are read whole, :paths
   set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
   refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
@@ -208,27 +209,28 @@
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data
-  root loads, no test's code), prose (.md), the shipped config (resources/seon/config/: its
-  values are :config's, which a test's digest takes by the keys it reads) and the schema
-  resources (their entries are program facts: a test's digest takes the entries its reach names)?
+  root loads, no test's code), prose (.md) and the shipped config (resources/seon/config/: its
+  values are :config's, which a test's digest takes by the keys it reads)? The schema resources
+  are in: their entries are program facts, which a test's digest takes by the entries its reach
+  names, and their class (env-class) for a reach that reads a db's whole schema.
   (claude_scratch/ is already out of the tree, tree-id's excludes.)"
   {:malli/schema [:=> [:cat :string] :boolean]}
   [p]
   (not (or (str/ends-with? p ".md")
            (str/starts-with? p "resources/seon/tasks/")
            (str/starts-with? p "resources/seon/config/")
-           (str/starts-with? p "resources/seon/schemas/")
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
 (defn- env-class
-  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps or /bin, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
+  "The class of the env-input? file at relative path p: :seon.env/system, /web, /deps, /bin or /schemas, each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
   [p]
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
-        (str/starts-with? p "bin/") :seon.env/bin))
+        (str/starts-with? p "bin/") :seon.env/bin
+        (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas))
 
 (defn- group-entries
   "The :seon.pin class of each source group cfg's :seon.config.source/pin-namespaces names
@@ -605,6 +607,7 @@
   ([dir cand]
   (reduce (fn [acc [k dg]]
             (let [g (read-verdict (verdict-path dir k dg :pass)) r (read-verdict (verdict-path dir k dg :red))]
+              (doseq [[v st] [[g :pass] [r :red]] :when (map? v)] (.setLastModified (java.io.File. ^String (verdict-path dir k dg st)) (System/currentTimeMillis)))
               (cond (contract/error? g) (reduced g)
                     (contract/error? r) (reduced r)
                     :else (if-let [v (proofs/verdict dg (when g {:digest dg :pass 1 :fail 0 :error 0})
@@ -623,36 +626,63 @@
              :let [[_ dg st] (re-matches #"([^.]+)\.(pass|red)\.edn" (.getName f))] :when dg]
          [dg (keyword st) f])))
 
+(defn- ledger-bytes
+  "The size the cache at dir last wrote down for itself (its .size file), nil when it has none or
+  cannot read it (then the next write counts the cache)."
+  {:malli/schema [:=> [:cat :string] [:or :nil :int]]}
+  [dir]
+  (let [f (java.io.File. ^String dir ".size")]
+    (when (.isFile f) (parse-long (str/trim (slurp f))))))
+
+(defn- verdict-listing
+  "Every verdict file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata
+  alone (a staged file or the .size ledger is not a verdict)."
+  {:malli/schema [:=> [:cat :string] [:vector :any]]}
+  [dir]
+  (vec (for [^java.io.File f (file-seq (java.io.File. ^String dir)) :when (and (.isFile f) (str/ends-with? (.getName f) ".edn"))]
+         [f (.length f) (.lastModified f)])))
+
 (defn- evict!
-  "Leave key k at most :seon.config.proofs/results-per-test digests, removing the lowest digest
-  strings first (digests are hashes, so which goes is arbitrary, never the oldest: a cache), never kept
-  (the one just written) nor a digest with a red file (a red or a flaky verdict is never laundered by
-  its eviction, so a key red at many digests keeps them all until its files are removed by hand). A
-  file that would not delete stays (an extra digest, never an error). Answers nil."
-  {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string] :string] :nil]}
-  [dir k kept]
-  (let [files (verdict-files dir k)
-        dgs (sort (distinct (map first files)))
-        red (into #{} (keep (fn [[dg st]] (when (= :red st) dg))) files)
-        excess (- (count dgs) (cfg/value :seon.config.proofs/results-per-test))
-        gone (set (take (max 0 excess) (remove #(or (= kept %) (red %)) dgs)))]
-    (doseq [[dg _ ^java.io.File f] files :when (gone dg)] (.delete f))))
+  "Keep the cache at dir within max-bytes after a write of added bytes (the files at kept, never
+  removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
+  bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
+  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results
+  touches a verdict it reads) go first, greens and reds alike, until the cache is under the bound, and
+  the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
+  higher guess, corrected by the next count. A file that would not delete stays (a cache a little
+  over, never an error). Answers nil."
+  {:malli/schema [:=> [:cat :string :int [:set :string] :int] :nil]}
+  [dir added kept max-bytes]
+  (let [known (ledger-bytes dir)
+        total (some-> known (+ added))
+        ledger! (fn [n] (write-file {:req {:path (str dir "/.size") :text (str n)}}) nil)]
+    (if (and total (<= total max-bytes))
+      (ledger! total)
+      (let [files (verdict-listing dir)
+            size (reduce + (map second files))]
+        (ledger! (loop [[[^java.io.File f n] & more] (sort-by #(nth % 2) (remove #(kept (str (first %))) files)) size size]
+                   (if (and f (> size max-bytes))
+                     (recur more (if (.delete f) (- size n) size))
+                     size)))))))
 
 (defn write-verdicts!
   "Cache what ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes :fns :cost} or a
   step's {:step :digest ...}) of run ({:id, and :tree or :branch :t}, the writer every file names), with
   failures ({key [assertion]}, seon.proofs/failures): one file a key at its digest and status, written by
-  write-file (staged, then renamed over), then the key's excess evicted. A flaky result (judged, not run),
+  write-file (staged, then renamed over), then the cache held within :seon.config.proofs/results-max-bytes
+  (the least recently used verdicts evicted, never one just written). A flaky result (judged, not run),
   an :unreported one (no verdict of its own) and one with no :digest write nothing. Answers {:recorded n},
   or the first write's :seon.fx/io-error: those verdicts are not cached, so they run again. Nothing is
   written to the store: a verdict is derived data (docs/merging.md#verdicts-are-a-cache). dir: the cache's
-  (:seon.config.proofs/results-dir unless given)."
+  (:seon.config.proofs/results-dir unless given), max-bytes its bound (:seon.config.proofs/results-max-bytes)."
   {:malli/schema [:function [:=> [:cat :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]
-                  [:=> [:cat :string :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]]}
+                  [:=> [:cat :string :map [:map-of :any :map] [:map-of :any [:sequential :map]]] [:or [:map [:recorded nat-int?]] :seon.error/base]]
+                  [:=> [:cat :string :map [:map-of :any :map] [:map-of :any [:sequential :map]] :int] [:or [:map [:recorded nat-int?]] :seon.error/base]]]}
   ([run ran failures] (write-verdicts! (cfg/value :seon.config.proofs/results-dir) run ran failures))
-  ([dir run ran failures]
-  (let [writer (select-keys run [:id :tree :branch :t :agent])]
-    (reduce (fn [acc [k r]]
+  ([dir run ran failures] (write-verdicts! dir run ran failures (cfg/value :seon.config.proofs/results-max-bytes)))
+  ([dir run ran failures max-bytes]
+  (let [writer (select-keys run [:id :tree :branch :t :agent])
+        done (reduce (fn [acc [k r]]
               (let [st (proofs/status-of r)
                     v (cond-> {:key k :digest (:digest r) :status st :writer writer}
                         (:ms r) (assoc :ms (long (:ms r)))
@@ -665,9 +695,11 @@
                                          :text (sedn/encode v)}})]
                 (if (contract/error? w)
                   (reduced w)
-                  (do (evict! dir k (:digest r)) (update acc :recorded inc)))))
-            {:recorded 0}
-            (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r)))) ran)))))
+                  (-> acc (update :recorded inc) (update :bytes + (:bytes (:value w))) (update :kept conj (:path (:value w)))))))
+            {:recorded 0 :bytes 0 :kept #{}}
+            (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r)))) ran))]
+    (when-not (contract/error? done) (when (pos? (:recorded done)) (evict! dir (:bytes done) (:kept done) max-bytes)))
+    (if (contract/error? done) done (select-keys done [:recorded])))))
 
 (defn last-ms
   "{test ms} of tests: the most ms any of a test's cached verdicts measured, whatever its digest: what
@@ -936,12 +968,13 @@
   ([] {:params {:kind "the effect kind" :workers "performers, its concurrency"
                 :rate "tokens per second the provider admits (nil: no bucket)"
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
+                :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
        :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
-  ([args] (assoc (select-keys args [:kind :workers :batch]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
+  ([args] (assoc (select-keys args [:kind :workers :batch :close?]) :busy 0 :done 0 :seq 0 :queue (sorted-map) :spent {}
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
@@ -955,7 +988,14 @@
        (case in
          :in (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
-         :done [(bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o)) @o]
+         :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
+                 ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
+                 ;; empty and nothing in flight is that event, told to the worker as the next item, unless an
+                 ;; answered request said more of its own were coming (:more in its :req: main's backlog, whose next
+                 ;; round is asked once this one's vectors are written)
+                 (when (and (:close? st) (zero? (:busy st)) (empty? (:queue st)) (not-any? #(get-in % [:request :req :more]) (or (:batch m) [m])))
+                   (step/out! o :to-workers {:idle true}))
+                 [st @o])
          :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
 
 (defn worker-proc
@@ -965,10 +1005,14 @@
   is one outcome per request, in order. A kind with :open holds a host object (a model): the
   worker makes it on its first item, (open ctx), keeps it in its own state, and gives it to
   perform as :handle; an open that answers an error is every request's outcome, and the next
-  item opens again. The entrant boundary for a defect in the perform Var: the defect is the
+  item opens again. A kind with :close is told when its owner's queue has emptied ({:idle true}, no
+  outcome): (close handle) lets go of what the handle holds outside the process and answers its
+  facts (docs/vector.md#the-model), kept in the ping as :closed; the handle stays and a later item
+  uses it again. The entrant boundary for a defect in the perform Var: the defect is the
   outcome, as an error map, so its asker is always answered."
   {:malli/schema :seon.step/step-fn}
-  ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"} :ins {} :outs {}
+  ([] {:params {:perform "the kind's perform Var" :open "the Var that makes the kind's host object from :ctx (nil: none)"
+                :close "the Var that lets go of what the host object holds when the owner's queue is empty (nil: none)"} :ins {} :outs {}
        ;; the effect blocks in native IO (an HTTP read, a file write). Jolt runs :io procs
        ;; on fibers bound to their carrier thread for life, and a blocking FFI call pins the
        ;; carrier, stranding every other fiber placed on it (inv2: replies 4-15 s late).
@@ -976,13 +1020,16 @@
        ;; worker count already bounds the threads
        :workload :mixed
        ;; :open?: it holds its kind's host object (a model's foreign threads run while it does)
-       :ping-map-fn (fn [st] (-> (select-keys st [:n]) (assoc :open? (some? (:handle st)))))})
-  ([args] {:perform (:perform args) :open (:open args) :kind (:kind args) :ctx (:ctx args) :n 0
+       :ping-map-fn (fn [st] (-> (select-keys st [:n :closed]) (assoc :open? (some? (:handle st)))
+                                   (cond-> (:facts (:handle st)) (assoc :host @(:facts (:handle st))))))})
+  ([args] {:perform (:perform args) :open (:open args) :close (:close args) :kind (:kind args) :ctx (:ctx args) :n 0
            :owner (:owner args) ::flow/in-ports {:work (:work args)}})
   ([st _] st)
   ([st _ m]
-   (if (nil? m)
-     [st nil]
+   (cond
+     (nil? m) [st nil]
+     (:idle m) [(cond-> st (and (:close st) (:handle st)) (assoc :closed ((:close st) (:handle st)))) nil]
+     :else
      (let [ms (or (:batch m) [m])
            t0 (profile/now-ns)
            ;; the host object, kept once made even when perform then throws
@@ -1028,17 +1075,18 @@
   {:malli/schema [:=> [:cat :map :seon.host/chan] :map]}
   [kinds back]
   (reduce-kv
-    (fn [acc kind {:keys [perform open workers ctx rate batch]}]
+    (fn [acc kind {:keys [perform open close workers ctx rate batch]}]
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
                           :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
-                                  batch (assoc :batch batch))})
+                                  batch (assoc :batch batch)
+                                  close (assoc :close? true))})
             (into (for [i (range workers)]
                     [(keyword (str "fx." (name kind)) (str i))
-                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :ctx ctx :work work :owner owner}}])))))
+                     {:proc (flow/process #'worker-proc) :args {:kind kind :perform perform :open open :close close :ctx ctx :work work :owner owner}}])))))
     {} kinds))
 
 (defn stall-evidence

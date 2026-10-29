@@ -1249,8 +1249,9 @@
 
 ;; See docs/health.md#a-function-that-cites-no-section
 (deftest a-public-var-cites-the-section-that-describes-it
-  (let [db (var-forms (ts/test-db) 6
+  (let [db (var-forms (ts/test-db) 7
                       (fn [i] (case (int i)
+                                7 {:src "(seon.contract/defn n [])" :doc "Does a thing."}
                                 1 {:src "(defn f [])" :doc "Does a thing."}
                                 2 {:src "(defn g [])" :doc "Does a thing. See docs/health.md#a-dead-citation."}
                                 3 {:src "(defn- h [])" :doc "A private thing."}
@@ -1259,7 +1260,7 @@
                                 6 {:src "(defn m [])" :doc "See docs/errors.md#problems."})))
         v #(symbol (cite-ns db) (str "v" %))
         rows #(mapv (comp :var :evidence) (problems/uncited-vars db {} (into #{} (map v) %)))]
-    (is (= [(v 1) (v 4)] (rows [1 2 3 4 5 6])) "a documented public var citing nothing and an undocumented one; a cited one, a private one and a test are not")
+    (is (= [(v 1) (v 4) (v 7)] (rows [1 2 3 4 5 6 7])) "a documented public var citing nothing and an undocumented one, and one defined by a namespaced defn; a cited one, a private one and a test are not")
     (is (= [] (problems/uncited-vars db {} #{})) "no changed var, nothing read")
     (is (= [] (problems/uncited-vars db {} #{'app.nowhere/x})) "a name no var has")
     (testing "attention: a branch that adds an uncited public var is told, never refused (AGENTS section 4), and a var the base already left uncited is not its problem"
@@ -1275,10 +1276,11 @@
 (deftest uncited-vars-follow-the-vars-asked-for
   (cost/proof {:of 'seon.problems/uncited-vars :input 'seon.problems-test/uncited-var-input
                :n "changed public vars, each with a docstring that cites nothing"
-               :work "once: the program's namespaces (seon.program/program-nss); per named var: one AVET seek, its entity, its docstring and its form's text, and one row"
+               :work "once: the program's namespaces (seon.program/program-nss); per named var: one AVET seek, its entity, its docstring and its form's head (read by seon.source/first-head), and one row"
                :growth :linear
-               ;; measured 2026-10-27: 130k ticks / 406 KB / 22 calls at 10, 3.87M / 11.9 MB / 602 at 300
-               :per-n {:ticks 13000 :bytes 39500 :calls 2}
+               ;; measured 2026-10-27: 130k ticks / 406 KB / 22 calls at 10, 3.87M / 11.9 MB / 602 at 300;
+               ;; 2026-10-29, the form's head read by seon.source/first-head (one contracted call per var): 32 calls at 10
+               :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 2}
                :sizes [10 100 1000]}))
 

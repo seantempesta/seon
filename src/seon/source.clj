@@ -56,6 +56,10 @@
   (let [nsx (program/ensure-ns! nsym)]
     (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym)) form))))
 
+(def ^:private defining-heads
+  "The heads of the top-level forms that define a var by their second element."
+  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
+
 (defn analyze-form
   "The compiler's account units of form in namespace nsym, analyzed without running it. A
   form that sets up its namespace's environment is run first (the ns form, a defmacro whose
@@ -64,7 +68,10 @@
   are the file's, whatever the namespace held before (a binary's own namespace, one of
   test/'s that main's program loaded with its old ns form, or one another namespace's
   require marked loaded), and running it again on the namespace it set up changes nothing.
-  Answers {:units [...] :ns-form? b}."
+  A var the image already holds takes the privacy this definition gives it (defn-, ^:private), so a
+  file analyzed after it in load order may name a var the same import makes public: root's main
+  held test-runner/tree-branch private while the tree made it public, and every import of main
+  failed (docs/failure-points.md). Answers {:units [...] :ns-form? b}."
   {:malli/schema [:=> [:cat :symbol :any] :map]}
   [nsym form]
   (let [nsx (program/ensure-ns! nsym)
@@ -74,6 +81,14 @@
     (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
+    ;; a var the image holds takes the privacy its new definition gives it, so a file analyzed
+    ;; after this one (in load order) may name a var made public by the same import
+    (when-let [v (and (seq? form) (symbol? (second form))
+                      (contains? defining-heads (symbol (name (first form))))
+                      (get (ns-interns nsx) (second form)))]
+      (let [private? (boolean (or (= "defn-" (name (first form))) (:private (meta (second form)))))]
+        (when (not= private? (boolean (:private (meta v))))
+          (alter-meta! v assoc :private private?))))
     {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
 
 (defn accounts
@@ -96,10 +111,6 @@
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))}))
 
-(def ^:private defining-heads
-  "The heads of the top-level forms that define a var by their second element."
-  '#{def defn defn- defmacro defmulti defonce defprotocol defchecked deftest})
-
 (defn defining-ids
   "The form id of the form defining each var in text, the file of namespace nsym: {qualified var
   symbol form-id}, the id seon.program/account gives the form (the namespace and the form's exact
@@ -115,6 +126,25 @@
                        (when (and (seq? form) (symbol? (first form)) (contains? defining-heads (symbol (name (first form)))) (symbol? (second form)))
                          [(symbol (str ns) (name (second form))) (program/form-id ns src k)]))))
           (:forms (read-forms nsym text)))))
+
+(defn first-head
+  "The name (a string) of the head of the form text (one form, as a recorded form's :form/src), read in namespace nsym, or nil when
+  that form is not a list headed by a symbol: what kind of definition a recorded form's source is
+  (`defn`, `defn-`, `defmacro`, whatever its namespace: seon.contract/defn is `defn`), told by the
+  reader and never by the text's first characters. See docs/health.md#a-function-that-cites-no-section."
+  {:malli/schema [:=> [:cat :symbol :string] [:maybe :string]]}
+  [nsym text]
+  (let [f (binding [*ns* (or (find-ns nsym) *ns*)] (read-string text))]
+    (when (and (seq? f) (symbol? (first f))) (name (first f)))))
+
+(defn mentions?
+  "Whether a form of text (the file of namespace nsym) holds the symbol sym, unqualified, as a symbol
+  anywhere in it: found by the reader, so a name in a string, a comment or inside a longer symbol is
+  not a mention. What seon.docs/baseline-reads asks of an old file's forms."
+  {:malli/schema [:=> [:cat :symbol :string :symbol] :boolean]}
+  [nsym text sym]
+  (boolean (some #(and (symbol? %) (nil? (namespace %)) (= sym %))
+                 (mapcat #(tree-seq coll? seq (:form %)) (:forms (read-forms nsym text))))))
 
 (defn defining-meanings
   "What a section citing each var defined in text (the file of namespace nsym) describes of it, as
@@ -409,7 +439,8 @@
 (defn tx-of
   "The facts that bring db's program up to date with files ({relative path text}): refresh-tx of them
   when changed? (they are the files that changed), else replace-tx of them (they are the tree). A
-  file the running image cannot analyze (a form names a var the image holds as private or not at all)
+  file the running image cannot analyze (a form names a var the image holds as private and the
+  import does not make public, or a var it lacks)
   answers :seon.source/unanalyzable, its message the analyzer's, never a throw: root's watcher goes on
   and the next batch tries again (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] :boolean] [:or :seon.db/tx-data :map]]}

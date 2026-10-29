@@ -71,13 +71,48 @@
 (deftest seon-checkout-is-derived-at-load
   (is (= (str (config/checkout) "/resources/seon/system.edn") (:checkout (tags)))))
 
+;; ---- no #env without a setter ------------------------------------------------------------
+
+(defn- env-tags
+  "The names every #env tag of the config file text read (as edn tagged literals) names."
+  [text]
+  (->> (edn/read-string {:default tagged-literal} text)
+       (tree-seq #(or (coll? %) (tagged-literal? %)) #(if (tagged-literal? %) [(:form %)] (if (map? %) (mapcat identity %) (seq %))))
+       (filter #(and (tagged-literal? %) (= 'env (:tag %))))
+       (map #(str (:form %)))
+       distinct sort))
+
+(def ^:private env-awaiting-their-task
+  "#env tags nothing in bin/, src/, test/ or config/ sets, kept for now: the owner's switches for a
+  paid model's name and for benches (docs/model.md, docs/vocabulary.md); task
+  seon.config/per-run-keys-ride-the-command-line turns each into a --set and empties this set."
+  #{"SEON_AI_MODEL" "SEON_INSTRUMENT"})
+
+;; docs/config.md#layers: `#env` appears only where a script sets one
+(deftest no-env-tag-names-a-variable-nothing-sets
+  (let [root (config/checkout)
+        names (env-tags (slurp (config/path root)))
+        sources (concat (filter #(.isFile %) (file-seq (java.io.File. (str root "/bin"))))
+                        (filter #(.isFile %) (file-seq (java.io.File. (str root "/src"))))
+                        (filter #(and (.isFile %) (not (str/ends-with? (.getName %) "config_test.clj"))) (file-seq (java.io.File. (str root "/test"))))
+                        [(java.io.File. (str root "/config/local.edn"))])
+        text (apply str (for [f sources :when (.isFile f)] (slurp f)))
+        set-somewhere? (fn [n] (boolean (some #(str/includes? text %) [(str n "=") (str "export " n)])))]
+    (is (seq names) "the reader finds the file's #env tags")
+    (is (= [] (vec (remove set-somewhere? (remove env-awaiting-their-task names))))
+        "an #env tag whose variable no script, source or test sets is a hidden layer nothing uses: delete it")
+    (is (= env-awaiting-their-task (set (filter (set names) env-awaiting-their-task)))
+        "an exception whose tag has gone leaves the set")
+    (is (every? (complement set-somewhere?) env-awaiting-their-task)
+        "an exception that something now sets leaves the set")))
+
 ;; ---- the shipped file and its schemas ----------------------------------------------------
 
 (deftest the-shipped-file-validates-under-every-profile
   ;; the scripted model's script is stated only under :scripted (checks and tests)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (read-file (config/path (config/checkout)) p (config/checkout))]
-      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= (set (keys c)) (set (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
                                          (config/keys-declared)))) p)))
   (let [shipped #(read-file (config/path (config/checkout)) % (config/checkout))]
     (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
@@ -122,7 +157,7 @@
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
-  ;; bin/test runs under SEON_PROFILE=scripted
+  ;; bin/test runs its processes under --profile scripted
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider config/config)))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
@@ -210,9 +245,10 @@
 
 (deftest no-environment-read-in-src-but-the-loader
   (let [refs (mapcat getenv-refs (src-files))]
-    ;; the analyzer does find them: the loader's own three (checkout, profile, secret)
+    ;; the analyzer does find them: the loader's own two (checkout, secret); the profile is a
+    ;; command-line layer (--profile), not an environment read
     (is (= #{'seon.config} (set (map first refs))))
-    (is (= '#{(defn checkout) (defn profile) (defn secret)} (set (map second refs))))))
+    (is (= '#{(defn checkout) (defn secret)} (set (map second refs))))))
 
 ;; ---- layers: the shipped file, --config (a checkout's local.edn only when named), --set ---------------------------------------
 
@@ -221,6 +257,32 @@
     (is (= ["scale" "100" "more"] (:rest o)))
     (is (= [["--set" {:seon.config.web/port 7791}] ["--config x.edn" "x.edn"]] (:layers o))))
   (is (= ["root"] (config/without-overrides ["root" "--set" ":seon.config.root/server-port=7898"]))))
+
+;; --profile NAME is a command-line layer, recorded in the config in force: docs/config.md#layers
+(deftest the-profile-is-read-from-the-command-line
+  (is (= :default (config/profile [])))
+  (is (= :scripted (config/profile ["root" "--profile" "scripted" "--set" ":seon.config.web/port=1"])))
+  (is (= ["root"] (config/without-overrides ["--profile" "scripted" "root"])))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/overrides ["--profile"])))))
+  ;; with no args it answers the profile in force, even where *command-line-args* is unbound (an
+  ;; eval's thread in root answered :default under --profile deepseek)
+  (is (= (:seon.config.root/profile config/config) (binding [*command-line-args* nil] (config/profile))))
+  (let [under #(config/layered (config/load-layers (config/checkout) %))
+        none (under [])
+        scripted (under ["--profile" "scripted"])
+        deepseek (under ["--profile" "deepseek"])]
+    ;; the profile's own values
+    (is (= :none (get-in none [:config :seon.config.ai/provider])))
+    (is (= :scripted (get-in scripted [:config :seon.config.ai/provider])))
+    (is (= :openai-compat (get-in deepseek [:config :seon.config.ai/provider])))
+    ;; recorded in the config in force, with its layer, and written as facts on main
+    (is (= :default (get-in none [:config :seon.config.root/profile])))
+    (is (= :scripted (get-in scripted [:config :seon.config.root/profile])))
+    (is (= "--profile scripted" (get-in scripted [:sources :seon.config.root/profile])))
+    (is (= "no --profile" (get-in none [:sources :seon.config.root/profile])))
+    (is (= :deepseek (:seon.config.root/profile (first (config/facts (:config deepseek) (:sources deepseek))))))
+    ;; a later layer still wins over the profile's value
+    (is (= :none (get-in (under ["--profile" "scripted" "--set" ":seon.config.ai/provider=:none"]) [:config :seon.config.ai/provider])))))
 
 (deftest a-bad-set-refuses-naming-it
   (doseq [bad ["port=1" ":seon.config.web/port" "seon.config.web/port=1" ":seon.config.web/port=("]]
@@ -238,17 +300,17 @@
     (spit (str co "/resources/seon/config/default.edn") (slurp (str (config/checkout) "/resources/seon/config/default.edn")))
     (spit local "{:seon.config.source/root \"/elsewhere/write-back\" :seon.config.web/port 4242}")
     (try
-      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default []))]
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co []))]
         (is (not= "/elsewhere/write-back" (:seon.config.source/root c)) "unnamed, it is no layer")
         (is (not-any? #{"config/local.edn"} (vals srcs))))
-      (let [{c :config srcs :sources} (config/layered (config/load-layers co :default ["--config" local]))]
+      (let [{c :config srcs :sources} (config/layered (config/load-layers co ["--config" local]))]
         (is (= "/elsewhere/write-back" (:seon.config.source/root c)) "named, it is one")
         (is (= 4242 (:seon.config.web/port c)))
         (is (= (str "--config " local) (srcs :seon.config.source/root))))
       (finally (clojure.java.shell/sh "rm" "-rf" co)))))
 
 (deftest later-layers-win-key-by-key-and-name-their-source
-  (let [ls (config/load-layers (config/checkout) :default
+  (let [ls (config/load-layers (config/checkout)
                                ["--config" (str dir "/local-ports.edn") "--set" ":seon.config.web/port=7999"])
         {c :config srcs :sources} (config/layered ls)]
     (is (= 7910 (:seon.config.root/server-port c)))
@@ -260,19 +322,19 @@
 
 (deftest an-override-is-validated-by-the-same-schemas
   (is (= [{:key :seon.config.web/port :problem :invalid :value "-1"}]
-         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) :default ["--set" ":seon.config.web/port=-1"]))))))
+         (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/port=-1"]))))))
   (is (= :unknown-key
-         (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) :default ["--set" ":seon.config.web/porrt=1"])))))))))
+         (:problem (first (:seon.config/problems (refused #(config/layered (config/load-layers (config/checkout) ["--set" ":seon.config.web/porrt=1"])))))))))
 
 (deftest no-port-is-listened-on-unless-the-config-says-so
-  (let [c (:config (config/layered [(first (config/load-layers (config/checkout) :default []))]))]
+  (let [c (:config (config/layered [(first (config/load-layers (config/checkout) []))]))]
     (is (= 0 (:seon.config.web/port c)))
     (is (= 0 (:seon.config.root/server-port c)))))
 
 (deftest the-loader-reads-the-command-line-as-the-process-has-it
   (binding [*command-line-args* '("ports" "--set" ":seon.config.web/port=7998")]
     (is (= ["ports" "--set" ":seon.config.web/port=7998"] (config/argv)))
-    (is (= 7998 (:seon.config.web/port (:config (config/layered (config/load-layers (config/checkout) :default (config/argv)))))))))
+    (is (= 7998 (:seon.config.web/port (:config (config/layered (config/load-layers (config/checkout) (config/argv)))))))))
 
 ;; ---- the resolver: task -> model -> provider -> config ------------------------------------------
 

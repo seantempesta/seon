@@ -13,7 +13,7 @@
 ;; - Overrides come only through #env below, and only where a script or a check sets one, so
 ;;   this file is the one list of what can be set. A value resolving to nil (an unset #env with
 ;;   no fallback) is absent, which only an optional key allows.
-;; - #profile selects by SEON_PROFILE (default :default); :deepseek runs agents on DeepSeek.
+;; - #profile selects by the command line's --profile NAME (default :default); :deepseek runs agents on DeepSeek.
 ;; - Machine-dependent values are derived at load, never shipped: #seon/checkout "p" is p under
 ;;   the checkout this process runs from (SEON_CHECKOUT, else JOLT_PWD).
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
@@ -171,9 +171,11 @@
 
  ;; Unit: MB. The memory Seon itself may use on the machine it targets: a 16 GB MacBook M1
  ;; (owner, 2026-10-22: "run well on a 16GB Macbook M1"), a quarter of it, leaving the rest to
- ;; the OS, the user's work and what agents run (builds, tests). At the bound: seon.check/scale
- ;; fails when root, the fork server and :seon.config.agent/max-running agents would exceed it
- ;; (each agent charged the system's measured free-memory drop per agent).
+ ;; the OS, the user's work and what agents run (builds, tests); owner, 2026-10-29: root plus ten
+ ;; working agents under about 4 GB. At the bound: seon.check/scale fails when root and the fork
+ ;; server (their footprints) and :seon.config.agent/max-running agents would exceed it, each agent
+ ;; charged the machine's drop in free plus inactive memory (host_statistics64) from before the
+ ;; agents started to their peak, per agent, never the sum of their footprints (docs/cost.md#how-we-measure).
  :seon.config.machine/memory-mb 4096
  ;; Unit: MB. The most physical footprint one MCP relay (bin/mcp, one per Claude session) may
  ;; reach: stock perl measured 6.3 MB peak (`/usr/bin/time -l`, 2026-10-22) where the Seon binary
@@ -196,14 +198,16 @@
  ;; Load only makes what it measures likelier. At the bound: the measurement is read.
  :seon.config.check/hold-ms 500
  ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
- ;; returns (:system-free-returned-mb-per-agent, reported, not checked). Provenance: the
- ;; window it replaced. At the bound: the free memory is read.
+ ;; returns (:system-available-returned-mb-per-agent, reported, not checked). Provenance: the
+ ;; window it replaced. At the bound: the available memory is read.
  :seon.config.check/pages-ms 500
- ;; Unit: runs running at once (v1's :seon.config.agent/max-running, same value and
- ;; reason): four agents beside the user's work fit a 16 GB machine. A ready task beyond it
+ ;; Unit: runs running at once. Provenance: owner, 2026-10-29 ("10-20 should be fine for users
+ ;; with small machines"): an agent costs ~20.6 MB of real memory (bin/check scale, 2026-10-29), so
+ ;; ten fit an 8 GB machine beside the user's work (was 4, v1's, when an agent was counted by its
+ ;; footprint); task seon.config/agents-at-once-follow-the-machine sizes it from the RAM. A ready task beyond it
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
- :seon.config.agent/max-running 4
+ :seon.config.agent/max-running 10
  ;; Unit: turns a run may take when its task sets none (a task's own
  ;; :seon.config.agent/max-turns wins). At the bound the run ends and the done rule judges it.
  ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
@@ -320,7 +324,7 @@
  ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.
- :seon.config.source/gate-checkout #env SEON_GATE_CHECKOUT
+ :seon.config.source/gate-checkout nil
  ;; Unit: paths under the root, read in this order. Their .clj files are namespaces; the .edn
  ;; files under resources/seon/schemas are schema resources (schemas are program: an agent
  ;; changes one with my.schema/register!, and the merge writes it back; owner 2026-10-21).
@@ -420,8 +424,10 @@
  ;; out (git) does not. Provenance: root's task seon.check/a-run-builds-the-binary-only-when-
  ;; something-reaches-it (2026-10-23): bin/test built it (46 s) whenever anything ran. A var
  ;; missing here is a missed build (a test fails on a stale binary), so it names the one way a
- ;; test starts the binary: seon.test-store/binary-sh.
- :seon.config.source/binary-vars #{seon.test-store/binary-sh}
+ ;; test starts the binary: seon.test-store/binary-sh, and seon.vector/start!, which execs
+ ;; `target/seon embed-worker` (2026-10-29: the helper tests ran a stale binary, red and green at one
+ ;; digest, until this named it).
+ :seon.config.source/binary-vars #{seon.test-store/binary-sh seon.vector/start!}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
  ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task
@@ -453,13 +459,12 @@
  ;; every worktree, the merge gate's checkout and every agent read and write one cache. Unset: this
  ;; checkout's own. At the bound: a missing directory is made by the first write.
  :seon.config.proofs/results-dir #or [#env SEON_RESULTS_DIR #seon/checkout "target/results"]
- ;; Unit: digests. How many digests of one test (or check step) the cache keeps: the writer of a test's next
- ;; digest removes the excess, lowest digest first, never the one it writes nor a digest judged red
- ;; (a red, or flaky, is never laundered by its eviction). Provenance: estimate, 2026-10-28: the live
- ;; trees (main, the merges tree, five worktree sessions, the agents' branches) hold up to ~15 digests of
- ;; a widely reached test (16,598 results for 1,075 tests over the store's life); 32 leaves room. At the
- ;; bound: an evicted digest's test runs again once.
- :seon.config.proofs/results-per-test 32
+ ;; Unit: bytes. The whole verdict cache's capacity (the files under results-dir). A write that takes it
+ ;; past the bound removes the least recently used verdicts (oldest file mtime; a read touches it),
+ ;; greens and reds alike, until it is under, never one just written; below the bound nothing is
+ ;; removed. Provenance: the owner, 2026-10-29 (docs/decisions.md); the main tree's cache held 121 MB
+ ;; in 27,079 files that day. At the bound: an evicted verdict's test runs again once.
+ :seon.config.proofs/results-max-bytes 536870912
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (test-runner/shards), its greens stored by digest when it has run. Provenance:
@@ -570,13 +575,13 @@
 
  ;; Who answers agents' turns. With no profile, none: the first turn answers the typed
  ;; :seon.model/no-provider and the run ends on it (root's ruling 2026-10-22: production
- ;; ran the scripted test fixture as if it were a model). SEON_PROFILE=deepseek (or
- ;; SEON_AI_PROVIDER=openai-compat) uses the endpoint below; SEON_PROFILE=scripted, the
+ ;; ran the scripted test fixture as if it were a model). --profile deepseek (or
+ ;; --set :seon.config.ai/provider=:openai-compat) uses the endpoint below; --profile scripted, the
  ;; scripted provider (a test fixture) bin/check and bin/test run under, no paid call: it needs
- ;; that profile, which states its script (SEON_AI_PROVIDER=scripted alone leaves none, and boot
+ ;; that profile, which states its script (--set :seon.config.ai/provider=:scripted alone leaves none, and boot
  ;; refuses the provider's contract). There is no default model (docs/model.md#no-default-model);
  ;; check the context before any paid call.
- :seon.config.ai/provider #keyword #or [#env SEON_AI_PROVIDER #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}]
+ :seon.config.ai/provider #keyword #profile {:default "none" :scripted "scripted" :deepseek "openai-compat"}
  ;; The scripted provider's reply function (a test fixture): replies by task.
  :seon.config.ai/script #profile {:scripted seon.fixtures/reply}
  ;; Unit: the provider's own model name. Provenance: v1 owner ruling 2026-09-10, deepseek-flash
@@ -592,7 +597,7 @@
  ;; loop replies ran for minutes (168 of 181 model-minutes, 12.4M tokens, AUDIT-agents §5.2),
  ;; and a task whose every reply runs to 65,536 costs ~$5.8 (one such reply ~$0.04). A task or
  ;; model that turns thinking on raises it through the resolver (v1's 65,536 for that case).
- :seon.config.ai/max-tokens #long #or [#env SEON_AI_MAX_TOKENS 8192]
+ :seon.config.ai/max-tokens 8192
  ;; DeepSeek's thinking mode (:enabled | :disabled). Off (owner, 2026-10-21: "if we can't have
  ;; intuitive function calling based on the context our context is bad and instructions need
  ;; help"): a task whose next step needs long reasoning is a context or instruction defect to
@@ -629,11 +634,11 @@
  :seon.config.ai/providers
  {"deepseek"
   {;; Unit: URL; /chat/completions is appended (v1's :seon.config.ai/endpoint named the whole URL).
-   :seon.config.ai/base-url #or [#env SEON_AI_BASE_URL "https://api.deepseek.com"]
+   :seon.config.ai/base-url "https://api.deepseek.com"
    ;; Unit: the NAME of an environment variable. Never the credential: root's :model owner reads
    ;; the key at the call, it never becomes a datom, and every agent unsets this variable at its
    ;; birth (the key is root's alone).
-   :seon.config.ai/api-key-variable #or [#env SEON_AI_API_KEY_ENV "DEEPSEEK_API_KEY"]
+   :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
    ;; the request field the completion budget is sent in (v1)
    :seon.ai.model/output-token-wire-key "max_tokens"
    ;; Unit: tokens. The block DeepSeek's prompt cache counts a hit in. Provenance: measured
@@ -890,21 +895,20 @@
  ;; tree's target/cache; bin/env alone names it, so its pin is written once). Measured on Seon's 1,393 forms (M5 Max, Metal, load ~10):
  ;; 12 ms one text, 37k tokens/s batched (175 texts/s), 0.86 GB RSS; the BF16 file no faster (34k).
  :seon.config.vector/model #env SEON_EMBED_MODEL
- :seon.config.vector/lib #or [#env SEON_EMBED_LIB #seon/checkout "target/lib/libseon-embed.dylib"]
+ :seon.config.vector/lib #seon/checkout "target/lib/libseon-embed.dylib"
  ;; Unit: tokens. One encode's context and micro-batch: 4096 measured best of 512-4096 (512 texts/s
  ;; 122, 1024 167, 2048 173, 4096 176), as v1 found (cap tokens, not texts).
  :seon.config.vector/batch-tokens 4096
  ;; Unit: texts. One encode's sequences; at the bound the next text starts the next encode.
  :seon.config.vector/batch-texts 64
- ;; Unit: threads. ggml's CPU pool in root's :embed worker: Metal does the encode, so 1 measured as
- ;; fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4 threads of
- ;; its own (Metal's), and loading it runs ~32 that end when it has loaded.
+ ;; Unit: threads. ggml's CPU pool in the :embed helper (seon.vector/serve!): Metal does the encode, so 1
+ ;; measured as fast as 18 (139 vs 140 texts/s, 2026-10-23). Whatever it is, the open model keeps 4
+ ;; threads of its own (Metal's), and loading it runs ~32 that end when it has loaded; all in the
+ ;; helper's process, none in root's.
  :seon.config.vector/threads 1
- ;; Unit: threads. The open model's own threads, outside Jolt's roster (Metal's), which root
- ;; declares while its :embed worker holds the model (seon.check/declared-threads). Measured
- ;; 2026-10-23 on an M5 Max: 4 at every :seon.config.vector/threads from 1 to 18. Its load runs
- ;; ~32 more for ~4 s, which end when it has loaded (a thread count taken then reads them).
- :seon.config.vector/model-threads 4
+ ;; Unit: characters. How much of the embedding helper's stderr a :seon.vector/helper-died error keeps (its last
+ ;; characters; the error says how many earlier ones were left out). Provenance: a screenful of llama.cpp's log.
+ :seon.config.vector/stderr-chars 4096
  ;; Unit: tokens. A text past it keeps its first max-tokens (the count cut is recorded). Provenance:
  ;; v1's 2,048 (forms p99 1,766 tokens); at 512, 148 of Seon's 1,393 forms were cut.
  :seon.config.vector/max-tokens 2048
@@ -973,7 +977,7 @@
  :seon.config.web/stylesheet #seon/checkout "target/css/app.css"
  ;; Unit: +hhmm. Jolt has no time zones: clocks on the page add this offset (`date +%z`).
  ;; Unset: UTC, which the page's clocks then show.
- :seon.config.web/utc-offset #or [#env SEON_UTC_OFFSET "+0000"]
+ :seon.config.web/utc-offset "+0000"
 
  ;; Contracts and their recording (session G1): :on, :contracts (wrappers, no recording
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
@@ -982,4 +986,4 @@
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.
- :seon.config.native/probe-lib #or [#env SEON_PROBE_LIB #seon/checkout "target/lib/libprobe.dylib"]}
+ :seon.config.native/probe-lib #seon/checkout "target/lib/libprobe.dylib"}

@@ -5,8 +5,29 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
+### The verdict cache holds 512 MB, least recently used out first (owner, 2026-10-29)
+"least recently used automatic eviction if max capacity is reached"; the capacity: 512 MB (chosen over 256 MB; the main tree's cache held 121 MB in 27,034 files that day). One capacity for the whole cache, greens and reds alike; a verdict for a test no longer in the program goes by the same rule; nothing goes below the bound ("don't drop cache work that other agents may need"). Stated in: :seon.config.proofs/results-max-bytes, seon.proofs/the-verdict-cache-empties-itself.
+
 ### An eval call holds one or more forms (owner, 2026-10-29)
 "remove that from the docs that only one form runs". A call is prose and one or more forms, each run top level in order, the first throw stopping the rest; the prompt asks for one form per call. Several forms answer as a REPL prints them (verified on Clojure 1.12.5: `(+ 1 1) (+ 2 2)` prints 2 then 4): `:forms` (how many ran) and `:value` the vector of their values ("okay that works"); one form, or one `do`, answers its value. The code is never rewritten (a vector of the forms compiles as one: an alias a `require` in it makes is unknown, a `def` after an `ns` lands in the old namespace). A call with no prose or no form answers `:seon.turn/invalid-call`. Supersedes "one form per call" in the two 2026-10-28 entries below. Stated in: docs/prompt.md, docs/agent.md, `seon.model/eval-tool`, `seon.turn/call-problem`, `seon.repl/response`.
+
+### The model's context is the render of the agent's record, by the one walk (owner, 2026-10-29)
+"I'm down with the whole db -> pull into ctx representation and then rendering that"; "This really feels like we are conflating the data with the render"; "build with both the context render and the web ui render in mind so we don't let one get out of sync with the other". A request is the agent's records in order (its evals, its replies, its messages) and the parts of its render of @ctx: whole at the first request, then only the parts whose drawing changed, each sent once a change. The model and the person read one layout (render-ctx), so they cannot drift. Removing evals from @ctx with swap! draws the request whole: the one compaction. Stated in: docs/render.md#the-models-context-a-cached-prefix-then-the-turn, docs/render.md#the-page-is-sent-as-what-changed, docs/agent.md, task seon.context/the-context-is-the-agents-evals-and-seons.
+
+### Nothing derived is held; everything is derived from the db at t (owner, 2026-10-29)
+"Don't fear deletion make the system work with the data that's there. Period. Don't try and hold random derived state in the system. Derive it from the current state." What a request sent is a fact on its model call; a cache is keyed by its inputs and may be dropped. Removed under it: the fold and :same-as (a record's printed text depends only on that record), seon.context/world and its page caches. Stated in: AGENTS section 4 (a kept db value is a reference), docs/ctx.md, docs/render.md.
+
+### The agent's record is facts about its work (owner, 2026-10-29)
+"The agent's record is facts about its work. Telemetry and derived data live on their own entities, pointing at what they describe: a vector at its eval, a model call at its turn, a process sample at its agent. The agent's pull never reaches them, and the debug view and the ui render them." The agent's pull is `*` plus hand-declared reverse joins (its turns, evals, newest messages) and its task; anything an agent writes on its entity is pulled and rendered by its schema. Stated in: docs/ctx.md#the-record-is-the-agents-work, docs/ctx.md#the-pattern.
+
+### The agent is the unit, not the run (owner, 2026-10-29)
+"get rid of runs, the concept doesn't really exist and is just X amount of forms being evaluated ... An agent is just writing evals". An agent is one per branch, keyed by its branch, the same across boots and wakes; a turn limit on the agent (raised to extend it); a message is addressed to the agent; :lost and :killed are agent statuses; one agent works a task at a time; the check before a merge takes git's words ("more git merging terms ... less made up things"): a merge check of a commit, its result on the task, keyed by the commit and main's commit; done is every proof green, the merge check's included, and behind main is no red (main is merged in every turn it moved). Stated in: task seon.agent/the-agent-is-the-unit-not-the-run (cut 1 merged: docs/ctx.md#the-pattern; cuts 2 and 3 open).
+
+### An agent's test results are facts on its branch; the shared cache stays for reuse (owner, 2026-10-29)
+Chose "Agent runs only" for now: an agent's runs write :seon.test/* facts on its branch, which @ctx holds and the proofs part renders; bin/test and bin/prove keep the shared file cache, so agents still share greens; the cache gets one capacity with least-recently-used eviction past it ("least recently used automatic eviction if max capacity is reached"). Stated in: tasks seon.proofs/test-results-are-a-few-facts, seon.proofs/the-verdict-cache-empties-itself.
+
+### A value is rendered by the newest render of its schema (owner, 2026-10-29)
+"automatic per eval result auto rendering and to override by just writing a function that renders that ... just a query which gets the default and any other render functions and sorts them by newest first"; "if we don't know what something is we return a warning/error so the agents are encouraged to fix it and we only auto render things we know what they are". Stated in: task seon.render/a-value-is-rendered-by-the-newest-render-of-its-schema (not built).
 
 ### Seon runs on an ordinary MacBook (owner, 2026-10-29)
 "I want this to run on an average users macbook for reference. Not just servers or people like me with 128GB of ram." Ten working agents fit an 8 GB-class machine: root idle at or under 650 MB, the fork server under 300 MB, ten agents under 3 GB. Stated in: docs/plan.md (beside step 1), docs/machine.md#ten-agents-at-once.
@@ -19,6 +40,30 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 
 ### Config at every level, no env var switches (owner, 2026-10-29)
 "formalize config options so there is no env var magic happening. I want the config process to be documented and a standard system for configuring at any level -- init, added to an agent's entity to override on a per agent level, task wherever it needs to go"; "Everything forks from root right? So maybe it is helpful to add to the root entity?". Order: defaults < profile < --config < --set < main's root entity < model < provider < task < agent; each key's schema names the levels that may set it; an agent level beside the task's; bin/ passes --set, not env vars. Stated in: docs/plan.md (beside step 1); docs/config.md when built.
+
+### Env vars are fine when aero captures them into config entries (owner, 2026-10-29)
+"env vars aren't bad, but the need to be captured by aero and translated into config entries." An environment variable reaches the program only as an `#env` value of a config key in `default.edn` (or the loader's documented inputs: the checkout, the secret); nothing switches behaviour on an env var read elsewhere. The profile is `--profile NAME` (4a34eb9227). Stated in: docs/config.md.
+
+### Stop the garbage at its source (owner, 2026-10-29)
+"Yes stop the garabage for sure": an allocation that is thrown away is cut where it is made (a spin, a recomputation, a decode done twice), not collected faster after. Stated in: docs/machine.md#roots-heap, docs/plan.md (beside step 1).
+
+### Use the machine while nothing is starved (owner, 2026-10-29)
+"Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
+
+### Agents at once: ten to twenty on a small machine, no ceiling on big iron (owner, 2026-10-29)
+"Yeah I think 10-20 should be fine for users with small machines and the sky is the limit for servers and big iron." `:seon.config.agent/max-running` defaults to 10 (was 4, v1's), and is sized from the machine's RAM and an agent's measured real cost (20.6 MB an agent by `bin/check scale`, 2026-10-29), never a fixed ceiling on a large machine. Stated in: resources/seon/config/default.edn (:seon.config.agent/max-running), task seon.config/agents-at-once-follow-the-machine.
+
+### Fix every major optimization issue; memory is the thread to pull (owner, 2026-10-29)
+"Your job is to priortize fixing ALL major optimization issues that you see. Memory problems seem like a good way to finding real system / platform / core issues so it's not a bad thread to pull on. Blockers of course." and "I don't see why hundreds of mb are being used for anything right now so I think there's a lot of headroom". The machine session works beside step 1: blockers first, then every large cost found, each measured before and after. Stated in: docs/plan.md (beside step 1).
+
+### Config levels are built as keys need them (owner, 2026-10-29)
+Chose "only levels in use": one resolver with the levels something sets today (defaults < profile < --config < --set); main's root entity, model, provider, task and agent levels join that resolver the day a key needs them, in the order of the entry above. Stated in: docs/plan.md (beside step 1), resources/seon/tasks/seon.config.edn.
+
+### The memory budget: Seon fits 8 GB and runs beside other apps on 16 GB (owner, 2026-10-29)
+Chose "8 GB, fits in 16": root and ten working agents under ~4 GB in all, so Seon runs beside a browser and an editor on a 16 GB MacBook and still works on an 8 GB one; `bin/check scale` charges against that. Stated in: docs/plan.md, docs/machine.md#ten-agents-at-once.
+
+### The standing root follows main's ref, never the checkout's HEAD (owner, 2026-10-29)
+Chose "root follows main ref": a topic branch checked out in the main tree never reaches root's source or main through `bin/update`. Stated in: task seon.fx/the-standing-root-follows-main-not-the-checkouts-head.
 
 ### Old worktrees' run data is not kept (owner, 2026-10-29)
 "No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
