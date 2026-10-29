@@ -626,7 +626,7 @@
   ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
   ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
   ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
-  (let [[_ a b r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
                            "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
                            "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
         v (some-> (:value r) clojure.edn/read-string)]
