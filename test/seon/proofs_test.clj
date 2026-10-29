@@ -179,9 +179,9 @@
         notes (atom [])
         ran (proofs/run-tests! tests dg #(swap! notes conj %))
         db (store! dir ran {'app.pv-red-test/red-test [{:type :fail :message "1 is not 2"}]})]
-    (is (= [["app.pv-calc-test/add-test" "app.pv-calc-test/twice-test"] ["app.pv-neg-test/neg-test"] ["app.pv-red-test/fixture-test" "app.pv-red-test/red-test"]]
-           (sort-by first (map #(sort (mapv str %)) (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
-        "a namespace within its share of the measured ms stays in one shard")
+    (is (= [1 2 2] (sort (map count (runner/shards tests 3 (zipmap tests [1 1 1 1 2])))))
+        "a namespace over half a shard's share is split: five tests of 6 ms over three shards")
+    (is (= (set tests) (set (apply concat (runner/shards tests 3 (zipmap tests [1 1 1 1 2]))))) "and none is lost")
     (is (= 2 (count (runner/shards tests 2 {}))) "never more shards than jobs")
     (is (not (contract/error? db)) "every result recorded")
     (is (= (set tests) (set (keys ran))) "every test has a result")
@@ -246,8 +246,21 @@
   (is (= '#{[x/a] [y/b y/c z/d]} (set (runner/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
       "the longest alone, the rest together")
   (is (= '#{[p/a p/c q/e] [p/b p/d]} (set (runner/shards '[p/a p/b p/c p/d q/e] 2 '{p/a 5 p/b 5 p/c 5 p/d 5 q/e 1})))
-      "a namespace longer than a shard's share is split into share-sized parts")
+      "a namespace over half a shard's share is split into parts of at most that")
   (is (= 2 (count (runner/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
+
+(deftest a-test-s-weight-in-the-deal-is-its-median-ms-not-its-largest
+  ;; 2026-10-29: a merge's 217 tests were dealt by the largest ms any verdict measured; one 17 s test
+  ;; once measured 625 s in a hung run, so a shard ended at 62 s beside three at 640-746 s
+  ;; (docs/merging.md#a-merge-runs-what-the-change-reaches)
+  (let [dir (str (System/getProperty "user.dir") "/target/tmp/typical-ms-" (random-uuid))
+        rec (fn [t dg ms] (fx/write-verdicts! dir {:id "proofs-test"} {t {:test t :digest dg :pass 1 :fail 0 :error 0 :ms ms}} {}))]
+    (try (doseq [[dg ms] [["d1" 17000] ["d2" 625000] ["d3" 16000] ["d4" 18000] ["d5" 15000]]] (rec 'app.pv-slow-test/hung-once dg ms))
+         (rec 'app.pv-slow-test/once "d1" 4000)
+         (is (= {'app.pv-slow-test/hung-once 17000 'app.pv-slow-test/once 4000}
+                (fx/typical-ms dir '[app.pv-slow-test/hung-once app.pv-slow-test/once app.pv-slow-test/never-run]))
+             "the median of its verdicts, whatever their digests; a test with none is left out")
+         (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."

@@ -9,6 +9,7 @@
 # target/prove/<run-id>, which the run's first line names: no two runs share one);
 # each result is stored at its digest, after target/seon is built from this tree when anything
 # runs. Ends on TEST OK / TEST FAILED and its exit status.
+# With bin/prove (both or checks), the check steps to run go beside the shards (bin/check --steps).
 # bin/test --plan|--shard|--store-steps|--health ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's health step).
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -47,8 +48,14 @@ if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 st=0 P=()
-# each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/last-ms)
+# each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
 for f in $F; do runner --shard "$f" > "${f%.edn}.log" 2>&1 & P+=($!); done
+# bin/prove's check steps (the plan's out/steps) run beside the shards, not after them: they share no
+# store, port or checkout state with a test's roots (each step takes an APFS clone of the one seeded store,
+# bin/check), so the run takes as long as the longer of the two, not their sum (docs/merging.md). Their
+# output is kept in out/check.log and printed after the shards'.
+C=
+if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then "$ROOT/bin/check" --steps "$OUT" > "$OUT/check.log" 2>&1 & C=$!; fi
 # a stalled test is named, never ended: a running shard quiet since its last "started" line past
 # that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test
 # with no record: :seon.config.agent/stall-ms, out/stall-ms, 0: none) is printed and recorded as
@@ -66,6 +73,7 @@ for (( i = 1; i <= ${#F}; i++ )); do
   fi
 done
 [[ -n $W ]] && kill $W 2>/dev/null
+if [[ -n $C ]]; then wait $C || st=1; cat "$OUT/check.log"; fi
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
