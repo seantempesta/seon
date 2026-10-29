@@ -411,6 +411,10 @@
   (let [_ (begin! task run)
         ;; the agent's own budget (:seon.agent/max-turns, raised to extend it) bounds the loop; the arg is the default
         max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])) (:max-turns arg))
+        ;; the cap this run works under, a fact of the run as root records it at a run's start (seon.task/run-start-tx),
+        ;; when the run began here: what its page's turn line reads (seon.render.ui/run-head)
+        _ (when-not (:seon.run/max-turns (d/entity (agent/db) [:seon.run/id run]))
+            (agent/transact! [{:seon.run/id run :seon.run/max-turns (:max-turns arg)}]))
         t0-task (task/task (agent/db) task)
         merge? (task/merges? (:seon.task/kind t0-task))
         merge-cfg (r/merge-limits t0-task)]

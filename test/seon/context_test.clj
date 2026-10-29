@@ -86,7 +86,7 @@
 
 (deftest a-cut-reply-is-told-to-the-agent
   ;; the run's head (seon.render.ui/run-head), not the work's status: a cut reply is the conversation's
-  (let [head (fn [turn] (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :turns {"t1" turn}}} 1)))]
+  (let [head (fn [turn] (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :turns {"t1" turn}} :seon.db/db (ts/test-db)} 1)))]
     (is (re-find #"at the model's token limit" (head {:seon.turn/n 0 :seon.turn/truncated true})) (head {:seon.turn/n 0 :seon.turn/truncated true}))
     (is (not (re-find #"token limit" (head {:seon.turn/n 0}))))))
 
