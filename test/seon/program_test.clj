@@ -255,7 +255,7 @@
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
           "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/program-store)) nil) 'seon.program/reach-update))
+              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store)) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
 (deftest load-order-reads-no-quoted-name
@@ -536,7 +536,7 @@
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
   ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (System/getProperty "user.dir")
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         a (update-vals (program/graph-index g in nil) :digest)
         moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
@@ -594,7 +594,7 @@
   ;; (:seon.config.source/process-entry)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs in))
         idx (program/graph-index g in nil)
         process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
         reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
@@ -884,7 +884,7 @@
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
   (let [here (System/getProperty "user.dir")
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         digests #(update-vals (program/graph-index g % nil) :digest)
         a (digests in)
@@ -914,7 +914,7 @@
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
   ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
   ;; namespace (seon.program/file-readers) does.
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (ts/reach-digests db (in "t1"))
         b (ts/reach-digests db (in "t2"))
