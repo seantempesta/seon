@@ -160,11 +160,12 @@
   ;; takes the lock the other loaders take, so a second waits for the first's write: here the lock is held
   ;; and a load started on another thread must be blocked on it, never past it
   (let [checkout (.getCanonicalPath (java.io.File. "."))
-        path (str checkout "/target/runs/load-lock-" (random-uuid))
-        runs (str path "-runs")
+        path (ts/process-store checkout)
+        main (str "load-lock-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
         _ (.mkdirs (java.io.File. (str runs "/tasks")))
         _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-        root (ts/start-root! {:store path :main "main" :runs runs})
+        root (ts/start-root! {:store path :main main :runs runs})
         ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
     (try
       (is (= :blocked (ask "(let [lock @#'my.root/load-lock
@@ -176,7 +177,7 @@
                                   (loop [] (let [s (str (.getState t))] (if (#{\"BLOCKED\" \"TERMINATED\"} s) (deliver state s) (do (Thread/yield) (recur)))))
                                   (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))"))
           "a load started while the lock is held waits on it")
-      (finally (ts/stop-root! root)))))
+      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
 
 (deftest a-stale-task-load-never-creates-a-task-it-did-not-declare
   ;; found on the standing root 2026-10-28: 199 invalid-input errors of seon.task/task-value, a task whose
