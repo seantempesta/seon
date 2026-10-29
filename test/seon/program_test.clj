@@ -371,6 +371,24 @@
     (.mkdirs (java.io.File. d))
     d))
 
+(defn- sampled-repo
+  "A new git repository (its path) holding every nth file of the checkout's src, test and schemas as
+  they are on disk (tracked and untracked, unignored, not HEAD's: the digests are the working tree's; a
+  tracked file deleted on disk is no file) and the files `extra` names: the same cross-file references
+  and quoted names as the tree, at 1/n of its import and reach work (what the proofs of a tree's digests
+  and pins ask of the whole program cost 3.4 G ticks to import alone). program-db reads a tree from
+  its repository's git objects, so the sample is a repository."
+  [label n extra]
+  (let [here (System/getProperty "user.dir")
+        files (->> (:out (apply sh/sh "git" "-C" here "ls-files" "-co" "--exclude-standard" (cfg/value :seon.config.source/dirs)))
+                   str/split-lines sort (filter #(.exists (java.io.File. here %)))
+                   (keep-indexed (fn [i f] (when (or (zero? (mod i n)) (contains? (set extra) f)) f))))
+        listing (str (scratch-dir (str label "-list")) "/files")
+        d (scratch-dir label)]
+    (spit listing (str/join "\n" files))
+    (sh/sh "zsh" "-c" (str "tar -c -C '" here "' -T '" listing "' -f - | tar -x -C '" d "' && git -C '" d "' init -q"))
+    d))
+
 (deftest a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
   (let [db (calc-db)
         before (select-keys (ts/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
@@ -661,7 +679,8 @@
   ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        sample (sampled-repo "pins" 6 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj" "src/seon/source.clj" "src/seon/contract.clj"])
+        g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
         a (update-vals (program/graph-index g in nil) :digest)
         all-tests (set (keys a))
         ;; each class once: the checks below ask the same sets several times, a graph-index of the whole program each
@@ -835,24 +854,11 @@
   ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
-  ;; Every eighth file of src, test and the schemas (a sample as the digests see it: the same cross-file
-  ;; references and quoted names, an eighth of the import and reach work), copied twice to two
-  ;; repositories (program-db reads a tree from its git objects); the whole tree's run of the same
+  ;; An eighth of the tree's files, in two repositories (sampled-repo); the whole tree's run of the same
   ;; property cost 6.7 G ticks.
   (let [here (System/getProperty "user.dir")
         dirs (cfg/value :seon.config.source/dirs)
-        ;; the files of the tree as they are on disk (tracked and untracked, unignored), not HEAD's: the
-        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
-        ;; (pure-tests 2026-10-23: HEAD is no input of the digest); a tracked file deleted on disk is no file
-        files (->> (:out (apply sh/sh "git" "-C" here "ls-files" "-co" "--exclude-standard" dirs))
-                   str/split-lines sort (filter #(.exists (java.io.File. here %)))
-                   (keep-indexed (fn [i f] (when (zero? (mod i 8)) f))))
-        listing (str (scratch-dir "list") "/files")
-        _ (spit listing (str/join "\n" files))
-        sample (fn [label] (let [d (scratch-dir label)]
-                             (sh/sh "zsh" "-c" (str "tar -c -C '" here "' -T '" listing "' -f - | tar -x -C '" d "' && git -C '" d "' init -q"))
-                             d))
-        copy (sample "copy") copy2 (sample "copy2")
+        copy (sampled-repo "copy" 8 []) copy2 (sampled-repo "copy2" 8 [])
         in (fx/inputs here)
         a (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
         b (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
