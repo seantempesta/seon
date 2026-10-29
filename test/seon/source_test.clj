@@ -938,6 +938,20 @@
                :fixed {:bytes 500000 :calls 20}
                :sizes [10 100 1000]}))
 
+(deftest a-var-the-import-makes-public-may-be-named-by-a-later-file
+  ;; the standing root's main held test-runner/tree-branch private (defn-) while the tree made it
+  ;; public and seon.proofs-test named it: every import of main failed "is not public" and root's
+  ;; program stayed stale (seon.source/analyze-form; docs/failure-points.md)
+  (binding [*ns* *ns*] (eval '(ns app.pubsrc)) (eval '(defn- g [] 1)))
+  (let [db (empty-db)
+        files {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn g [] 1)\n"
+               "src/app/pubuser.clj" "(ns app.pubuser (:require [app.pubsrc]))\n\n(defn h [] (app.pubsrc/g))\n"}]
+    (is (:private (meta (resolve 'app.pubsrc/g))) "the image holds g as private")
+    (is (vector? (source/tx-of db files true)) "the user of g analyzes after the file that makes it public")
+    (is (not (:private (meta (resolve 'app.pubsrc/g)))) "and the image's var is public, as the import defines it")
+    (is (vector? (source/tx-of db {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn- g [] 1)\n"} true)))
+    (is (:private (meta (resolve 'app.pubsrc/g))) "a definition made private again makes the var private")))
+
 (deftest a-source-the-image-cannot-analyze-is-an-error-not-a-throw
   ;; the standing root's watcher died of "var: #'seon.db/install-missing! is not public": a changed file named a var
   ;; the running (older) image held as private; the import threw out of the batch handler (task
