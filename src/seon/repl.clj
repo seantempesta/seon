@@ -654,11 +654,13 @@
   "Change the definition var sym names by replacing old, exact text that occurs once in its
   recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
   namespace through the one REPL path (`eval-string`): it is recorded as program, its contract
-  armed, read by the forgiving reader as a model's call is (seon.reader/forgive: a delimiter
-  repaired, and said in :repaired), as a typed defn would be. Answers that
+  armed, as a typed defn would be. It is read exactly as written, never repaired: a repair of a
+  whole definition is made far from the edit and reads as another error there (md-scan #17: an edit
+  one paren short, repaired at lines 252 and 263, failed as cond at 215). Answers that
   eval's response with :edited, the var and the lines around the change; or
   :seon.repl/edit-refused, nothing changed: no recorded source, old not in it (with the lines that
-  hold old's first line, ignoring indentation), or old there more than once (each candidate's line).
+  hold old's first line, ignoring indentation), old there more than once (each candidate's line), or
+  new opening or closing delimiters old does not (seon.reader/balance: :unbalanced, by how many of each).
   Exact text and one occurrence, as file editors converged on (docs/agent.md#changing-a-definition):
   the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan."
   {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.eval/response]]}
@@ -676,12 +678,18 @@
                             (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))))
       (next at) (refuse :ambiguous (str "the old text occurs " (count at) " times: give more of it, so it is one")
                         (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at))
+      ;; new must leave the definition as balanced as old did: each delimiter it opens or closes more than old
+      (not= (reader/balance old) (reader/balance new))
+      (let [d (merge-with - (reader/balance new) (reader/balance old))
+            closer {\( \) \[ \] \{ \}}]
+        (refuse :unbalanced (str "the new text does not balance as the old text did: it "
+                                 (clojure.string/join ", " (for [[o n] (sort-by key d) :when (not (zero? n))]
+                                                             (if (pos? n) (str "opens " n " more " o) (str "closes " (- n) " more " (closer o)))))
+                                 " than the old text (strings, character literals and comments aside); nothing changed")
+                (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at)))
       :else (let [i (first at)
-                  ;; the new definition read as the turn reads a model's call (seon.reader/forgive): an
-                  ;; unbalanced delimiter in new is repaired, and the repair said
-                  {text :text repairs :repairs} (reader/forgive (str (subs src 0 i) new (subs src (+ i (count old)))))
-                  r (eval-string text (cond-> {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}
-                                        (seq repairs) (assoc :repaired (context/repaired text repairs))))
+                  text (str (subs src 0 i) new (subs src (+ i (count old))))
+                  r (eval-string text {"ns" (namespace sym) :origin :model :within (:eval @agent/state)})
                   from (line-of i) k (cfg/value :seon.config.agent/edit-context-lines)]
               ;; the response as data: its printed text and costliest functions are the outer eval's to print
               (cond-> (dissoc r :text :fns :record)
