@@ -269,6 +269,21 @@
   (count (d/datoms db :aevt)) (count (d/datoms db :avet))
   (count (d/datoms db :eavt)))
 
+(defn prime-commit!
+  "Make this process know db's schema content key, so a process forked from it commits its
+  branch without hashing the schema again. Datahike keeps the key of the last schema it hashed
+  in one cell of its own (datahike.writing's last-schema-meta, reused while every part is the
+  same object), and db->stored fills it; a fresh agent's cell was empty, so its first commit
+  hashed Seon's 100 KB schema: 31.5 MB allocated and 9.8 MB of pages written, measured
+  2026-10-29 (docs/machine.md#what-a-process-owns-in-memory). An agent's db gets its schema
+  parts from the schema cache by key, the same objects the fork server's db holds, so the key
+  the server knows is the agent's. Costs one hash of the schema when it changed, a comparison
+  when not. nil."
+  {:malli/schema [:=> [:cat :seon.host/db] :nil]}
+  [db]
+  (datahike.writing/db->stored db false)
+  nil)
+
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
 (lib/defc c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)

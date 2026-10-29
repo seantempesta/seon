@@ -596,6 +596,16 @@
         freezes (count (filter #(> % 65536) (map - (rest statics) statics)))]
     (is (<= freezes 2) (str freezes " freezes in 20 forks; the server's static at each: " (pr-str statics)))))
 
+(deftest an-agent-allocates-little-from-ready-to-its-first-request
+  ;; docs/machine.md#what-a-process-owns-in-memory: a cost proof in bytes. An agent's first commit
+  ;; (it commits the run it began when it first waits) hashed Seon's whole schema, because
+  ;; datahike.writing's cell for the last schema hashed was empty in every fresh process: 31.5 MB
+  ;; allocated, 9.8 MB of pages written (seon.db/prime-commit!, which the fork server calls so its
+  ;; agents inherit the key). The bytes this thread allocated between its :state mark (init done)
+  ;; and its first request's form, measured 2026-10-29: 38.5 MB before, 6.5 MB after.
+  (let [[r] (in-agent ["(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"])]
+    (is (< (:value r) 12000000) (str "an agent allocated " (:value r) " bytes from its state mark to its first request: " (pr-str r)))))
+
 (deftest an-agent-with-no-task-resumes-a-kept-branch
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
