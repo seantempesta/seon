@@ -822,8 +822,10 @@
   (let [p (checkout! "runtime-pins" {"deps.edn" "{}" "docs/a.md" "# a"})
         commit (fn [s msg] (doseq [args [["init" "-q"] ["add" "."] ["-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" msg]]]
                              (apply sh/sh "git" "-C" s args)))
+        n (volatile! 0)
         bump (fn [name] (let [s (str p "/reference-code/" name)]
-                          (spit (str s "/core.clj") (str "(ns " name ") " (rand-int 1000000)))
+                          ;; a new text per bump, so each is a commit of its own (a count, never a random: test-inputs)
+                          (spit (str s "/core.clj") (str "(ns " name ") " (vswap! n inc)))
                           (sh/sh "git" "-C" s "add" ".")
                           (sh/sh "git" "-C" s "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "bump")
                           (sh/sh "git" "-C" p "add" (str "reference-code/" name))))

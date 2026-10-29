@@ -206,6 +206,7 @@
   data (das-b, das-d), never :db/txInstant unless declared data, which every transaction asserts and no key's content reads (a
   transaction's entity bears no key: reading it cost a descent and two seeks a transaction, 87 of them for
   a branch of 18 evals)."
+  {:malli/schema [:=> [:cat ifn? ifn? :any] :boolean]}
   [das-b das-d a]
   (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (program/attr-namespaces (namespace a))) (das-b a) (das-d a)))))
 

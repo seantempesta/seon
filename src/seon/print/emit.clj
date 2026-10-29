@@ -38,6 +38,7 @@
   newline itself, is searched for (`indexOf`) once per occurrence: its next place is kept until
   passed, so a line costs a few native calls and a character that never comes is searched for
   once."
+  {:malli/schema [:=> [:cat :string :seon.host/fn :seon.host/fn] :any]}
   [^String s on-break on-escape]
   (let [n (.length s)
         find (fn [ch from] (let [j (.indexOf s (int ch) (int from))] (if (neg? j) n j)))]
