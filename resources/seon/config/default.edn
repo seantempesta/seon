@@ -277,6 +277,19 @@
  ;; test run ~30 min; the costliest green in-process test recorded 8.3 G ticks (p99 1.9 G, median
  ;; 2 M; 1,186 tests' newest verdicts), so 10 G ends a loop in about a minute and fails none today.
  :seon.config.agent/test-ticks 10000000000
+ ;; Unit: engine ticks. The least one test may run: its budget is min(test-ticks, max(this,
+ ;; test-ticks-factor x the median ticks its green verdicts measured)), so a test with no green history
+ ;; gets this. Provenance: the 45,333 verdicts of 1,194 tests in the results cache (2026-10-29; commit
+ ;; message): newest-green ticks median 1.7 M, p90 153 M, p99 1.7 G, max 8.3 G; 4 G is about 1-5 s of work
+ ;; (a tight loop ~4e9 ticks/s, an allocating one ~7.5e8) and no test but one runaway (seon.db-test/a-create-that-fails-leaves-no-store,
+ ;; 3 greens of 81-147 G) spent more than max(4 G, 10 x its median) at any digest. At the bound that test
+ ;; is an :error of :seon.test/ticks-spent naming the budget used. The budget is in every test's digest
+ ;; through these three keys and never through the history (docs/merging.md#a-tests-tick-budget).
+ :seon.config.agent/test-ticks-floor 4000000000
+ ;; Unit: a factor (times). How many times its median green ticks a test may run, at any digest
+ ;; (see test-ticks-floor): the same test's greens vary 1.0-1.07 x the median at p50-p90 and 3.3 x at p99
+ ;; (44,368 verdicts); 10 is past every test but one runaway above the floor.
+ :seon.config.agent/test-ticks-factor 10
  ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
