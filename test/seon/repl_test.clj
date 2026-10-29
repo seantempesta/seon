@@ -35,12 +35,18 @@
   ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a
   ;; java.util.concurrent.Future is required"). A form is program when its top-level form is a
   ;; definition; a def nested beside calls stays the recorded eval, and its record says so
-  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task]}]
+  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task agent]}]
                                            [(str "(ns " ns ".core) (def a 1)")
                                             (str "(in-ns '" ns ".core) (let [r (+ 1 1)] (def b r) r)")
                                             {:op :eval :agent "root"
-                                             :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b]))")}]))]
+                                             ;; the records are applied ahead of the agent's commit (seon.agent/transact!): read at its
+                                             ;; :commit events, the tap first, until a is there (b never is)
+                                             :code (str "(let [ev (c/events sys) a :" agent
+                                                        " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b])))"
+                                                        " r (loop [] (let [v (read)] (if (first v) v"
+                                                        " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                                        " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (some #(= "a" (name %)) (:recorded top)) (str "a top-level def is program: " (pr-str top)))
     (is (empty? (:recorded nested)) (pr-str nested))
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
