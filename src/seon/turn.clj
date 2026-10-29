@@ -475,6 +475,15 @@
                        (let [obs (observe task)
                              ;; how the work stands, from the walk the request is drawn from (one computation a turn)
                              s (status-now)
+                             ;; its proofs pass: the tests its change reaches run now, judged as the judge judges them
+                             ;; (agent/prove! :judge, their results facts on the branch), and the status is read again
+                             ;; from the branch, before it is done or merges (the owner's ruling: a turn runs the
+                             ;; proofs, the reach runs once they are green). md-scan #24 ended green on its proofs
+                             ;; and the judge found 18 reds its change made
+                             s (if (and (not (contract/error? s)) (empty? (:reasons s)))
+                                 (do (test-error! (agent/prove! :judge))
+                                     (let [db (agent/db)] (context/status db (pdb/eid db :seon.agent/key (:key @agent/state)) {})))
+                                 s)
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
                              hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]

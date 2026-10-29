@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -73,18 +73,20 @@
 (defn- root-eval
   "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
   cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
-  d) with `sys` a local bound to this root, unbounded (root's own forms take no tick
-  budget); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
+  d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
+  budget: a whole-program load allocates tens of GB, and the agent's per-form
+  budget stopped it); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
   {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.eval/response]}
   [sys code]
   (when-not (find-ns 'root.repl)
     (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
   (let [r (binding [*sys* sys]
-            (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0
+            (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
                                            (repl/record-details @(:conn sys) code r {} nil)))
-    (dissoc r :value)))
+    ;; its value too: the :eval answer passes it on when it is plain data (op-answer :eval)
+    r))
 
 (defn- live-run
   "Task id's running run whose agent's process lives in root's view now, as [run nil], or [nil dead]
@@ -268,7 +270,11 @@
 
 (defmethod op-answer :eval [sys ag req]
   (let [r (if (= :root ag) (root-eval sys (:code req)) @(c/submit! sys ag (:code req) {:origin :outside}))]
-    (if (contract/error? r) r {:response (select-keys r [:handle :text :ex :recorded :main])})))
+    ;; its value as data beside its printed text when it is plain data (seon.db/plain?: what the wire's EDN carries):
+    ;; a reader of the answer reads the value, never the text back (an eval that printed has its :out verbatim in the
+    ;; text, which is no EDN since out-verbatim). The model reads the text alone (tools/call)
+    (if (contract/error? r) r {:response (cond-> (select-keys r [:handle :text :ex :recorded :main])
+                                           (and (contains? r :value) (pdb/plain? (:value r))) (assoc :value (:value r)))})))
 
 ;; the block's text as the model reads it: printed to the agent's output, not as a
 ;; value (a value comes back as a string literal, escaped, under the reply's budget);
