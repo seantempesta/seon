@@ -155,4 +155,20 @@ OPEN beyond 3: the per-eval description when a form has no `;;` line (show its c
 
 Next: one example task from scratch, carried through 1-9; an independent reader with none of this history checks it for gaps; then the mock is rebuilt from it; then the build plan."
   :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-context-is-the-agents-evals-and-seons"
+  :seon.task/plan "The owner's design for what the model is sent, agreed 2026-10-29 in conversation (replaces seon.context/world, the page items and their caches, the unsent current-state block, the fold and :same-as, included-tx in the turn, and observe's per-turn work).
+
+The request is the system prompt, then every eval record of the agent in order, each printed by the one printer as a pure function of the record (no fold, no record depending on the ones before), so a request is the one before plus what was added and a cache of a record's text is keyed by its id and evictable (AGENTS 5). A model's eval is its assistant tool call and tool result; an eval Seon makes is the same record, its response naming who asked (:by, the agent's id or root's), sent as a user message since a provider's assistant role holds only what the model wrote.
+
+Turn 0 (the agent's start, no records yet): Seon evaluates and records (my.agent/help), any setup forms, and the render of @ctx (the agent's ui, expanded hiccup, the same the person sees: the one large upfront cost).
+
+Each turn after the model's reply: each eval call runs in order, its result its tool message; then Seon evaluates (my.agent/prove) (the proofs' results land as facts, seon.proofs/test-results-are-a-few-facts) and one changes form answering {:ctx :ui :main}, each left out when empty:
+- :ctx, seon.ctx/diff of the agent's record between the last turn's commit and now ({path [old new]}, costs what changed);
+- :ui, each render part whose walk revision moved since the last turn's frame ({part-id hiccup}); a list is a part per row (Phoenix LiveView's streams), and a large part that changes often is split, never patched inside;
+- :main, how main differs: main's merges since the merge base (seon.merge/divergence of main's side), the names both sides changed, and a would-be conflict (THE PLAN step 1, problem 4).
+A reply with prose and no call is the agent winding down: it is kept as the assistant message (today it is lost from the model's history: seon.context/records reads only evals and messages), then Seon runs the proofs and the done rule, records the end and the agent goes idle; green ends it, red tells it why.
+
+Open: the changes form's name; compaction (later: the owner's idea of all prose and evals, some elided, then the current ctx and ui, then diffs from there); stable part ids from the data a part shows, never a hash of its args; the turn's request bookkeeping (:seon.turn/sent, basis, split, tokens, timings) moved to its own entity the agent's pull never reaches."
+  :seon.task/kind :design
   :seon.task/proofs #{}}]
