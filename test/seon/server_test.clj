@@ -258,10 +258,12 @@
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never
   ;; written, so the done rule refuses, the task is held, and the answer says why
   (let [[done] (at/in-agent #(vector {:op :done :agent (:agent %)}))]
-    (is (= :closed (:status done)) (pr-str done))
-    (is (= :red (:outcome done)))
-    (is (clojure.string/includes? (str (get-in done [:held :seon.task/failure :reason])) "proof-unknown demo-test/t")
-        "the done rule's reasons, as the judge wrote them on the held task")))
+    ;; the answer is one line and the handle that reads the whole verdict (seon.server/verdict-line)
+    (is (clojure.string/includes? (:line done) ":status :closed") (pr-str done))
+    (is (clojure.string/includes? (:line done) ":outcome :red") (pr-str done))
+    (is (clojure.string/includes? (:line done) "proof-unknown demo-test/t")
+        "the done rule's reasons, as the judge wrote them on the held task")
+    (is (clojure.string/includes? (:handle done) "seon.server/verdict"))))
 
 (deftest an-outside-agent-changes-its-task-by-swap
   ;; the owner, 2026-10-27: "I want the ctx atom to be a mirror of the agents context that we are
@@ -427,3 +429,38 @@
     (is (= 3 (:value after2)) (str "and after a prove of main: " (pr-str after2)))
     (is (true? (:value live2)))
     (is (not (contract/error? (:value failed))) (str "its fail! records on its run: " (pr-str failed)))))
+
+;; See docs/merging.md#main-moved-is-said-at-every-eval
+(deftest the-done-answer-is-a-line-and-a-handle
+  ;; one-wait's real run (root, 2026-10-28): seon_done answered 73,856 characters, the whole verdict
+  ;; with every red. A line, each red with its first failure, cut by the one printer, and the form
+  ;; that reads the whole
+  (let [reds (vec (for [i (range 300)] (symbol "a.t-test" (str "x" i))))
+        db (d/db-with (ts/test-db) [{:seon.task/id "a/t" :seon.task/execution :held
+                                     :seon.task/failure {:reason (str "proof-red " (clojure.string/join " " reds))}
+                                     :seon.task/evidence {:from "a/t#1" :conflicts [] :unmerged [] :red reds}}
+                                    {:seon.run/id "a/t#1" :seon.run/status :closed :seon.run/outcome :red :seon.run/reason "red"
+                                     :seon.run/failures {'a.t-test/x0 [{:type :fail :message "expected 1, got 2"}]}}])
+        {:keys [line handle]} (seon.server/verdict-line db "a/t#1" "a/t" "main moved since your base: 2 names changed")]
+    (is (clojure.string/includes? line "expected 1, got 2") (str "a red with its first failure: " line))
+    (is (clojure.string/includes? line "main moved since your base") "how main differs, so nothing at done is new")
+    (is (< (count line) 4000) (str "300 reds, one line: " (count line) " characters"))
+    (is (= "(seon.server/verdict @(:conn sys) \"a/t#1\" \"a/t\")" handle) "the form that reads it whole")))
+
+(deftest a-dead-agent-never-wedges-its-task
+  ;; one-wait's real run (root, 2026-10-28): an agent that died left its task :running, and
+  ;; seon_attach answered the dead agent, shared, so every eval said "agent a2 ended" with no way back.
+  ;; A death is a fact root's view holds: attach closes the dead run and starts a fresh agent on its branch
+  (let [kill (fn [ns] {:op :eval :agent "root"
+                       :code (str "(let [ev (c/events sys) r (some #(when (= \"" ns "/u\" (:seon.run/task %)) %) (seon.task/running @(:conn sys)))"
+                                  "      a (:seon.run/agent r)]"
+                                  "  (c/kill! sys a)"
+                                  "  (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur))))"
+                                  "  (clojure.core.async/untap (:events-mult sys) ev) a)")})
+        [first-a _ second-a]
+        (at/in-agent (fn [{:keys [ns]}] [{:op :attach :task (str ns "/u")} (kill ns) {:op :attach :task (str ns "/u")}])
+                     {:decls (fn [_] [{:seon.task/name "u" :seon.task/plan "Work too." :seon.task/kind :work :seon.task/proofs #{'demo-test/u}}])})]
+    (is (keyword? (:agent first-a)) (pr-str first-a))
+    (is (keyword? (:agent second-a)) (str "attach after the death starts an agent: " (pr-str second-a)))
+    (is (not= (:agent first-a) (:agent second-a)) "a fresh one, never the dead one")
+    (is (not (:shared second-a)) "its own run, not the dead agent's")))
