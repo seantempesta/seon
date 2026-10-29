@@ -760,7 +760,7 @@
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
-  each written proof with its source from ctx, the sections cited with their text and the similar
+  each written proof with its source and its recorded result (:status, :failure and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
   as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
   the task's own attributes in ctx change or a transaction touches what task-data read. Each var
@@ -769,7 +769,12 @@
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
   (let [{:seon.task/keys [id kind execution] :as t} (:task c)
         ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
-        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))]
+        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))
+        ;; each proof's last result as the branch records it (the agent's run wrote it on its var entity:
+        ;; seon.proofs/result-tx), read from ctx and nothing computed here
+        results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
+                           [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
+                                            (:seon.test/failure v) (assoc :failure (:seon.test/failure v)))]))]
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
@@ -781,7 +786,11 @@
      ;; the rest of its data by the printer (each cited var is its own component); each proof how to
      ;; run it and, written, its source (its last result is the status's)
      (let [data (cond-> (context/task-data db (task/task db id) false)
-                  (seq sources) (update :to-prove #(into (empty %) (for [[s run] %] [s (if-let [src (sources s)] {:run run :source src} run)]))))]
+                  (or (seq sources) (seq results))
+                  (update :to-prove #(into (empty %) (for [[s run] %]
+                                                       [s (if (or (sources s) (results s))
+                                                            (cond-> (merge {:run run} (results s)) (sources s) (assoc :source (sources s)))
+                                                            run)]))))]
        ;; a cut names the form that answers the whole at the agent's REPL
        (remove nil?
          (list ;; a premise main may already answer comes first, so it is checked in turn 1

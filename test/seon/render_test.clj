@@ -989,6 +989,31 @@
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
 
+(deftest the-proofs-part-renders-the-recorded-status
+  ;; task seon.proofs/test-results-are-a-few-facts (R2a): the task part of the one layout shows each
+  ;; proof's status, the digest it was judged at and (while red) its first failure from @ctx, where the
+  ;; agent's run recorded them on the proof's var entity; nothing is run or read from the cache to draw it
+  (let [[_ branch _] (paged-dbs)
+        k (seon.task/agent-key "b1" :a3)
+        draw #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
+                              (requiring-resolve (r/declared :seon.render/render-ctx)))]
+                (try (:html (unit-of (r/placed-units w) "task-data-")) (finally (r/dispose-walk! w))))
+        written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
+                                   {:var/name 'demo/f-test :var/kind :test :var/form "f"}])
+        red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
+                                 :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"}])
+        green (d/db-with red [[:db/retract [:var/name 'demo/f-test] :seon.test/failure "{:type :fail, :message \"it doubles\", :expected \"4\", :actual \"5\"}"]
+                              {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
+    (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
+    (let [h (draw red)]
+      (is (str/includes? h ":red") (str "the recorded status: " h))
+      (is (str/includes? h "it doubles") "and its first failure")
+      (is (str/includes? h "digest-1") "and the digest it was judged at")
+      (is (str/includes? h "done-when") "marked: done when green"))
+    (let [h (draw green)]
+      (is (str/includes? h ":green"))
+      (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
+
 (deftest the-status-shows-what-an-outside-read-observed
   ;; task seon.render/the-status-before-any-model-turn: an outside read (seon.turn/context-block,
   ;; origin :outside) records what it observed as a model turn does, so the status is drawn from

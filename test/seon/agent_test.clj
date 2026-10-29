@@ -517,6 +517,34 @@
     (is (= ['{reds-test/r :fail} 0 1 false 1 [["the recorded failure" true]]] (:value judge))
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))))
 
+(deftest a-test-run-writes-its-results-on-the-branch
+  ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
+  ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
+  ;; red with its digest and first failure, main holding none of it; fixed and run again, green with no
+  ;; failure and the sums started over at the new digest; a run that changes nothing writes nothing
+  (let [facts "(let [pull (fn [db] (if-let [e (seon.db/eid db :var/name 'facts-test/r)] (datahike.api/pull db '[*] e) {}))]
+                 {:branch (select-keys (pull (seon.agent/db)) [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs])
+                  :main (select-keys (pull (seon.agent/heard-main)) [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs])})"
+        [_ red fact-red _ green fact-green again]
+        (in-agent ["(ns facts-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 2) \"it is one\"))"
+                   "(select-keys (my.agent/prove) [:results])" facts
+                   "(deftest r (is (= 1 1)))"
+                   "(select-keys (my.agent/prove) [:results])" facts
+                   "(let [t (:max-tx (seon.agent/db))] (my.agent/prove) (= t (:max-tx (seon.agent/db))))"]
+                  {:dirs ["src" "test"] :proofs #{'facts-test/r}})]
+    (is (= {:results '{facts-test/r :fail}} (:value red)))
+    (let [{:keys [branch main]} (:value fact-red)]
+      (is (= :red (:seon.test/status branch)) (pr-str fact-red))
+      (is (string? (:seon.test/digest branch)))
+      (is (str/includes? (str (:seon.test/failure branch)) "it is one") "its first failure")
+      (is (= {} main) "main holds none of it"))
+    (is (= {:results '{facts-test/r :pass}} (:value green)))
+    (let [{:keys [branch]} (:value fact-green)]
+      (is (= :green (:seon.test/status branch)))
+      (is (nil? (:seon.test/failure branch)) "no failure while green")
+      (is (= 1 (:seon.test/runs branch)) "the sums start over at the new digest"))
+    (is (true? (:value again)) "a run that changes nothing writes no datoms")))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test that is the same is not run again once green, "especially when
   ;; freshly branched": an agent's greens and a checkout's (bin/test's) are one cache, keyed by
