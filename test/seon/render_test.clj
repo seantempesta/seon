@@ -951,7 +951,7 @@
   ;; wrong): they are drawn above the plan, whole
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
-        h (h/html (ui/task-data {:seon.ctx/ctx {:task {:seon.task/id "demo/w"}} :seon.db/db db} 1))]
+        h (h/html (ui/task-html {} (ui/task-data {:seon.ctx/ctx {:task {:seon.task/id "demo/w"}} :seon.db/db db} 1)))]
     (is (str/includes? h "reproduce what the plan says is wrong") "the whole instructions are on the page")
     (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "reproduce what the plan says is wrong") (str/index-of h "Make w true.")) "above the plan")))
@@ -983,16 +983,20 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "namespaces-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
-        "the task, the namespaces it touches, what is related, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
+    (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md")
+            (str "namespaces-" rid) (str "related-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
+        "the task, each thing its plan cites (a part each), the namespaces it touches, what is related, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
-      (is (str/includes? h ":fail")))
+      (is (str/includes? h "text-error") "the failing proof's verdict is the status's mark")
+      (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task-data-"))]
       (is (str/includes? h "demo/f") "drawn by task-data")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
     (is (str/includes? (:html (unit-of task "related-")) "nothing related yet") "related, drawn from the db: none yet here")
-    (is (= [(str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
+    (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
+            ;; e1 is the agent's own loop (an eval naming a run, no model call): the chat's start and end cards, not a row
+            (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e2"))
             (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
             (str "chat-end-" rid)]
            (mapv :id conv))
@@ -1009,7 +1013,7 @@
         k (seon.task/agent-key "b1" :a3)
         draw #(let [w (r/draw (:tree (seon.ctx/build % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
                               (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                (try (:html (unit-of (r/placed-units w) "task-data-")) (finally (r/dispose-walk! w))))
+                (try (:html (unit-of (r/placed-units w) "status-")) (finally (r/dispose-walk! w))))
         written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
                                    {:var/name 'demo/f-test :var/kind :test :var/form "f"}])
         red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
@@ -1018,13 +1022,11 @@
                               {:var/name 'demo/f-test :seon.test/digest "digest-2" :seon.test/status :green}])]
     (is (not (str/includes? (draw written) "digest-1")) "a proof not yet run shows no result")
     (let [h (draw red)]
-      (is (str/includes? h ":red") (str "the recorded status: " h))
+      (is (str/includes? h "text-error") (str "the recorded status, red: " h))
       (is (str/includes? h "it doubles") "and its failing assertion")
-      (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code")
-      (is (str/includes? h "digest-1") "and the digest it was judged at")
-      (is (str/includes? h "done-when") "marked: done when green"))
+      (is (str/includes? h "(= 4 5)") "as the assertion it got, printed as code"))
     (let [h (draw green)]
-      (is (str/includes? h ":green"))
+      (is (str/includes? h "text-success") "green is the status's mark")
       (is (not (str/includes? h "it doubles")) "a green keeps no failure"))))
 
 (deftest the-status-is-drawn-from-facts-with-no-turn-of-the-reader
@@ -1038,7 +1040,7 @@
         standing (try (unit-of (r/placed-units w) "status-") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
-    (is (str/includes? h ":pass") (str "the verdict the branch holds: " h))
+    (is (str/includes? h "text-success") (str "the verdict the branch holds: " h))
     (is (not (str/includes? h " of ")) "and has no turn count")))
 
 (deftest the-models-page-holds-the-plan-whole
@@ -1447,12 +1449,12 @@
            :messages {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
     (testing "a model turn is its reply, its thinking folded"
-      (let [t (h (ui/chat-turn {:seon.ctx/ctx c} 1 2))]
+      (let [t (h (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 2))]
         (is (str/includes? t "I'll **reproduce** it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (str/includes? t "turn 1")))
-      (is (nil? (ui/chat-turn {:seon.ctx/ctx c} 1 3)) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/chat-turn {:seon.ctx/ctx c :seon.db/db (ts/test-db)} 1 3)) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/chat-message {:seon.ctx/ctx c} 1 4))]
         (is (str/includes? m "user"))

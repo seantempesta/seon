@@ -644,7 +644,7 @@
       (nil? src) (refuse :no-source "no recorded source: define it whole first" nil)
       (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))]
                     (refuse :not-found "the old text is not in its source exactly (whitespace counts); (source f) shows it as recorded"
-                            (vec (take 3 (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l])))))
+                            (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))))
       (next at) (refuse :ambiguous (str "the old text occurs " (count at) " times: give more of it, so it is one")
                         (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at))
       :else (let [i (first at)
