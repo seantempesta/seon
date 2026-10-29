@@ -112,7 +112,14 @@
         (testing "health reads what the tree caused since its base: another base is another key, and no base no key"
           (is (not= ((:digests sd) "health") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "health")))
           (is (= ((:digests sd) "laws") ((:digests (proofs/step-digests all {:env "e" :tree "t1" :config {} :base "b2"})) "laws")) "laws reads the tree alone")
-          (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1" :config {}})))))))
+          (is (= ["health"] (:missing (proofs/step-digests all {:env "e" :tree "t1" :config {}}))))))
+      (testing "the forks and lmdb steps are keyed by the pins: a pin bump selects them, a config key outside the pins does not"
+        (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
+              at (fn [cfg] (:digests (proofs/step-digests all {:env "e" :tree "t" :config cfg :base "b"})))
+              before (at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "40"})]
+          (doseq [step ["forks" "lmdb-kill" "lmdb-sem"]]
+            (is (not= (before step) ((at {:seon.pin/jolt "j2" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "40"}) step)) (str step ": jolt's pin moved"))
+            (is (= (before step) ((at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "41"}) step)) (str step ": a config key is no pin"))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
       (is (= #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
