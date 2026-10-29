@@ -494,26 +494,33 @@
 
 (deftest a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): seon.proofs/result-tx, what an agent's run
-  ;; writes on its branch beside the cache: the digest, status, first failure and running sums of each
-  ;; test that ran, and the digest and status of one reused; only what differs
+  ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running
+  ;; sums of each test that ran, and the digest and status of one reused; only what differs; and a test whose
+  ;; reach digest moved, not judged by the run, loses its facts (a status is the verdict at the digest it has now)
   (let [red {:test 'app.f-test/t :digest "d1" :pass 0 :fail 1 :error 0 :ms 5 :ticks 100 :bytes 1000}
         green (assoc red :digest "d2" :pass 1 :fail 0)
-        failure {'app.f-test/t [{:type :fail :message "no" :expected "1" :actual "2"}]}
-        tx1 (proofs/result-tx {} {'app.f-test/t red} failure {})
+        failure {'app.f-test/t [{:type :fail :message "no" :expected "1" :actual "2"} {:type :fail :message "nor" :expected "3" :actual "4"}]}
+        at {'app.f-test/t "d1"}
+        tx1 (proofs/result-tx {} {'app.f-test/t red} failure {} at)
         held #(into {} (remove (comp #{:var/name} key)) (first %))]
     (is (= :red (:seon.test/status (first tx1))))
     (is (= "d1" (:seon.test/digest (first tx1))))
-    (is (str/includes? (:seon.test/failure (first tx1)) "no") "its first failing assertion")
+    (is (= (failure 'app.f-test/t) (:seon.test/failures (first tx1))) "every failing assertion kept, as data, as the child reported it")
     (is (= {:seon.test/runs 1 :seon.test/ms 5 :seon.test/ticks 100 :seon.test/bytes 1000} (select-keys (first tx1) [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])))
-    (is (= [] (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d1" :pass 0 :fail 1 :error 0 :failures (failure 'app.f-test/t)}}))
+    (is (= [] (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d1" :pass 0 :fail 1 :error 0 :failures (failure 'app.f-test/t)}} at))
         "reused at the digest and status the branch holds: nothing to write")
-    (let [tx2 (proofs/result-tx {'app.f-test/t (assoc (held tx1) :seon.test/runs 3)} {'app.f-test/t green} {} {})]
+    (let [tx2 (proofs/result-tx {'app.f-test/t (assoc (held tx1) :seon.test/runs 3)} {'app.f-test/t green} {} {} {'app.f-test/t "d2"})]
       (is (= :green (:seon.test/status (first (remove vector? tx2)))) "fixed and run again: green")
-      (is (= [[:db/retract [:var/name 'app.f-test/t] :seon.test/failure (:seon.test/failure (first tx1))]] (filter vector? tx2)) "the failure is retracted on green")
+      (is (= [[:db/retract [:var/name 'app.f-test/t] :seon.test/failures (:seon.test/failures (first tx1))]] (filter vector? tx2)) "the failures are retracted on green")
       (is (= 1 (:seon.test/runs (first (remove vector? tx2)))) "a new digest starts the sums over"))
     (let [at-d2 (assoc (held tx1) :seon.test/digest "d2" :seon.test/status :green :seon.test/runs 1 :seon.test/ms 5)
-          tx3 (proofs/result-tx {'app.f-test/t (dissoc at-d2 :seon.test/failure)} {'app.f-test/t green} {} {})]
+          tx3 (proofs/result-tx {'app.f-test/t (dissoc at-d2 :seon.test/failures)} {'app.f-test/t green} {} {} {'app.f-test/t "d2"})]
       (is (= {:seon.test/runs 2 :seon.test/ms 10} (select-keys (first tx3) [:seon.test/runs :seon.test/ms])) "the same digest adds"))
-    (let [tx4 (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d9" :pass 1 :fail 0 :error 0}})]
+    (let [tx4 (proofs/result-tx {'app.f-test/t (held tx1)} {} {} {'app.f-test/t {:digest "d9" :pass 1 :fail 0 :error 0}} {'app.f-test/t "d9"})]
       (is (= :green (:seon.test/status (first (remove vector? tx4)))) "a reused green at a new digest")
-      (is (= 6 (count tx4)) "its digest and status written, its four sums and its failure retracted (the old digest's)"))))
+      (is (= 6 (count tx4)) "its digest and status written, its four sums and its failures retracted (the old digest's)"))
+    (let [held1 (held tx1)]
+      (is (= (set (for [[k v] held1] [:db/retract [:var/name 'app.f-test/t] k v]))
+             (set (proofs/result-tx {'app.f-test/t held1} {} {} {} {'app.f-test/t "d5"})))
+          "not judged by this run and its digest moved: every fact retracted, its status unknown")
+      (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))

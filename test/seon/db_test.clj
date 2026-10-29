@@ -440,9 +440,7 @@
     :seon.turn/reply (slice @prose k 1500)
     :seon.turn/calls [{:id "call-0" :code "(f 2)" :eval (str "e" k)}]}
    {:seon.model-call/id (str "att/" k) :seon.model-call/turn "turn"
-    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model
-                            :observed {:results {'t-test/x :fail} :test-run-errors [] :reasons [{:reason :proof-red :symbol 't-test/x}]
-                                       :reds [{:test 't-test/x :type :fail :expected "(= 6 (f 2))" :actual "(not (= 6 4))"}]}}}
+    :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :run "att" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
    {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/record {:code "(f 2)" :response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}}])
 

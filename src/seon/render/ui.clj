@@ -759,7 +759,7 @@
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
   then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
-  each written proof with its source and its recorded result (:status, :failure and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
+  each written proof with its source and its recorded result (:status, the failing assertions and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
   as a call of the one printer, [#'seon.render/html opts data],
   expanded when the page is written, so the model reads the data as data). It runs again when
   the task's own attributes in ctx change or a transaction touches what task-data read. Each var
@@ -773,7 +773,7 @@
         ;; seon.proofs/result-tx), read from ctx and nothing computed here
         results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
                            [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
-                                            (:seon.test/failure v) (assoc :failure (:seon.test/failure v)))]))]
+                                            (seq (:seon.test/failures v)) (assoc :failures (mapv context/failure (:seon.test/failures v))))]))]
     [:section
      ;; its name as a title (the id's name, words), its namespace and state above it
      [:p {:class "text-2xs uppercase tracking-wider text-text-500"}
@@ -855,89 +855,25 @@
       source (conj [#'render/html {:budget budget :handle (list :source whole)} source])
       (seq others) (conj [#'render/html {:budget budget :handle (list 'dissoc whole :source)} others]))))
 
+(defn status-html
+  "The work's standing as the page shows it (the declared html render of :seon.context/status): its
+  data by the one printer, under the budget of a value, with the form that reads it again. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts v]
+  [:section [:h2 "status"]
+   [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)} (with-meta (dissoc v :reasons) nil)]])
+
 (defn status
-  "What the newest turn of the agent observed, a model's or an outside read's (a component over ctx
-  and the db), as (my.task/status) answers it: seon.context/turn-state over the turn's recorded
-  basis (seon.context/turn-input, with the model turn before it for its last reply), as a call of
-  the one printer (the model reads the data)."
+  "How the agent's work on its task stands (a component over ctx and the db): seon.context/status
+  of its branch db, a part (its data, :seon.context/status, drawn by its schema's html render for
+  the page and its model render for the model: docs/render.md#a-part-answers-data). It reads main's
+  commit from ctx only when the task merges itself (the merge view), so a move of main redraws it
+  only then."
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _aid]
-  (let [;; its turns by eid, newest first: the newest of either origin, and the model turn before it
-        [turn & older] (vals (:turns c))
-        lst (some #(when (= :model (:seon.turn/origin %)) %) older)
-        task (:seon.task/id (:task c))]
-    (when turn
-      ;; the turns as ctx's pull holds them ([*]): their basis, and the last model turn's calls
-      (let [b (:seon.model-call/basis (d/pull db [:seon.model-call/basis] [:seon.model-call/id (ratom/realize (:seon.turn/id turn))]))
-            l (some-> lst ratom/realize (select-keys [:seon.turn/truncated :seon.turn/calls]))]
-        [:section [:h2 "status"]
-         [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)}
-          (context/turn-state db (task/task db task) (context/turn-input db b l))]]))))
-
-(defn- commit-db
-  "The db at commit cid of the store branch db reads (datahike.api/commit-as-db): main's or the
-  merge base's value as a render's child names it, read from the branch's own store, so a render
-  of them is a function of its args wherever it is drawn (an agent's walk, root's cold draw)."
-  {:malli/schema [:=> [:cat :seon.host/db :uuid] :seon.host/db]}
-  [db cid] (d/commit-as-db (:store db) cid))
-
-(defn merge-view
-  "Whether the branch can merge into main now, drawn from r (seon.merge/readiness: what main
-  changed since the merge base, and which of those the branch changed too). branch-views reads it.
-  See docs/render.md#the-branchs-views."
-  {:malli/schema [:=> [:cat :seon.merge/readiness] vector?]}
-  [r]
-  [:section [:h2 "merge"]
-   [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.merge/readiness (:base @seon.agent/state) (seon.agent/db) (seon.agent/heard-main))}
-    r]])
-
-(defn caused-view
-  "What the branch's own work made wrong since its merge base, drawn from split
-  (seon.problems/caused-split: the open problems it caused, which the done rule refuses, and what
-  it changed under the wiki, :attention); nil when it caused none. branch-views reads it.
-  See docs/render.md#the-branchs-views."
-  {:malli/schema [:=> [:cat [:map [:caused :any] [:attention :any]]] [:maybe vector?]]}
-  [{:keys [caused attention]}]
-  (when (or (seq caused) (seq attention))
-    [:section [:h2 "caused"]
-     [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(seon.problems/caused-split (:base @seon.agent/state) (seon.agent/db))}
-      {:caused caused :attention attention}]]))
-
-(defn gaps-view
-  "The functions the branch defines without a contract, from ch, its changes since the merge base
-  (seon.merge/uncontracted: what root's judge and the merge gate ask); nil when it defines none.
-  See docs/render.md#the-branchs-views."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:maybe vector?]]}
-  [ch]
-  (let [gaps (vec (sort-by str (pm/uncontracted ch)))]
-    (when (seq gaps)
-      [:section [:h2 "without a contract"]
-       [#'render/html {:budget (config/value :seon.config.render/value-budget)} gaps]])))
-
-(defn divergence-view
-  "What the branch's merge carries to main, from ch, its changes since the merge base
-  (seon.merge/divergence: the vars it added, redefined and removed and the schema keys it
-  changed); nil when it carries none. See docs/render.md#the-branchs-views."
-  {:malli/schema [:=> [:cat :seon.merge/changes] [:maybe vector?]]}
-  [ch]
-  (let [carried (pm/divergence ch)]
-    (when (seq carried)
-      [:section [:h2 "its merge carries"]
-       [#'render/html {:budget (config/value :seon.config.render/value-budget)} carried]])))
-
-(defn branch-views
-  "What the branch's work since its merge base shows, as one component over the db (the base's
-  commit, and main's when the task merges itself, its children): caused-view, gaps-view,
-  divergence-view and, with a main commit, merge-view, each drawn from the one diff of the branch
-  against its base (seon.merge/content-datoms read once, the changes made from it). It runs again
-  when main or the base moves, or a datom the diff read changes. See docs/render.md#the-branchs-views."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :uuid [:maybe :uuid]] seq?]}
-  [{db :seon.db/db} base main]
-  (let [b (commit-db db base)
-        moved (pm/content-datoms b db #{})
-        ch (pm/delta-changes b db #{} moved)]
-    (list (caused-view (problems/caused-split b db ch)) (gaps-view ch) (divergence-view ch)
-          (when main (merge-view (pm/readiness b db (commit-db db main) moved))))))
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
+    (with-meta (context/status db aid {:main main}) {:seon.render/schema :seon.context/status})))
 
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
@@ -956,14 +892,27 @@
 
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
-  run schema's render, from the agent's record (its status, branch and turn cap, its turns)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  [:section
-   (render/html {:schema :seon.run/run-fact}
-                (-> (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
-                                                  :seon.run/branch (:seon.agent/branch c)})
-                    (assoc :turns-taken (count (:turns c)))))])
+  run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
+  the run's when the agent raised none, from the db), and
+  that its last reply was cut, when it was: the conversation's part of where the agent stands (the
+  work's is seon.render.ui/status)."
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [;; its cap: the agent's own (raised to extend it), else its run's, as the turn loop reads it; the run by
+        ;; the agent, a fact written when a run begins
+        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db aid) seq (apply max) (d/entity db))
+        cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
+        n (count (:turns c))]
+    [:section
+     (render/html {:schema :seon.run/run-fact}
+                  (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
+                                                :seon.run/branch (:seon.agent/branch c)}))
+     ;; the run's schema render draws its declared keys only: the turns taken and a cut reply are lines of their own
+     ;; this turn's number (its record is written before its page is drawn), of the cap, as chat-end says it
+     [:p (str "turn " n (when cap (str " of " cap)))]
+     ;; its last reply cut at the model's token limit: what followed it was lost
+     (when (some-> (:turns c) vals first ratom/realize :seon.turn/truncated)
+       [:p {:class "err"} "your last reply was cut at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."])]))
 
 (defn own-problems
   "The open problems of the agent's newest run (a component over its branch db, seon.problems/own: its run's,
@@ -1142,13 +1091,8 @@
                        (let [proved (set (map :var/name (vals (:proved task))))]
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
                        [#'related {} aid]
-                       (when (seq (:turns c)) [#'status {} aid])
-                       ;; what the turn no longer computes, drawn when what it reads moves: the merge
-                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
-                       ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
-                       (when-let [b (:seon.agent/base-commit c)]
-                         ;; a task that merges itself also shows whether it can merge now (main's commit)
-                         [#'branch-views {} b (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) (:seon.agent/main-commit c))])))
+                       ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
+                       [#'status {} aid]))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns c)) [#'run-head {} aid])
       (when aid [#'own-problems {} aid])

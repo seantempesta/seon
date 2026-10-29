@@ -16,7 +16,7 @@
   breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [clojure.repl]
             [malli.registry :as mr] [clojure.core.async :as a]))
 
@@ -28,7 +28,7 @@
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
-;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
+;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it: the db :db is, dropped by commit! when it moves :db)
 ;; :eval (the id of the eval running, "e5", while seon.repl/eval-string runs it: what transact! names in its tx-meta)
@@ -677,6 +677,20 @@
         (swap! state assoc :branch-graph {:point at :graph g :inputs in})
         g))))
 
+(defn reconcile-index
+  "The reconciler's index of db (seon.reconcile/index), advanced from the one this process held for
+  the db it last asked about by what differs, at first from main's as the fork server handed it
+  (seon.fork-server/index-at-fork); listed whole only when it holds none. What seon.context/status
+  asks for main's claims. It keeps the commit it is of, never the db. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [{from :db c :commit idx :index} (:index @state)
+        ;; the db it is of, made again from its commit: a db held past its moment pins its index (AGENTS 4)
+        from (or from (some->> c (d/commit-as-db (:store db))))
+        v (if idx (r/index idx from db) (r/index db))]
+    (swap! state assoc :index {:commit (d/commit-id db) :index v})
+    v))
+
 (defn branch-changes
   "What branch db changed since base, its merge base (seon.merge/delta-changes, declared data
   left out): read once per (base, db) pair and held while db is the newest asked, as
@@ -997,19 +1011,33 @@
   "Record a test run's results on this branch (task seon.proofs/test-results-are-a-few-facts, seon.proofs/result-tx: only what differs from the
   facts the branch holds, so a run that changes nothing writes nothing): ran, failures and the
   cached results reused, as seon.proofs/result-tx takes them, of the tests the branch holds a var
-  entity for. Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
+  entity for, deferred (the process tests the run left to root's gate) as :deferred at their digest,
+  removed ({test status}, main's tests the branch removed, judged each run from main's definition) as
+  this run's verdict on their name, and the facts of each other test whose digest moved (digests, the
+  run's plan) retracted. See docs/merging.md#verdicts-are-a-cache.
+  Answers the datoms written, or the typed :seon.agent/unrecorded when the branch's schema
   lacks the facts' attributes (a branch cut before they existed), or when the branch refuses the write
   (docs/failure-points.md, a refused write in a test run's results): the run still answers, with it."
-  {:malli/schema [:=> [:cat :map :map :map] [:or nat-int? :seon.error/base]]}
-  [ran failures reused]
+  {:malli/schema [:=> [:cat :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol] [:map-of :qualified-symbol :keyword]] [:or nat-int? :seon.error/base]]}
+  [ran failures reused digests deferred removed]
   (let [db (db)]
-   (if-not (contains? (d/schema db) :seon.test/status)
+   (if-not (contains? (d/schema db) :seon.test/failures)
     (contract/error :seon.agent/unrecorded #'record-results! "this branch's schema has no :seon.test/* attributes: the run's results stay in the cache only" {})
-   (let [
-        old (into {} (for [t (distinct (concat (keys ran) (keys reused))) :let [e (pdb/eid db :var/name t)] :when e]
-                       [t (d/pull db [:seon.test/digest :seon.test/status :seon.test/failure :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes] e)]))
+   (let [pattern [:var/name :seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]
+        ;; the tests this run judged, and every test the branch holds a verdict of (its digest may have moved)
+        held (d/q '[:find [?e ...] :where [?e :seon.test/digest]] db)
+        ran-es (keep #(pdb/eid db :var/name %) (distinct (concat (keys ran) (keys reused) deferred)))
+        old (into {} (map (fn [m] [(:var/name m) (dissoc m :var/name)])) (d/pull-many db pattern (vec (distinct (concat held ran-es)))))
         ;; a test with no var entity here (loaded, never recorded) has no fact to hold
-        tx (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)))]
+        ;; main's tests the branch removed judge from main's definition each run, with no reach digest of the
+        ;; branch's (never cached): their verdict is this run's, on their name
+        rm (vec (for [[t st] removed :let [o (some->> (pdb/eid db :var/name t) (d/pull db [:seon.test/status :seon.test/failures]))
+                                            status (if (= :pass st) :green :red) fs (when (= :red status) (not-empty (vec (failures t))))]
+                      :when (or (not= status (:seon.test/status o)) (not= fs (:seon.test/failures o)))]
+                  [(cond-> {:var/name t :seon.test/status status} fs (assoc :seon.test/failures fs))
+                   (when (and (:seon.test/failures o) (not fs)) [:db/retract [:var/name t] :seon.test/failures (:seon.test/failures o)])]))
+        tx (-> (proofs/result-tx old (select-keys ran (keys old)) failures (select-keys reused (keys old)) digests (into #{} (filter old) deferred))
+               (into (comp cat (remove nil?)) rm))]
     ;; the write is the edge: a branch that refuses it answers :unrecorded with the writer's message, so
     ;; the run's thunk (finish, called on the loop, not in the asker's eval) still answers the asker
     (if (seq tx)
@@ -1113,7 +1141,8 @@
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
-                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected)))]
+                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)
+                                                                     (select-keys (proofs/results r) (keys (:removed plan)))))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)]))
                       (dissoc :measured)))))
@@ -1335,6 +1364,11 @@
                                                              :seon.task/needs :seon.task/branch :seon.task/model :seon.task/kind])
                                              (update :seon.task/ns symbol))]))))
     (transact! [{:seon.task/id task :seon.task/execution :running}
+                ;; the plan the run began with, as main records it at a run's start (seon.task/run-start-tx), when
+                ;; the branch was cut before it: what a design step's done rule compares (:no-design)
+                (cond-> {:seon.run/id run}
+                  (not (:seon.run/plan (d/entity (db) [:seon.run/id run])))
+                  (assoc :seon.run/plan (:plan (:seon.task/accumulated (task/task (db) task)))))
                 {:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key (:key @state) :seon.agent/id (:id @state)
                                                          ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern);
                                                          ;; nested: a top-level agent map takes a content id, one the key's upsert conflicts with
@@ -1403,7 +1437,7 @@
                    ;; graph starts from it (base-graph), never built in this process
                    graph (assoc :base-graph {:point (pdb/point db0) :graph graph})
                    ;; main's reconciler index as the fork server keeps it, for db0: the first turn
-                   ;; observes the branch from it (seon.turn's index!), never lists it here
+                   ;; observes the branch from it (seon.agent/reconcile-index), never lists it here
                    index (assoc :index index)))
      (swap! state vary-meta assoc :seon.render/schema :seon.agent/state)
      (mark! :state)

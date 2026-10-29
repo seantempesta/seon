@@ -70,7 +70,7 @@
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
   every one of each (expected and actual as the test child printed them)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/failures]}
   [test-run]
   (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
@@ -81,7 +81,7 @@
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
-  {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/costs]}
+  {:malli/schema [:=> [:cat [:map [:reports [:sequential {:gen/max 4} :seon.test/report]]]] :seon.run/costs]}
   [test-run]
   (into {} (for [{:keys [var cost]} (:reports test-run) :let [t (test-symbol var)] :when (and t cost)] [t cost])))
 
@@ -176,7 +176,7 @@
   "Each function's cost per call over the tests of details ({test {var row}}, seon.fx/details): {var {:calls n :ticks
   :self-ticks :bytes :self-bytes}}, the measures summed over the tests and divided by the calls. A
   recursive function's inclusive ticks and bytes count its inner calls again; its self ones do not."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:map-of :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
+  {:malli/schema [:=> [:cat [:map-of {:gen/max 4} :qualified-symbol [:map-of {:gen/max 4} :qualified-symbol [:tuple :int :int :int :int :int]]]] [:map-of :qualified-symbol :map]]}
   [detail]
   (let [sums (reduce (fn [m [v row]] (update m v #(if % (mapv + % row) row))) {} (mapcat val detail))]
     (into {} (for [[v [calls ticks self-ticks bytes self-bytes]] sums :when (pos? calls)]
@@ -201,47 +201,60 @@
 
 (defn- test-facts
   "The :seon.test/* attributes a test's result sets (task seon.proofs/test-results-are-a-few-facts), given old (the entity as the branch holds it, or nil)
-  and new ({:digest :status :failure :measure {:ms :ticks :bytes}}; no :measure for a reused result, which ran
-  nothing): the digest, the status (a different status at the same digest is :flaky), the failure while not
-  green, and the sums, which a new digest resets to this run and the same digest adds to."
+  and new ({:digest :status :failures :measure {:ms :ticks :bytes}}; no :measure for a reused result, which ran
+  nothing): the digest, the status (a different status at the same digest is :flaky), the failing assertions while not
+  green (as data, seon.proofs/failures' shape), and the sums, which a new digest resets to this run and the same digest adds to."
   {:malli/schema [:=> [:cat [:maybe :map] :map] :map]}
-  [old {:keys [digest status failure measure]}]
+  [old {:keys [digest status failures measure]}]
   (let [same? (= digest (:seon.test/digest old))
         status (if (and same? measure (:seon.test/status old) (not= status (:seon.test/status old))) :flaky status)
         sums (cond (and same? measure) (merge-with + (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
                                                    {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)})
                    measure {:seon.test/runs 1 :seon.test/ms (:ms measure 0) :seon.test/ticks (:ticks measure 0) :seon.test/bytes (:bytes measure 0)}
-                   same? (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]))]
+                   same? (select-keys old [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes]))
+        fs (or (not-empty failures) (when same? (:seon.test/failures old)))]
     (cond-> (assoc sums :seon.test/digest digest :seon.test/status status)
-      (and (not= :green status) (or failure (and same? (:seon.test/failure old)))) (assoc :seon.test/failure (or failure (:seon.test/failure old))))))
+      (and (not= :green status) (seq fs)) (assoc :seon.test/failures fs))))
+
+(def ^:private test-attrs
+  "The :seon.test/* attributes a test's var entity holds (seon.proofs/result-tx). See docs/merging.md#verdicts-are-a-cache."
+  [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes])
 
 (defn result-tx
   "The transaction that records a test run's results on the branch that ran it (docs/merging.md#verdicts-are-a-cache,
   task seon.proofs/test-results-are-a-few-facts): for each test of ran ({test result}, answer-ran's, with its :ms
-  :ticks :bytes) its digest, status, first failure (failures, {test [assertion]}) and sums; and for each of
-  reused ({test result}, a result the cache held at its digest) its digest and status, so a freshly branched
-  agent's proofs show their reused status. old is {test entity} as the branch holds each now
-  (:seon.test/* attributes; absent for a test it holds none of). Only what differs is written: [] when
-  nothing does."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map] [:vector :any]]}
-  [old ran failures reused]
-  (let [fail-text (fn [t] (some-> (first (failures t)) (select-keys [:type :message :expected :actual :got]) (print/text (:part print/budgets))))
-        news (-> (into {} (for [[t r] ran :when (:digest r)]
-                            [t {:digest (:digest r) :status (if (= :pass (status-of r)) :green :red) :failure (fail-text t)
+  :ticks :bytes) its digest, status, failing assertions (failures, {test [assertion]}, as data) and sums; for each of
+  reused ({test result}, a result the cache held at its digest) its digest, status and the failures it kept, so a
+  freshly branched agent's proofs show their reused status; for each of deferred (the process tests the
+  run left to root's gate) its digest and :deferred. A status means the verdict at the test's reach digest
+  now: each other test old holds whose recorded digest is not its digest in digests ({test digest}, the run's plan:
+  every judging test's) loses its facts, so a stray red whose callee moved reads unknown, never red. old is {test
+  entity} as the branch holds each now (:seon.test/* attributes; absent for a test it holds none of). Only what
+  differs is written: [] when nothing does."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map [:map-of :qualified-symbol :string]] [:vector :any]]
+                  [:=> [:cat [:map-of :qualified-symbol [:maybe :map]] :map :map :map [:map-of :qualified-symbol :string] [:set :qualified-symbol]] [:vector :any]]]}
+  ([old ran failures reused digests] (result-tx old ran failures reused digests #{}))
+  ([old ran failures reused digests deferred]
+  (let [news (-> (into {} (for [[t r] ran :when (:digest r)]
+                            [t {:digest (:digest r) :status (if (= :pass (status-of r)) :green :red) :failures (failures t)
                                 :measure (select-keys r [:ms :ticks :bytes])}]))
                  (into (for [[t r] reused :when (and (:digest r) (not (contains? ran t)))]
                          [t {:digest (:digest r) :status (cond (:flaky r) :flaky (green? r) :green :else :red)
-                             :failure (when-not (green? r)
-                                        (or (some-> (first (:failures r)) (select-keys [:type :message :expected :actual :got]) (print/text (:part print/budgets)))
-                                            "red at this digest, with no failure kept"))}])))]
-    (vec (mapcat (fn [[t n]]
-                   (let [o (old t) facts (test-facts o n)
-                         set-attrs (into {} (remove (fn [[k v]] (= v (k o)))) facts)
-                         gone (for [[k v] (select-keys o [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes :seon.test/failure])
-                                    :when (not (contains? facts k))]
-                                [:db/retract [:var/name t] k v])]
-                     (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))
-                 (sort-by (comp str key) news)))))
+                             :failures (when-not (green? r) (:failures r))}]))
+                 ;; a process test the run left to root's gate: that verdict at its digest
+                 (into (for [t deferred :let [dg (digests t)] :when (and dg (not (contains? ran t)) (not (contains? reused t)))]
+                         [t {:digest dg :status :deferred}])))
+        stale (for [[t o] old :when (and (:seon.test/digest o) (not (contains? news t)) (not= (:seon.test/digest o) (digests t)))]
+                t)]
+    (into (vec (mapcat (fn [[t n]]
+                         (let [o (old t) facts (test-facts o n)
+                               set-attrs (into {} (remove (fn [[k v]] (= v (k o)))) facts)
+                               gone (for [[k v] (select-keys o [:seon.test/runs :seon.test/ms :seon.test/ticks :seon.test/bytes :seon.test/failures])
+                                          :when (not (contains? facts k))]
+                                      [:db/retract [:var/name t] k v])]
+                           (cond-> (vec gone) (seq set-attrs) (conj (assoc set-attrs :var/name t)))))
+                       (sort-by (comp str key) news)))
+          (for [t (sort-by str stale) [k v] (select-keys (old t) test-attrs)] [:db/retract [:var/name t] k v])))))
 
 (defn answer
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
@@ -302,7 +315,7 @@
   judges red again, with its failures; a flaky one is red, so it is selected and never run). So an
   unchanged tree runs nothing.
   Cost: one lookup per key, then a sort of what is selected."
-  {:malli/schema [:=> [:cat [:maybe [:map-of :any :string]] [:map-of :any :string] [:map-of :string :map] [:set :any]]
+  {:malli/schema [:=> [:cat [:maybe [:map-of {:gen/max 4} :any :string]] [:map-of {:gen/max 4} :any :string] [:map-of {:gen/max 4} :string :map] [:set {:gen/max 4} :any]]
                   [:map [:selected [:vector :any]] [:run [:vector :any]] [:reused [:map-of :any :map]]]]}
   [base cand found proofs]
   (let [selected (vec (sort-by str (distinct (concat (filter cand proofs)

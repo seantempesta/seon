@@ -138,7 +138,7 @@
   else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
   size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
   part left the smallest size's remainder near 0 and the fit read the speedup as growth."
-  {:malli/schema [:=> [:cat :seon.cost/sized [:vector :seon.cost/row] :seon.cost/dim]
+  {:malli/schema [:=> [:cat :seon.cost/sized [:vector {:gen/max 4} :seon.cost/row] :seon.cost/dim]
                   [:maybe [:map [:exponent :double] [:allowed :double] [:basis [:enum :increments :total :bounded-fixed]]]]]}
   [e rows d]
   (let [rs (filterv #(some? (get-in % [:measured d])) rows)
@@ -161,7 +161,7 @@
 
 (defn judge
   "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
-  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row]] :seon.cost/verdict]}
+  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector {:gen/max 4} :seon.cost/row]] :seon.cost/verdict]}
   [e rows]
   (let [dims (into #{} (mapcat (comp keys :expected)) rows)
         ;; one measure of ticks may be off by a timer chunk (:seon.config.proofs/tick-quantum, task
@@ -377,7 +377,7 @@
 (defn explain
   "The estimate, the measurements against it and the verdict (`verdict-lines`), as text an
   agent reads."
-  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector :seon.cost/row] :seon.cost/verdict] :string]}
+  {:malli/schema [:=> [:cat :seon.cost/estimate [:vector {:gen/max 4} :seon.cost/row] :seon.cost/verdict] :string]}
   [e rows v]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) dimensions)
         line (fn [{:keys [n measured expected]}]

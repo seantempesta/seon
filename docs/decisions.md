@@ -5,6 +5,12 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
+### Parts answer data: an html render and a model render, the value named status (owner, 2026-10-29)
+"I want the hiccup render to make the data we need to render the web ui and I similarly want the ai render to make the data we send to the model ... different models could have different renders ... make sure we are not doing shit multiple times"; "keep everything as data until it's at a print boundary ... only use the one value printer"; "Store information we need and it's presence means something" (on the model call basis's :observed: "wtf does observed mean?"). A page part may answer a value of a schema; the page draws its :seon.render/html, the model is sent its :seon.render/model, each a function of the one value the walk computed once. How an agent's work stands is that value, named status ("status": git's word, what my.task/status answers; over "standing"), computed from facts of the branch, never held. Stated in: docs/render.md#a-part-answers-data, docs/render.md#how-the-work-stands, seon.context/status, seon.render/part.
+
+### The standing store is test data: wipe it when a change needs it (owner, 2026-10-29)
+"nothing in the Store is needed. wipe it whenever you need too. Keep an eye out for crap building up and we need to clean out test files and other tmp stuff". A stored attribute renamed or retyped erases the store, never migrates it (:seon.test/failure became :seon.test/failures). Stated in: docs/machine.md#disk-stays-bounded.
+
 ### The verdict cache holds 512 MB, least recently used out first (owner, 2026-10-29)
 "least recently used automatic eviction if max capacity is reached"; the capacity: 512 MB (chosen over 256 MB; the main tree's cache held 121 MB in 27,034 files that day). One capacity for the whole cache, greens and reds alike; a verdict for a test no longer in the program goes by the same rule; nothing goes below the bound ("don't drop cache work that other agents may need"). Stated in: :seon.config.proofs/results-max-bytes, seon.proofs/the-verdict-cache-empties-itself.
 

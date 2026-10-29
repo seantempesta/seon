@@ -180,7 +180,7 @@
                     [:cost {:optional true} :seon.cost/report]]
  :seon.run/failures [:map-of :qualified-symbol [:vector :seon.problems/assertion]]
  ;; a cost proof's measured rows and verdict per test (seon.cost/proof's report)
- :seon.cost/report [:map [:rows [:vector :seon.cost/row]] [:verdict :seon.cost/verdict]]
+ :seon.cost/report [:map [:rows [:vector {:gen/max 4} :seon.cost/row]] [:verdict :seon.cost/verdict]]
  :seon.run/costs [:map-of :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of :any [:map [:forms :int] [:turns :int]]]

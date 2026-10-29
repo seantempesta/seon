@@ -793,13 +793,13 @@
   ;; var entity (seon.proofs/result-tx) is in the agent's record under the task's :proved, where the
   ;; one layout renders it from: the pattern's wildcard reaches it
   (let [db (seeded 3 nil)
-        db (:db-after (d/with db [{:var/name 'app.x-test/t0 :seon.test/digest "d1" :seon.test/status :red :seon.test/failure "{:type :fail}"
+        db (:db-after (d/with db [{:var/name 'app.x-test/t0 :seon.test/digest "d1" :seon.test/status :red :seon.test/failures [{:type :fail :message "no"}]
                                    :seon.test/runs 1 :seon.test/ms 3 :seon.test/ticks 40 :seon.test/bytes 800}]))
         t (get-in (ctx/build db (aid db) :b) [:tree :task])
         v (get-in t [:proved (id db [:var/name 'app.x-test/t0])])]
     (is (= :red (:seon.test/status v)))
     (is (= "d1" (:seon.test/digest v)))
-    (is (= "{:type :fail}" (:seon.test/failure v)))
+    (is (= [{:type :fail :message "no"}] (:seon.test/failures v)))
     (is (= 1 (:seon.test/runs v)))))
 
 (deftest a-symbol-joins-by-name

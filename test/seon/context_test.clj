@@ -28,6 +28,24 @@
                                  ;; a test the agent wrote in its scratch namespace, no proof of its task
                                  [user/scratch-test "(deftest scratch-test (is (= 1 2)))"]])))))
 
+(defn- status-at
+  "How agent b/a1's work on task tid stands (seon.context/status) on db once the facts the source
+  reads are on it: vs, {test [status failures]}, each test's :seon.test/status and
+  :seon.test/failures on its var entity (seon.proofs/result-tx's), and the agent."
+  ([db tid vs] (status-at db tid vs {}))
+  ([db tid vs opts]
+   (let [db (d/db-with db (into [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id tid]}]
+                                (for [[t [st fs]] vs]
+                                  (cond-> {:var/name t :seon.test/status st} (seq fs) (assoc :seon.test/failures (vec fs))))))]
+     (context/status db (pdb/eid db :seon.agent/key "b/a1") opts))))
+
+(defn- index-of
+  "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
+  reads: acc {task proofs}, claims {test #{tasks}}, done {task {:merged-t}}."
+  [acc claims done]
+  {:root nil :tasks {} :keys {} :needed-by {} :acc acc :depth {} :claims claims :runs {} :by-task {} :done done
+   :ready #{} :ready-key {} :live #{} :reap #{} :kill {} :judge #{} :merging #{}})
+
 (defn- wiki!
   "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
   every render reads is a page of it."
@@ -39,10 +57,9 @@
                                                :seon.task/instructions "Use `demo/f` and `demo-test/g-test`."
                                                :seon.task/proofs #{'demo-test/f-test 'demo-test/g-test}}]))
         t (task/task db "demo/f")
-        block (context/current-state db t {:results {'demo-test/f-test :pass 'demo-test/g-test :fail}
-                                           :reds [{:test 'demo-test/g-test :type :fail :message nil :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
-                                           :turn 0 :max-turns 4})
-        by (into {} (map (juxt :test identity)) (:proofs block))]
+        block (context/task-data db t)
+        st (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/g-test [:red [{:type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]]})
+        by (into {} (map (juxt :test identity)) (:proofs st))]
     (is (= {:test 'demo-test/f-test :status :pass} (by 'demo-test/f-test)) "a passing proof is its status")
     (is (select/code? (:source (by 'demo-test/g-test))) "a red proof shows its source, as code")
     (is (= [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}] (:failures (by 'demo-test/g-test)))
@@ -68,11 +85,10 @@
     (is (nil? (:seon.print/continuation (first cuts))))))
 
 (deftest a-cut-reply-is-told-to-the-agent
-  (let [db (db-with-program)
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
-        t (task/task db "demo/f")]
-    (is (re-find #"at the model's token limit" (:cut (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4 :truncated? true})))))
-    (is (nil? (:your-last-reply (context/current-state db t {:turn 1 :max-turns 4}))))))
+  ;; the run's head (seon.render.ui/run-head), not the work's status: a cut reply is the conversation's
+  (let [head (fn [turn] (pr-str (seon.render.ui/run-head {:seon.ctx/ctx {:seon.agent/status :running :seon.agent/max-turns 4 :turns {"t1" turn}} :seon.db/db (ts/test-db)} 1)))]
+    (is (re-find #"at the model's token limit" (head {:seon.turn/n 0 :seon.turn/truncated true})) (head {:seon.turn/n 0 :seon.turn/truncated true}))
+    (is (not (re-find #"token limit" (head {:seon.turn/n 0}))))))
 
 (deftest a-records-text-is-the-same-whatever-came-before
   ;; task seon.context/the-context-is-the-agents-evals-and-seons: a record's printed text is a
@@ -96,53 +112,56 @@
       (is (str/includes? (text "e2") "---- budget 16") "the repeated answer prints whole")
       (is (not (str/includes? (text "e3") "(:value result/")) "an equal value is printed, not read from an earlier handle"))))
 
-(defn- task-f [db] (task/task (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
-                                                                  :seon.task/proofs #{'demo-test/f-test}}]))
-                              "demo/f"))
+(defn- db-f
+  "db with the task demo/f, whose proof is demo-test/f-test."
+  [db] (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
+                                          :seon.task/proofs #{'demo-test/f-test}}])))
+
+(defn- task-f [db] (task/task (db-f db) "demo/f"))
 
 (deftest a-reason-and-a-run-error-reach-the-context
-  (let [db (db-with-program)
-        t (task-f db)
-        ;; the done rule refused beyond the task's own proof: a regression, a stray red, a
-        ;; contract gap; the run named one failing assertion of each red test
-        reasons [{:reason :proof-red :symbol 'demo-test/f-test} {:reason :regression :symbol 'demo-test/g-test}
-                  {:reason :stray-red :symbol 'user/scratch-test} {:reason :contract-gap :symbol 'demo/helper}]
-        reds [{:test 'demo-test/g-test :type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}]
-        block (context/current-state db t {:results {'demo-test/f-test :fail 'demo-test/g-test :fail} :reds reds
-                                           :reasons reasons :turn 1 :max-turns 4
-                                           :test-run-errors ["namespace app-test did not load: Unable to resolve symbol: g"]})]
+  (let [db (db-f (db-with-program))
+        failure {:type :fail :expected "(= 1 (g))" :actual "(not (= 1 0))" :got "(= 1 0)"}
+        ;; main's claims (seon.reconcile/index): g-test is a merged task's proof, so red here it is a regression
+        index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {'demo-test/g-test #{"demo/g"}} {"demo/g" {:merged-t 1}}))
+        ;; the done rule refused beyond the task's own proof: a regression and a stray red; the run named one
+        ;; failing assertion of the red test
+        st (status-at db "demo/f" {'demo-test/f-test [:red] 'demo-test/g-test [:red [failure]] 'user/scratch-test [:red]} {:index index})]
     (testing "every reason but the task's own red proof (shown with the proofs), each with what explains it"
       (is (= [{:reason :regression :test 'demo-test/g-test :failures [{:assert (print/code "(= 1 (g))") :got (print/code "(= 1 0)")}]}
-              {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}
-              {:reason :contract-gap :vars ['demo/helper]}]
-             (:refused block))))
+              {:reason :stray-red :test 'user/scratch-test :do '(my.task/update! :seon.task/proofs conj (quote user/scratch-test))}]
+             (:refused st)))
+      (is (= [:proof-red :regression :stray-red] (mapv :reason (:reasons st))) "the done rule's own answer, beside it")
+      (is (not (contains? (context/status-model {} st) :reasons)) "and the model is told each as what to do, not twice"))
     (testing "a run that failed as a whole is said, not read as tests not run"
-      (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run block)))
+      (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
+            db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"]}
+                              {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"] :seon.process/test-error err}])
+            st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
+        (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
+        (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
+        (is (re-find #"did not load" (print/text (vary-meta (context/status-model {} st) assoc :seon.print/full true))) "printed, as the page and (my.task/status) print it, it is there"))
       (is (= ["namespace app-test did not load: Unable to resolve symbol: g" "test process died: 9"]
              (proofs/test-run-errors {:reports [{:type :error :message "namespace app-test did not load: Unable to resolve symbol: g"}
                                            {:type :fail :var "#'demo-test/f-test" :message "x"}
                                            {:type :error :var nil :message "test process died: 9"}]}))))
-    (testing "printed, as the page's status and (my.task/status) print it, they are there"
-      (let [text (print/text (vary-meta (dissoc block :write-set :to-prove :task) assoc :seon.print/full true))]
-        (is (re-find #":regression" text))
-        (is (re-find #"did not load" text))))
     (testing "a design step that has not improved its plan is told what it lacks and the call that does it"
-      (let [b (context/current-state db t {:results {} :reasons [{:reason :no-design}] :turn 1 :max-turns 4})]
+      (let [dd (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/kind :design :seon.task/plan "p"
+                                                                                :seon.task/proofs #{'demo-test/f-test}}]))
+            b (status-at dd "demo/f" {'demo-test/f-test [:red]})]
         (is (= [[:no-design :seon.task/plan 'my.task/update!]]
-               (mapv (juxt :reason :unchanged (comp first :do)) (:refused b))))))
+               (mapv (juxt :reason :unchanged (comp first :do)) (filter #(= :no-design (:reason %)) (:refused b)))))))
     (testing "a task with no proofs is told the form that registers one (a design writes its own)"
-      (let [b (context/current-state db t {:results {} :reasons [{:reason :no-proofs}] :turn 1 :max-turns 4})]
+      (let [nd (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"}]))
+            b (status-at nd "demo/f" {})]
         (is (= ['my.task/update! :seon.task/proofs] (take 2 (:do (first (:refused b))))))))
-    (testing "a stray red is told the form that makes it a proof of the task"
-      (let [b (context/current-state db t {:results {'user/scratch-test :fail} :reasons [{:reason :stray-red :symbol 'user/scratch-test}] :turn 1 :max-turns 4})]
-        (is (= ['(my.task/update! :seon.task/proofs conj (quote user/scratch-test))]
-               (keep :do (filter #(= :stray-red (:reason %)) (:refused b)))))))
     (testing "a stray red the branch does not define is one of main's tests it removed: marked so, and no form makes it a proof"
-      (let [b (context/current-state db t {:results {'demo-test/gone :fail} :reasons [{:reason :stray-red :symbol 'demo-test/gone}] :turn 1 :max-turns 4})]
+      (let [b (status-at db "demo/f" {'demo-test/f-test [:green] 'demo-test/gone [:red]} {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})]
         (is (= [{:reason :stray-red :test 'demo-test/gone :removed true}] (:refused b)))))
     (testing "nothing refused, nothing failed: no section"
-      (let [b (context/current-state db t {:results {'demo-test/f-test :pass} :reasons [] :turn 1 :max-turns 4 :test-run-errors []})]
-        (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply]))))))
+      (let [b (status-at db "demo/f" {'demo-test/f-test [:green]})]
+        (is (not-any? #(contains? b %) [:refused :test-run :flagged :your-last-reply :unmerged]))
+        (is (= [] (:reasons b)))))))
 
 (deftest a-repair-is-told-on-its-call
   ;; owner, 2026-10-28: the forgiving reader may complete a form or make prose a comment, and
@@ -195,9 +214,7 @@
                                                :seon.task/proofs #{'ctx-calc-test/square-test 'ctx-calc-test/cube-test 'ctx-calc-test/empty-test}}]))
         ;; the test child's report of the failing assertion, as clojure.test makes it
         rep (agent/test-report {:type :fail :expected '(= 9 (square 3)) :actual '(not (= 9 6))} "#'ctx-calc-test/square-test")
-        block (context/current-state db (task/task db "ctx/sq")
-                                     {:results {'ctx-calc-test/square-test :fail} :turn 1 :max-turns 4
-                                      :reds (proofs/red-reports {:reports [rep]} #{'ctx-calc-test/square-test})})
+        block (status-at db "ctx/sq" {'ctx-calc-test/square-test [:red (get (proofs/failures {:reports [rep]}) 'ctx-calc-test/square-test)]})
         by (into {} (map (juxt :test identity)) (:proofs block))]
     (is (= [{:assert (print/code "(= 9 (square 3))") :got (print/code "(= 9 6)")}] (:failures (by 'ctx-calc-test/square-test)))
         "the assertion once, and what it evaluated to")
@@ -208,7 +225,10 @@
     (is (= {:test 'ctx-calc-test/cube-test :status :undefined} (by 'ctx-calc-test/cube-test))
         "a proof not written yet says so")
     (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")
-    (let [b (context/current-state db (task/task db "ctx/sq") {:results {} :turn 1 :max-turns 4 :test-run-errors ["namespace app-test did not load"]})]
+    (let [db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "ctx/sq"]}
+                            {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"]
+                             :seon.process/test-error {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load"}}])
+          b (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
@@ -231,7 +251,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
                                                :seon.task/plan "Read `docs/flow.md#step`, and ```docs/flow.md#stop``` whole."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        block (context/task-data db (task/task db "demo/f"))
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= "A step returns its state and outputs. It never blocks."
            (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
@@ -245,7 +265,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f"
                                                :seon.task/plan "Read ```bin/env``` first."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})]
+        block (context/task-data db (task/task db "demo/f"))]
     (is (clojure.string/includes? (str block) "export SEON_CHECKOUT") "the file's text, read on demand")
     (is (empty? (d/q '[:find ?e :where [?e :seon.section/address ?a] [(clojure.string/starts-with? ?a "bin/")]] db))
         "and nothing stored for it")))
@@ -260,7 +280,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc` then `reference-code/malli/README.md` and `docs/nowhere.md`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (context/current-state db (task/task db "demo/n") {:results {} :reds [] :turn 0 :max-turns 4})
+        block (context/task-data db (task/task db "demo/n"))
         by (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= pinned (:seon.ref/pin (first (filter #(clojure.string/starts-with? (:seon.ref/address %) "reference-code/malli/README.md") (:sections block)))))
         "the pin main's source fact records")
@@ -314,6 +334,21 @@
                   (ns-fact v)])
                defs)))
 
+(deftest a-function-without-a-contract-is-refused
+  ;; the status reads the branch's diff against its base (:seon.agent/base-commit): a function the
+  ;; branch defined without a contract is a reason, named once
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/proofs #{'demo-test/f-test}}]))
+      (d/transact conn [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/base-commit (d/commit-id @conn)}
+                        {:var/name 'demo-test/f-test :seon.test/status :green}])
+      (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
+      (d/transact conn [{:var/name 'demo/helper :var/kind :fn}])
+      (let [db @conn st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
+        (is (= ['demo/helper] (:without-a-contract st)))
+        (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
+
 (defn- turn-of
   "A recorded model turn n of run demo/f#1 with basis b: one call and its answer, and its model call
   (the two maps of one transaction)."
@@ -335,12 +370,11 @@
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons [{:reason :proof-red :symbol 'demo-test/f-test}]}
-            call! (fn [n] (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
+      (let [call! (fn [n] (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
                                              :seon.eval/record {:code (str "(+ " n " 1)") :response {:handle (symbol "result" (str "e" n)) :value (inc n)}
                                                                 :run "demo/f#1" :call-id (str "c" n) :call 0 :prose (str "Step " n ".")}}]))
             ;; as seon.turn goes: the turn recorded, its request made on the db that holds it, what it sent added
-            request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :observed observed :agent "b/a1"}
+            request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4 :origin :model :agent "b/a1"}
                                   _ (d/transact conn (turn-of b n))
                                   {:keys [messages sent]} (context/render @conn b)]
                               (d/transact conn [{:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/sent sent}])
@@ -357,22 +391,22 @@
         (is (= (context/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou work at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user"] (mapv :role r0)) "the first request: the system prompt, then the page whole")
-        (is (every? #(re-find % (:content (second r0))) [#"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+" #"1 of 4"]) "the page whole, by component key: the turn's status too")
+        (is (every? #(re-find % (:content (second r0))) [#"cited-\d+-demo_2Ff" #"Doubles\." #"status-\d+"]) "the page whole, by component key: how the work stands too")
         (is (re-find #"cited-\d+-demo_2Ff" (:content (peek r1))) "the cited var's edit: its component, by its key")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"task-data-\d+" (:content (peek r1)))) "a component that did not change is not told again")
-        (is (str/includes? (:content (peek r1)) "2 of 4") "the turn's status, what changed of it")
+        (is (not (re-find #"status-\d+" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
               read (:messages (context/render db {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn 2 :max-turns 1
-                                                  :origin :outside :observed observed :agent "b/a1"}))]
+                                                  :origin :outside :agent "b/a1"}))]
           (is (= ["system" "user"] (mapv :role read)) "an outside agent's read: the system prompt and the page whole")
           (is (str/includes? (:content (peek read)) "quadruple")))))))
 
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context
   ;; and again in the current block, every turn; on the page each is one part: the plan in
-  ;; [:task], a cited var's source in its own part, the proofs' statuses in [:status]
+  ;; [:task], a cited var's source in its own part, the proofs' statuses in the status
   (ts/test-branch!
     (fn [_ conn]
       ;; its proof written: an unwritten one is told what to assert in the plan's words, the plan again
@@ -382,14 +416,14 @@
       (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}
                         {:db/id "turn" :seon.turn/id "demo/f#1/0" :seon.turn/run [:seon.run/id "demo/f#1"] :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model}
                         {:seon.model-call/id "demo/f#1/0" :seon.model-call/turn "turn"
-                         :seon.model-call/basis {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 4 :origin :model
-                                                 :observed {:results {'demo-test/f-test :fail} :reds [] :reasons []}}}])
+                         :seon.model-call/basis {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn 0 :max-turns 4 :origin :model}}
+                        {:var/name 'demo-test/f-test :seon.test/status :red}])
       (let [db @conn
             a (pdb/eid db :seon.agent/key "b/a1")
             page (context/drawn-parts db (ctx/build db a :b))
             text (print/text (vary-meta page assoc :seon.print/full true))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
-        (is (some #(str/starts-with? % "status-") (keys page)) "the status is on the page")
+        (is (some #(str/starts-with? % "status-") (keys page)) "how the work stands is on the page")
         (is (= 1 (times "Make ```demo/g``` exact.")) "the plan once")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #":test demo-test/f-test,\s+:status :fail" text))) "the proofs' statuses once, in the status")))))
@@ -456,7 +490,7 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "u" :seon.task/plan "Use `demo/f`, `demo/x` and `demo/y`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        refs (:write-set (context/current-state db (task/task db "demo/u") {:turn 0 :max-turns 4}))]
+        refs (:write-set (context/task-data db (task/task db "demo/u")))]
     (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
     (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
@@ -469,7 +503,7 @@
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
     (is (str/includes? (:content m) ":from \"owner\"") "who sent it"))
-  (is (not (contains? (context/current-state (db-with-program) (task-f (db-with-program)) {:turn 1 :max-turns 4}) :messages)) "never in the block"))
+  (is (not (contains? (context/task-data (db-with-program) (task-f (db-with-program))) :messages)) "never in the task's data"))
 (deftest an-error-shows-what-its-contract-says
   ;; a contract invalid is data (its problems, the fix): the response shows that, not only
   ;; the message (the step E dry run's agent read "invalid-input: its arguments do not
@@ -497,17 +531,19 @@
 (deftest an-unknown-proof-says-what-to-write
   ;; a proof with no result: the reason names the deftest to write in its namespace and how
   ;; to run it (the dry run's agents read `{:reason :proof-unknown}` and searched for 25 turns)
-  (let [db (db-with-program)
-        b (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/unwritten-test}] :turn 1 :max-turns 4})
+  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p"
+                                                                            :seon.task/proofs #{'demo-test/unwritten-test}}]))
+        b (status-at db "demo/f" {})
         r (first (:refused b))]
+    (is (= [{:test 'demo-test/unwritten-test :status :undefined}] (:proofs b)) "a proof not written says so")
     (is (= :proof-unknown (:reason r)))
     (is (= 'demo-test/unwritten-test (:test r)))
     (is (re-find #"deftest unwritten-test" (pr-str (:do r))) (pr-str r))
-    (is (re-find #"run-test" (pr-str (:do r))) (pr-str r)))
+    ;; written, then judged by the runner whose results the done rule reads, never clojure.test's own run
+    (is (re-find #"\(my.agent/prove\)" (pr-str (:do r))) (pr-str r)))
   ;; a proof written but with no result was offered the same template, which overwrites it
   ;; (the fixture's program defines demo-test/f-test)
-  (let [db (db-with-program)
-        r (first (:refused (context/current-state db (task-f db) {:results {} :reasons [{:reason :proof-unknown :symbol 'demo-test/f-test}] :turn 1 :max-turns 4})))]
+  (let [r (first (:refused (status-at (db-f (db-with-program)) "demo/f" {})))]
     (is (= {:reason :proof-unknown :test 'demo-test/f-test :written true :do '(my.agent/prove)} r) "a written proof is run, never written again")))
 
 (deftest a-cited-task-shows-its-plan-at-that-depth
@@ -520,18 +556,11 @@
                                               {:seon.task/ns 'demo :seon.task/name "f"
                                                :seon.task/plan "Read `demo.other/g` before you start."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        block (context/current-state db (task/task db "demo/f") {:results {} :reds [] :turn 0 :max-turns 4})
+        block (context/task-data db (task/task db "demo/f"))
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")))
 
-
-(deftest a-taken-message-is-read-from-its-fact
-  ;; root's ruling (2026-10-23): a message is a fact. Root writes the owner's on main; the turn
-  ;; that takes it writes the same fact on its branch and names it in its basis by id
-  (let [db (d/db-with (db-with-program) [{:seon.message/id "m-1" :seon.message/from "owner" :seon.message/to {:seon.run/id "demo/f#1"} :seon.message/agent {:seon.agent/key "b/a1"}
-                                          :seon.message/body "use demo/g, not a new helper"}])]
-    (is (= [{:id "m-1" :from "owner" :body "use demo/g, not a new helper"}] (context/taken-messages db {:message-ids ["m-1"]})))))
 
 (defn- read-back
   "What model call entity e on db sent, read back from its records (the refs it recorded, each by its own
@@ -548,12 +577,11 @@
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                            :seon.task/proofs #{'demo-test/f-test}}]))
   (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-  (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
-        ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+  (let [ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                                                                :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
         turn! (fn [n more]
                 (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
-                         :origin :model :observed observed :agent "b/a1"}
+                         :origin :model :agent "b/a1"}
                       _ (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n
                                                   :seon.turn/origin :model}
                                                  more)
@@ -616,7 +644,7 @@
                                                         :call-id (str "c-" id) :call 0 :prose "Step."}}]))
             run! (fn [run task] (d/transact conn [{:seon.run/id run :seon.run/task [:seon.task/id task] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id task}}}]))
             basis (fn [task run] {:commit (d/commit-id @conn) :task task :run run :turn 0 :max-turns 9 :origin :model
-                                  :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"})
+                                  :agent "b/a1"})
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
             turn! (fn [run b] (d/transact conn [{:db/id "turn" :seon.turn/id (str run "/0") :seon.turn/run {:seon.run/id run} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n 0 :seon.turn/origin :model}
                                                 {:seon.model-call/id (str run "/0") :seon.model-call/turn "turn"
@@ -655,7 +683,7 @@
                                      :seon.eval/record (merge {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value}
                                                                :line (str id) :run "demo/g#1"} more)}]))
             basis (fn [n] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
-                           :origin :model :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"})
+                           :origin :model :agent "b/a1"})
             turns (loop [n 0 printed nil out []]
                     (if (= n 5)
                       out
@@ -717,7 +745,7 @@
 (deftest the-request-is-a-conversation-of-evals-and-the-page
   ;; docs/render.md: each turn's prose and eval calls with their responses
   ;; as tool messages (read from the eval records), the reasoning as returned, and at each model
-  ;; turn the page: whole at the first, what changed of it after (a turn taken moves the status
+  ;; turn the page: whole at the first, what changed of it after (a verdict moves the status
   ;; alone); the prefix stays byte-identical
   (ts/test-branch!
     (fn [_ conn]
@@ -726,12 +754,11 @@
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}
-            ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
+      (let [ev! (fn [id by code value & [more]] (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                                                                    :seon.eval/record (merge {:code code :response {:handle (symbol "result" id) :value value} :run "demo/f#1"} more)}]))
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
             request (fn [n more] (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 4
-                                          :origin :model :observed observed :agent "b/a1"}]
+                                          :origin :model :agent "b/a1"}]
                                    (d/transact conn [(merge {:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model} more)
                                                      {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
                                                       :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
@@ -740,6 +767,7 @@
                                      [b messages])))
             [b0 r0] (request 0 {:seon.turn/reply "I call f." :seon.turn/reasoning "why" :seon.turn/calls [{:id "call-0" :code "(f 1)" :eval "e2"}]})
             _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :call 0 :content "I call f." :reasoning "why"})
+            _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
             [_ r1] (request 1 {})]
         (is (= ["system" "user"] (mapv :role r0)) "turn 0: the system prompt, then the page whole")
         (is (= ["system" "user" "assistant" "tool" "user"] (mapv :role r1)) (pr-str (mapv :role r1)))
@@ -747,9 +775,10 @@
             "prose as content, the reasoning as returned, the call")
         (is (= "{:handle result/e2, :value 1}" (:content (nth r1 3))) "the call's response, its recorded value printed as it is sent")
         (is (= r0 (subvec r1 0 2)) "the whole earlier request is the prefix: its page stays, appended")
-        (is (re-find #"status-\d+" (:content (peek r1))) "a turn taken: the status, the turn of how many")
-        (is (not-any? #(re-find % (:content (peek r1))) [#"task-data-\d+" #"related-\d+" #"run-head-\d+"]) "the status alone")
-        (is (str/includes? (:content (peek r1)) "2 of 4"))
+        (is (re-find #"status-\d+" (:content (peek r1))) "a verdict recorded after turn 0: how the work stands, told again")
+        ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
+        (is (not (re-find #"related-\d+" (:content (peek r1)))) "what a verdict does not move is not told again")
+        (is (str/includes? (:content (peek r1)) ":fail") "the proof's new verdict")
         (is (not (str/includes? (:content (peek r1)) "[:task]")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.context/messages)) "one path: no request without an agent")))))
@@ -875,7 +904,7 @@
         db (d/db-with (db-with-program) (program-facts [['demo-test/f-test src []]]))
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f exact."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        state (context/turn-state db (task/task db "demo/f") {:results {'demo-test/f-test :fail} :reds [] :turn 0 :max-turns 4})
+        state (status-at db "demo/f" {'demo-test/f-test [:red]})
         text (:text (print/print-value {:handle 'result/e1 :value state} {:handle 'result/e1}))]
     (is (every? #(str/includes? text %) (str/split-lines src)) text)
     (is (not (str/includes? text "\\\"two doubled")) "no quote escaped")))
@@ -1216,7 +1245,7 @@
   ;; demo-test/f-test is written (its source is recorded) but no test report names it: it never
   ;; ran, which the judge calls :proof-unknown (seon.reconcile/done-explain); it is not "ran and asserted nothing"
   (let [db (db-with-program)
-        block (context/current-state db (task-f db) {:results {} :turn 1 :max-turns 4})
+        block (status-at (db-f db) "demo/f" {})
         by (into {} (map (juxt :test :status)) (:proofs block))]
     (is (= :unknown (by 'demo-test/f-test)) (pr-str (:proofs block)))))
 
@@ -1318,9 +1347,9 @@
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                            :seon.task/proofs #{'demo-test/f-test}}]))
   (d/transact conn [{:seon.run/id "demo/f#1" :seon.run/task [:seon.task/id "demo/f"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-  (let [observed {:results {'demo-test/f-test :fail} :test-run-errors [] :reds [] :reasons []}]
+  (do
     [(fn ask! [n opts]
-       (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 9 :origin :model :observed observed :agent "b/a1"}
+       (let [b {:commit (d/commit-id @conn) :task "demo/f" :run "demo/f#1" :turn n :max-turns 9 :origin :model :agent "b/a1"}
              _ (d/transact conn [{:db/id "turn" :seon.turn/id (str "demo/f#1/" n) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"} :seon.turn/n n :seon.turn/origin :model}
                                  {:seon.model-call/id (str "demo/f#1/" n) :seon.model-call/turn "turn" :seon.model-call/basis b :seon.model-call/forms 1
                                   :seon.model-call/errors 0 :seon.model-call/red 1 :seon.model-call/ms 1}])
@@ -1404,6 +1433,8 @@
             _ (ev! "e1")
             _ (ask! 0 {})
             _ (ev! "e2")
+            ;; a proof's verdict recorded since turn 0: the status is a part that moved
+            _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
             r1 (ask! 1 {})
             ;; the agent trims its context (swap! on @ctx retracts the eval on its branch)
             _ (d/transact conn [[:db/retractEntity [:seon.eval/id "e1"]]])

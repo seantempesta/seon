@@ -648,6 +648,16 @@
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map]]}
   [] (let [w (framed)] [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))]))
 
+(defn page-parts
+  "This agent's parts now, from its live walk framed once (`page-hiccup`'s): [db parts data], the db it
+  framed at, what the model reads of each part ({element-id content}) and the data of each part that
+  answered data ({schema-key data}, seon.render/placed-data): the turn decides from the status and
+  draws its request from the same frame (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map :map]]}
+  [] (let [w (framed)]
+       [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
+        (render/placed-data w context/page-lists)]))
+
 ;; ---- the process: agent-step under run-loop ----------------------------------------
 
 (defn agent-step
