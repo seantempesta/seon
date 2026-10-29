@@ -673,7 +673,7 @@
   draws its request from the same frame (docs/render.md#a-part-answers-data)."
   {:malli/schema [:=> [:cat] [:tuple :seon.host/db :map :map]]}
   [] (let [w (framed)]
-       [(:walk-db @agent/state) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
+       [(walked-db (:walk-db @agent/state)) (apply array-map (mapcat identity (render/placed-hiccup w context/page-lists)))
         (render/placed-data w context/page-lists)]))
 
 ;; ---- the process: agent-step under run-loop ----------------------------------------
