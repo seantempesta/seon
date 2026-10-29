@@ -31,7 +31,7 @@
      :growth :linear
      :per-n {:ns 170000 :bytes 190000 :calls 23}
      :fixed {:ns 50000 :bytes 50000 :calls 10}
-     :sizes [10 100 1000]}))
+     :sizes [10 60 250]}))
 
 (defn view-of
   "The input of size n: the wiki of n sections (wiki) and the first page's own section, which its nine
