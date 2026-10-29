@@ -679,8 +679,9 @@
     [(pt/record db 'app.ft "(defn- h [x] x)" 'app.ft "(defn f0 [x] (h x))") 'app.ft]))
 
 (def ^:private refresh-sizes
-  "Forms in the other files: a fixed change costs the same at each."
-  [10 100 1000])
+  "Forms in the other files: a fixed change costs the same at each: a program 25 times the smallest's
+  shows it (at 10 100 1000 the proof cost 2.3 G ticks, nearly all of it building its inputs)."
+  [10 50 250])
 
 (deftest a-fixed-change-costs-the-same-at-any-program-size
   (doseq [e [{:of 'seon.source/read-nss :input 'seon.source-test/read-of

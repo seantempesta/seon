@@ -596,7 +596,7 @@
   (let [here (System/getProperty "user.dir")
         p1 'seon.reader-test/prose-without-a-fence-is-a-comment
         p2 'seon.reader-test/a-fenced-reply-reads-only-its-code
-        digests (ts/reach-digests (runner/program-db here (ts/program-store)) (fx/inputs here))
+        digests (ts/reach-digests (runner/program-db here (ts/kept-program-store)) (fx/inputs here))
         dir (cache-dir)
         ;; the checkout's green for p1, as bin/test caches one
         recorded (fx/write-verdicts! dir {:id "agent-test"} {p1 {:test p1 :digest (digests p1) :pass 1 :fail 0 :error 0}} {})
