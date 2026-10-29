@@ -38,7 +38,7 @@ The task graphs, their stub programs and proofs, and the scripted model's replie
 A change to what the owner sees (`seon.render.ui`, `seon.render.proc`, `seon.web`, `resources/public/app.css`) is checked by a light subagent with the built-in browser that compares each page against the facts the system records, and judges whether the page is useful to someone debugging an agent ([render](render.md#the-page)).
 
 The session that made the change launches it with the Agent tool (Haiku for a facts pass, Sonnet for a usefulness pass), fixes what it finds and launches it again until it finds no mismatch. Its brief holds four blanks:
-- **ROOT**: the ports of a root of the session's own (`bin/ports`, started with `SEON_PROFILE=scripted bin/root start`), never the owner's 7888/7777;
+- **ROOT**: the ports of a root of the session's own (`bin/ports`, started with `bin/root start --profile scripted`), never the owner's 7888/7777;
 - **PAGES**: the URLs to check, such as `http://127.0.0.1:WEB/` and `/agent/a4`;
 - **FACTS**: the forms that answer what each page should show, sent to the server's port with `printf '%s\n' FORM | nc -w 60 127.0.0.1 SERVER`: `{:op :agents}` (live agents, every task with its runs), `{:op :context :agent "a1"}` (what a live agent reads now), and `{:op :eval :agent "root" :code "(my.root/problems sys)"}` or a query over `:seon.run/*` and `:seon.turn/*` for a run's record;
 - **ACTIONS**: what to do on the page (an eval, a message, a click), and which fact confirms each.

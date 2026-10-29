@@ -33,7 +33,7 @@ A merge's verification is one command, `bin/prove --merge`.
 - **No lock.** Nothing waits on main's verification (owner, 2026-10-27: "Remove it"): it runs niced like any run. It rarely runs, since a branch that holds main and proved its tip merges with no run on main, and load is kept down by not running the same work twice, not by ordering runs.
 - How many heavy runs go at once is AGENTS' number (§2), not a gate here.
 
-A root that is restarting (`bin/update`) refuses connections for the moment, so a plan run that meets it prints `TEST FAILED` for the connection, a rerun and not a red; the verdict to read is the one a run ends on once root is up.
+`bin/update ARGS` hands its arguments to the restarted root, so the owner's root restarts with `nice -n 15 bin/update --profile deepseek` (the first after the command-line profile merged must pass it: the old binary's resume arguments carry none; [config](config.md#layers)). A root that is restarting (`bin/update`) refuses connections for the moment, so a plan run that meets it prints `TEST FAILED` for the connection, a rerun and not a red; the verdict to read is the one a run ends on once root is up.
 
 ## A merge runs what the change reaches
 
