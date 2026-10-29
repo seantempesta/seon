@@ -202,7 +202,13 @@
         (if (= "result" (namespace value))
           (text-op :seon.print/symbol text [:a {:class (css-class :seon.print/symbol) :href (str "#eval-" (name value))} text])
           {:op :text :text text :seon.print/class :seon.print/symbol}))
-      (:seon.print/boolean :seon.print/number :seon.print/keyword :seon.print/char)
+      ;; a float on the page three decimals, its whole text its title: the text a model reads is whole
+      :seon.print/number
+      (let [text (or (:seon.print/text node) (literal value))]
+        (if (and (double? value) (not (:seon.print/text node)) (< (Math/abs ^double value) 1.0e6))
+          (text-op :seon.print/number text [:span {:class (css-class :seon.print/number) :title text} (str (/ (Math/round (* ^double value 1000.0)) 1000.0))])
+          {:op :text :text text :seon.print/class :seon.print/number}))
+      (:seon.print/boolean :seon.print/keyword :seon.print/char)
       {:op :text :text (or (:seon.print/text node) (literal value)) :seon.print/class (:seon.print/face node)}
       :seon.print/string (text-op :seon.print/string (or (:seon.print/text node) (string-literal value))
                                   [:span {:class (css-class :seon.print/string)} (or (:seon.print/text node) value)])

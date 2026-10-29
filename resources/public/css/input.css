@@ -121,7 +121,12 @@
 .seon-print-val { min-width: 0; }
 .seon-print-node > .seon-print-grid { margin-left: 1rem; }
 .seon-print-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-.seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.125rem 0.5rem; text-align: left; vertical-align: top; }
+.seon-print-table { font-size: 0.72rem; line-height: 1.35; }
+.seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.05rem 0.35rem; text-align: left; vertical-align: top; }
+/* a cell one line, cut by its column's width only; hovered, whole */
+.seon-print-table td { max-width: 22rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seon-print-table td:hover { white-space: normal; overflow: visible; }
+.seon-print-table td .seon-print-grid { display: inline; }
 .seon-print-table th { font-weight: normal; }
 .seon-print-prose { white-space: pre-wrap; font-family: var(--font-prose); color: var(--color-text-200); margin: 0; }
 /* highlight.js's Clojure tokens in the page's palette */
