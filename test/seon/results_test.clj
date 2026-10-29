@@ -59,8 +59,8 @@
 (deftest a-corrupt-verdict-file-is-an-error-never-a-miss
   (with-dir
    (fn [dir]
-     (rec! dir {'a/t {:test 'a/t :digest "dc" :pass 1 :fail 0 :error 0}})
-     (spit (str dir "/a/t/dc.pass.edn") "{:status :pass")
+     (rec! dir {'a/t {:test 'a/t :digest "dc" :pass 0 :fail 0 :error 1}} {'a/t [{:type :error :message "thrown"}]})
+     (spit (str dir "/a/t/dc.red.edn") "{:status :red")
      (let [r (fx/stored-results dir '{a/t "dc"})]
        (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r)))
      (is (nil? (fx/read-verdict (str dir "/a/t/gone.pass.edn"))) "a file that is not there (never written, or evicted meanwhile) is a miss"))))
@@ -140,6 +140,16 @@
 (defn cache-write-under [n] (cache-write n false))
 (defn cache-write-over [n] (cache-write n true))
 
+(defn cache-read
+  "stored-results' arguments at n: a cache directory (under target/tmp) holding a green verdict for each of n tests, and the
+  candidates ({test digest}) that ask for all of them."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :string :map]]}
+  [n]
+  (let [dir (str (cfg/checkout) "/target/tmp/verdicts-cost-" (random-uuid))
+        t (fn [i] (symbol "a" (str "t" i)))]
+    (fx/write-verdicts! dir {:id "w"} (into {} (for [i (range n)] [(t i) {:test (t i) :digest (str "d" i) :pass 1 :fail 0 :error 0}])) {} Long/MAX_VALUE)
+    [dir (into {} (for [i (range n)] [(t i) (str "d" i)]))]))
+
 (defn- clean-costs! [] (sh/sh "sh" "-c" (str "rm -rf " (cfg/checkout) "/target/tmp/verdicts-cost-*")))
 
 ;; See docs/merging.md#verdicts-are-a-cache
@@ -160,6 +170,19 @@
                     :growth :linear
                     :per-n {:bytes 11500}
                     :fixed {:calls 20 :bytes 60000}
+                    :sizes [10 100 1000]})
+       (finally (clean-costs!))))
+
+;; See docs/merging.md#verdicts-are-a-cache
+(deftest a-green-is-found-by-its-file-never-read
+  ;; measured 2026-10-29 on one scripted turn (docs/machine.md#what-a-turn-costs): a turn's plan asked for every test's
+  ;; verdict, and read each green's file (2,280 reads, 76.8 MB and 25.1 M ticks) for an answer its existence gives
+  (try (cost/proof {:of 'seon.fx/stored-results :input 'seon.results-test/cache-read
+                    :n "tests asked for, each with a green"
+                    :work "two file checks and one touch a test; no verdict file is read"
+                    :growth :linear
+                    :per-n {:bytes 5600 :calls 6}
+                    :fixed {:calls 10 :bytes 6000}
                     :sizes [10 100 1000]})
        (finally (clean-costs!))))
 
