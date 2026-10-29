@@ -77,10 +77,14 @@
                                           ;; the one catch of a batch handler's throw (docs/failure-points.md, the watcher's
                                           ;; batch): the batch's failure is an error value to on-error, and the next batch is read
                                           (when-let [t (try (on-batch b) nil (catch Throwable t t))]
-                                            (on-error (contract/error :seon.watch/batch-failed #'seon.watch/start!
-                                                                      (str "its batch handler threw: " (or (.getMessage ^Throwable t) (str (class t)))
-                                                                           ": the " (count b) " records of that batch were not loaded; root goes on watching")
-                                                                      {:records (count b)})))
+                                            (let [e (contract/error :seon.watch/batch-failed #'seon.watch/start!
+                                                                    (str "its batch handler threw: " (or (.getMessage ^Throwable t) (str (class t)))
+                                                                         ": the records of that batch were not loaded; root goes on watching")
+                                                                    {:records (count b)})]
+                                              ;; recording it can fail too (the store refused the write): the edge's last word is
+                                              ;; stderr, and the next batch is read all the same
+                                              (when-let [t2 (try (on-error e) nil (catch Throwable t2 t2))]
+                                                (.println System/err (str "seon.watch: " (:seon.error/message e) "; recording it threw: " (.getMessage ^Throwable t2))))))
                                           (recur))
                                         (when-not (realized? stopped)
                                           (on-exit (died p (str bin " ended: root no longer watches what its loaders read")))))))

@@ -396,12 +396,11 @@
         held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
         died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
         ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
-        ;; the load made true are shown by health. One load at a time: a load writes what it read
-        ;; against the db it read, so the boot's and a first batch's must not interleave (a stale
+        ;; the load made true are shown by health. One load at a time (load-lock, the REPL's loads too): a load
+        ;; writes what it read against the db it read, so the boot's and a first batch's must not interleave (a stale
         ;; one written after a newer one would undo it, and its event is spent)
-        one (Object.)
         load! (fn [ks changed]
-                (locking one
+                (locking load-lock
                   (let [r (load-kinds! sys ks changed)]
                     (doseq [e (load-errors (:loaded r))]
                       @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
