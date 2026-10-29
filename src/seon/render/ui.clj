@@ -323,7 +323,7 @@
           [:span {:class "mr-1 font-semibold text-text-100"} (kname focus)]
           (if (= :root focus)
             (list (link (= :chat tab) base "conversation") (link (= :context tab) "/root/debug" "context"))
-            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "debug") (link (= :context tab) (str base "/context") "context")))]))]))
+            (list (link (= :chat tab) base "chat") (link (= :debug tab) (str base "/debug") "record") (link (= :context tab) (str base "/context") "sent to model")))]))]))
 
 (defn shell
   "The document around a view's body: head, the stylesheet, Datastar, and the feed of that view's
@@ -1032,7 +1032,7 @@
   nothing. Its <details> carries its handle's anchor (eval-<id>): a handle printed anywhere links here.
   See docs/render.md#the-page."
   {:seon.render/style "[&>details>summary]:flex [&>details>summary]:min-w-0 [&>details>summary]:items-baseline [&>details>summary]:gap-x-2" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} eid]
+  [{c :seon.ctx/ctx step? :step} eid]
   (let [e (ratom/realize (get-in c [:evals eid]))
         rec (:seon.eval/record e)
         opened? (:seon.eval/opened e)
@@ -1043,7 +1043,8 @@
         err (or ex (when (contract/error? v) v))
         tokens (context/messages-tokens (context/eval-messages e nil))]
     [:li
-     [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} opened? (assoc :open true))
+     ;; a step of a turn (opts :step) is drawn open: its turn's one fold opens them all, never a second click
+     [:details (cond-> {:class "seon-eval" :id (str "eval-" (:seon.eval/id e))} (or opened? step?) (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
       (into (if k [:summary {:seon/call 'seon.root/opened! :seon/agent (:seon.agent/id c) :seon/args {:key k :eval (:seon.eval/id e)}}] [:summary])
             (remove nil?)
@@ -1147,7 +1148,7 @@
           [:summary {:class "text-xs text-text-500"}
            (str (count evals) (if (= 1 (count evals)) " step" " steps") " · " (ms-str ms))
            (when (pos? failed) [:span {:class "text-error"} (str " · ⚠ " failed " failed")])]
-          [:ol {:class "seon-turn mt-1 flex flex-col"} (for [e evals] [#'eval-item {} e])]])
+          [:ol {:class "seon-turn mt-1 flex flex-col"} (for [e evals] [#'eval-item {:step true} e])]])
        [:p {:class "text-2xs text-text-500"} (str/join " · " (remove nil? [(when n (str "turn " n)) (when tokens (str (print/tokens-text tokens) " of context"))]))]])))
 
 (defn chat-ask
@@ -1170,16 +1171,37 @@
      [:p {:class "text-2xs text-text-500"} (str from)]
      (markdown (str body))]))
 
+(defn- newest-run
+  "The newest run of agent aid on db (its :seon.run/agent), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :any]}
+  [db aid] (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db aid) seq (apply max) (d/entity db)))
+
+(defn chat-start
+  "Where the work began, the chat's line after what was asked (a component over the db): its run's
+  turn budget. The agent's loop eval (seon.turn/work!) is not drawn: this line and `chat-end` say what
+  it did. See docs/render.md#the-page."
+  {:seon.render/style "self-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{db :seon.db/db} aid]
+  (when-let [run (newest-run db aid)]
+    [:p (str "started working" (when-let [m (:seon.run/max-turns run)] (str " · a budget of " m " turns")))]))
+
 (defn chat-end
-  "How the agent stands as the chat's last line (a component over ctx): its status, its turns of
-  its cap (:seon.agent/max-turns, when set). See docs/render.md#the-page."
-  {:seon.render/style "text-center text-xs text-text-500" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (let [[status max-turns] (map #(ratom/realize (get c %)) [:seon.agent/status :seon.agent/max-turns])
-        turns (count (:turns c))]
-    ;; nothing until the agent has a status on its branch
-    (when status
-      [:p (str "— " (kname status) (when (pos? turns) (str " · turn " turns (when max-turns (str " of " max-turns)))) " —")])))
+  "How the work ended, the chat's last card (a component over ctx and the db): its run's end
+  (:seon.end/*: its outcome, its turns, the tokens it spent), done or why not; while it runs, how the
+  agent is. See docs/render.md#the-page."
+  {:seon.render/style "self-center rounded-xl border border-base-800 px-4 py-2 text-sm" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [run (newest-run db aid)
+        end (some->> (:seon.run/id run) (vector :seon.end/run) (d/entity db))
+        status (ratom/realize (:seon.agent/status c))]
+    (cond
+      end (let [{:seon.end/keys [outcome turns tokens reason]} end]
+            [:p {:class (if (= :green outcome) "text-success" "text-text-100")}
+             (str (if (= :green outcome) "✓ Done" (str "Ended: " (kname outcome)))
+                  (when turns (str " in " turns (if (= 1 turns) " turn" " turns")))
+                  (when tokens (str " · " (print/tokens-text tokens)))
+                  (when (and reason (not= :green outcome)) (str " · " reason)))])
+      status [:p {:class "text-text-500"} (case status :busy "working…" :idle "waiting for you" (kname status))])))
 
 (defn render-ctx
   "The render of an agent's ctx, the one layout the model and the person read (the declared html
@@ -1205,7 +1227,11 @@
         ev? (set (keys evals))
         tu? (set (keys (:turns c)))
         ;; a model's evals are drawn in their turn's message, not again in the list
-        in-turn (into #{} cat (vals (turn-evals c db)))]
+        in-turn (into #{} cat (vals (turn-evals c db)))
+        ;; the agent's own loop (its eval with no model call that names a run: seon.turn/work!) is the chat's
+        ;; start and end cards, not a row
+        loop? (fn [id] (let [e (some-> (get-in c [:evals id]) ratom/realize)]
+                         (and (= (:seon.eval/by e) (some-> (:seon.agent/id c) name)) (:run (:seon.eval/record e)) (not (:call-id (:seon.eval/record e))))))]
     [:div {:id "render-ctx"}
      [:div {:id "p-task"}
       (when task (list [#'task-data {} aid]
@@ -1221,7 +1247,8 @@
       (when (seq (added-keys c)) [#'ctx-keys {}])]
      [:ol {:id "c-rows"}
       (when (:task c) [#'chat-ask {} aid])
-      (for [id conv :when (not (in-turn id))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
+      (when aid [#'chat-start {} aid])
+      (for [id conv :when (and (not (in-turn id)) (not (loop? id)))] (cond (ev? id) [#'eval-item {} id] (tu? id) [#'chat-turn {} aid id] :else [#'chat-message {} aid id]))
       (when aid [#'chat-end {} aid])]
      [:aside {:id "p-tiles"}
       (for [[id e] evals :let [{{v :value} :response k :schema} (:seon.eval/record e)] :when (and (some? v) (render/render-of (ratom/realize v) k))]
