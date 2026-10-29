@@ -264,6 +264,11 @@
  ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the
  ;; bound the rest are left out of the item; the record says nothing of them.
  :seon.config.agent/form-top-fns 10
+ ;; Unit: lines. How many lines before and after the changed text seon.repl/edit! answers, so the
+ ;; agent sees its edit land without reading the definition again. Provenance: the md-scan bench,
+ ;; 2026-10-29 (run 5 reread a 250-line scan after each change); two, as a diff's context reads. At
+ ;; the bound the rest of the definition is left out of the answer, its (source f) whole.
+ :seon.config.agent/edit-context-lines 2
  ;; Unit: engine ticks ONE test (its :each fixtures included) may run, wherever it runs: an
  ;; agent's turn, the judge, bin/test (seon.proofs/run-tests!). One bound, per test, so a test's
  ;; verdict is a function of the test alone and the same in every place, and a green reused by

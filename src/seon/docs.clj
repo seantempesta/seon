@@ -578,7 +578,7 @@
   "Var sym as its citation's depth shows it (docs/references.md#the-delimiter-picks-the-depth):
   :summary its arglists and its doc's first sentence, :doc its arglists, doc and contract,
   :code its source (from the db), whole: the printer cuts it where it is shown, with the form
-  that reads its rest; at :doc a var with no doc shows its source. A name that resolves to
+  that reads its rest, and the form that changes a part of it (seon.repl/edit!); at :doc a var with no doc shows its source. A name that resolves to
   nothing says so. A var the db holds is read from its facts (its doc, its contract, its
   recorded source and the arglists it declares), so what it shows changes as the db does; a
   library var the db does not hold, from the process's var meta, which its build fixes."
@@ -603,8 +603,9 @@
       (and (nil? v) (nil? m)) {:symbol sym :unresolved true :problem (:unresolved ref/problem-messages)}
       (= :summary depth) (cond-> (select-keys doc [:symbol :arglists]) (:doc m) (assoc :summary (ref/lead-sentence (:doc m))))
       (or (nil? src) (and (= :doc depth) (:doc m))) doc
-      ;; its source is code, printed as in its file (seon.print/code)
-      :else {:symbol sym :source (print/code src)})))
+      ;; its source is code, printed as in its file (seon.print/code), and how a part of it changes
+      :else {:symbol sym :source (print/code src)
+             :change (print/code (str "(seon.repl/edit! '" sym " \"old text, exactly once\" \"new text\")"))})))
 
 (defn- reached
   "What citation c asks to see, at its depth, and what that is: a wiki section from main's

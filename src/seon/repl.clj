@@ -552,7 +552,8 @@
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (name (:handle r))]
     (swap! agent/state dissoc :defs)
-    (if (and contract/record? (= :agent (:mode @agent/state)))
+    ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
+    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
       (do (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state) :seon.agent/id (:id @agent/state)} id (by (:origin req))
                                                  (record-details (agent/db) code r req (get-in @agent/state [:turn :run])))))
           (assoc r :record id))
@@ -600,6 +601,56 @@
                   m (when (= :agent (:mode @agent/state)) (agent/main-difference))]
               (cond-> res m (assoc :main m))))
           (finally (swap! agent/state assoc :eval outer))))))
+
+(defn- numbered
+  "Lines from to (1-based, inclusive, clamped to text) of text, as [line text] each."
+  {:malli/schema [:=> [:cat :string :int :int] [:vector [:tuple pos-int? :string]]]}
+  [text from to]
+  (let [ls (clojure.string/split-lines text)]
+    (vec (for [i (range (max 1 from) (inc (min (count ls) to)))] [i (nth ls (dec i))]))))
+
+(defn- offsets
+  "Every offset at which s occurs in text, in order (an occurrence may not overlap the one before)."
+  {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]}
+  [text s]
+  (loop [from 0 acc []]
+    (if-let [i (clojure.string/index-of text s from)] (recur (+ i (max 1 (count s))) (conj acc i)) acc)))
+
+(defn edit!
+  "Change the definition var sym names by replacing old, exact text that occurs once in its
+  recorded source (`(source sym)`), with new, then evaluating the whole new definition in its
+  namespace through the one REPL path (`eval-string`): it is recorded as program, its contract
+  armed, read by the forgiving reader as a model's call is (seon.reader/forgive: a delimiter
+  repaired, and said in :repaired), as a typed defn would be. Answers that
+  eval's response with :edited, the var and the lines around the change; or
+  :seon.repl/edit-refused, nothing changed: no recorded source, old not in it (with the lines that
+  hold old's first line, ignoring indentation), or old there more than once (each candidate's line).
+  Exact text and one occurrence, as file editors converged on (docs/agent.md#changing-a-definition):
+  the md-scan bench's agent spent 30 turns string-editing a copy of a 250-line scan, 2026-10-29."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :string] [:or :seon.repl/edit-refused :seon.eval/response]]}
+  [sym old new]
+  (let [src (my.agent/source-fn sym)
+        refuse (fn [why msg lines] (contract/error :seon.repl/edit-refused #'edit! (str sym ": " msg)
+                                                   (cond-> {:seon.repl/var sym :seon.repl/refused-because why} (seq lines) (assoc :seon.repl/lines lines))))
+        line-of (fn [i] (inc (count (filter #{\newline} (subs src 0 i)))))
+        at (when src (offsets src old))]
+    (cond
+      (nil? src) (refuse :no-source "no recorded source: define it whole first" nil)
+      (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))]
+                    (refuse :not-found "the old text is not in its source exactly (whitespace counts); (source f) shows it as recorded"
+                            (vec (take 3 (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l])))))
+      (next at) (refuse :ambiguous (str "the old text occurs " (count at) " times: give more of it, so it is one")
+                        (mapv (fn [i] (let [n (line-of i)] [n (nth (clojure.string/split-lines src) (dec n))])) at))
+      :else (let [i (first at)
+                  ;; the new definition read as the turn reads a model's call (seon.reader/forgive): an
+                  ;; unbalanced delimiter in new is repaired, and the repair said
+                  {text :text repairs :repairs} (reader/forgive (str (subs src 0 i) new (subs src (+ i (count old)))))
+                  r (eval-string text (cond-> {"ns" (namespace sym) :origin :model :within (:eval @agent/state)}
+                                        (seq repairs) (assoc :repaired (context/repaired text repairs))))
+                  from (line-of i) k (cfg/value :seon.config.agent/edit-context-lines)]
+              ;; the response as data: its printed text and costliest functions are the outer eval's to print
+              (cond-> (dissoc r :text :fns :record)
+                (not (:ex r)) (assoc :edited {:var sym :lines (numbered text (- from k) (+ from (count (filter #{\newline} new)) k))}))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why

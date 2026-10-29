@@ -9,6 +9,7 @@
  :seon.config.agent/heap-extra-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "How far an agent's heap may grow past what it inherited; past it an allocation throws OutOfMemoryError."}]
  :seon.config.agent/sock-buf-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "Each socket's send and receive buffer (root, fork server and agents)."}]
  :seon.config.agent/form-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one form the model or an outside agent sends may do before it stops with :seon.repl/ticks-spent. 0: none."}]
+ :seon.config.agent/edit-context-lines [:int {:min 0 :seon.config/unit "lines" :description "How many lines before and after the changed text seon.repl/edit! answers."}]
  :seon.config.agent/form-top-fns [:int {:min 0 :seon.config/unit "functions" :description "How many of a form's costliest contracted functions its reply item keeps (seon.repl/wrap-cost)."}]
  :seon.config.agent/test-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one test may do, wherever it runs (a turn, the judge, bin/test); past it that test is an :error of :seon.test/ticks-spent naming it, and the run goes on. 0: none."}]
  :seon.config.agent/stall-ms [:int {:min 0 :seon.config/unit "ms" :description "Silence after which an agent with a request in flight is observed stalled, and a running bin/test test is named STALLED; recorded, never an end. 0: no check."}]}

@@ -30,6 +30,45 @@
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))
 
+(deftest an-edit-replaces-exact-text-once-and-evaluates-the-definition
+  ;; docs/agent.md#changing-a-definition: the md-scan bench's agent string-edited a copy of a
+  ;; 250-line scan for 30 turns; edit! replaces one exact piece of the recorded source and evaluates it whole
+  (let [old @agent/state]
+    (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+         (repl/eval-string "(ns x.repl-edit) (defn f \"Adds.\" [a]\n  (let [b 1\n        c 2]\n    (+ a b c)))\n(defn g [] (+ 1 1)) (defn h [] (+ 1 1)) (in-ns 'user)" {})
+         (let [r (repl/edit! 'x.repl-edit/f "c 2" "c 20")]
+           (is (= 22 ((resolve 'x.repl-edit/f) 1)) "the new definition is the one called")
+           (is (= 'x.repl-edit/f (get-in r [:edited :var])))
+           (is (some #(str/includes? (second %) "c 20") (get-in r [:edited :lines])) "the lines around the change")
+           (is (str/includes? (my.agent/source-fn 'x.repl-edit/f) "c 20") "its source is the new text: the next edit reads it"))
+         (let [r (repl/edit! 'x.repl-edit/f "c 3" "c 4")]
+           (is (= :not-found (:seon.repl/refused-because r)) "old text not there: refused, nothing changed")
+           (is (= 22 ((resolve 'x.repl-edit/f) 1))))
+         (let [r (repl/edit! 'x.repl-edit/f "  (let [b 1" "(let [b 1")]
+           (is (nil? (:seon.repl/refused-because r)) "indentation is text: the exact match holds"))
+         (let [r2 (repl/edit! 'x.repl-edit/f "c" "d")]
+           (is (= :ambiguous (:seon.repl/refused-because r2)) "there more than once: refused")
+           (is (<= 2 (count (:seon.repl/lines r2))) "naming each candidate's line"))
+         (let [r (repl/edit! 'x.repl-edit/g "(+ 1 1)" "(+ 1 (inc 1)")]
+           (is (= 3 ((resolve 'x.repl-edit/g))) "a delimiter left open is closed by the forgiving reader")
+           (is (seq (:repaired r)) "and the repair is said"))
+         (is (= :no-source (:seon.repl/refused-because (repl/edit! 'clojure.core/nope "a" "b"))) "no recorded source")
+         (finally (reset! agent/state old) (remove-ns 'x.repl-edit)))))
+
+(deftest an-edit-in-an-agent-is-program-on-its-branch
+  ;; the edit's definition is recorded as a typed defn is: the branch's program holds the new source,
+  ;; and its inner eval records no eval of its own
+  (let [[_ edit branch] (at/in-agent (fn [{:keys [ns task]}]
+                                       [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
+                                        (str "(seon.repl/edit! '" ns ".ed/f \"[] 1\" \"[] 2\")")
+                                        {:op :eval :agent "root"
+                                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                    " [(:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".ed/f])))"
+                                                    "  (count (filter #(clojure.string/includes? (:code %) \"[] 2)\") (datahike.api/q '[:find [?r ...] :where [_ :seon.eval/record ?r]] b)))])")}]))]
+    (is (get-in edit [:value :edited]) (pr-str edit))
+    (is (clojure.string/includes? (str (first (:value branch))) "[] 2") "the branch's program holds the new source")
+    (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
+
 (deftest a-move-into-a-namespace-that-hides-a-helper-says-so
   ;; owner, 2026-10-29: "don't some repls output a warning ... you are overwriting symbols in this
   ;; namespace?": an agent in-ns'd to seon.render.ui, whose own source shadows the REPL's, and read

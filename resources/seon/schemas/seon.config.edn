@@ -56,6 +56,7 @@
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
+  [:seon.config.agent/edit-context-lines :seon.config.agent/edit-context-lines]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]
   [:seon.config.agent/stall-ms :seon.config.agent/stall-ms]
   ;; merges
