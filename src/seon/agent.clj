@@ -658,7 +658,7 @@
 
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
-  (seon.program/reach-digests) against base's (main at its merge base), the greens stored at
+  (seon.program/graph-index) against base's (main at its merge base), the greens stored at
   those digests (the verdict cache, greens and reds, whoever ran them: seon.fx/stored-results) and proofs. The digests' inputs with no program facts are this boot's
   :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
   binary is built from its source tree), so an agent's results are kept by digest in the one
@@ -675,7 +675,7 @@
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :graph (the reach graph it
-  walked) and :process, the tests that reach a process of their own (seon.program/reach-index, the
+  walked) and :process, the tests that reach a process of their own (seon.program/graph-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
   are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
