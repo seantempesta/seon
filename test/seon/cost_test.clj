@@ -128,7 +128,13 @@
       (let [t (assoc linear :growth :log :per-n {:bytes 85000.0} :fixed {:bytes 480000.0} :sizes [10 100 1000])
             rows' (rows t (fn [n] {:bytes ({10 738336.0 100 738640.0 1000 1147520.0} n)}))]
         (is (empty? (:steeper (cost/judge t rows'))))
-        (is (< (:exponent (cost/growth t rows' :bytes)) 0.3))))
+        (is (< (:exponent (cost/growth t rows' :bytes)) 0.3))
+        ;; main's Jolt 546c3d1f, a step of 3% before the large one: 675.6k, 695.8k, 1.07M
+        (let [r2 (rows t (fn [n] {:bytes ({10 675600.0 100 695800.0 1000 1070000.0} n)}))]
+          (is (empty? (:steeper (cost/judge t r2)))))
+        ;; a real extra pass over the data is still steeper: the same base, 1 KB a form beyond it
+        (let [r3 (rows t (fn [n] {:bytes (+ 675600.0 (* 1000.0 n))}))]
+          (is (not (:ok? (cost/judge t r3)))))))
     (testing "constant work: its cost itself, which a creep of a few percent barely moves"
       (let [c (assoc linear :growth :constant :per-n {} :fixed {:bytes 1290000.0} :sizes [10 100 1000])
             r (g c {10 1230000.0 100 1290000.0 1000 1430000.0})]

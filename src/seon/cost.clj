@@ -140,11 +140,12 @@
   allows over the same sizes (its own plus steeper-by). A change making every size cheaper,
   or dearer, by one amount never moves it (task seon.cost/a-speedup-never-reads-as-steeper;
   docs/cost.md#how-growth-is-judged). The basis: :increments, each size's increment over the
-  smallest against the work's own (three sizes or more with two increments over increment-floor
-  of the smallest size's cost, the largest at least growth-share of it, no fixed part assumed:
-  an index's depth is a step, and the step's flat side, a few bytes of noise above the smallest
-  size, is no shape to fit);
-  :total, the cost itself, for constant work (it should not grow);
+  smallest against the work's own (three sizes or more, not log work, with two increments over increment-floor
+  of the smallest size's cost, the largest at least growth-share of it, no fixed part assumed);
+  :total, the cost itself, for constant work (it should not grow); log work takes :bounded-fixed,
+  never increments: its cost is a staircase (an index gains a level every so many entries), and
+  increments of a staircase have no power-law shape (675.6k, 695.8k and 1.07M bytes at 10, 100 and
+  1,000 read n^1.29 on increments against a log's n^0.60, and n^0.19 on the cost less its fixed part);
   else :bounded-fixed, the estimate's :fixed taken off but never more than the smallest
   size leaves beyond its estimated per-unit part. On the stated :fixed alone, a faster fixed
   part left the smallest size's remainder near 0 and the fit read the speedup as growth."
@@ -156,18 +157,19 @@
         w #(work (:growth e) (:n %))
         fit (fn [basis pts wpts] {:exponent (exponent pts) :allowed (+ steeper-by (exponent wpts)) :basis basis})
         r0 (first rs)
-        incs (when (and (>= (count rs) 3) (not= :constant (:growth e)))
-               (for [r (rest rs) :when (>= (- (m r) (m r0)) (* increment-floor (m r0)))] r))]
+        incs (when (and (>= (count rs) 3) (not (#{:constant :log} (:growth e))))
+               (for [r (rest rs) :when (>= (- (m r) (m r0)) (* increment-floor (m r0)))] r))
+        bounded (fn [] (let [f (double (get-in e [:fixed d] 0.0))
+                             e0 (get-in r0 [:expected d])
+                             f (if e0 (max 0.0 (min f (- (m r0) (- e0 f)))) f)
+                             pts (for [r rs :when (pos? (- (m r) f))] r)]
+                         (fit :bounded-fixed (for [r pts] [(:n r) (- (m r) f)]) (for [r pts] [(:n r) (w r)]))))]
     (cond
       (< (count rs) 2) nil
       (= :constant (:growth e)) (fit :total (for [r rs] [(:n r) (m r)]) (for [r rs] [(:n r) (w r)]))
       (and (>= (count incs) 2) (>= (- (m (last incs)) (m r0)) (* growth-share (m r0))))
       (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
-      :else (let [f (double (get-in e [:fixed d] 0.0))
-                  e0 (get-in r0 [:expected d])
-                  f (if e0 (max 0.0 (min f (- (m r0) (- e0 f)))) f)
-                  pts (for [r rs :when (pos? (- (m r) f))] r)]
-              (fit :bounded-fixed (for [r pts] [(:n r) (- (m r) f)]) (for [r pts] [(:n r) (w r)]))))))
+      :else (bounded))))
 
 (defn judge
   "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
