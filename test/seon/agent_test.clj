@@ -757,7 +757,10 @@
   ;; below its floor (16 MiB) back to the floor, so a trip set directly never held and agents
   ;; collected every 16 MiB, not the configured 4 (measured 2026-10-28: 16777216); the
   ;; configured trip is the nursery's floor, set with the ceiling
-  (let [[r] (in-agent ["(jolt.scheme/eval-string \"(collect-trip-bytes)\")"])]
+  ;; read after 200 MB of garbage, so collections have run and the adaptive nursery (off for a
+  ;; set trip: JOLT_GC_TRIP_BYTES) had its chance to rewrite it
+  (let [[_ r] (in-agent ["(dotimes [_ 200] (count (byte-array (* 1024 1024))))"
+                         "(jolt.scheme/eval-string \"(collect-trip-bytes)\")"])]
     (is (= (seon.config/value :seon.config.agent/trip-bytes) (:value r)) (pr-str r))))
 
 (deftest a-test-childs-ceiling-is-its-own

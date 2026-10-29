@@ -213,13 +213,13 @@
 
 (defn heap-cap!
   "Bound this process's heap at n bytes and start its collections every trip bytes: Jolt's own
-  ceiling (JOLT_MAX_HEAP) and nursery floor (JOLT_NEW_SIZE), re-installed here in one go; past
-  the ceiling an allocation throws OutOfMemoryError, and the adaptive nursery never sizes the
-  trip below the floor. Built binaries only (source mode installs no collector policy). See
+  ceiling (JOLT_MAX_HEAP) and nursery pin (JOLT_GC_TRIP_BYTES, which turns the adaptive nursery
+  off: a trip set here is the one the process runs with, however many collections have run),
+  re-installed here in one go; past the ceiling an allocation throws OutOfMemoryError. Built binaries only (source mode installs no collector policy). See
   docs/machine.md#what-a-process-owns-in-memory."
   {:malli/schema [:=> [:cat :int :int] :any]}
   [n trip]
-  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_NEW_SIZE\" \"" (long trip) "\") "
+  (scm/eval-string (str "(begin (putenv \"JOLT_MAX_HEAP\" \"" (long n) "\") (putenv \"JOLT_GC_TRIP_BYTES\" \"" (long trip) "\") "
                         "(when jolt-gc-policy-installed? (jolt-install-gc-policy!)) jolt-heap-ceiling-bytes)")))
 
 (defn max-heap-free-ratio!

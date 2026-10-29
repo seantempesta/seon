@@ -580,6 +580,10 @@
     (is (= (:env in-a) (:env (fx/inputs b))) "a schema resource is no input of every test: its entries are program facts, taken by the tests whose reach names them")
     (is (not= (get-in in-a [:config :seon.env/schemas]) (get-in (fx/inputs b) [:config :seon.env/schemas]))
         "and a class of its own, for a reach that walks a db's whole schema (seon.reconcile/index)")
+    (spit (str b "/src/app/a.clj") "(ns app.a \"edited\")")
+    (is (= (:env in-a) (:env (fx/inputs b))) "a src file is no input of every test: its forms are program facts")
+    (is (not= (get-in in-a [:config :seon.env/src]) (get-in (fx/inputs b) [:config :seon.env/src]))
+        "and a class of its own, for a reach that reads the whole program's text (a docstring)")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
     (.mkdirs (java.io.File. (str b "/native")))
@@ -599,7 +603,12 @@
                         (set (for [[t d] a :when (not= d (b t))] t))))
         all-tests (set (keys a))
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
-        schemas (moved :seon.env/schemas)]
+        schemas (moved :seon.env/schemas) src (moved :seon.env/src)]
+    ;; no-docstring-carries-a-date shared one digest across a red and a green: it reads every src docstring
+    ;; through the kept program db, which no digest held (docs/source.md#tests-run-by-reach)
+    (is (src 'seon.main-test/no-docstring-carries-a-date) "a test reading the checkout's whole program takes the src class")
+    (is (not (src 'seon.reader-test/prose-without-a-fence-is-a-comment)) "a pure test takes no src class")
+    (is (not (src 'seon.test-store-test/n-roots-open-the-process-store-at-once)) "nor does a test that only starts processes")
     ;; a-move-of-main-costs-what-moved went red when 14 attributes joined the schema, its digest unmoved:
     ;; seon.reconcile/index filters every attribute the schema declares by namespace (docs/source.md#tests-run-by-reach)
     (is (schemas 'seon.render-cost-test/main-info-reads-what-the-page-shows) "a test reaching seon.reconcile/index takes the schema class")
