@@ -1567,7 +1567,7 @@
   from one holding an index answers only for what moved, never for the program), the rest
   computed, all of them when it holds none or holds one under other inputs. The index is
   derived data, a function of the graph and inputs: regenerated whenever it is not held
-  (AGENTS section 5). Read it with index-of."
+  (AGENTS section 5). Read it with index-of. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
   [{:keys [defs tests] :as g} inputs]
   (let [{held :in} (:index g)
@@ -1582,7 +1582,7 @@
                :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
 
 (defn index-of
-  "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none."
+  "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map] :map]}
   [g] (get-in g [:index :answers] {}))
 

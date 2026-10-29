@@ -52,13 +52,14 @@
   when a commit since moved the program (:graph-moved, seon.program/moves-program?): a spawn's own commit (its
   run) moves none, and reach-update reads every live form (15-21 ms a fork, measured). The graph keeps its
   index (seon.program/reach-indexed), moved with it and held under the inputs an agent forked from :db takes
-  (seon.agent/test-inputs: another boot's, once, here and not in every agent), so an agent's base-graph starts
-  from main's answers and recomputes only the tests its base differs in. A graph with nothing stale is
-  the same value (docs/source.md#tests-run-by-reach)."
+  (seon.agent/test-inputs: made whole here when they are not the held ones, never in every agent), so an agent's
+  base-graph starts from main's answers and recomputes only the tests its base differs in
+  (docs/source.md#tests-run-by-reach). An unmoved program is a key lookup."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (let [st (cond-> st (:graph-moved st) (-> (update :graph program/reach-update (:db st)) (dissoc :graph-moved)))]
-    (update st :graph program/reach-indexed (second (agent/test-inputs (:db st))))))
+  (cond-> st (:graph-moved st)
+          (-> (update :graph #(-> % (program/reach-update (:db st)) (program/reach-indexed (second (agent/test-inputs (:db st))))))
+              (dissoc :graph-moved))))
 
 (defn index-at-fork
   "Server state st with main's reconciler index (:index {:commit :index}, listed when the server
