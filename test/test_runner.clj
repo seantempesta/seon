@@ -1,7 +1,7 @@
 (ns test-runner
   "bin/test's and bin/prove's runner (task seon.proofs/prove-runs-what-a-change-reaches):
   :seon.config.source/dirs imported as program facts (program-db), as root imports them, each test keyed by its reach digest
-  (seon.program/reach-digests) and each bin/check step by its functions' (seon.proofs/
+  (seon.program/graph-index) and each bin/check step by its functions' (seon.proofs/
   check-steps); seon.proofs/plan selects what has no green result at its digest.
     --plan WHAT OUT [--all] [NS ...]  the selection: tests dealt into OUT/shard-<i>.edn, steps
                                       into OUT/steps (WHAT: tests, checks or both)
@@ -43,7 +43,7 @@
   a store's branches made under other dirs (another import) are none of this one's."
   [] (str "tree-" (error/digest (pr-str (config/value :seon.config.source/dirs))) "-"))
 
-(defn- tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
+(defn tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
 
 (defn- branch-tree "The tree id branch b keeps, or nil (b keeps no tree of this import)." [b]
   (let [n (name b) p (tree-prefix)] (when (str/starts-with? n p) (subs n (count p)))))
@@ -81,6 +81,34 @@
       (sh/sh "rm" "-rf" dir tar)
       files)))
 
+(defn keep-tree!
+  "Makes branch b, keeping the program of git tree id tree of root's repository, in the store of conn
+  (cfg: its config), whole or not at all, whichever run makes it first. The import commits on a
+  staging branch of its own (:stage-<uuid>, none of branch-tree's), and b is branched from the
+  staging branch's committed head in one step: b never exists half imported, so a run that finds
+  it made meanwhile by another process (Datahike's :branch-already-exists, the one catch, docs/
+  failure-points.md#edges-that-catch) reads the same program, and drops its staging branch
+  (docs/source.md). branches: the store's, from which the nearest
+  kept tree is chosen."
+  [conn cfg root tree b branches]
+  (let [[from paths] (->> (for [k branches :let [t (branch-tree k)]
+                                 :when (and t (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" t))))]
+                             [k (changed-paths root t tree)])
+                           (sort-by (comp count second))
+                           first)
+        ;; the parent's db, a value (the store's own connection's for :db)
+        parent (if from (let [p (d/connect (assoc cfg :branch from))] (try @p (finally (d/release p)))) @conn)
+        tx (if from
+             (source/refresh-tx parent (tree-files root tree paths))
+             (source/import-tx parent (tree-files root tree nil)))
+        stage (keyword (str "stage-" (random-uuid)))]
+    (d/branch! conn (or from :db) stage)
+    (try (let [c (d/connect (assoc cfg :branch stage))]
+           (try (d/transact c {:tx-data tx}) (finally (d/release c))))
+         (try (d/branch! conn stage b)
+              (catch Throwable t (when-not (= :branch-already-exists (:type (ex-data t))) (throw t))))
+         (finally (d/delete-branch! conn stage)))))
+
 (defn program-db
   "The db holding :seon.config.source/dirs of the checkout at root as program facts (seon.source: analyzed,
   not run), kept in the LMDB store at store on a branch named by root's git tree id (seon.fx/
@@ -91,8 +119,8 @@
   the branch (a file that does not read throws first), and a transaction refused takes the
   branch it made with it, so no later plan reads a partial program as the tree's (task
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
-  read from the tree's git objects (tree-files). One writer at a time
-  per store (two runs never share a checkout, AGENTS section 3). A store past
+  read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
+  finish keeps the branch (keep-tree!). A store past
   :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
   before it is opened, and starts again from this tree. The branch's connection stays open for
   the process (the db value reads the store); the store's main connection is released. tree: the
@@ -105,22 +133,7 @@
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
     (when-not (contains? (set branches) b)
-      (let [[from paths] (->> (for [k branches :let [t (branch-tree k)]
-                                     :when (and t (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" t))))]
-                                 [k (changed-paths root t tree)])
-                               (sort-by (comp count second))
-                               first)
-            ;; the parent's db, a value (the store's own connection's for :db)
-            parent (if from (let [p (d/connect (assoc cfg :branch from))] (try @p (finally (d/release p)))) @conn)
-            tx (if from
-                 (source/refresh-tx parent (tree-files root tree paths))
-                 (source/import-tx parent (tree-files root tree nil)))
-            _ (d/branch! conn (or from :db) b)
-            committed (volatile! false)]
-        (try (let [c (d/connect (assoc cfg :branch b))]
-               (try (d/transact c {:tx-data tx}) (finally (d/release c))))
-             (vreset! committed true)
-             (finally (when-not @committed (d/delete-branch! conn b))))))
+      (keep-tree! conn cfg root tree b branches))
     (d/release conn)
     @(d/connect (assoc cfg :branch b)))))
 
@@ -331,18 +344,6 @@
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
     (cond-> p @unread (assoc :unread @unread))))
 
-(defn- prune-runs!
-  "Remove the oldest run directories beside out (target/prove/<timestamp>-<pid>: the names sort by
-  time) past :seon.config.proofs/runs-kept; out's own, the run starting, always stays. Answers nil."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [out]
-  (let [own (io/file out)
-        runs (some->> (.getParentFile own) .listFiles
-                      (filter #(and (.isDirectory ^java.io.File %) (re-matches #"\d{8}T\d{6}-\d+" (.getName ^java.io.File %))))
-                      (sort-by #(.getName ^java.io.File %)) reverse)]
-    (doseq [^java.io.File d (drop (config/value :seon.config.proofs/runs-kept) runs) :when (not= d own)]
-      (sh/sh "rm" "-rf" (.getPath d)))))
-
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
   are dealt into out's shards (write-shards!), and its bin/check steps are written to out/steps
@@ -507,7 +508,6 @@
       (case flag
         ;; --plan WHAT OUT [--all] [NS ...]: bin/test's and bin/prove's planning part
         "--plan" (let [[what out & names] more all? (case (first names) "--all" true "--merge" :merge false)]
-                   (prune-runs! out)
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))

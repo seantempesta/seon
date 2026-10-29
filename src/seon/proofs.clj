@@ -2,7 +2,7 @@
   "Proofs: what a change must run, and what a run proved. prove's selection (task
   seon.proofs/prove-runs-what-a-change-reaches, docs/merging.md#a-merge-runs-what-the-change-reaches):
   a key (a test var, or a bin/check step of check-steps) runs only when no green verdict is
-  cached at its reach digest (seon.program/reach-digests), in the one cache every checkout
+  cached at its reach digest (seon.program/graph-index), in the one cache every checkout
   shares (seon.fx/write-verdicts!, seon.fx/stored-results; docs/merging.md#verdicts-are-a-cache);
   bin/prove, bin/test, bin/check without a run size and an agent's test run all select with plan. And the results of a clojure.test run's report data (the agent's
   run-tests-forked answer): one status per test var, read the same way by the agent's turn
@@ -92,7 +92,7 @@
   "bin/check's steps, the one list of them (bin/check reads it from ./seon steps and fails a
   step it does not name), as prove keys them: each step name (a bin/check --steps unit) to the
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
-  reach-digests with roots), with the checkout's :env (bin/, native/, resources/, the pins:
+  graph-index with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
   functions: its key is the tree's digest (step-digests). health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
@@ -126,7 +126,7 @@
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
-  seon.program/reach-digests over the steps' functions); for a step reading the whole tree, the
+  seon.program/graph-index over the steps' functions); for a step reading the whole tree, the
   digest of its name and :tree; for one reading what the tree caused, of its name, :tree and
   :base (the base's tree, seon.fx/base-commit; none: the step is missing, never keyed by the tree
   alone); missing, the steps naming a function the program does not define (renamed, not
@@ -246,7 +246,7 @@
 (defn left-out
   "The keys of ks a run leaves out: those in process (tests and bin/check steps that reach a
   process of their own: a root, an agent, a fork, the binary; a shell call is none:
-  seon.program/reach-index's :process?), but none when the run asks for them (asked?: it names
+  seon.program/graph-index's :process?), but none when the run asks for them (asked?: it names
   their namespaces, or it is a merge's verification) and never one of proofs (DECISIONS, Process
   tests are not automatic). The one filter bin/test's plan (test-runner/plan-of) and an agent's
   (seon.agent/run-selection) apply."

@@ -142,6 +142,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.context/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
+- `seon.server/verdict-line`: the form in its `:handle` (`(seon.server/verdict @(:conn sys) run task)`, the run and task ids as `pr-str` writes them): code to evaluate that reads the whole verdict, not output; the line beside it is the one printer's.
 
 An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/make-ns!`), as a plain Clojure REPL does (AGENTS §4, "what would a plain REPL do"); what they write reaches the model as the evaluation's `:out`, budgeted as prose. A check's console lines are the printer's whole text (`seon.main/shown`).
 

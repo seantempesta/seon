@@ -26,7 +26,7 @@
 
 (defn- schema [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
 
-(defn- digests [db env] (select-keys (program/reach-digests db {:env env :tree "t" :config {}}) ts))
+(defn- digests [db env] (select-keys (ts/reach-digests db {:env env :tree "t" :config {}}) ts))
 
 (defn- scratch-dir []
   (let [d (str (System/getProperty "user.dir") "/target/tmp/prove-" (random-uuid))] (.mkdirs (java.io.File. d)) d))
@@ -97,7 +97,7 @@
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
                    'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
         roots {"smoke" '[app.pv-check/smoke] "idle" '[app.pv-check/idle]}
-        dg (fn [db] (program/reach-digests db {:env "e" :tree "t" :config {}} roots))
+        dg (fn [db] (ts/reach-digests db {:env "e" :tree "t" :config {}} roots))
         before (dg db)
         after (dg (record db 'app.pv-calc "(defn add [a b] (+ b a))"))]
     (is (= #{"smoke" "idle"} (set (keys before))) "each step its own digest")
@@ -124,7 +124,7 @@
       (is (= #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
-      (is (= {} (program/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
+      (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
 
 (deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
@@ -136,11 +136,11 @@
   (let [db (record (prog) 'user "(ns app.pv-boot (:require [app.pv-calc :as c] [seon.lib]))"
                    'app.pv-boot "(defn smoke [] (seon.lib/fork! {:child (fn [] nil) :refused identity :parent identity}))"
                    'app.pv-boot "(defn calc [] (c/add 1 2))")
-        idx (program/reach-index db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+        idx (ts/reach-index db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
         process (set (keep (fn [[k v]] (when (:process? v) k)) idx))
         cand {"smoke" (:digest (idx "smoke")) "calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"}]
     (is (= #{"smoke"} process) "the step that forks reaches a process; the one that adds does not")
-    (is (= (program/reach-digests db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
+    (is (= (ts/reach-digests db {:env "e" :tree "t" :config {}} {"smoke" '[app.pv-boot/smoke] "calc" '[app.pv-boot/calc]})
            (update-vals idx :digest))
         "the walk's digests are reach-digests'")
     (is (= {"calc" (:digest (idx "calc")) 'app.pv-calc-test/add-test "d"} (apply dissoc cand (proofs/left-out (keys cand) process false #{})))
@@ -318,6 +318,27 @@
       (is (contains? (:digests p) 'app.fi-calc-test/adds) "the tree read: its test is planned")
       (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))
     (finally (close-stores! store)))))
+
+(deftest two-runs-share-a-new-trees-branch
+  ;; docs/source.md: two prove processes on a tree neither had seen both
+  ;; found its branch absent and both made it; Datahike refused the second ("Branch already exists",
+  ;; 2026-10-29). The second run's step is run here after the first's, with the absence it had
+  ;; checked: it ends with the same whole branch, and no staging branch is left
+  (let [d (checkout! {"deps.edn" "{}" "src/app/tr_calc.clj" "(ns app.tr-calc)\n(defn add [a b] (+ a b))\n"
+                      "test/app/tr_calc_test.clj" "(ns app.tr-calc-test (:require [clojure.test :refer [deftest is]] [app.tr-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"})
+        store (str (scratch-dir) "/store")
+        tree (fx/tree-id d)
+        keep! (fn [keep! runner/keep-tree! args] (apply runner/keep-tree! args))
+        {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
+        b (runner/tree-branch tree)]
+   (try
+    (runner/keep-tree! conn cfg d tree b (d/branches conn))
+    (let [first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))]
+      (runner/keep-tree! conn cfg d tree b #{:db})
+      (is (= #{:db b} (set (d/branches conn))) "one branch for the tree, no staging branch left")
+      (is (= first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))) "the second import added nothing to it"))
+    (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
+    (finally (d/release conn) (close-stores! store)))))
 
 (deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
   ;; the full run of 2026-10-26: this namespace's scratch stores stayed open (program-db keeps its

@@ -1058,7 +1058,7 @@
 (def tree-readers
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
-  (reach-digests), unless the form referencing it defines one of env-readers. The host's file
+  (graph-index), unless the form referencing it defines one of env-readers. The host's file
   readers (io/resource reads the resources/ classes), and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
   bin/check: what such a test proves is the whole program the binary is built from."
   '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
@@ -1446,34 +1446,13 @@
       (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
       (into {} (for [t tests :let [id (var-form t)] :when id] [t (answer t [id])])))))
 
-(defn reach-digests
-  "{test var -> reach digest} of db's tests (task seon.program/tests-run-by-reach): the
-  digest of the test's name, inputs' :env (what has no program facts), its own form, its
-  namespace's forms that define no var (the ns form, fixtures), and every live form their
-  references reach (a var to the form that last defined it, macros and quoted names among
-  them (unit-account); a defined multimethod's methods and protocol's extensions; a
-  contracted var's form to the schema entries its contract names, and each entry to those
-  its form names; a var named in data its form reads, inputs' :data-refs: system.edn's procs,
-  which root resolves by name), with inputs' :tree when a reached form references a
-  tree-reader. A
-  test's digest moves when a form or schema entry it reaches does, or the shape of what it
-  reaches (which form calls which): each strongly connected component's Merkle digest
-  (reach-graph). Cost: the live forms, contracts and schema entries read once and digested
-  once, then one pass over the condensed graph (reach-graph, then graph-index). With roots ({key [var ...]}, a bin/check step's mode functions: seon.proofs/
-  check-steps), the same digest of each key: what its vars' forms and their namespaces'
-  plain forms reach; a key one of whose vars has no form here has none."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol :string]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:map-of :string [:sequential :qualified-symbol]]] [:map-of :string :string]]]}
-  ([db inputs] (reach-digests db inputs nil))
-  ([db inputs roots] (update-vals (graph-index (reach-graph db (:data-refs inputs)) inputs roots) :digest)))
-
 (defn program-digest
   "The digest of db's program as a whole: its live forms (:form/id, hasch of a form's namespace
   and text, docs/storage.md#ids: a replaced form is retracted), its schema entries (:schema/form)
   and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
   so the index's order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
-  service reads of main's program (seon.root/prove!): per-test digests (reach-digests) need the
+  service reads of main's program (seon.root/prove!): per-test digests (graph-index) need the
   checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'
   datoms (measured on the standing root's main, 2699 forms, 660 schema entries, 129
   namespaces: 0.79M ticks, 5.0 MB, of which the index read is 0.52M ticks, 3.9 MB)."
@@ -1483,18 +1462,6 @@
     (doseq [dt (d/datoms db :aevt :form/id)] (.append b (:e dt)) (.append b "\n"))
     (doseq [a [:schema/form :ns/tail] dt (d/datoms db :aevt a)] (.append b (:e dt)) (.append b " ") (.append b (:v dt)) (.append b "\n"))
     (error/digest (.toString b))))
-
-(defn reach-index
-  "{test {:digest :process? :binary?}} of db's tests under inputs, from the one graph (reach-graph, graph-index):
-  its reach digest (reach-digests), whether it reaches a process of its own (a var of
-  :seon.config.source/process-vars: process-tests) and whether it uses the built binary (a var of
-  :seon.config.source/binary-vars: bin/test builds target/seon only for these); uses? says what
-  is a use. With roots (a
-  bin/check step's mode functions, as reach-digests takes them), the same of each key."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.program/inputs] [:map-of :qualified-symbol [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]
-                  [:=> [:cat :seon.host/db :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] [:map-of :any [:map [:digest :string] [:process? :boolean] [:binary? :boolean]]]]]}
-  ([db inputs] (reach-index db inputs nil))
-  ([db inputs roots] (graph-index (reach-graph db (:data-refs inputs)) inputs roots)))
 
 (defn process-path
   "Why test t of graph g (reach-graph's) is a process test: the shortest chain of calls from its
@@ -1517,7 +1484,7 @@
               (recur (vec (distinct (map first step))) from'))))))))
 
 (defn process-tests
-  "The keys of index (reach-index's answer) that reach a process of their own (an agent, a
+  "The keys of index (graph-index's answer) that reach a process of their own (an agent, a
   fork, a root booted for it, the binary; a shell call is none): never run automatically, only when named (DECISIONS,
   Process tests are not automatic). Taking the index, not db, so a caller holding one walks once."
   {:malli/schema [:=> [:cat [:map-of :any [:map [:process? :boolean]]]] [:set :any]]}
