@@ -319,6 +319,27 @@
       (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))
     (finally (close-stores! store)))))
 
+(deftest two-runs-share-a-new-trees-branch
+  ;; docs/source.md: two prove processes on a tree neither had seen both
+  ;; found its branch absent and both made it; Datahike refused the second ("Branch already exists",
+  ;; 2026-10-29). The second run's step is run here after the first's, with the absence it had
+  ;; checked: it ends with the same whole branch, and no staging branch is left
+  (let [d (checkout! {"deps.edn" "{}" "src/app/tr_calc.clj" "(ns app.tr-calc)\n(defn add [a b] (+ a b))\n"
+                      "test/app/tr_calc_test.clj" "(ns app.tr-calc-test (:require [clojure.test :refer [deftest is]] [app.tr-calc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n"})
+        store (str (scratch-dir) "/store")
+        tree (fx/tree-id d)
+        keep! (fn [keep! runner/keep-tree! args] (apply runner/keep-tree! args))
+        {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
+        b (runner/tree-branch tree)]
+   (try
+    (runner/keep-tree! conn cfg d tree b (d/branches conn))
+    (let [first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))]
+      (runner/keep-tree! conn cfg d tree b #{:db})
+      (is (= #{:db b} (set (d/branches conn))) "one branch for the tree, no staging branch left")
+      (is (= first-facts (count (d/datoms @(d/connect (assoc cfg :branch b)) :eavt))) "the second import added nothing to it"))
+    (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
+    (finally (d/release conn) (close-stores! store)))))
+
 (deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
   ;; the full run of 2026-10-26: this namespace's scratch stores stayed open (program-db keeps its
   ;; branch's connection), nine of them by its end, and the shard's next opens failed with
