@@ -135,6 +135,9 @@
         ticks (let [t (or (:ticks req)
                           (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-ticks)))]
                 (when (and t (pos? t)) t))
+        ;; and of allocation (bytes), for the same requests (seon.intr/run): root's and work!'s run unbounded
+        bytes (let [b (or (:bytes req) (when (#{:model :outside :ui} (:origin req)) (cfg/value :seon.config.agent/form-bytes)))]
+                (when (and b (pos? b)) b))
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
         ;; before the do leading the first of them
@@ -150,7 +153,7 @@
                        ;; *test-out*, bound to the form's output as nREPL does
                        {v1 :v1 v2 :v2 v3 :v3 e1 :e} (:repl-vars @agent/state)
                        [tag v ns' outer] (try (binding [*ns* ns *out* out *err* err clojure.test/*test-out* out *1 v1 *2 v2 *3 v3 *e e1]
-                                                (let [v (intr/run ticks #(eval-fn form))] [:ret v *ns*]))
+                                                (let [v (intr/run ticks bytes #(eval-fn form))] [:ret v *ns*]))
                                               (catch Throwable e [:err e ns (outer-frames)]))
                        ;; the form as the wire carries it, whole: its own text, else its EDN (a symbol, a number)
                        common (cond-> {:id n :out (not-empty (str out)) :err-out (not-empty (str err)) :form (or src (sedn/encode form)) :repl/form form

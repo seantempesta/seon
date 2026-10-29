@@ -259,6 +259,12 @@
  ;; allocating one ~7.5e8, so this stops a runaway form after ~5-25 s of work. At the bound
  ;; the form answers the typed :seon.repl/ticks-spent and the request goes on. 0: none.
  :seon.config.agent/form-ticks 20000000000
+ ;; Unit: bytes. What one form the model, an outside agent or the page sends may allocate before it
+ ;; stops with :seon.repl/bytes-spent (jolt.host/run-interruptible's byte budget, checked at its tick
+ ;; polls, so a stop can land one poll's allocation past it). Provenance: md-scan #9's 17 model evals
+ ;; (the optimization session, 2026-10-29): median 1.5 MB, p90 ~66 MB, max 90 MB; 1 GiB is ~11x the
+ ;; largest. The agent's own loop (seon.turn/work!) has none. 0: none.
+ :seon.config.agent/form-bytes 1073741824
  ;; Unit: functions. How many of a form's costliest contracted functions (seon.profile/top)
  ;; its reply item and evaluation record keep, each with its exact calls and estimated ms.
  ;; Provenance: worktree session F2's literal 10, made a key (research row top-fns, 2026-10-22). At the

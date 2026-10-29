@@ -30,6 +30,13 @@
     (let [e (ev "(cond true 1 false)")]
       (is (str/starts-with? (str (get-in e [:ex :seon.error/message])) "Syntax error macroexpanding clojure.core/cond at (1:1). ")
           (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message]))))
+    ;; a form past its byte budget stops with the typed error, its allocation and budget as data
+    (let [old2 @agent/state
+          e (try (reset! agent/state {:n 0 :ns (the-ns 'user)})
+                 (repl/eval-string "(count (vec (range 5000000)))" {:origin :model :bytes 1000000})
+                 (finally (reset! agent/state old2)))]
+      (is (= :seon.repl/bytes-spent (get-in e [:ex :seon.error/type])) (str "stopped by its byte budget: " (pr-str (:ex e))))
+      (is (= 1000000 (get-in e [:ex :budget])) "its budget, as data"))
     (let [e (ev "(+ 1 1) (+ 2 2) (oops")]
       (is (contains? e :ex) "a read error stops it")
       (is (= {:forms 2 :value [2 4]} (select-keys e [:forms :value])) "and is no form that ran: the two before it are"))))

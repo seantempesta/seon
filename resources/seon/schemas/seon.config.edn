@@ -55,6 +55,7 @@
   [:seon.config.agent/heap-extra-bytes :seon.config.agent/heap-extra-bytes]
   [:seon.config.agent/sock-buf-bytes :seon.config.agent/sock-buf-bytes]
   [:seon.config.agent/form-ticks :seon.config.agent/form-ticks]
+  [:seon.config.agent/form-bytes :seon.config.agent/form-bytes]
   [:seon.config.agent/form-top-fns :seon.config.agent/form-top-fns]
   [:seon.config.agent/edit-context-lines :seon.config.agent/edit-context-lines]
   [:seon.config.agent/test-ticks :seon.config.agent/test-ticks]

@@ -8,6 +8,7 @@
  :seon.config.agent/inherited-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "How much an agent may inherit outside the static generation before the fork server freezes its heap into static at the next fork (also when main's program moved)."}]
  :seon.config.agent/heap-extra-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "How far an agent's heap may grow past what it inherited; past it an allocation throws OutOfMemoryError."}]
  :seon.config.agent/sock-buf-bytes [:int {:min 4096 :seon.config/unit "bytes" :description "Each socket's send and receive buffer (root, fork server and agents)."}]
+ :seon.config.agent/form-bytes [:int {:min 0 :seon.config/unit "bytes" :description "What one form the model, an outside agent or the page sends may allocate before it stops with :seon.repl/bytes-spent. 0: none."}]
  :seon.config.agent/form-ticks [:int {:min 0 :seon.config/unit "engine ticks" :description "Work one form the model or an outside agent sends may do before it stops with :seon.repl/ticks-spent. 0: none."}]
  :seon.config.agent/edit-context-lines [:int {:min 0 :seon.config/unit "lines" :description "How many lines before and after the changed text seon.repl/edit! answers."}]
  :seon.config.agent/form-top-fns [:int {:min 0 :seon.config/unit "functions" :description "How many of a form's costliest contracted functions its reply item keeps (seon.repl/wrap-cost)."}]
