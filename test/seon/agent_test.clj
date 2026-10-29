@@ -234,6 +234,71 @@
     (is (= 49 began) "the proof run was in its test")
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
 
+(deftest a-two-child-proof-run-ends-with-its-agent
+  ;; task seon.agent/a-proof-run-ends-with-its-agent, for a run dealt into two children. Child A's test holds the write end
+  ;; of a fifo and sleeps; child B's test blocks for good where no signal reaches (a take from a channel nothing puts
+  ;; on), so B outlives its agent's death. The agent is killed: the fifo's EOF says A is gone while B is alive. No clock
+  ;; decides: a child that outlives its agent wakes from its sleep (a minute) and writes a second byte. (A child also
+  ;; ends by watching its parent, so this does not alone show a sibling holds no copy of A's pipe: the next test does)
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        main (str "proofs-ended-" (random-uuid))
+        store (ts/process-store checkout)
+        runs (str checkout "/target/runs/" main "-runs")
+        fifo-a (str checkout "/target/runs/" main ".a.fifo")
+        fifo-b (str checkout "/target/runs/" main ".b.fifo")
+        _ (doseq [f [fifo-a fifo-b]] (sh/sh "mkfifo" f))
+        root (ts/start-root! {:store store :main main :runs runs :args ["--set" ":seon.config.proofs/child-min-ms=1"]})
+        eval-root (fn [code] (let [r (ts/ask root {:op :eval :agent "root" :code code})]
+                               (if (:error r) r (value-of (:response r)))))
+        _ (eval-root "(c/spawn! sys {})")
+        a (str "(ns parked0-proof (:require [clojure.test :refer [deftest is]]))"
+               " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-a) ")] (.write w 49) (.flush w) (Thread/sleep 60000) (.write w 50) (.flush w)) (is true))")
+        b (str "(ns parked1-proof (:require [clojure.test :refer [deftest is]]))"
+               " (deftest p (let [w (java.io.FileOutputStream. " (pr-str fifo-b) ")] (.write w 49) (.flush w) (clojure.core.async/<!! (clojure.core.async/chan))) (is true))")
+        form (str "(do " a " " b " (seon.agent/run-tests-forked 1000000000 '#{parked0-proof/p parked1-proof/p} :turn))")
+        _ (eval-root (str "(let [ev (c/events sys)] (c/submit! sys :a1 " (pr-str form) ") "
+                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
+        pids (eval-root "(into {} (for [[id a] (:agents (c/state sys))] [id (:pid a)]))")
+        agent-pid (get pids :a1)
+        in-a (java.io.FileInputStream. ^String fifo-a)
+        in-b (java.io.FileInputStream. ^String fifo-b)
+        began [(.read in-a) (.read in-b)]
+        killed (sh/sh "kill" "-9" (str agent-pid))
+        ended (.read in-a)]
+    (.close in-a) (.close in-b)
+    (ts/kill-root! root)
+    (ts/drop-main! store main)
+    (sh/sh "rm" "-rf" runs fifo-a fifo-b)
+    (is (pos-int? agent-pid) (str "the agent's pid, from " (pr-str pids)))
+    (is (= [49 49] began) "both children were in their tests")
+    (is (= -1 ended) (str "child A outlived its agent (byte " ended " after its sleep); agent " (pr-str agent-pid) " kill " (pr-str killed)))))
+
+(deftest a-handful-of-tests-runs-in-one-child
+  ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
+  ;; (:seon.config.proofs/child-min-ms); five tests never measured count :seon.config.proofs/unmeasured-ms each, under it
+  (let [form (fn [n] (str "(ns app.few" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"))
+        run (str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.few0-test app.few1-test app.few2-test app.few3-test app.few4-test})]"
+                 " (pr-str {:children (count @pids) :pass (:pass r)}))")
+        [_ _ _ _ _ r] (in-agent (conj (mapv form (range 5)) run))]
+    (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
+
+(deftest a-test-child-holds-only-its-own-pipe
+  ;; task seon.agent/a-proof-run-ends-with-its-agent: a child forked after a sibling holds no copy of the sibling's pipe,
+  ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
+  ;; of two children counts the descriptors open in it (fcntl F_GETFD) in its test and writes the count to a file: a child
+  ;; holding a sibling's pipe end has one more than the child forked before it
+  (let [checkout (.getCanonicalPath (java.io.File. "."))
+        dir (str checkout "/target/runs/fds-" (random-uuid))
+        _ (.mkdirs (java.io.File. ^String dir))
+        count-in (fn [n] (str "(ns fds" n "-proof (:require [clojure.test :refer [deftest is]]))"
+                              " (deftest p (let [c (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))] (spit " (pr-str (str dir "/" n)) " c)) (is true))"))
+        form (str "(do " (count-in 0) " " (count-in 1) " (seon.agent/run-tests-forked 1000000000 '#{fds0-proof/p fds1-proof/p} :turn))")
+        [run] (in-agent [form] {:sets [":seon.config.proofs/child-min-ms=1"]})
+        counts (mapv #(some-> (try (slurp (str dir "/" %)) (catch Throwable _ nil)) parse-long) [0 1])]
+    (sh/sh "rm" "-rf" dir)
+    (is (every? pos-int? counts) (str "both children counted: " (pr-str counts) " " (pr-str run)))
+    (is (apply = counts) (str "the two children hold the same descriptors: " (pr-str counts)))))
+
 (deftest an-agent-answers-while-its-tests-run
   ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
@@ -437,6 +502,21 @@
                               "          :passed (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")])
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 2 :error 1 :died ["#'app.die-test/b-dies"] :passed ["#'app.die-test/a-first" "#'app.die-test/c-last"]} v) (pr-str r))))
+
+(deftest a-test-run-is-dealt-across-children-and-loses-none
+  ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
+  ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
+  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2
+  (let [ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1))) (deftest b (is (= 2 2)))"
+                             (when (= n 3) " (deftest dies (seon.lib/c-exit 7))")))
+        run #(str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.par0-test app.par1-test app.par2-test app.par3-test})]"
+                  " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
+                  "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
+        [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
+                                      {:sets [":seon.config.proofs/jobs=2" ":seon.config.proofs/child-min-ms=1"]})
+        v #(some-> (:value %) clojure.edn/read-string)]
+    (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
+    (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
 
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as

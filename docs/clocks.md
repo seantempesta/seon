@@ -64,7 +64,7 @@ Names that look like clock reads but are quoted as data, so no time decides at t
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
-- `test-runner/shards`: bin/test's shards are dealt by each test's typical measured ms (the median of its cached results', ```seon.fx/typical-ms```), so they end together; a test never measured counts as the mean.
+- `seon.proofs/shards`: bin/test's shards are dealt by each test's typical measured ms (the median of its cached results', ```seon.fx/typical-ms```), so they end together; a test never measured counts as the mean.
 - bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
 
 ## Time measured (recorded, never compared to decide)

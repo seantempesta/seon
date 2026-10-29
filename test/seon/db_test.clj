@@ -809,6 +809,43 @@
      :fixed {:ticks 30000 :bytes 125000}
      :sizes [10 100 1000 100000]}))
 
+(defn held-store
+  "[cfg conn] of a fresh in-memory store (the schema and no example program) holding n notes on :db:
+  what a branch is made from, whatever it holds."
+  [n]
+  (let [cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write :writer pdb/writer-cfg}
+        _ (d/create-database (pdb/made-cfg cfg))
+        conn (d/connect cfg)]
+    (pdb/ids! conn)
+    (pdb/install-missing! conn)
+    (doseq [part (partition-all 1000 (range n))]
+      (d/transact conn {:tx-data (mapv #(hash-map :note/text (str "note " %)) part) :tx-meta (pdb/tx-meta :db)}))
+    [cfg conn]))
+
+(defn branch-round-trip
+  "A branch of the store of cfg made, its connection released, and deleted (seon.test-store/test-branch!'s
+  own work, whose body is f): the number of branches deleted."
+  [cfg conn]
+  (let [b (keyword (str "round-trip-" (random-uuid)))
+        [c _] (pdb/open-main! cfg b)]
+    (d/release c)
+    (count (pdb/delete-main! conn b))))
+
+(deftest a-branch-costs-what-it-holds-not-the-store
+  ;; a test's branch of the test store (seon.test-store/test-branch!) is one pointer write and one
+  ;; delete (docs/storage.md#branches-as-in-production): measured 2026-10-29 at 0.55 M ticks and 1.7 MB
+  ;; at 1,350 datoms and 0.63 M and 1.8 MB at 147,569, so the 1.6 G ticks the audit charged
+  ;; test-branch! in seon.vector-test are that test's own bodies (a closure is no contracted call: its
+  ;; work is its caller's self cost), not the branch
+  (is (= 1 (let [[_ conn] (held-store 10)] (branch-round-trip (:config @conn) conn))) "a branch made and deleted")
+  (cost/proof
+    {:of 'seon.db-test/branch-round-trip :input 'seon.db-test/held-store
+     :n "datoms the store holds, on :db"
+     :work "one pointer write to branch, one delete of the head key, whatever the branch's index holds"
+     :growth :constant
+     :fixed {:ticks 1000000 :bytes 2500000}
+     :sizes [10 100 1000 10000]}))
+
 (defn- attr-db
   "An in-memory db of eight long attributes and 200 random facts, with :attribute-refs? refs?
   (an attribute is then an entity id, not a keyword): a db of each kind a datom's :a can be."

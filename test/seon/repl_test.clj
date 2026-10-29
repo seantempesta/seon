@@ -35,12 +35,18 @@
   ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a
   ;; java.util.concurrent.Future is required"). A form is program when its top-level form is a
   ;; definition; a def nested beside calls stays the recorded eval, and its record says so
-  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task]}]
+  (let [[top nested branch] (at/in-agent (fn [{:keys [ns task agent]}]
                                            [(str "(ns " ns ".core) (def a 1)")
                                             (str "(in-ns '" ns ".core) (let [r (+ 1 1)] (def b r) r)")
                                             {:op :eval :agent "root"
-                                             :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b]))")}]))]
+                                             ;; the records are applied ahead of the agent's commit (seon.agent/transact!): read at its
+                                             ;; :commit events, the tap first, until a is there (b never is)
+                                             :code (str "(let [ev (c/events sys) a :" agent
+                                                        " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b])))"
+                                                        " r (loop [] (let [v (read)] (if (first v) v"
+                                                        " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                                        " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (some #(= "a" (name %)) (:recorded top)) (str "a top-level def is program: " (pr-str top)))
     (is (empty? (:recorded nested)) (pr-str nested))
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
@@ -51,14 +57,20 @@
   ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
   ;; spent 39 turns finding out why (docs/prompt.md)
   (let [[r nested stopped after branch]
-        (at/in-agent (fn [{:keys [ns task]}]
+        (at/in-agent (fn [{:keys [ns task agent]}]
                        [(str "(do (ns " ns ".core)\n  (def c 1)\n  (inc c))")
                         (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
                         (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
                         (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
                         {:op :eval :agent "root"
-                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
+                         ;; the agent's records are applied ahead of its commit (seon.agent/transact!): read at its
+                         ;; :commit events, the tap first (seon.check/await-records's order)
+                         :code (str "(let [ev (c/events sys) a :" agent
+                                    " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d])))"
+                                    " r (loop [] (let [v (read)] (if (every? true? v) v"
+                                    " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                    " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
     (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
@@ -71,13 +83,20 @@
   ;; returned, each form's exact text from the reader's positions (seon.repl/do-parts), no regex over
   ;; the code. Each definition is program with its own text, comments and spacing as written
   (let [[_ r branch]
-        (at/in-agent (fn [{:keys [ns task]}]
+        (at/in-agent (fn [{:keys [ns task agent]}]
                        [(str "(ns " ns ".core)")
                         (str "(do ; leads f\n  (seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))\n"
                              "  ;; leads g-test\n  (clojure.test/deftest g-test (clojure.test/is (= 2 (f 1)))))")
                         {:op :eval :agent "root"
-                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test]))")}]))]
+                         ;; an agent's records are applied ahead of its commit (seon.agent/transact!), so its branch
+                         ;; shows them at its :commit event: the tap first, then the read, and again at each of
+                         ;; the agent's commits until both forms are there (seon.check/await-records's order)
+                         :code (str "(let [ev (c/events sys) a :" agent
+                                    " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
+                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test])))"
+                                    " r (loop [] (let [v (read)] (if (every? some? v) v"
+                                    " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
+                                    " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
     (is (= 2 (count (:recorded r))) (str "both inner definitions are program: " (pr-str r)))
     (is (= ["(seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))"
             "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]

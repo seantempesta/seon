@@ -186,7 +186,10 @@
         "a run whose plan never ran says nothing of any test")))
 
 (deftest a-merges-deferred-tests-command
-    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test" "seon.root-test"] (fx/test-command ['seon.check-test 'seon.root-test] "/o"))))
+    ;; the gate runs the tests the change reached, not their namespaces' other tests (the restart
+    ;; test's gate ran 48 tests for 1 deferred one)
+    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test/a" "seon.root-test/b"]
+           (fx/test-command ['seon.check-test/a 'seon.root-test/b] "/o"))))
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
