@@ -42,6 +42,28 @@
     (or (:seon.render/html (contract/properties k))
         (some declared (parents k)))))
 
+(defn model-declared
+  "The model render symbol schema k (or its nearest parent) declares, {:seon.render/model sym}: what a
+  part of that schema sends the model (docs/render.md#a-part-answers-data), or nil (the part's data,
+  printed by the one printer where the request is made)."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:maybe :symbol]]}
+  [k]
+  (when k
+    (or (:seon.render/model (contract/properties k))
+        (some model-declared (parents k)))))
+
+(declare html)
+
+(defn- part
+  "A component's output out as the walk draws it: a part (a value whose metadata names its schema,
+  :seon.render/schema, not hiccup) is kept in data and drawn by its schema's html render (`html`);
+  hiccup is drawn as it is."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [out data]
+  (if-let [k (and (not (vector? out)) (not (seq? out)) (:seon.render/schema (meta out)))]
+    (do (vreset! data out) (html {:schema k :as :block} out))
+    out))
+
 (defn summary-declared
   "The summary function symbol schema k (or its nearest parent) declares, {:seon.render/summary
   sym}: what to show of a value too large or too host-bound to print whole, or nil."
@@ -280,9 +302,10 @@
             kids (volatile! [])
             id (key-id k)
             reads (volatile! nil)
+            data (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (apply f o args) (assoc env :children kids)) {:id id :class (name (first k))})
+            one #(try (with-id (emit w (part (apply f o args) data) (assoc env :children kids)) {:id id :class (name (first k))})
                       (catch Throwable e
                         (with-id [:div {:class "err"} (html {} (contract/error :seon.render/component-defect #'render!
                                                                                (str (symbol f) " threw: " (or (ex-message e) (str e))) {:seon.error/in (symbol f)}))]
@@ -300,7 +323,7 @@
         (led! w f (if same? :same :miss) nil bytes)
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0)))
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :data @data
                                     :reads (some-> @reads seq d/reads-index)})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
@@ -414,15 +437,32 @@
                         (let [h (h/html (resolved w k true))] (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
            {:id (:id c) :container sel :rev r :html html}))))
 
+(defn- model-of
+  "What part k of walk w (a component that answered data) sends the model: its schema's model render
+  of its data (model-declared; else the data itself), made when a request asks for it and kept on its
+  cache entry by its revision, so the page never pays for it and a request reuses an unchanged part's."
+  {:malli/schema [:=> [:cat :map [:vector :any]] :any]}
+  [w k]
+  (let [c (get @(:cache w) k)]
+    (if (= (:rev c) (:model-rev c))
+      (:model c)
+      (let [d (:data c)
+            sym (model-declared (:seon.render/schema (meta d)))
+            m (if sym ((requiring-resolve sym) {} d) d)]
+        (vswap! (:cache w) update k assoc :model-rev (:rev c) :model m)
+        m))))
+
 (defn placed-hiccup
   "Walk w's components placed in the root's lists with element ids sels ([\"#p-task\"]), in order, as
-  [[id hiccup]]: each one's output with its children's resolved, exactly as its render returned it
-  (a call of the printer kept as the call: the model reads the data); of each of sels, in their
-  order, from one prewalk."
+  [[id content]]: what the model reads of each, a part's model render (model-of) or else a
+  component's output with its children's resolved, exactly as its render returned it (a call of the
+  printer kept as the call: the model reads the data); of each of sels, in their order, from one
+  prewalk. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map [:sequential :string]] [:vector [:tuple :string :any]]]}
   [w sels]
   (let [by (group-by first (placed w))]
-    (vec (for [s sels [_ k] (get by s)] [(:id (get @(:cache w) k)) (resolved w k)]))))
+    (vec (for [s sels [_ k] (get by s) :let [c (get @(:cache w) k)]]
+           [(:id c) (if (some? (:data c)) (model-of w k) (resolved w k))]))))
 
 (defn draw
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its

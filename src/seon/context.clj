@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.reader :as reader] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -760,6 +760,87 @@
   (let [r (docs/resolve-ref db v :code)]
     (if (:unresolved r) {:unresolved v :problem (:unresolved ref/problem-messages)} (let [secs (docs/citing-sections db v)]
                                                 (cond-> (assoc r :callers (docs/callers db v)) (seq secs) (assoc :sections secs))))))
+
+(defn- verdicts
+  "Every test the branch db holds a verdict of (seon.proofs/result-tx: the verdict at its reach digest
+  now), {test {:status :pass|:fail :failures [assertion]}}: green is :pass, red and flaky :fail (a flaky
+  test is no green). One scan of :seon.test/status's datoms."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol :map]]}
+  [db]
+  (into {} (for [{e :e st :v} (d/datoms db :aevt :seon.test/status)
+                 :let [v (d/entity db e)]]
+             [(:var/name v) (cond-> {:status (if (= :green st) :pass :fail)}
+                              (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
+
+(defn standing
+  "How agent a's work on its task stands on its branch db, as data (task
+  seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
+  entity holds (`verdicts`; none: :unknown, or :undefined while the branch defines no such test),
+  a red or unknown one with its source and the program functions it calls (`callees`), a red one
+  with its failing assertions (`failure`); the done rule's reasons (seon.reconcile/done-explain)
+  and each as what to do (`refused`); what the branch's work did since its merge base, from one
+  diff (seon.merge/delta-changes of :seon.agent/base-commit against db): the functions without a
+  contract, the problems it caused and the sections it made stale (seon.problems/caused-split),
+  what its merge carries, and whether it can merge now when it is given main's commit; its
+  unmerged entries; a test run that failed as a whole (:seon.process/test-error on its newest
+  process); its turns of its cap; whether its last reply was cut. Nothing is held: each is a fact
+  of db. opts :index, a function answering the reconciler's index of db (seon.reconcile/index; else
+  one built cold), called only when a test outside the task's proofs is red (whether it is a
+  regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
+  70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
+  tests: none while every proof has a verdict)."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
+  [db a {:keys [index deferred main]}]
+  (let [ag (d/entity db a)
+        tid (some-> ag :seon.agent/task :seon.task/id)
+        t (when tid (task/task db tid))
+        {:keys [proofs plan]} (:seon.task/accumulated t)
+        kind (:seon.task/kind t :work)
+        vs (verdicts db)
+        results (update-vals vs :status)
+        base (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db)))
+        moved (when base (pm/content-datoms base db #{}))
+        ch (if base (pm/delta-changes base db #{} moved) {})
+        split (when base (problems/caused-split base db ch))
+        gaps (vec (sort-by str (pm/uncontracted ch)))
+        unmerged (pm/unmerged db)
+        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?t :seon.turn/agent ?a] [?t :seon.turn/run ?r]] db a) seq (apply max) (d/entity db))
+        turns (sort-by :seon.turn/n (filter #(= :model (:seon.turn/origin %)) (map #(d/entity db %) (d/q '[:find [?t ...] :in $ ?a :where [?t :seon.turn/agent ?a]] db a))))
+        proc (some->> (d/q '[:find [?p ...] :in $ ?a :where [?p :seon.process/agent ?a]] db a) (map #(d/entity db %)) seq (apply max-key #(:seon.process/forked-ms % 0)))
+        test-error (:seon.process/test-error proc)
+        proof? (set proofs)
+        ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
+        claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
+                 (if index (index) (r/index db)))
+        input (cond-> (if claims
+                        (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil (:seon.run/plan run) (set deferred))
+                        (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
+                                 :uncontracted (set gaps) :unmerged (mapv #(sedn/encode (:key %)) unmerged) :deferred (set deferred)}
+                          (= :design kind) (assoc :plan plan)
+                          (and (= :design kind) (:seon.run/plan run)) (assoc :plan-before (:seon.run/plan run))))
+                (seq (:caused split)) (assoc :caused (set (:caused split))))
+        reasons (r/done-explain input)
+        reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
+        defined? #(some? (docs/source-of db %))]
+    (cond-> {:proofs (vec (for [p (sort-by str proofs)
+                                :let [src (docs/source-of db p)
+                                      st (get results p (cond (nil? src) :undefined (some? test-error) :not-run :else :unknown))
+                                      fs (get-in vs [p :failures])
+                                      calls (when (and src (not= :pass st)) (callees db p))]]
+                            (cond-> {:test p :status st}
+                              (and src (not= :pass st)) (assoc :source (print/code src))
+                              (seq fs) (assoc :failures (mapv failure fs))
+                              (seq calls) (assoc :calls calls))))}
+      (:seon.agent/max-turns ag) (assoc :turn (str (inc (count turns)) " of " (:seon.agent/max-turns ag)))
+      (seq (refused reasons reds defined?)) (assoc :refused (refused reasons reds defined?))
+      test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
+      (:seon.turn/truncated (last turns)) (assoc :your-last-reply {:cut "at the model's token limit: what followed the cut was lost. Answer with less: one change at a time."})
+      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :kind :base :ours :theirs]) unmerged))
+      (seq gaps) (assoc :without-a-contract gaps)
+      (seq (:caused split)) (assoc :caused (:caused split))
+      (seq (:attention split)) (assoc :attention (:attention split))
+      (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
+      (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
 
 (defn turn-state
   "The turn sections of task t's current state as data, measured again each turn from

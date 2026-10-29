@@ -940,6 +940,26 @@
     (list (caused-view (problems/caused-split b db ch)) (gaps-view ch) (divergence-view ch)
           (when main (merge-view (pm/readiness b db (commit-db db main) moved))))))
 
+(defn standing-html
+  "The work's standing as the page shows it (the declared html render of :seon.context/standing): its
+  data by the one printer, under the budget of a value, with the form that reads it again. See
+  docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_opts v]
+  [:section [:h2 "standing"]
+   [#'render/html {:budget (config/value :seon.config.render/value-budget) :handle '(my.task/status)} (with-meta v nil)]])
+
+(defn standing
+  "How the agent's work on its task stands (a component over ctx and the db): seon.context/standing
+  of its branch db, a part (its data, :seon.context/standing, drawn by its schema's html render for
+  the page and its model render for the model: docs/render.md#a-part-answers-data). It reads main's
+  commit from ctx only when the task merges itself (the merge view), so a move of main redraws it
+  only then."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
+    (with-meta (context/standing db aid {:main main}) {:seon.render/schema :seon.context/standing})))
+
 (defn related
   "What the agent's work on its task is likely to need beyond what the plan cites (a component over
   ctx and the db): the units its last turn included (:seon.agent/included, seon.context/selected:
@@ -1143,13 +1163,8 @@
                        (let [proved (set (map :var/name (vals (:proved task))))]
                          (for [n (distinct (map :var/name (vals (:cited task)))) :when (and n (not (proved n)))] [#'cited {} aid n]))
                        [#'related {} aid]
-                       (when (seq (:turns c)) [#'status {} aid])
-                       ;; what the turn no longer computes, drawn when what it reads moves: the merge
-                       ;; base's and main's commits (the agent's :seon.agent/base-commit and main-commit) are their children. A
-                       ;; record that has not heard one yet has no view of it: nothing measured, nothing drawn
-                       (when-let [b (:seon.agent/base-commit c)]
-                         ;; a task that merges itself also shows whether it can merge now (main's commit)
-                         [#'branch-views {} b (when (and (:seon.agent/main-commit c) (task/merges? (:seon.task/kind task))) (:seon.agent/main-commit c))])))
+                       ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
+                       [#'standing {} aid]))
       ;; the run once it took a turn: before that it says only its id, which the task's names
       (when (seq (:turns c)) [#'run-head {} aid])
       (when aid [#'own-problems {} aid])
