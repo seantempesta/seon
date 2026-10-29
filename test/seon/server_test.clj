@@ -340,8 +340,8 @@
     (is (true? (:live=cold (:value reads))) (str "the live walk's page is the cold draw's at the commit it framed at; differing: " (pr-str (:live=cold (:value reads)))))
     (is (every? #(nil? (:pages %)) later) (str "each later read draws no page cold, its page the live walk's: " (pr-str (map :pages later))))
     ;; a read costs what changed (the render's views, docs/render.md): main's commit moving between two reads
-    ;; (a merge of an earlier test's task landing in this root) redraws the branch views, which the task's render
-    ;; keys by it (seon.render.ui/ctx-body), so only reads beside the same main are compared; measured 2026-10-29:
+    ;; (an earlier test's task merging in this root) redraws the branch views, which the task's render
+    ;; keys by it (seon.render.ui/render-ctx), so only reads beside the same main are compared; measured 2026-10-29:
     ;; every read after a move cost 15.5M ticks against 9.2M, a shard run's reads moved main in 8 of 13
     (let [same (filter (fn [[a b]] (= (:main a) (:main b))) (partition 2 1 later))]
       (is (seq same) (str "some later reads follow one that saw the same main: " (pr-str (map :main later))))
