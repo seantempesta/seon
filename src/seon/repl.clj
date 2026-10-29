@@ -354,10 +354,12 @@
           r)))
     {}))
 
-(defn- with-branch-schemas
+(defn with-branch-schemas
   "f called with malli's dynamic registry bound to this branch's population (branch-registry),
   read now: what a form compiles against, and the renders its values' schemas name
-  (seon.contract/properties reads it)."
+  (seon.contract/properties reads it). Each eval binds it, and so does each turn of the turn loop
+  (seon.turn/work!), so Seon's own code checks the agent's values against the schemas the agent
+  registered since the loop began."
   {:malli/schema [:=> [:cat :seon.host/fn] :any]}
   [f] (binding [mr/*registry* (branch-registry)] (f)))
 

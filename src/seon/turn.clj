@@ -424,26 +424,33 @@
     (branch/merge-main!)
     (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
-      (let [obs (observe task)
-            ;; how the work stands, from the walk the request is drawn from (one computation a turn)
-            s (status-now)
-            reasons (:reasons s)
-            stop (get-in @agent/state [:turn :stop])
-            hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
-        (cond
-          ;; no status is no done rule: the run ends on that error, never green
-          (contract/error? s) (end! st :error (:seon.error/message s) s)
-          ;; git's CI after the merge: green on the combined program; merge main again until
-          ;; it brings nothing new
-          (and (empty? reasons) merge?)
-          (let [m (branch/merge-main!)]
-            (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) (recur st)))
-          (empty? reasons) (end! st :green nil nil)
-          ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
-          ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
-          (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
-          hairy (end! st :merge-failed (:reason hairy) nil)
-          (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
-          stop (end! st (:outcome stop) (:reason stop) nil)
-          :else (let [st' (act! st obs s model)]
-                  (if (contract/error? st') (end! st :error (:seon.error/message st') st') (recur st'))))))))
+      ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
+      ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
+      ;; values against (md-scan #7: its new list blocks met the old :seon.ref/block in seon.ref/sections and
+      ;; ended the loop); a turn answers its end, or [::next st] to go on
+      (let [step (repl/with-branch-schemas
+                  (fn []
+              (let [obs (observe task)
+                    ;; how the work stands, from the walk the request is drawn from (one computation a turn)
+                    s (status-now)
+                    reasons (:reasons s)
+                    stop (get-in @agent/state [:turn :stop])
+                    hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
+                (cond
+                  ;; no status is no done rule: the run ends on that error, never green
+                  (contract/error? s) (end! st :error (:seon.error/message s) s)
+                  ;; git's CI after the merge: green on the combined program; merge main again until
+                  ;; it brings nothing new
+                  (and (empty? reasons) merge?)
+                  (let [m (branch/merge-main!)]
+                    (if (and (empty? (:applied m)) (empty? (:conflicts m))) (end! st :green nil nil) [::next st]))
+                  (empty? reasons) (end! st :green nil nil)
+                  ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
+                  ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
+                  (= :failed (:outcome stop)) (end! st :failed (:reason stop) nil)
+                  hairy (end! st :merge-failed (:reason hairy) nil)
+                  (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
+                  stop (end! st (:outcome stop) (:reason stop) nil)
+                  :else (let [st' (act! st obs s model)]
+                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next st']))))))]
+        (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))
