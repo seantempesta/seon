@@ -108,6 +108,20 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(defn commit-of
+  "The writer's main notice {:t :prev :ops :commit} for a db value made from the test store's seed
+  (d/db-with, d/with): its datoms (what differs from conn's head, datahike.api/datoms-diff) are
+  committed on conn, a test branch, so a proc that takes the notice makes the db with
+  d/commit-as-db as it does in root (docs/machine.md#what-a-process-owns-in-memory). :t is the commit's."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db] :map]}
+  [conn db]
+  (let [prev (:max-tx @conn)
+        [gone added] (d/datoms-diff @conn db :eavt [])
+        tx (-> (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) (remove #(= :db/txInstant (:a %)) gone))
+               (into (map (fn [x] [:db/add (:e x) (:a x) (:v x)])) (remove #(= :db/txInstant (:a %)) added)))
+        r (d/transact conn {:tx-data tx})]
+    {:t (:max-tx (:db-after r)) :prev prev :ops [] :commit (d/commit-id (:db-after r)) :ns 0}))
+
 (def ^:private starter
   "This test process's starter fifo: made once, named by its pid, and held open read-write for the
   process's life (its children do not inherit it), so its EOF says the test process is gone however

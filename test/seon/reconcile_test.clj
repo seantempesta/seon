@@ -452,6 +452,10 @@
                (d/db-with (task/boot-tx "boot-1" max-running)))]
     (cond-> db (seq extra) (d/db-with extra))))
 
+(defn- note
+  "The writer's notice for db, a commit of a test branch, that follows prev (main's t before it)."
+  [db prev ops] {:t (:max-tx db) :prev prev :ops ops :commit (d/commit-id db) :ns 0})
+
 (defn- mspawn [nm n] {:op :spawn :task (str "demo/" nm) :run (str "demo/" nm "#" n)
                       :env {:branch (task/default-branch (str "demo/" (str/replace nm #"-merge$" ""))) :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}})
 
@@ -726,6 +730,7 @@
       (is (= [(mspawn "a-merge" 2)] (actions-for db))))))
 
 (deftest a-merge-behind-again-and-again-is-held-for-root
+  (ts/test-branch! (fn [_ conn]
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind run is green, so max-merge-turns
   ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
   ;; behind runs of one merge task the next behind answer holds the task for root with the evidence
@@ -734,7 +739,7 @@
                  (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done)
                                                              (mapcat #(run "add-merge" % :behind :outcome :green) (range 1 (inc prior)))
                                                              (run "add-merge" (inc prior) :ended :outcome :green :results {(t "add") :pass})))
-                       [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+                       [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
                        asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
                        behind (contract/error :seon.merge/behind 'seon.writer/merge-refused "main changed 2 key(s) since the branch's merge base: merge main into the branch first" {:tx 9 :behind 2})
                        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [behind]}})
@@ -748,7 +753,8 @@
       (is (= :held (:seon.task/execution tk)) "past it, the task is held for root")
       (is (re-find #"behind" (:reason (:seon.task/failure tk))))
       (is (= :closed (:seon.run/status run')))
-      (is (= :seon.merge/behind (:seon.error/type (:seon.run/error run'))) "with the writer's evidence"))))
+      (is (= :seon.merge/behind (:seon.error/type (:seon.run/error run'))) "with the writer's evidence")))))
+)
 
 (deftest a-branch-behind-main-is-told-so-first
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
@@ -822,6 +828,7 @@
         [(d/db-with db tx) (assoc act :problem (:reason (some :seon.task/failure tx)))]))))
 
 (deftest a-refused-run-holds-its-task-and-creates-none
+  (ts/test-branch! (fn [_ conn]
   ;; owner, 2026-10-23: "no automatic retries, send it to root to decide if it should be
   ;; retried", and root, 2026-10-26: a work run's refused end is told to the agent once (a
   ;; :verdict), and the same verdict again holds. Every hold holds its task as my.task/fail!
@@ -852,7 +859,7 @@
         (is (= :failed (r/task-state (r/index db') id))))))
   (testing "a merge the octopus merge refused: the reconciler proc's answer to the writer"
     (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
-          [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+          [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
           asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
           reason (contract/error :seon.writer/refused 'seon.writer/octopus-merge "conflicts with main at app/f" {:merged? false})
           [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [reason]}})
@@ -864,13 +871,15 @@
       (is (= :held (:seon.task/execution tk)))
       (is (= {:reason "merge refused: conflicts with main at app/f" :run "demo/add-merge#1"} (:seon.task/failure tk)))
       (is (= :closed (:seon.run/status (task/run db' "demo/add-merge#1"))))
-      (is (= reason (:seon.run/error (task/run db' "demo/add-merge#1"))) "the writer's reason, on the run"))))
+      (is (= reason (:seon.run/error (task/run db' "demo/add-merge#1"))) "the writer's reason, on the run")))))
+)
 
 (deftest a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
+  (ts/test-branch! (fn [_ conn]
   ;; a merged member whose changed forms name no source file: no write-back runs, so its run
   ;; holds a commit-error naming them, never silence; one that changed no source stays silent
   (let [db (mdb [(decl "add")] :extra (concat (run "add" 1 :done) (run "add-merge" 1 :ended :outcome :green :results {(t "add") :pass})))
-        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns 0})
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         st (assoc st :source {:branch "jolt/seon-merges"})
         asked (first (filter #(= :octopus-merge (get-in % [:req :req :op])) (:to-api outs)))
         answered (fn [x] (let [[_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:ok true :results [x]}})
@@ -906,7 +915,8 @@
               "a merged member with no files is no member of the write-back: no sha for files it never touched"))
         (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
         (is (= ["src/app/none.clj"] (:seon.git/files (:seon.run/error run'))) "held as a lost write-back, named by file")
-        (is (nil? (:seon.run/commit-error run')) "and no untyped note beside it")))))
+        (is (nil? (:seon.run/commit-error run')) "and no untyped note beside it"))))))
+)
 
 (deftest a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
   ;; the :git effect refused the write-back of a merged run (a locked ref): its run holds a typed error naming the files,
@@ -967,6 +977,7 @@
     (is (not= :failed (r/task-state (r/index released) "demo/add")) "released, it is no longer failed")))
 
 (deftest an-idle-system-does-nothing-after-a-reason
+  (ts/test-branch! (fn [_ conn]
   ;; the reconciler proc's own steps: the reason's hold is one write; once it is committed
   ;; and answered nothing is left to do (quiet, naming the held task as a root cause); a
   ;; root-only commit after it asks nothing
@@ -974,9 +985,9 @@
                       :extra (run "add" 1 :ended :outcome :red :results {(t "add") :fail}))
                  "demo/add#1" [{:reason :proof-red :symbol (t "add")}])
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
-        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         [w & others] (reqs outs)
         tx (get-in w [:req :req :tx-data])
         ;; the writer commits, then answers: main's commit reaches the proc first
@@ -993,7 +1004,8 @@
     (is (not-any? #(= :spawn (get-in % [:req :op])) (reqs outs2)) "nothing starts")
     (let [[db3 ops3] (commit db2 [{:seon.root/id :root :seon.root/quiescent quiet}])
           [_ outs3] (main st db3 ops3)]
-      (is (empty? (reqs outs3)) "a commit of root's own report asks nothing"))))
+      (is (empty? (reqs outs3)) "a commit of root's own report asks nothing")))))
+)
 
 (deftest stuck-names-cancelled-and-held-roots
   (let [db (db-of diamond :extra (concat (merged "a") (task/execution-tx ["demo/b"] :cancelled) (task/execution-tx ["demo/c"] :held)))]
@@ -1015,14 +1027,17 @@
       [(c 'app/f :both-modified)] 3 :merge-turns)))
 
 (deftest quiescence-is-reported-when-nothing-can-move
+  (ts/test-branch! (fn [_ conn]
   ;; the reconciler proc's own steps over real commits: a task held for root and its dependents, nothing live
   (let [db (mdb [(decl "add") (decl "twice" :needs ["add"])]
                 :extra (concat (run "add" 1 :closed)
                                [{:seon.task/id "demo/add" :seon.task/execution :held :seon.task/failure {:reason "capped" :run "demo/add#1"}}]))
-        commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)})] [st (:to-api outs)]))
+        ;; main's commits are the test branch's: the first holds db's datoms, the others are transacted on it
+        db (d/commit-as-db conn (:commit (ts/commit-of conn db)))
+        commit (fn [_ tx] (let [rep (d/transact conn {:tx-data tx})] [(:db-after rep) (pdb/report->tx rep)]))
+        step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main (note db (:t st) ops))] [st (:to-api outs)]))
         report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
-        [st outs] (step (r/reconciler-proc {:boot "boot-1"}) db [])
+        [st outs] (step (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         report (report-in outs)
         blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
     (testing "nothing to start, nothing in flight: one positive report, naming the held root and what it blocks"
@@ -1045,7 +1060,8 @@
               [st4 outs4] (step st2 db4 ops4)]
           (is (= ["demo/add"] (keep #(get-in % [:req :opts :task]) outs4)))
           (is (not (:quiet st4)))
-          (is (nil? (report-in outs4))))))))
+          (is (nil? (report-in outs4)))))))))
+)
 
 (deftest every-way-a-run-leaves-running-writes-its-outcome
   ;; root, 2026-10-26: a run with no outcome is a running run (an agent's ctx and its page's run
@@ -1076,10 +1092,11 @@
 (def ^:private held-why "branch :demo/a is held by live agent a9")
 
 (deftest a-refused-spawn-writes-a-refused-run
+  (ts/test-branch! (fn [_ conn]
   ;; root refuses the spawn (the branch is held, or too many live agents): the refused answer is
   ;; the run, written on main, and the next pass starts the task again
   (let [db (db-of [(decl "a")])
-        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1"}) :main {:t (:max-tx db) :ops [] :db db :ns (profile/now-ns)})
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
         held (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
         [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r held})
@@ -1089,16 +1106,18 @@
     (is (= :refused (:seon.run/status run)) "the refused answer is written as the run")
     (is (= held-why (:seon.run/reason run)) "with root's reason")
     (is (= :refused (:seon.run/outcome run)) "and its outcome, so it reads as ended")
-    (is (= [(spawn "a" 2)] (actions-for (d/db-with db written))) "the next pass starts the task again")))
+    (is (= [(spawn "a" 2)] (actions-for (d/db-with db written))) "the next pass starts the task again"))))
+)
 
 (deftest a-refused-task-asks-again-when-main-moves
+  (ts/test-branch! (fn [_ conn]
   ;; if nothing has changed, asking again is refused again: neither the refused answer nor
   ;; its own commit starts the task; other work on main lets it ask again, as its next run
   (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns (profile/now-ns)}))
+        main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
         spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
         db (db-of [(decl "a")])
-        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
         [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})})
         w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
@@ -1111,7 +1130,8 @@
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
     (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
     (is (= [{:task "demo/a" :cause held-why :run "demo/a#1" :blocks []}] (get-in st [:quiescent :root-causes])) "quiet, naming it")
-    (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again")))
+    (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again"))))
+)
 
 (deftest quiescence-names-a-task-that-cannot-start
   ;; a refused run is a root cause at quiescence, naming what it blocks
@@ -1232,19 +1252,21 @@
     (is (nil? (#'r/stage-boundary (d/db-with db [(on "demo/i#2" "i")]) "demo/i#2")) "nor does a wake of the same task")))
 
 (deftest a-step-reads-the-db-its-own-write-made
+  (ts/test-branch! (fn [_ conn]
   ;; the stage-boundary red (seon.agent-test/a-requests-implement-continues-its-designs-request):
   ;; the writer answers a write before main's commit reaches the reconciler (two ins), so :started
   ;; read a db without the run start :spawned wrote, found no earlier run on its agent, and wrote
   ;; no :stage entry. An answer main has not reached waits for main's commit of its t. A commit's
   ;; :ns is 0: the proc measures a stat from it, which nothing here reads (no clock in the test)
-  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
-        main (fn [st db ops] (r/reconciler-proc st :main {:t (:max-tx db) :ops ops :db db :ns 0}))
+  (let [commit (fn [_ tx] (let [rep (d/transact conn {:tx-data tx})] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main (note db (:t st) ops)))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
         env {:branch (task/default-branch "demo/d") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}
         ;; the session's earlier stage: demo/d's run on the agent the spawn will answer
         d1 (update (task/run-start-tx "demo/d#1" "demo/d" "boot-1" :a1 env 1000 "Make d true.") 0 assoc :seon.run/status :done :seon.run/outcome :green)
         db (db-of [(decl "d") (decl "i")] :released ["demo/i"] :extra d1)
-        [st outs] (main (r/reconciler-proc {:boot "boot-1"}) db [])
+        db (d/commit-as-db conn (:commit (ts/commit-of conn db)))
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         asked (first (filter #(= :spawn (get-in % [:req :op])) (reqs outs)))
         [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r {:id :a1}})
         w (first (filter #(= :write (get-in % [:req :op])) (reqs outs2)))
@@ -1260,7 +1282,8 @@
     (is (empty? (reqs outs3)) "its write's answer waits: main has not reached the write")
     (is (= 1 (count (stage outs4))) "main's commit of it takes the answer: the stage's entry, read off the db holding the run")
     (is (empty? (:behind st4)) "and holds it no longer")
-    (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well")))
+    (is (= 1 (count (stage outs5))) "a later commit than the write's takes it as well"))))
+)
 
 (deftest a-proof-a-branch-registers-reaches-main-at-the-runs-end
   ;; owner, 2026-10-25 (Dogfood rulings): a design registers the red proofs it writes

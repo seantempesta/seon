@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
             [seon.task :as task] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source]
-            [datahike.api :as d] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
+            [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow] [seon.ref :as ref]
             [seon.config :as cfg] [seon.error :as err]))
 
 
@@ -1133,9 +1133,9 @@
     [st (into outs more)]))
 
 (defn reconciler-proc
-  "The reconciler. In :main (main's commits {:t :ops :db}, in order, a blocking buffer) and :answers (the
+  "The reconciler. In :main (main's commit notices {:t :prev :ops :commit}, in order, a blocking buffer; it makes the db of the commit when it takes the notice) and :answers (the
   api's answers to its requests). Out :to-api (its requests, as {:op :request ...}).
-  Args: :boot (this root's boot id); in :judge (outside agents' runs handed back).
+  Args: :boot (this root's boot id), :conn (the store the commits are read from); in :judge (outside agents' runs handed back).
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
@@ -1155,8 +1155,8 @@
    (case in
      ;; each commit's datoms move the index (observe); a commit the sliding buffer dropped
      ;; (main's t is not the next one) lists main again (index), k8s's relist after a gap
-     :main (let [db (:db m) t (:max-tx db)
-                 next? (and (:idx st) (= t (inc (:t st))))
+     :main (let [db (pdb/at-commit (:conn st) (:commit m)) t (:max-tx db)
+                 next? (and (:idx st) (= (:prev m) (:t st)))
                  idx (if next? (observe (:idx st) db (:ops m)) (index db))
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
@@ -1166,7 +1166,7 @@
                  only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))
                                                                (= :refused (get-in idx [:runs (second (get-in idx [:keys e])) :seon.run/status]))))
                                               (:ops m)))
-                 st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= t (inc (:t st -2))) inc)
+                 st (assoc st :db db :t t :idx idx :seen (inc (:seen st)) :lists (cond-> (:lists st 0) (not= (:prev m) (:t st -2)) inc)
                            :quiet (boolean (and (:quiet st) (not work?)))
                            :refused (if (and work? (not only-refused?)) #{} (:refused st #{})))
                  [st outs] (pass st)
