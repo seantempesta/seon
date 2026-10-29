@@ -74,7 +74,7 @@
   "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
   cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
-  budget: a whole-program load allocates tens of GB, measured 2026-10-30, and the agent's per-form
+  budget: a whole-program load allocates tens of GB, and the agent's per-form
   budget stopped it); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
   {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.eval/response]}
   [sys code]
@@ -85,7 +85,8 @@
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
     @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
                                            (repl/record-details @(:conn sys) code r {} nil)))
-    (dissoc r :value)))
+    ;; its value too: the :eval answer passes it on when it is plain data (op-answer :eval)
+    r))
 
 (defn- live-run
   "Task id's running run whose agent's process lives in root's view now, as [run nil], or [nil dead]
