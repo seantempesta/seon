@@ -763,6 +763,18 @@
     (is (str/includes? (:text git) ":exit 128") (str "git finds no repository: " (pr-str git)))
     (is (str/includes? (:text git) "not a git repository") (pr-str git))))
 
+(deftest an-oom-carries-its-heap
+  ;; docs/machine.md#how-to-read-an-out-of-memory-error: an agent past its heap bound (:seon.config.agent/heap-extra-bytes)
+  ;; gets OutOfMemoryError, and its error map keeps the heap by type (Jolt's :jolt/heap) as data
+  (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
+                              {:sets [":seon.config.agent/heap-extra-bytes=268435456"]})
+        heap (get-in oom [:ex :jolt/heap])]
+    (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str oom))
+    (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
+    (is (= (:live heap) (+ (:static heap) (:dynamic heap))) "the totals add up")
+    (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
+    (is (str/includes? (:text after) "3") "the agent lives")))
+
 (deftest each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
