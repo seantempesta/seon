@@ -276,10 +276,10 @@
                                  (included-tx (:seon.task/id t))))
         _ (agent/commit!)
         ;; what the run's earlier requests printed, reused by each record's id (seon.context/printed-run)
-        ;; its page is the live walk's (what changed since the frame before), never drawn cold, and the
+        ;; its parts are the live walk's (what changed since the frame before), never drawn cold, and the
         ;; request is made on the db the walk framed at: one commit for both
-        [db page] (repl/page-hiccup)
-        {:keys [block messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :pages {(d/commit-id db) page}})
+        [db parts] (repl/page-hiccup)
+        {:keys [block messages sent printed]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
         _ (swap! agent/state assoc :printed {run printed})
         context-ms (long (profile/ms-since t0))
         _ (when sent (agent/transact! [{:seon.model-call/id id :seon.model-call/sent sent}]))
@@ -397,12 +397,9 @@
         ;; the read's related units, decided as a model turn's are, before its request is drawn
         _ (when take? (when-let [tx (not-empty (included-tx task))] (agent/transact! tx) (agent/commit!)))
         basis (assoc (basis! task run n 1 :outside ob taken) :agent (:key @agent/state))
-        [db page] (repl/page-hiccup)
-        {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run])
-                                                                  :pages (assoc (get-in @agent/state [:pages run]) (d/commit-id db) page)})
+        [db parts] (repl/page-hiccup)
+        {:keys [messages printed sent]} (context/render db basis {:printed (get-in @agent/state [:printed run]) :parts parts})
         _ (when take? (swap! agent/state assoc-in [:printed run] printed))
-        ;; the page it drew, kept by every read (an observer's too, which records a turn): the next diff draws no page twice
-        _ (swap! agent/state assoc-in [:pages run] (:pages printed))
         text (str/join "\n\n" (map :content messages))]
     ;; the read is a turn of this run, as a model turn is: what it was built from and what it cost
     (agent/transact! [{:db/id "run" :seon.run/id run}

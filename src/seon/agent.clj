@@ -28,7 +28,6 @@
 ;; :branch-graph (the reach graph of the branch's db, keyed by that db value, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two values: branch-changes)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
-;; :pages (seon.turn/context-block: {run {commit page}}, the newest page it drew, which the next read's diff takes its earlier page from: seon.context/world)
 ;; :index (seon.turn/index!: the reconciler's index of :db, the db it was observed for, advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
 ;; :tx (the last transaction transact! applied, {:db-after :tx-data}: seon.ctx patches @ctx from it)

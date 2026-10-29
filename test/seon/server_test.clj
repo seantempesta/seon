@@ -270,10 +270,10 @@
   ;; pulling and they can do easy ops there on the atom rather than learning datalog". An agent
   ;; attached from outside reads its task in @ctx, changes the plan by swap! (no query, no my.*
   ;; function), and the change is on its branch, in its next @ctx, on its page, and told as its
-  ;; next read's diff (seon.context/world): the plan's path with its old and new value, each eval
-  ;; it made by its handle, which its own message shows
+  ;; next read as the part that moved (seon.context/request: the task's part, whole, the others as the
+  ;; read before sent them)
   (let [plan "Work: f0 returns its input."
-        [first-turn _ swapped page elsewhere on-branch told next-turn]
+        [first-turn _ swapped page elsewhere on-branch next-turn]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :context :agent agent}
                         "(def c0 (datahike.api/commit-id (seon.agent/db)))"
@@ -286,26 +286,14 @@
                         {:op :eval :agent "root"
                          :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
                                     " [:seon.task/id " (pr-str task) "]))")}
-                        ;; what the next read tells of the swap!, between the commit before it and now
-                        (str "(let [ms (seon.context/world (seon.agent/db) (:db/id @seon.ctx/ctx) " (str "agent." agent "/c0") " (datahike.api/commit-id (seon.agent/db))) t (:content (first ms))]"
-                             " {:path (clojure.string/includes? t \":seon.task/plan]\") :old (clojure.string/includes? t " (pr-str (pr-str "Work.")) ")"
-                             " :new (clojure.string/includes? t " (pr-str (pr-str plan)) ") :handle (clojure.string/includes? t \"result/e\")"
-                             " :record (clojure.string/includes? t \":seon.eval/record\") :agent-id (clojure.string/includes? t \":seon.agent/id\") :tokens (seon.context/messages-tokens [{:role \"user\" :content (subs t (clojure.string/index-of t \":ctx\"))}])})")
                         {:op :context :agent agent}]))]
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
     (is (clojure.string/includes? (:value page) plan) "the render of ctx draws it")
     (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
-    (is (= {:path true :old true :new true :handle true :record false :agent-id false} (dissoc (:value told) :tokens)) "the next turn tells it as a diff in ctx's shape: the plan's path, its old and its new value, each eval by its handle, never its record")
-    ;; the :ctx part of the message, which is what the diff owns: about 90 tokens (630 when an eval was
-    ;; told whole), four evals by their handles and the plan's old and new value. The page part beside
-    ;; it is the task's render redrawn with the new plan (a whole task's instructions among it)
-    (is (>= 100 (:tokens (:value told))) "a swap! is told in what it changed")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
-    (is (clojure.string/includes? (:context next-turn) "result/e") "and each eval it made by its handle")
-    (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")
-    (is (clojure.string/includes? (:context next-turn) (pr-str "Work.")) "the next read is what changed since the read before: the plan's old value, which a whole page no longer draws")))
+    (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")))
 
 (deftest an-outside-agents-process-test-goes-to-the-judge-and-a-red-says-why
   ;; THE PLAN 0.7's first run (root, 2026-10-27): a deftest an agent defined at its REPL that
@@ -334,17 +322,17 @@
   ;; contracted calls, two pages drawn a read (the one before's again, to diff against). Each read after
   ;; the first draws the one page it tells and costs what the read before did: ticks and bytes are the
   ;; process's exact counts (seon.profile/measure!); its page is the agent's live walk's (seon.repl/page-hiccup),
-  ;; so seon.context/page, the cold draw, is never called, and it equals the cold draw at the commit it framed at
+  ;; so seon.context/drawn-parts, the cold draw, is never called, and it equals the cold draw at the commit it framed at
   (let [[reads]
         (at/in-agent (fn [{:keys []}]
                        [(str "(let [t (:task @seon.agent/state) r (:run @seon.agent/state)"
                              " m (fn [] (let [v (volatile! nil)]"
                              "           (seon.profile/measure! #(count (seon.turn/context-block t r true)) (fn [d] (vreset! v d)))"
                              "           {:ticks (:ticks @v) :bytes (:bytes @v)"
-                             "            :pages (some (fn [f] (when (= 'seon.context/page (:var f)) (:calls f))) (seon.profile/touched))}))]"
+                             "            :pages (some (fn [f] (when (= 'seon.context/drawn-parts (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 5 m))"
                              "   :live=cold (let [[db page] (seon.repl/page-hiccup) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    cold (seon.context/page db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
+                             "                    cold (seon.context/drawn-parts db (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a))))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
     (is (= 5 (count (:reads (:value reads)))))

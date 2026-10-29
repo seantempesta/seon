@@ -1153,11 +1153,11 @@
         [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])
                         {:sets [":seon.config.ai/script=seon.fixtures/stages"]})
         {:keys [ended design implement boundary]} (:value r)
-        last-design (peek design) first-implement (first implement)]
+        last-design (pop (peek design)) first-implement (first implement)]
     (is (= :parked (get-in ended [(str (:ns @names) "/st-implement#1") :status])) (str "the implement parked; the stages' runs: " (pr-str ended)))
     (is (and (seq design) (seq implement) boundary) (pr-str r))
     (is (= (second (first design)) (second first-implement)) "the design's task data, in the same place")
-    (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix")
+    (is (= last-design (subvec first-implement 0 (min (count first-implement) (count last-design)))) "the design's last request is its exact prefix (its hashes aside: the implement's own replace them)")
     (is (some #(= [:message boundary] (vec (take 2 %))) (drop (count last-design) first-implement)) "then root's boundary")))
 
 (deftest a-waiting-run-parks-and-a-message-wakes-the-same-process
@@ -1194,6 +1194,26 @@
     (is (= (range (nth (second runs) 5)) (numbers (str w "#2"))) "the wake's, numbered from its own 0, none over the parked run's")
     (is (and pid1 (= pid1 pid2)) (str "one process for both runs: " pid1 " " pid2))))
 
+(deftest a-prose-reply-stays-in-the-history
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a reply of prose with no call
+  ;; is the agent winding down; seon.context/records read only evals and messages, so the wake that
+  ;; followed it sent a history without it. It is an assistant message of the next request
+  (let [q (fn [w] (str "[:find ?id ?st :where [?e :seon.run/task ?t] [?t :seon.task/id \"" w "\"] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/agent ?a]]"))
+        parked (fn [w n] (str "(seon.root/await-db sys \"the runs parked, or one ended\" #(let [rows (datahike.api/q '" (q w) " %)] (or (= " n " (count (filter (fn [[_ st]] (= :parked st)) rows))) (some (fn [[_ st]] (#{:held :done :closed :merged :dead} st)) rows))))"))
+        [_ r] (in-agent (fn [{:keys [ns]}]
+                          (let [w (str ns "/w")]
+                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
+                             {:op :eval :agent "root"
+                              :code (str "(do (my.root/run! sys [" (pr-str w) "]) " (parked w 1)
+                                         " (let [ag (some (fn [[id _ _ ag]] (when (= " (pr-str (str w "#1")) " id) ag))"
+                                         "           (datahike.api/q '[:find ?id ?st ?out ?ag :where [?e :seon.run/task ?t] [?t :seon.task/id " (pr-str w) "] [?e :seon.run/id ?id] [?e :seon.run/status ?st] [?e :seon.run/outcome ?out] [?e :seon.run/agent ?a] [?a :seon.agent/id ?ag]] @(:conn sys)))]"
+                                         "   @(seon.root/message! sys ag \"carry on\") " (parked w 2)
+                                         "   (let [db (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch " (pr-str w) ")}}))]"
+                                         "     {:prose (sort (keep (comp :prose :seon.eval/record) (map #(datahike.api/pull db '[:seon.eval/record] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/record]] db))))})))")}]))
+                        {:sets [":seon.config.ai/script=seon.fixtures/prose-reply"]
+                         :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
+    (is (= ["Saw my own reply."] (:prose (:value r))) (pr-str r))))
+
 (deftest a-run-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
   ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
@@ -1216,7 +1236,7 @@
                                    "   :read (mapv :content (mapcat second (seon.context/parts-of db (:seon.model-call/sent m))))})")])
                              {:sets [":seon.config.ai/provider=:none"]})]
     (is (= :error (:outcome (:value end))) (pr-str end))
-    (is (= [:section :page] (:sent (:value turn))) "the help page, then the page whole")
+    (is (= [:section :parts :hashes] (:sent (:value turn))) "the help page, then the page's parts whole, then their hashes")
     (is (= 2 (count (:read (:value turn)))) "read back from its records")
     (is (str/includes? (str (peek (:read (:value turn)))) "1 of 1") (str "the page's status: the turn of how many: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))

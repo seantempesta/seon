@@ -4,7 +4,7 @@
   of it and the records before it, which never change, so it is printed once and reused by its
   id). Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx]
             [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
 
 (defn- item
@@ -166,9 +166,9 @@
 
 (defn turns-of
   "The input at n: the db of a branch where agent b/p<n> took n turns on a task (its plan changing
-  each turn, one commit a turn: *conn*), and the refs a request sent, [:page a nil c1] then
-  [:page a c(i) c(i+1)], each page's c1 the next one's c0, as seon.context/request records them.
-  Every page is the same size (a plan and a run), so the cost is per page."
+  each turn, one commit a turn: *conn*), and the refs a request sent, [:parts a c whole? ids call], each
+  turn's parts as seon.context/request records them, drawn at that turn's commit. Every turn
+  sends the same parts (a plan and a run), so the cost is per ref."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:vector :any]]]}
   [n]
   (let [conn *conn* k (str "b/p" n) tid (str "demo/p" n)]
@@ -179,18 +179,18 @@
                          (do (d/transact conn [{:seon.task/id tid :seon.task/plan (str "Make p, step " i ".")}])
                              (d/commit-id @conn))))
           a (:db/id (d/entity @conn [:seon.agent/key k]))]
-      [@conn (vec (for [[c0 c1] (map vector (cons nil commits) commits)] [:page a c0 c1]))])))
+      (let [ids (vec (keys (seon.context/drawn-parts @conn (seon.ctx/build @conn a (:seon.agent/branch (d/entity @conn a))))))]
+        [@conn (vec (for [[i c] (map-indexed vector commits)] [:parts a c (zero? i) ids (str tid "#1/" i)]))]))))
 
 ;; See docs/render.md#the-branchs-views
-(deftest reading-a-request-back-draws-each-page-once
+(deftest reading-a-request-back-draws-each-turns-parts-once
   (binding [*conn* nil]
     (ts/test-branch!
       (fn [_ conn]
         (binding [*conn* conn]
           (cost/proof {:of 'seon.context/parts-of :input 'seon.context-cost-test/turns-of
-                       :n "page refs of the request (one turn's page each, page n's c1 the next one's c0)"
-                       :work (str "one page drawn a ref (the walk of the agent's record at that commit), the pages already drawn "
-                                  "taken from the {commit page} the refs before left, so no commit is drawn twice")
+                       :n "parts refs of the request (one turn's parts each, each drawn at its own commit)"
+                       :work "one page drawn a ref (the walk of the agent's record at that commit), every commit once"
                        :growth :linear
                        ;; measured 2026-10-28 (a plan and a run a page): 2.68 MB / 433 calls at 1, 9.51 MB / 881 at 2,
                        ;; 23.2 MB / 1,777 at 4, 50.7 MB / 3,569 at 8; before the pages map (every page drawn twice):
@@ -199,3 +199,42 @@
                        :fixed {:bytes 500000 :calls 50}
                        :sizes [1 2 4 8]}))))))
 
+
+(defn request-of
+  "The input at n: seon.context/request's arguments for the turn after n earlier evals, each printed by the
+  turn that follows it (the run's print kept, :printed), the page's parts the walk's (two, one moved since the
+  request before), the previous request's refs recorded on its model call."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [[db a] (session-of n)
+        basis (fn [t] {:commit (d/commit-id db) :task "demo/f" :run "demo/f#1" :turn t :max-turns 9 :origin :model
+                       :observed {:results {} :test-run-errors [] :reds [] :reasons []} :agent "b/a1"})
+        turn (fn [t] [{:db/id (str "t" t) :seon.turn/id (str "demo/f#1/" t) :seon.turn/run {:seon.run/id "demo/f#1"} :seon.turn/agent {:seon.agent/key "b/a1"}
+                       :seon.turn/n t :seon.turn/origin :model}
+                      {:seon.model-call/id (str "demo/f#1/" t) :seon.model-call/turn (str "t" t) :seon.model-call/basis (basis t)}])
+        sent (fn [t r] [{:seon.model-call/id (str "demo/f#1/" t) :seon.model-call/sent (:sent r)}])
+        opts (fn [db t parts printed] {:db db :basis (basis t) :help "help" :help-ref [:section 1 1] :parts parts :printed printed})
+        e {:db/id a}
+        part (fn [k text] [:section {:id k} text])
+        parts (fn [t] {"task-1" (part "task-1" "Make f.") "status-1" (part "status-1" (str t " of 9"))})
+        db1 (d/db-with db (turn 0))
+        r0 (seon.context/request e (opts db1 0 (parts 1) nil))
+        db2 (d/db-with db1 (concat (sent 0 r0) (turn 1)))
+        r1 (seon.context/request e (opts db2 1 (parts 2) (:printed r0)))
+        db3 (d/db-with db2 (concat (sent 1 r1)
+                                   [{:seon.eval/id "e-last" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "b/a1"}
+                                     :seon.eval/record {:code "(f)" :call-id "c-last" :call 0 :prose "Last." :response {:handle 'result/e-last :value 1}}}]
+                                   (turn 2)))]
+    [e (opts db3 2 (parts 3) (:printed r1))]))
+
+(deftest a-turns-request-costs-its-parts-flat-in-the-session
+  ;; task seon.context/the-context-is-the-agents-evals-and-seons (R1): a request is the previous one and
+  ;; what was added, so with the run's print it prints the parts that moved and the new record, whatever
+  ;; the session held before (the replacement of the cold page draws of seon.context/world, 35M ticks a page)
+  (cost/proof {:of 'seon.context/request :input 'seon.context-cost-test/request-of
+               :n "evals of the session before the turn"
+               :work "the previous call and its refs read once, the parts that moved printed in one message, the new record printed; nothing earlier is printed or drawn again"
+               :growth :constant
+               :fixed {:calls 9}
+               ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
+               :sizes [10 100 1000]}))
