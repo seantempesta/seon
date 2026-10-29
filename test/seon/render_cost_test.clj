@@ -243,7 +243,7 @@
      ;; 580 on jolt/ref-depth (seon.render.ui/sent-request shows every message the request sent as a card, nothing
      ;; hidden: each card's elements and attributes serialized by seon.web.html, 152 raw?, 136 attr-name, 84 escape
      ;; calls in the pass; the bytes did not grow: 1.21 MB)
-     :fixed {:calls 580 :bytes 1210000}
+     :fixed {:calls 500 :bytes 1210000}
      ;; the full run measures 4,000 too (:seon.config.proofs/cost-max-n)
      :sizes [100 300 1000 4000]}))
 

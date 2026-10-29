@@ -8,20 +8,20 @@
  ;; prints. The agent's process state: a Datahike db, the reach graph and host handles are shown by
  ;; name and size, each with the form that reads it (seon.agent/state-summary)
  :seon.agent/state [:map {:seon.render/summary seon.agent/state-summary}]
- ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
- ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
- ;; what an agent's work is likely to need beyond what its plan cites (seon.context/related-view), a part of its
- ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
  ;; the task an agent works (seon.context/task-data, with its proofs' sources and verdicts), a part of its page:
  ;; the page draws it (task-html), the model is sent the value
  :seon.context/task [:map {:seon.render/html seon.render.ui/task-html :seon.render/model seon.render.ui/task-model}]
- ;; a var the plan cites (seon.render.ui/cited-of: its source, tests and callers), a part of the page
+ ;; a thing the plan cites, at its citation's depth (seon.render.ui/cited; a var with its tests and callers), a part of the page
  :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html :seon.render/model seon.render.ui/cited-model}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
+ ;; what an agent's work is likely to need beyond what its plan cites (seon.context/related-view), a part of its
+ ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
  :seon.context/related [:map {:seon.render/html seon.render.ui/related-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests
  :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
+ ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
+ ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)
  :seon.context/status [:map {:seon.render/html seon.render.ui/status-html :seon.render/model seon.context/status-model}]
  ;; a prove's run (my.agent/prove): its verdict, each proof's status, the reds with their first
  ;; failing assertion and the deaths, and counts (my.agent/prove-summary); the lists are the value
@@ -85,7 +85,8 @@
                             [:split {:optional true} [:map [:system nat-int?] [:conversation nat-int?] [:page nat-int?]]]
                             [:whole {:optional true} [:vector [:tuple :any [:vector :seon.model/message]]]]
                             [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
-                            [:seon.model-call/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]]
+                            [:seon.model-call/cache-miss-tokens {:optional true} :int] [:seon.turn/error {:optional true} :map]
+                            [:added-refs {:optional true} [:set :any]] [:open? {:optional true} :boolean]]
  ;; an agent's page, the one layout the model and the person read: its ctx as components (seon.render.ui/render-ctx, drawn by the walk), which a branch may override
  :seon.render/render-ctx [:map {:seon.render/html seon.render.ui/render-ctx}]
  ;; root's page: its ctx as components (seon.render.ui/root-ctx, drawn by root's walk), which a branch may override

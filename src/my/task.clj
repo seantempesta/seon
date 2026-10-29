@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -31,10 +31,12 @@
   (let [tx (task/member-tx (current) member f (vec args))]
     (if (contract/error? tx)
       tx
-      (do (agent/transact! tx)
-          ;; its plan or instructions rewritten: what they cite is derived again from the text, as at creation
-          (when (#{:seon.task/plan :seon.task/instructions} member)
-            (let [rx (task/rederive-tx (agent/db) (current))] (when (seq rx) (agent/transact! rx))))
+      (do ;; its plan or instructions rewritten: what they cite is derived again from the new text, as at
+          ;; creation, in the same transaction, so no db holds the new text with the old citations
+          (agent/transact! (if (#{:seon.task/plan :seon.task/instructions} member)
+                             (let [db' (d/db-with (agent/db) tx)]
+                               (into (vec tx) (task/rederive-tx db' (task/task db' (turn/current-task)))))
+                             tx))
           (get (current) member)))))
 
 (defn fail!

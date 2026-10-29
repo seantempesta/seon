@@ -5,7 +5,7 @@
   id). Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx]
-            [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
+            [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.program-cost-test :as pc]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -149,6 +149,23 @@
   without its write set, as the task part draws it."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :boolean]]}
   [n] (let [[db _] (related-of-changed n)] [db (seon.task/task db "demo/r") false]))
+
+(defn namespace-of
+  "seon.context/namespace-data's arguments at n definitions: a branch whose namespace app.pc defines
+  n functions (seon.program-cost-test/branch-of), and that namespace."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
+  [n] [(first (pc/branch-of n)) 'app.pc])
+
+(deftest the-namespaces-part-costs-the-names-it-shows
+  ;; what the namespaces part draws of one namespace (docs/render.md#a-part-answers-data): its
+  ;; definitions' datoms, a name each, never their forms read again (agents work in namespaces of hundreds)
+  (cost/proof {:of 'seon.context/namespace-data :input 'seon.context-cost-test/namespace-of
+               :n "definitions in the namespace"
+               :work "the namespace's entity, its ns form's source for its aliases, then one query over its definitions' var datoms (name, kind, form, order) and one over its deftests: a name per definition, linear in them, no form read"
+               :growth :linear
+               :per-n {:bytes 2000}
+               :fixed {:calls 3 :bytes 200000}
+               :sizes [10 100 1000]}))
 
 (deftest task-data-costs-what-the-plan-names
   ;; the task's data (task-data over the task as of t), as the task's component draws it when a

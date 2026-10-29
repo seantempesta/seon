@@ -459,11 +459,20 @@
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
       ;; values against (md-scan #7: its new list blocks met the old :seon.ref/block in seon.ref/sections and
       ;; ended the loop); a turn answers its end, or [::next st] to go on
-      (let [step (try (repl/with-branch-schemas
+      (let [step (repl/with-branch-schemas
                   (fn []
-              (let [obs (observe task)
-                    ;; how the work stands, from the walk the request is drawn from (one computation a turn)
-                    s (status-now)
+              ;; the draw is the one place Seon's code calls the agent's program (its walk, its status): a throw
+              ;; there is the agent's to read, as data, and the loop goes on (turn-error!); root's interrupt is a
+              ;; stop, not the agent's error. act! and end! are outside it: their throws are Seon's
+              (let [drawn (try [(observe task) (status-now)]
+                               (catch Throwable e (if (:interrupted (ex-data e)) (throw e) [::undrawn (agent/error-map e 'seon.turn/work!)])))]
+                (if (= ::undrawn (first drawn))
+                  ;; the second in a row, with no model turn between, ends its work with that error
+                  (let [st' (update (turn-error! st (second drawn)) :turn inc)]
+                    (if (< 1 (:threw st'))
+                      (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
+                      [::next st']))
+              (let [[obs s] drawn
                     reasons (:reasons s)
                     stop (get-in @agent/state [:turn :stop])
                     hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
@@ -485,17 +494,5 @@
                   (>= (:turn st) max-turns) (end! st :cap (r/explain-text reasons) nil)
                   stop (end! st (:outcome stop) (:reason stop) nil)
                   :else (let [st' (act! st obs s model)]
-                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))
-                      ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!); the
-                      ;; second in a row, with no model turn between, ends its work with that error
-                      ;; root's interrupt is a stop, not the agent's error: it ends the work as it did before this boundary
-                      (catch Throwable e (if (:interrupted (ex-data e)) (throw e) [::undrawn (agent/error-map e 'seon.turn/work!)])))
-            ;; a turn that threw is given to the agent (turn-error!) and counted; the second in a row, with no
-            ;; model turn between, ends its work with that error
-            step (if (and (vector? step) (= ::undrawn (first step)))
-                   (let [st' (update (turn-error! st (second step)) :turn inc)]
-                     (if (< 1 (:threw st'))
-                       (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                       [::next st']))
-                   step)]
+                          (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))))))))]
         (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))

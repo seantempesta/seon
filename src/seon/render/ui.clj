@@ -710,7 +710,7 @@
       prev (assoc :same {:turn (dec n) :parts (- (count refs) (count added))})
       ;; the whole request, always (owner, 2026-10-29: "I don't want anything hidden"): a finished turn's
       ;; row is drawn once and cached
-      true (assoc :whole whole :added-refs (set added)))))
+      true (assoc :whole whole :added-refs (set added) :open? open?))))
 
 (defn more
   "The list's end, the unit's element (opts :unit): how many older rows there are, unrendered; it
@@ -847,28 +847,28 @@
         (seq others) (assoc :callers (vec (distinct (map :var/name others))))))))
 
 (defn cited
-  "One thing the task's plan cites (a component over ctx and the db), named by its key
-  (seon.context/cite-key): a function, a wiki section, a schema key, a namespace, a file or a task, at
+  "One thing the task's plan cites (a component over ctx and the db), its citation cite as the layout
+  read the task's citations once a draw (seon.context/citations): a function, a wiki section, a schema key, a namespace, a file or a task, at
   the depth its citation's delimiter asks (docs/references.md#the-delimiter-picks-the-depth), as the
   reference system shows it (seon.docs/cited); a function at :doc or :code with its direct tests and
   callers (`cited-of`). A part: the page draws it by cited-html, the model is sent the value
   (docs/render.md#a-part-answers-data)."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :string] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _ k]
-  (when-let [cite (some #(when (= k (context/cite-key %)) %) (some->> (:task c) :seon.task/id (task/task db) (context/citations db)))]
-    (when-let [[kind view] (docs/cited db cite)]
-      (let [depth (:seon.ref/depth cite)
-            fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
-        (with-meta (merge {:cites k :kind kind :depth depth} view fn-extra) {:seon.render/schema :seon.context/cited})))))
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int :seon.ref/citation] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} _ cite]
+  (when-let [[kind view] (docs/cited db cite)]
+    (let [depth (:seon.ref/depth cite)
+          fn-extra (when (and (= :var kind) (not= :summary depth)) (dissoc (cited-of db c (:seon.ref/name cite)) :source))]
+      (with-meta (merge {:cites (context/cite-key cite) :kind kind :depth depth} view fn-extra)
+        {:seon.render/schema :seon.context/cited ::cite cite}))))
 
 (defn- cited-call
   "The one printer's call for a cited part's value v (shown without the part's schema mark, or html would draw
   it by its render again), its cuts reading the rest through the form that makes the part whole again
   (`cited`, the same ctx and db the page was drawn from). See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
-  [{:keys [cites]} shown]
+  [v shown]
   [#'render/html {:budget (config/value :seon.config.render/value-budget)
-                  :handle (list 'seon.render.ui/cited {:seon.ctx/ctx '(deref seon.ctx/ctx) :seon.db/db '(seon.agent/db)} 0 cites)}
+                  :handle (list 'seon.render.ui/cited {:seon.ctx/ctx '(deref seon.ctx/ctx) :seon.db/db '(seon.agent/db)} 0 (::cite (meta v)))}
    (with-meta shown nil)])
 
 (defn cited-html
@@ -1310,7 +1310,7 @@
       (when task (list [#'task-data {} aid]
                        ;; each var the plan cites beside its proofs (the proofs are the task's data)
                        ;; each thing its plan cites, a part each, at the depth its citation asks
-                       (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {} aid (context/cite-key cite)])
+                       (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {} aid cite])
                        ;; where the code lives: each namespace the work touches, its aliases, definitions and tests
                        [#'namespaces {} aid]
                        [#'related {} aid]
@@ -1637,12 +1637,14 @@
   I don't want anything hidden\"): its turn and the provider's numbers (its tokens, the prompt tokens it
   served from cache), then every message it sent in order, each a card with its role, the record that
   made it and its tokens (the one sizer's estimate): what it sends as the turn before it did, grouped
-  under one line that opens to it, then what this turn added, whole; and the cache point, where the
+  under one line that opens to it (its cards drawn only while it is open: opening it posts /open and the
+  unit comes back with them, so a turn draws what it added, never the run's whole history again), then
+  what this turn added, whole; and the cache point, where the
   provider's cached prefix ends, placed by its cache-hit count over the messages' estimates (an
-  estimate, said so). input {:turn :run :view :refs :whole :added-refs :same :split}, the turn's origin,
+  estimate, said so). input {:turn :run :view :refs :whole :added-refs :same :split :open?}, the turn's origin,
   usage or error. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:keys [turn run refs whole added-refs same split] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
+  [opts {:keys [turn run view refs whole added-refs same split open?] :seon.turn/keys [origin error] :seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]}]
   (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
         unit (:unit opts)
         ms (request-messages whole (or added-refs #{}))
@@ -1685,11 +1687,12 @@
      (when error [:div {:class "rounded border border-error p-2"} (render/html {} error)])
      ;; what it sends as the turn before it did: one line that opens to it, its cache point inside
      (when (pos? n-shared)
-       [:details
+       [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "&open=' + el.open)")}
+                   open? (assoc :open true))
         [:summary {:class "cursor-pointer text-text-400"}
          (str "same as turn " (inc (:turn same)) " · " n-shared " messages · " (print/tokens-text (reduce + 0 (map #(nth % 2) shared)))
               (when (and cached (<= cached n-shared)) " · from cache up to the line inside"))]
-        (into [:div {:class "flex flex-col gap-1 pt-1"}] (mapcat card (range) shared))])
+        (when open? (into [:div {:class "flex flex-col gap-1 pt-1"}] (mapcat card (range) shared)))])
      [:div {:class "text-2xs uppercase text-text-500"} (if (pos? n-shared) "new this turn" "what this turn sent")]
      (into [:div {:class "flex flex-col gap-1"}]
            (mapcat card (map #(+ % n-shared) (range)) (drop n-shared ms)))]))
