@@ -1063,7 +1063,8 @@
         _ (flow/pause-proc (:graph sys) a)
         ;; the proc's control channel is FIFO: this ping is taken after the pause
         paused-health (ping sys a)
-        p1 (c/submit! sys a "(def x 1) x")
+        ;; one form (a do): several top-level forms answer each one's value (DECISIONS 2026-10-29)
+        p1 (c/submit! sys a "(do (def x 1) x)")
         p2 (c/submit! sys a "(inc x)")
         ;; the measurement: no answer within the window while paused
         held (deref p1 (seon.config/value :seon.config.check/hold-ms) :held)
