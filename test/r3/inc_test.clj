@@ -7,8 +7,9 @@
 (defn- rand-step
   "One random write a root or observer makes on main (tx-data), drawn with rng."
   [db ^java.util.Random rng k]
-  (let [ts (vec (sort (keys (task/tasks db))))
-        as (vec (sort-by :seon.run/id (vals (task/runs db))))
+  (let [;; the ids alone, from their indexes: the step draws one task and one run, never a read of every one of them
+        ts (vec (sort (map :v (d/datoms db :aevt :seon.task/id))))
+        as (vec (sort (for [dt (d/datoms db :aevt :seon.run/status)] (:v (first (d/datoms db :eavt (:e dt) :seon.run/id))))))
         pick (fn [v] (when (seq v) (nth v (.nextInt rng (count v)))))
         t (pick ts) a (pick as)
         env (fn [id] (r/desired-env (task/task db id)))
@@ -16,7 +17,7 @@
     (case (.nextInt rng 9)
       0 (when t (task/execution-tx [t] (pick [:running :held :cancelled :running])))
       1 (when t (let [aid (str t "#x" k)] (task/run-start-tx aid t (pick ["r3-boot" "old-boot"]) :ax (env t) 0 "p")))
-      2 (when a [{:seon.run/id (:seon.run/id a) :seon.run/status (pick [:ended :dead :done :merged :closed :running])
+      2 (when a [{:seon.run/id a :seon.run/status (pick [:ended :dead :done :merged :closed :running])
                   :seon.run/merged-t (+ 900 (.nextInt rng 300)) :seon.run/basis-t (+ 900 (.nextInt rng 300))
                   :seon.run/results [{:seon.proof/test (symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))
                                           :seon.proof/status (pick [:pass :fail :pass])}]}])
