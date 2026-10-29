@@ -21,6 +21,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.contract/arm!`: arming a contract is Malli's instrument model, the Var's root replaced once by its checked wrapper at definition.
 - `seon.system/step-fn`: `resources/seon/system.edn` names each proc's step-fn Var; the declaration is the set of these resolves.
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
+- `seon.render/model-of`: a schema's declared model render (`:seon.render/model`) is a symbol in data, resolved when a request sends the part, as `render-of` is for its html render ([a part answers data](render.md#a-part-answers-data)).
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
 - `seon.render/summarized`: a schema's `:seon.render/summary` is a symbol in data, resolved when the value is printed, as `render-of` is for a render.

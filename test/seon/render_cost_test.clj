@@ -4,7 +4,7 @@
   serialized in one pass, linear in its nodes (owner, 2026-10-23: renders as functions and results;
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
             [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
@@ -330,7 +330,7 @@
      :sizes [100 300 1000 4000]}))
 
 (def ^:dynamic *conn*
-  "The branch's connection branch-views' proof writes its base, main and branch on (bound by its deftest)."
+  "The branch's connection the status's proof writes its base, main and branch on (bound by its deftest)."
   nil)
 
 (defn- defn-facts
@@ -343,10 +343,11 @@
      {:db/id (str v) :var/name v :var/ns (str "ns " n) :var/form (str "form " v) :var/kind :fn}]))
 
 (defn branch-of
-  "The input at n: a branch's views' arguments, [opts base main]: a base holding one function, main one
-  function later, and the branch (the base's db) with n functions of its own, each without a contract
-  (so gaps and divergence have n rows each)."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
+  "The input at n: the status part's arguments, [opts aid]: a base holding one function, main one
+  function later, and the branch (the base's db, with the agent whose base commit it is) with n functions
+  of its own, each without a contract (so gaps and divergence have n rows each); the task merges itself,
+  so main's commit is read too."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :int]]}
   [n]
   (let [conn *conn* ns (str "bn" n)
         _ (d/transact conn (defn-facts (symbol ns "f") "(defn f [x] x)"))
@@ -354,19 +355,20 @@
         _ (d/transact conn (defn-facts (symbol ns "k") "(defn k [] 2)"))
         main (d/commit-id @conn)
         ours (reduce (fn [db i] (d/db-with db (defn-facts (symbol ns (str "h" i)) (str "(defn h" i " [] " i ")"))))
-                     (d/commit-as-db conn base) (range n))]
-    [{:seon.db/db ours} base main]))
+                     (d/db-with (d/commit-as-db conn base) [{:seon.agent/key "b/a1" :seon.agent/base-commit base}])
+                     (range n))]
+    [{:seon.db/db ours :seon.ctx/ctx {:task {:seon.task/kind :whole} :seon.agent/main-commit main}} (seon.db/eid ours :seon.agent/key "b/a1")]))
 
-;; See docs/render.md#the-branchs-views
-(deftest the-branchs-views-read-its-diff-once
+;; See docs/render.md#a-part-answers-data
+(deftest the-status-reads-the-branchs-diff-once
   (ts/test-branch!
     (fn [_ conn]
       (binding [*conn* conn]
-        (cost/proof {:of 'seon.render.ui/branch-views :input 'seon.render-cost-test/branch-of
+        (cost/proof {:of 'seon.render.ui/status :input 'seon.render-cost-test/branch-of
                      :n "functions the branch defined without a contract (a base and main one function apart)"
                      :work (str "the datoms that differ between the base and the branch read once (seon.merge/content-datoms), "
                                 "then the changes, the problems it caused, the gaps, what it carries and the merge section's "
-                                "three-way from them; main's own diff once")
+                                "three-way from them; main's own diff once; the verdicts one scan of the status datoms")
                      :growth :linear
                      ;; measured 2026-10-28: 28.1 MB / 175 calls at 1, 37.4 MB / 742 at 10, 57.9 MB / 2,002 at 30
                      ;; (9.7M, 12.9M, 19.9M ticks); before, the four views each reading the diff: 61.5 MB / 220 calls

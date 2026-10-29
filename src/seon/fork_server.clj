@@ -94,7 +94,7 @@
        :ping-map-fn (fn [st] {:t (:max-tx (:db st)) :mismatch (:mismatch st)})})
   ;; :graph, main's reach graph (seon.program/reach-graph), brought to :db at a fork or a standby after a program commit (graph-at-fork), handed
   ;; to every agent forked (seon.agent/base-graph); a standby inherits it. :index, main's reconciler index and the commit it is of,
-  ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.turn's index! starts from it)
+  ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
   ([{:keys [db cfg store conn graph index kq]}]
