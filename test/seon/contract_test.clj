@@ -6,7 +6,7 @@
   reported as the schema's fault, never taken for the function's error."
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [malli.core :as m]
-            [seon.contract :as contract :refer [defn defn-]] [seon.cost :as cost]))
+            [seon.contract :as contract :refer [defn defn-]] [seon.cost :as cost] [seon.config] [seon.print]))
 
 (defn- armed-inc
   "One int in, one out: the shape of the unit table's :fn/armed-call row."
@@ -112,3 +112,13 @@
         msg (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-message e)))]
     (is (clojure.string/includes? (str msg) "at [:blocks 0 :text-from]") msg)
     (is (clojure.string/includes? (str msg) "in {:kind :para}") (str "a missing key: the map without it: " msg))))
+
+;; See docs/cost.md#counting-calls
+(deftest a-test-process-arms-what-root-arms-at-boot
+  ;; a cost proof counts contracted calls on armed vars, so the same code counts the same in bin/test
+  ;; and in an agent's test child only if both armed seon.config, seon.edn and seon.print as root's
+  ;; boot does: seon.docs/citing-sections read 1 call under bin/test and 4 in the agent (the config read it makes)
+  (is (contract/armed? #'seon.config/value) "seon.config/value is counted, as in root")
+  (is (contract/armed? #'seon.print/print-value) "seon.print/print-value is counted, as in root")
+  (is (every? contract/armed? (for [n contract/boot-nss v (vals (ns-interns (the-ns n))) :when (contract/contract v)] v))
+      "every contracted var of the boot namespaces is armed"))

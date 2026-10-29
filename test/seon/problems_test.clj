@@ -447,7 +447,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 63) "the contracted calls of one health read (59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
+    (is (<= (:calls m) 64) "the contracted calls of one health read (64 with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -821,7 +821,7 @@
                :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
                :growth :linear
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 2}
+               :fixed {:ns 50000 :bytes 50000 :calls 5}
                :sizes [10 100 1000]}))
 
 (deftest stale-pins-follow-the-pin-page
@@ -1286,7 +1286,7 @@
                ;; measured 2026-10-27: 130k ticks / 406 KB / 22 calls at 10, 3.87M / 11.9 MB / 602 at 300;
                ;; 2026-10-29, the form's head read by seon.source/first-head (one contracted call per var): 32 calls at 10
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
-               :fixed {:ticks 10000 :bytes 30000 :calls 2}
+               :fixed {:ticks 10000 :bytes 30000 :calls 5}
                :sizes [10 100 1000]}))
 
 

@@ -866,7 +866,7 @@
   (let [page [:section [:h2 "agents"] [:ol [:li "a1 busy"]]]
         html (h/html (r/html {} {:screen {:seon.render/html page} :n 1}))]
     (is (str/includes? html "<section><h2>agents</h2><ol><li>a1 busy</li></ol></section>") html)
-    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render #'r/nested-html}))
+    (is (str/includes? (:text (seon.print/print-value {:screen {:seon.render/html page} :n 1} {:render @#'r/nested-html}))
                        "[:section [:h2 \"agents\"]")
         "a value's text names its hiccup as the data it is")))
 

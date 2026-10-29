@@ -99,7 +99,7 @@
          ;; became chars-tokens over a text's length, its rule shared with seon.context/messages-tokens:
          ;; one call more; 80 with seon.print.select/lifted-namespace, the one decision of a map's
          ;; #:ns{ lift, made once per map over its keys with no call per key)
-         :fixed (dissoc (armed fixed 80 170) :ns)
+         :fixed (dissoc (armed fixed 86 170) :ns)
          :sizes [100 300 1000 10000]})
       (finally (when-not armed? (require 'seon.print.emit 'seon.print.select 'seon.print :reload))))))
 

@@ -158,7 +158,7 @@
                     :n "verdicts already in the cache"
                     :work "the one verdict written, and the size file read and rewritten; no verdict already there is looked at"
                     :growth :constant
-                    :fixed {:calls 15 :bytes 60000}
+                    :fixed {:calls 16 :bytes 60000}
                     :sizes [10 100 1000]})
        (finally (clean-costs!))))
 

@@ -134,7 +134,7 @@
                ;; measured 2026-10-28 with the postings (ten texts of each kind holding the word): 2.70 MB / 204 calls at 100, 2.75 MB / 204 at 300,
                ;; 2.88 MB / 204 at 1,000; before them, a tenth holding it: 3.78 MB at 100, 19.17 MB at 1,000, 67.68 MB / 7,714 calls at 4,000
                :per-n {:bytes 800 :calls 0}
-               :fixed {:bytes 2700000 :calls 175}
+               :fixed {:bytes 2700000 :calls 204}
                :sizes [100 300 1000 4000]}))
 
 (defn citing-input
@@ -157,6 +157,6 @@
      :growth :linear
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000
      :per-n {:ticks 4000 :bytes 19000 :calls 0}
-     :fixed {:ticks 20000 :bytes 300000 :calls 1}
+     :fixed {:ticks 20000 :bytes 300000 :calls 4}
      :sizes [100 300 1000]}))
 

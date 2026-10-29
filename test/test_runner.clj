@@ -284,6 +284,8 @@
   (let [{:keys [tests digests tree mg]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
+    ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
+    (contract/instrument! contract/boot-nss)
     (let [;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           reports (volatile! [])
           ran (proofs/run-tests! tests digests

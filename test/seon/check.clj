@@ -284,7 +284,7 @@
   []
   (run-check "CONTRACTS" nil
    (fn [_]
-    (let [boot (contract/instrument! '[seon.edn seon.config seon.contract seon.profile seon.print seon.print.select seon.print.emit])
+    (let [boot (contract/instrument! contract/boot-nss)
         nss (platform-nss)
         vs (for [n nss v (vals (ns-interns n)) :when (contract/contract v)] v)
         at-def (filter #(= :definition (:seon.contract/checked-at (meta %))) vs)
