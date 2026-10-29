@@ -69,16 +69,15 @@
 (defn failures
   "The failing assertions of the test run, per test: {test [{:type :message :expected :actual}]}, with the
   value the test got (:got) and a typed error's :seon.error/type, so a red reused at its digest reads as its run did;
-  the first :seon.config.proofs/max-assertions of each (expected and actual as the test child printed them)."
+  every one of each (expected and actual as the test child printed them)."
   {:malli/schema [:=> [:cat [:map [:reports [:sequential :seon.test/report]]]] :seon.run/failures]}
   [test-run]
-  (let [kept (cfg/value :seon.config.proofs/max-assertions)]
-   (reduce (fn [acc {:keys [type var] :as r}]
+  (reduce (fn [acc {:keys [type var] :as r}]
             (let [t (test-symbol var)]
-              (if (and t (#{:fail :error} type) (< (count (get acc t)) kept))
+              (if (and t (#{:fail :error} type))
                 (update acc t (fnil conj []) (select-keys r [:type :message :expected :actual :got :flaky :seon.error/type]))
                 acc)))
-          {} (:reports test-run))))
+          {} (:reports test-run)))
 
 (defn costs
   "The cost proofs' reports of the test run, per test ({:rows :verdict}, kept as data)."
@@ -154,7 +153,7 @@
   [dg red]
   (-> red
       (assoc :flaky true :digest dg)
-      ;; first, so no cut of a test's failures (:seon.config.proofs/max-assertions) leaves it out
+      ;; first, so it leads the test's failures
       (update :failures #(into [{:type :fail :flaky true :message (str "flaky: green and red at digest " dg " (seon.proofs/flaky)")}]
                                (remove :flaky) %))))
 
@@ -248,8 +247,8 @@
   "Test run r as its asker is answered (docs/merging.md#verdicts-are-a-cache): its counts, :deferred
   and :key as they are, and of its :reports only what the done rule reads: one :pass report for each
   of proofs that passed, every report of a died test, and the failing reports of the first
-  :seon.config.proofs/answer-reds red tests (those among proofs first), each test's first
-  :seon.config.proofs/max-assertions. The rest is counted (:reds-left, the red tests left out) and
+  :seon.config.proofs/answer-reds red tests (those among proofs first), every failing assertion of
+  each. The rest is counted (:reds-left, the red tests left out) and
   is in the verdict cache under the run's digests (an agent reads one whole by
   seon.agent/stored-results). So the answer costs its reds, never the tests run (an agent's whole run
   was about 3 MB in one frame): docs/merging.md#verdicts-are-a-cache. results, failures, costs and
@@ -262,10 +261,9 @@
         reds (vec (sort-by (juxt (comp not proofs) str) (keep (fn [[t s]] (when (not= :pass s) t)) st)))
         bound (cfg/value :seon.config.proofs/answer-reds)
         kept (set (take bound reds))
-        per (cfg/value :seon.config.proofs/max-assertions)
         failing (reduce (fn [acc {:keys [type var] :as rep}]
                           (let [t (test-symbol var)]
-                            (if (and (kept t) (#{:fail :error} type) (< (count (get acc t)) per))
+                            (if (and (kept t) (#{:fail :error} type))
                               (update acc t (fnil conj []) rep)
                               acc)))
                         {} reports)]

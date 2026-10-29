@@ -9,7 +9,6 @@
  :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the store is removed before it is opened and starts again from the run's tree."}]
  :seon.config.proofs/stall-factor [:int {:min 1 :seon.config/unit "times a test's last run" :description "How long, as a multiple of its own last recorded ms, a test bin/test runs may be quiet before it is named STALLED (never ended); :seon.config.agent/stall-ms is its floor and the bound of a test with no record."}]
  :seon.config.proofs/jobs [:int {:min 1 :seon.config/unit "processes" :description "Shards a worktree session's or root's proof run (bin/prove, bin/test) runs its selected tests in at once."}]
- :seon.config.proofs/max-assertions [:int {:min 1 :seon.config/unit "assertions" :description "Failing assertions a red test keeps in its run's facts, the first ones (seon.proofs/failures)."}]
  :seon.config.proofs/case-sizes [:int {:min 1 :seon.config/unit "test.check sizes" :description "How many sizes a generated cost proof's cases cycle through (seon.cost/cases): case i is drawn at (mod i this)."}]
  :seon.config.proofs/seed-salt [:int {:seon.config/unit "a salt (integer)" :description "Salt of every generative check's seed (seon.proofs/seed); 0 normally, changed to re-roll every seed once."}]
  :seon.config.proofs/seeds [:int {:min 1 :seon.config/unit "seeds (a count)" :description "How many seeds a randomized property test draws in this run (its test-seed and the next ones); the full run draws 5."}]
