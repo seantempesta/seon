@@ -1329,9 +1329,11 @@
   form's neighbours recomputed only where its edges can have changed (an added form; a form
   referring to, naming in a test's namespace (:quoted), or defining the methods, extensions or
   contract of, a var a changed form defines), and the components of the changed forms and of every form reaching them re-folded
-  (components over those alone, the rest kept). :affected, how many forms were re-folded."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :string] [:sequential :map]] :map]}
-  [g db removed added]
+  (components over those alone, the rest kept). touched, forms whose edges changed with no form of theirs (a schema entry
+  added or removed that they name: schema-moves). :affected, how many forms were re-folded. A held index
+  (reach-indexed) keeps the answers of the tests these changes cannot move, and names the others :stale."
+  {:malli/schema [:=> [:cat :map :seon.host/db [:sequential :string] [:sequential :map] [:set :string]] :map]}
+  [g db removed added touched]
   (let [data-refs (:data-refs g)
         old (:rows g)
         bulk? (empty? old)
@@ -1345,9 +1347,9 @@
         step (fn [m k ids] (update m k #(into (into [] (remove drop-ids) %) ids)))
         by (fn [m kind] (reduce (fn [m f] (reduce #(step %1 %2 [(:id f)]) m (defined f kind)))
                                 (reduce (fn [m f] (reduce #(step %1 %2 []) m (defined f kind))) m gone) added))
-        ;; a form reading a key it computes reads the config keys schema entries name
-        added (for [f added] (cond-> f (computed-config-reader? f)
-                                   (update :config into (:schema-config g))))
+        ;; a form reading a key it computes reads the config keys schema entries name (:schema-config,
+        ;; taken at the fold, so a schema entry added or removed moves them by the fold alone)
+        computed (into (apply disj (:computed g #{}) removed) (comp (filter computed-config-reader?) (map :id)) added)
         ;; a schema key a form names as a literal keyword is an edge to that entry (a lookup by
         ;; the key it passes, valid?, a registered error variant); the keywords are then dropped.
         ;; The form that bakes the registry (seon.config/schema-forms) holds every key as data, not as lookups
@@ -1367,7 +1369,7 @@
                   (into {} (for [{e :e v :v} (d/datoms db :aevt :var/name) :when (V v)] [v {:contract (contract e) :kind (kind e)}])))
                 (into {} (for [v V :let [e (:e (first (d/datoms db :avet :var/name v)))]]
                            [v (when e {:contract (:v (first (d/datoms db :eavt e :var/contract))) :kind (:v (first (d/datoms db :eavt e :var/kind)))})])))
-        sids (fn [text] (into [] (comp (map #(str "schema " %)) (filter rows)) (names (sedn/decode text))))
+        sids (fn [text] (into [] (map #(str "schema " %)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (= :test (:kind e)) (conj s v) (disj s v))) (:tests g) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
@@ -1400,20 +1402,20 @@
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
         edges (fn [f] (if (schema-row? f)
-                        (vec (:schema f))
+                        (vec (filter rows (:schema f)))
                         (vec (concat (remove test-ids (keep var-form (named f)))
                                      (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
                                      (when (or (proc (:id f)) (bin (:id f)) (test-nss (:ns f))) (op-ids f))
                                      (filter rows (:sedges f))
                                      (for [s (defined f :var)
-                                           id (concat (get methods s) (get impls s) (get contract s) (keep var-form (get data-refs s)))]
+                                           id (concat (get methods s) (get impls s) (filter rows (get contract s)) (keep var-form (get data-refs s)))]
                                        id)))))
         holders (for [[s vs] data-refs :when (some V vs) id (get defs s)] id)
         ;; an entry var or method changed: every form whose edges go to them (one that starts a
         ;; process, or sends an op from a test's namespace) is re-edged
         starters (when (some (into V M) entry) (concat proc bin (filter #(seq (:ops (rows %))) (keys rows))))
-        dirty (-> (set (map :id added))
+        dirty (-> (into (set (map :id added)) touched)
                   (into (mapcat #(get refd %)) V)
                   (into (keep var-form) (concat V M P))
                   (into holders)
@@ -1441,6 +1443,16 @@
         affected (into changed (reached-by rev changed))
         old-comp (:comp-of g)
         olds (keep old-comp affected)
+        ;; the index the graph holds (reach-indexed) loses the tests whose answer these changes can move: a
+        ;; test whose form was re-folded (it reaches what changed), one of a namespace whose plain forms
+        ;; were added, removed or re-folded; and the tests removed. A component kept keeps its digest and flags.
+        held (:index g)
+        tests-by-ns (when held (if (and (identical? tests (:tests g)) (:tests-by-ns g)) (:tests-by-ns g) (group-by (comp symbol namespace) tests)))
+        stale (when held
+                (-> (into #{} (for [id affected, [k a] (:defines (rows id)) :when (and (= :var k) (tests a))] a))
+                    (into (mapcat tests-by-ns)
+                          (into #{} (comp (filter plain?) (map :ns)) (concat gone (map rows affected))))))
+        dead (when held (filter #(and ((:tests g) %) (not (tests %))) V))
         ;; the affected components re-folded sinks first (Bazel's and Nix's action keys): a
         ;; component's digest is its forms' own and those of the components it reaches
         [comp-of cd fl n] (reduce (fn [[comp-of cd fl n] c]
@@ -1452,7 +1464,7 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map (comp :config rows) c)
+                                                    :config (let [own (map #(let [cf (:config (rows %))] (if (computed %) (into (or cf #{}) (:schema-config g)) cf)) c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
                                                               (let [[k & more] (sort-by (comp - count) ks)]
                                                                 (-> (or k #{}) (into cat own) (into cat more))))})
@@ -1462,9 +1474,20 @@
                                    (transient (apply dissoc (:flags g) olds))
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
-    (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
-           :reads reads :scans scans :proc proc :bin bin :plain plain :own own
-           :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))))
+    (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
+           :reads reads :scans scans :proc proc :bin bin :plain plain :own own :computed computed
+           :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
+      held (assoc :tests-by-ns tests-by-ns
+                  :index (update held :answers #(apply dissoc % (concat stale dead)))
+                  :stale (as-> (into (:stale g #{}) stale) st (reduce disj st dead))))))
+
+(defn- schema-row
+  "The reach row of schema entry k (its text): its id, its own digest, and every entry its form names, held
+  whether or not the entry exists (reach-step's edges keep those rows holds), so one added later is an edge."
+  {:malli/schema [:=> [:cat :any :string] :map]}
+  [k text]
+  {:id (str "schema " k) :own (error/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
+   :schema (mapv #(str "schema " %) (names (sedn/decode text)))})
 
 (defn reach-graph
   "db's reach graph, a value: its live forms and schema entries (a schema entry's :schema, the
@@ -1476,32 +1499,86 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map]] :map]}
   [db data-refs]
   (let [schemas (schema-texts db)
-        sid #(str "schema " %)
         live (live-ids db)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
-                 :reads #{} :scans #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0
+                 :reads #{} :scans #{} :proc #{} :bin #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
                  :data-refs data-refs :schemas schemas :schema-config (schema-config-keys schemas) :live live}
                 db []
-                (into (reach-rows db (set (vals live)) true)
-                      (for [[k text] schemas]
-                        {:id (sid k) :own (error/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
-                         :schema (keep #(when (contains? schemas %) (sid %)) (names (sedn/decode text)))})))))
+                (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text)))
+                #{})))
+
+(defn- schema-moves
+  "g, brought to db's schema entries (schemas, db's {key text}), with what reach-step takes of the entries that moved:
+  [g' removed added touched]. An entry changed or gone is a row removed, one changed or new a row
+  added (its dependents are re-folded by the edges they hold to its id); one added or gone changes
+  which names are edges, so the forms holding the name are touched, re-edged by reach-step: the entries
+  naming it (their :schema), the contracts naming it (:contract holds every name), and the forms naming
+  it as a keyword (:form/keywords, one AVET seek a key, their :sedges kept by g' here); and
+  the config keys entries name moving (:schema-config) touches the forms reading a key they compute
+  (:computed), whose config the fold takes it by."
+  {:malli/schema [:=> [:cat :map :seon.host/db :map :map] [:tuple :map [:vector :string] [:vector :map] [:set :string]]]}
+  [g db live schemas]
+  (let [old (:schemas g)
+        sid #(str "schema " %)
+        gone (remove schemas (keys old))
+        fresh (remove old (keys schemas))
+        changed (filter #(and (contains? old %) (not= (old %) (schemas %))) (keys schemas))
+        exist (into #{} (map sid) (concat gone fresh))
+        config (schema-config-keys schemas)
+        rows (:rows g)
+        ;; the forms naming an entry that came or went as a keyword: live in both values, no change of theirs
+        namers (for [[k now] (concat (map vector gone (repeat false)) (map vector fresh (repeat true)))
+                     dt (d/datoms db :avet :form/keywords k)
+                     :let [id (:v (first (d/datoms db :eavt (:e dt) :form/id)))]
+                     :when (and (= (:e dt) (live id)) (contains? (:live g) id) (not ((:refs (rows id)) 'seon.config/baked-schema-forms)))]
+                 [id (sid k) now])
+        rows (reduce (fn [rs [id k now]] (update-in rs [id :sedges] #(vec (if now (distinct (conj % k)) (remove #{k} %))))) rows namers)
+        g' (assoc g :schemas schemas :schema-config config :rows rows)]
+    [g'
+     (mapv sid (concat gone changed))
+     (mapv #(schema-row % (schemas %)) (concat fresh changed))
+     (cond-> (-> (into #{} (comp (keep #(when (some exist (:schema (rows (sid %)))) (sid %)))) (keys schemas))
+                 (into (map first) namers)
+                 (into (for [[v ks] (:contract g) :when (some exist ks) :let [id (peek (get (:defs g) v))] :when id] id)))
+      (not= config (:schema-config g)) (into (:computed g #{})))]))
 
 (defn reach-update
   "Graph g (reach-graph's, of another value) for db: the live forms g holds that db does not
   removed, db's that g does not added (live-ids: index scans, no entity read), and only the
   components those touch and their ancestors re-folded (reach-step), so a branch's graph is
-  its base's at the cost of what it changed. A schema entry added or changed rebuilds, and so
-  does a namespace gaining its first test or losing its last (its forms' quoted names become
-  or stop being edges: reach-step's test-nss)."
+  its base's at the cost of what it changed. The schema entries the two values differ in are
+  rows removed and added the same way (schema-moves), with the forms whose edges they change
+  touched, so a merge that adds an entry costs its dependents', not the program's. A namespace
+  gaining its first test or losing its last rebuilds (its forms' quoted names become or stop being
+  edges: reach-step's test-nss)."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [g db]
-  (if (not= (:schemas g) (schema-texts db))
-    (reach-graph db (:data-refs g))
-    (let [live (live-ids db) was (:live g)
-          g' (assoc (reach-step g db (vec (remove live (keys was))) (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false))
-                    :live live)]
-      (if (= (:test-nss g' #{}) (:test-nss g #{})) g' (reach-graph db (:data-refs g))))))
+  (let [live (live-ids db) was (:live g)
+        schemas (schema-texts db)
+        [g0 gone-s added-s touched] (if (= (:schemas g) schemas) [g [] [] #{}] (schema-moves g db live schemas))
+        g' (assoc (reach-step g0 db (into (vec (remove live (keys was))) gone-s)
+                              (into (vec (reach-rows db (set (for [[id e] live :when (not (was id))] e)) false)) added-s) touched)
+                  :live live)]
+    (if (= (:test-nss g' #{}) (:test-nss g #{})) g' (reach-graph db (:data-refs g)))))
+
+(defn- index-answer
+  "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
+  over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
+  {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
+  [{:keys [rows plain comp-of cd flags]} {:keys [env tree config]} roots?]
+  (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
+        env-keys (filterv #(= "seon.env" (namespace %)) (keys config))]
+    (fn [k ids]
+      (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
+            ;; the config keys its reach reads (config-reads) that the config holds
+            ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
+            ;; a reader of files or a process (the tree, a root, the binary) can read any class of
+            ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
+            ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
+            ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
+        {:digest (error/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots? (:reads f)))) cs) tree)
+                                      (concat (sort (map cd cs)) (map line (sort ks)))))
+         :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
@@ -1515,27 +1592,39 @@
   components read (config-reads); :process? and :binary?, whether one of those components uses a
   process or a binary var. A root naming a var with no form in g gets none."
   {:malli/schema [:=> [:cat :map :seon.program/inputs [:maybe [:map-of :string [:sequential :qualified-symbol]]]] :map]}
-  [{:keys [rows defs tests plain comp-of cd flags]} {:keys [env tree config]} roots]
+  [{:keys [defs tests] :as g} inputs roots]
   (let [var-form #(peek (get defs %))
-        ;; each config key's line of a digest, and the :seon.env/* keys, made once for every key's answer
-        line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
-        env-keys (filterv #(= "seon.env" (namespace %)) (keys config))
-        answer (fn [k ids]
-                 (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
-                       ;; the config keys its reach reads (config-reads) that the config holds
-                       ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
-                       ;; a reader of files or a process (the tree, a root, the binary) can read any class of
-                       ;; files (:seon.env/*); a pin it takes by its reach, as any test does: Jolt's runtime
-                       ;; core and Chez, which every process runs on, are the forks' suites' and the daily full run's
-                       ks (if (some #(let [f (flags %)] (or (:reads f) (:proc f) (:bin f))) cs) (into ks env-keys) ks)]
-                   {:digest (error/digest (apply str k "\n" env "\n" (when (some #(let [f (flags %)] (or (:scans f) (and roots (:reads f)))) cs) tree)
-                                                 (concat (sort (map cd cs)) (map line (sort ks)))))
-                    :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))]
+        answer (index-answer g inputs (boolean roots))]
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
       ;; caller names it missing, never a digest of :env alone that a stale green matches
       (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
       (into {} (for [t tests :let [id (var-form t)] :when id] [t (answer t [id])])))))
+
+(defn reach-indexed
+  "Graph g holding the tests' index under inputs (graph-index's, with no roots): the answers it
+  held still (reach-step drops those a change can move and names them :stale, so a graph updated
+  from one holding an index answers only for what moved, never for the program), the rest
+  computed, all of them when it holds none or holds one under other inputs. The index is
+  derived data, a function of the graph and inputs: regenerated whenever it is not held
+  (AGENTS section 5). Read it with index-of. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
+  [{:keys [defs tests] :as g} inputs]
+  (let [{held :in} (:index g)
+        fresh? (or (identical? inputs held) (= inputs held))]
+    (if (and fresh? (empty? (:stale g)))
+      g
+      (let [var-form #(peek (get defs %))
+            answer (index-answer g inputs false)
+            answers (into (if fresh? (:answers (:index g)) {})
+                          (for [t (if fresh? (:stale g) tests) :let [id (var-form t)] :when id] [t (answer t [id])]))]
+        (assoc g :index {:in inputs :answers answers} :stale #{}
+               :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
+
+(defn index-of
+  "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [g] (get-in g [:index :answers] {}))
 
 (defn program-digest
   "The digest of db's program as a whole: its live forms (:form/id, hasch of a form's namespace
