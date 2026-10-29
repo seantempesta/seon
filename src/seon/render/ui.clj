@@ -892,12 +892,17 @@
 
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
-  run schema's render, from the agent's record (its status, branch and turn cap, its turns), and
+  run schema's render, from the agent's record (its status, branch and turn cap, its turns; the cap
+  the run's when the agent raised none, from the db), and
   that its last reply was cut, when it was: the conversation's part of where the agent stands (the
   work's is seon.render.ui/status)."
-  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
-  [{c :seon.ctx/ctx} _aid]
-  (let [cap (ratom/realize (:seon.agent/max-turns c)) n (count (:turns c))]
+  {:seon.render/style tile-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db} aid]
+  (let [;; its cap: the agent's own (raised to extend it), else its run's, as the turn loop reads it; the run by
+        ;; the agent, a fact written when a run begins
+        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db aid) seq (apply max) (d/entity db))
+        cap (or (ratom/realize (:seon.agent/max-turns c)) (:seon.run/max-turns run))
+        n (count (:turns c))]
     [:section
      (render/html {:schema :seon.run/run-fact}
                   (relevant :seon.run/run-fact {:seon.run/status (:seon.agent/status c) :seon.run/max-turns (:seon.agent/max-turns c)
