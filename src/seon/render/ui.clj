@@ -806,31 +806,18 @@
 
 (defn task-data
   "The task its agent works (a component over ctx and the db): its id, kind and execution from ctx,
-  then the task's data (seon.context/task-data over the db: its instructions and its plan as prose, then what to prove,
-  each written proof with its source and its recorded result (:status, the failing assertions and the :digest it was judged at, done when green) from ctx, the sections cited with their text and the similar
-  as a call of the one printer, [#'seon.render/html opts data],
-  expanded when the page is written, so the model reads the data as data). It runs again when
-  the task's own attributes in ctx change or a transaction touches what task-data read. Each var
-  the plan cites is a component of its own (`cited`)."
+  then the task's data (seon.context/task-data over the db: its instructions and its plan as prose,
+  then each proof and the form that proves it, the similar), as a call of the one printer,
+  [#'seon.render/html opts data], expanded when the page is written, so the model reads the data as
+  data. Each proof's source and verdict are the status's (`status`), and each thing the plan cites
+  a part of its own (`cited`): neither is here again (a run was sent each proof's source and
+  failures twice, 2026-10-29). It runs again when the task's own attributes in ctx change or a
+  transaction touches what task-data read."
   {:seon.render/style (str panel-style " [&_h3]:text-xs [&_h3]:text-text-300") :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} _aid]
-  (let [{:seon.task/keys [id kind execution] :as t} (:task c)
-        ;; each proof written, its source as ctx holds it (the task's :proved): what the test asserts
-        sources (into {} (for [v (vals (:proved t)) :let [src (form-src db (:form v))] :when src] [(:var/name v) (print/code src)]))
-        ;; each proof's last result as the branch records it (the agent's run wrote it on its var entity:
-        ;; seon.proofs/result-tx), read from ctx and nothing computed here
-        results (into {} (for [v (vals (:proved t)) :when (:seon.test/status v)]
-                           [(:var/name v) (cond-> {:status (:seon.test/status v) :done-when :green :digest (:seon.test/digest v)}
-                                            (seq (:seon.test/failures v)) (assoc :failures (mapv context/failure (:seon.test/failures v))))]))]
+  (let [{:seon.task/keys [id kind execution]} (:task c)]
     ;; a part: the page draws it by task-html, the model is sent the value (docs/render.md#a-part-answers-data)
-    ;; what the plan cites is a part each (`cited`, at its depth), not again here
-    (with-meta (assoc (let [data (cond-> (dissoc (context/task-data db (task/task db id) false) :sections)
-                  (or (seq sources) (seq results))
-                  (update :to-prove #(into (empty %) (for [[s run] %]
-                                                       [s (if (or (sources s) (results s))
-                                                            (cond-> (merge {:run run} (results s)) (sources s) (assoc :source (sources s)))
-                                                            run)]))))] data)
-                      :id id :kind kind :execution execution)
+    (with-meta (assoc (dissoc (context/task-data db (task/task db id) false) :sections) :id id :kind kind :execution execution)
       {:seon.render/schema :seon.context/task})))
 
 (defn cited-of
