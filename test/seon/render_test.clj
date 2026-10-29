@@ -332,6 +332,18 @@
   [st main]
   (#'p/advance-main (dissoc st :main-db) (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])))
 
+(deftest a-dropped-page-lets-go-of-its-branchs-db
+  ;; docs/machine.md#roots-heap: a branch's db read for a page is kept while a page shows it. The
+  ;; read was never dropped, so every branch ever opened kept a version of the index for root's life.
+  (let [[main branch] (paged-dbs)
+        st (proc-state main branch)]
+    (is (some? (get-in st [:branch-reads :task-demo-f :db])) "the read is held while views show the branch")
+    (let [one (#'p/drop-view st [:chat :a3])]
+      (is (some? (get-in one [:branch-reads :task-demo-f :db])) "and while another view of it remains"))
+    (let [none (#'p/drop-view (#'p/drop-view st [:chat :a3]) :a3)]
+      (is (nil? (get-in none [:branch-reads :task-demo-f])) "gone with its last view")
+      (is (= [:main-db] (map (comp first first) (ts/stale-dbs none Long/MAX_VALUE))) "so no db is held but main's"))))
+
 (deftest root-context-is-its-page-printed-at-the-budget
   ;; what root reads is its page, the render of its ctx (each component's hiccup by its id), printed once
   ;; by the one printer at :seon.config.render/root-context-budget; the cut is the printer's alone
@@ -981,10 +993,11 @@
       (is (str/includes? h "demo/f") "drawn by task-data")
       (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
     (is (str/includes? (:html (unit-of task "related-")) "nothing related yet") "related, drawn from the db: none yet here")
-    (is (= [(str "message-item-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
-            (str "turn-item-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "turn-item-" rid "-" (eid :seon.turn/id "demo/f#1/1"))]
+    (is (= [(str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
+            (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
+            (str "chat-end-" rid)]
            (mapv :id conv))
-        "the conversation in the order it was written: by eid, each a component keyed by its entity")
+        "the conversation in the order it was written: by eid, each a component keyed by its entity, then how the agent stands")
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
@@ -1347,6 +1360,19 @@
     (is (not (str/includes? h "```")) "fence marks are not text")
     (is (str/includes? h "<hr") "a break")
     (is (str/includes? h "tail") "nothing after the fence is lost")))
+
+(deftest markdown-draws-fenced-code-and-a-numbered-list-from-the-scan
+  ;; docs/render.md#prose-and-the-one-string-cutter: a fenced block's content and a list's items are the scan's
+  ;; offsets, so no regex reads the text again
+  (let [fenced (ui/markdown "~~~clojure\n(+ 1 2)\n  (inc 3)\n~~~")
+        open (ui/markdown "```\nnever closed")
+        nums (ui/markdown "1. first\n   - nested\n2. second")]
+    (is (= ["(+ 1 2)\n  (inc 3)"] (->> (tree-seq coll? seq fenced) (filter string?) (filter #(str/includes? % "(inc 3)"))))
+        "a fenced block draws its content once, with no marks")
+    (is (not (str/includes? (h/html fenced) "~~~")))
+    (is (str/includes? (h/html open) "never closed") "an unclosed block draws what it holds")
+    (is (= [:ol {:class "list-decimal pl-5"} [:li "first\n   - nested"] [:li "second"]] (last nums))
+        "a numbered list is an ol of its items, a nested line inside its parent item")))
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's or a run's id as its title

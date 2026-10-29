@@ -385,6 +385,21 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
+(deftest root-holds-no-test-code-and-its-agents-hold-mains-tests
+  ;; task seon.root/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
+  ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
+  ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
+  (let [;; the code this proves, named so its reach digest moves with it: root's boot and writer, the fork server's load
+        _ [#'seon.root/boot! #'seon.writer/main-commit #'seon.fork-server/main]
+        t "(some-> (resolve 'seon.reader-test/prose-without-a-fence-is-a-comment) bound?)"
+        [agent-held root-held facts] (in-agent [(str "(boolean " t ")")
+                                                {:op :eval :agent "root" :code (str "(boolean " t ")")}
+                                                {:op :eval :agent "root" :code "(boolean (seon.db/eid @(:conn sys) :var/name 'seon.reader-test/prose-without-a-fence-is-a-comment))"}]
+                                               {:dirs ["src" "test"]})]
+    (is (true? (:value agent-held)) "the agent holds main's test compiled")
+    (is (false? (:value root-held)) "root does not")
+    (is (true? (:value facts)) "though main's program holds it as facts")))
+
 (defn- statuses
   "The code of {test status} over the run that code x answers, every test it ran or reused (its
   :digests): an answer carries only its proofs' passes and its reds (seon.proofs/answer), so every
@@ -399,11 +414,13 @@
   ;; and every other namespace's do not run
   (let [proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
+        also 'seon.config-test/the-profile-is-read-from-the-command-line
         [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
                            {:op :eval :agent "root" :code (statuses (str "@(seon.root/run-tests! sys :" (:agent %) ")"))})
                           {:dirs ["src" "test"] :proofs #{proof}})]
-    (is (= {proof :pass reached :pass} (:value run))
-        "the proof and the one test reaching the change ran, green; nothing else ran")))
+    (is (= {proof :pass reached :pass also :pass} (:value run))
+        "the proof and the tests reaching the change ran, green; nothing else ran")))
 
 (deftest a-death-costs-the-test-it-interrupted-and-no-other
   ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
@@ -448,6 +465,8 @@
   (let [here (System/getProperty "user.dir")
         proof 'seon.reader-test/prose-without-a-fence-is-a-comment
         reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
+        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
+        also 'seon.config-test/the-profile-is-read-from-the-command-line
         run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [" (statuses "r") " (:key r)])")
         own (str "(let [p (prove)] {:results " (statuses "p") " :ran (:ran p) :reused (:reused p)})")
         ;; how many of the two tests' verdicts the cache holds at the digests the agent's plan gives
@@ -470,12 +489,12 @@
                   ;; since tests-are-facts dropped it)
                   {:dirs (cfg/value :seon.config.source/dirs) :proofs #{proof} :own-root? true})]
     (is (= [#{:env :tree :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass} :ran 2 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
+    (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
     (is (= 2 (:value files)) "and both are cached at the agent's digests")
     ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
-    (is (= {proof :pass reached :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
+    (is (= {proof :pass reached :pass also :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
     (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
-    (is (= {proof :pass reached :pass} (:results (:value second-run))) "and so is the agent's next run")))
+    (is (= {proof :pass reached :pass also :pass} (:results (:value second-run))) "and so is the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
@@ -607,7 +626,7 @@
   ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
   ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
   ;; first, so the inherited ceiling would leave the child about 0.7 of the allowance
-  (let [[_ _ r] (in-agent ["(def held (byte-array (* 300 1048576)))"
+  (let [[_ a b r] (in-agent ["(def held (byte-array (* 300 1048576)))"
                            "(ns room-test (:require [clojure.test :refer [deftest is]])) (deftest room (is (< (* 0.95 (seon.config/value :seon.config.agent/heap-extra-bytes)) (- (jolt.scheme/eval-string \"jolt-heap-ceiling-bytes\") (seon.lib/bytes-in-heap)))))"
                            "(let [r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{room-test})] (pr-str {:pass (:pass r) :fail (:fail r) :error (:error r)}))"])
         v (some-> (:value r) clojure.edn/read-string)]
@@ -942,6 +961,46 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
+         (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agent-keeps-no-db-older-than-its-branchs-current
+  ;; docs/machine.md#roots-heap, a kept db value is a reference: after a run of its own commits, a
+  ;; read of what they changed, its test plan's graph and a merge of main, the agent's state holds
+  ;; its branch's current db and nothing older but the two main points it is judged by (:base, the
+  ;; merge base, and :main, as last heard: seon.turn, seon.render.ui and my.branch read them as
+  ;; dbs, so they stay values until those readers take a commit: reported with this change). A
+  ;; graph, a diff and the last transaction are keyed by a point or let go (seon.db/point). In this
+  ;; process, on a branch of the test store, with a socketpair standing for root.
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [ab (pdb/on-main (:branch cfg) :agent-refs)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           store-conn (d/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state
+           note (fn [i] (agent/transact! [{:note/text (str "n" i)}]))
+           stale #(for [[path t] (ts/stale-dbs (apply dissoc @agent/state %) (:max-tx (agent/db)))] [path t])]
+       (try
+         (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked :main forked})
+         (let [[_ in] (agent/test-inputs (agent/db))]
+           (doseq [i (range 4)]
+             (note i)
+             (agent/branch-changes (:base @agent/state) (agent/db))
+             (agent/branch-graph (agent/db) (:base @agent/state) in))
+           (is (= [] (stale [:base :main])) "after commits of its own")
+           ;; main redefines app.m0/f1: a program change, which a merge of main brings in
+           (let [[v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+             (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                                :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                               [:db/add v :var/form "f1'"]]))
+           (agent/heard-main)
+           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+           (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
+           (note 5)
+           (agent/branch-changes (:base @agent/state) (agent/db))
+           (agent/branch-graph (agent/db) (:base @agent/state) in)
+           (is (= [] (stale [:base :main])) "and after more of its own"))
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest merge-main-brings-the-task-content-main-carried
@@ -1490,3 +1549,33 @@
     (is (< (:ticks unchanged) (* 0.01 (:ticks first-eval))) "main as the base: no diff, no query")
     (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
     (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))
+
+(deftest a-shell-child-costs-what-it-reads
+  ;; the reproduction, 2026-10-29: in a forked agent, clojure.java.shell/sh of a ~3 s command (its two output pipes
+  ;; read by two futures) spun after the child exited, ~470,000 passes a second and ~1.5 GB of garbage in 3.5 s, then ran
+  ;; the agent out of memory or hung it (in 3 of 6 runs). The readers' wait to enter the io poller's monitor made
+  ;; the main carrier's wake, itself an entry of that monitor, again and again from inside its own wait; a wait to
+  ;; enter a monitor no longer tells the loop it fell asleep (Jolt's locks.ss jolt-asleep-silent). The work done is bytes
+  ;; allocated, never time. docs/forks.md (Jolt: a thread waiting to enter a monitor)
+  (let [bytes "(jolt.scheme/eval-string \"(lambda () (sstats-bytes (statistics)))\")"
+        code (str "(let [bytes " bytes " b0 (bytes) rs (vec (repeatedly 4 #(clojure.java.shell/sh \"sleep\" \"1\")))] "
+                  "{:exits (mapv :exit rs) :mb (quot (- (bytes) b0) 1048576)})")
+        rs (in-agent [code "(+ 1 2)"])]
+    (is (every? #(nil? (:ex %)) rs) (pr-str (mapv #(select-keys % [:ex]) rs)))
+    (is (= [0 0 0 0] (:exits (:value (first rs)))) (pr-str (first rs)))
+    ;; four children of 1 s: ~4 MB with the fix, ~1,500 MB (the agent's heap ceiling) without it
+    (is (< (:mb (:value (first rs))) 64) (pr-str (first rs)))
+    (is (= 3 (:value (second rs))) "the agent lives")))
+
+(deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
+  ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
+  ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
+  ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
+  ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
+  (let [[_ _ r] (in-agent ["(ns fin-test (:require [clojure.test :refer [deftest is]])) (deftest r (is (= 1 1)))"
+                           "(alter-var-root #'seon.agent/transact! (fn [f] (fn [tx] (if (some :seon.test/status (filter map? tx)) (throw (ex-info \"transact refused: no\" {:writer-error \"no\"})) (f tx)))))"
+                           "(let [p (my.agent/prove)] (select-keys p [:pass :unrecorded]))"]
+                          {:dirs ["src" "test"] :proofs #{'fin-test/r}})]
+    (is (nil? (:ex r)) (pr-str r))
+    (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
+    (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))

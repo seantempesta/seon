@@ -218,6 +218,19 @@
            (mapv (juxt :e :a :v) (filter #(= :form/ops (:a %)) (#'pm/content-datoms base head #{}))))
         "the head's datoms of the attribute the base lacks are what moved")))
 
+(deftest content-datoms-given-a-diff-are-its-content-ones
+  ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: a caller that read the whole :eavt diff hands it over
+  ;; and nothing is diffed again; a transaction's instant is no key's content
+  (let [b (base)
+        branch (with b (var-tx "f" "(inc x)"))
+        whole (apply concat (d/datoms-diff b branch :eavt []))
+        mine (pm/content-datoms b branch #{})]
+    (is (seq mine) "the branch changed the program")
+    (is (= (set mine) (set (pm/content-datoms b branch #{} whole))) "the content ones among the whole diff are the ones read per attribute")
+    (is (some #(= :db/txInstant (:a %)) whole) "the whole diff holds the transactions' instants")
+    (is (not-any? #(= :db/txInstant (:a %)) mine) "which are no content")
+    (is (= (pm/delta-changes b branch #{}) (pm/delta-changes b branch #{} mine) (pm/delta-changes b branch #{} whole)))))
+
 (deftest a-schema-entry-merges-per-key
   ;; task seon.source/schemas-are-part-of-the-program: a schema entry is a program key,
   ;; [:schema k], merged like a var (v1's [:seon.schema/key k] identity), and the merge's

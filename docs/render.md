@@ -156,6 +156,7 @@ An agent's namespace refers `clojure.pprint`'s `pp` and `pprint` (`seon.agent/ma
 The places that cut a value where it is made, not in the printer, each with its reason.
 
 - `seon.main/shown`: names a budget only to print whole (the value's ``:seon.print/full`` metadata).
+- `seon.contract/kept`: an error keeps no live value ([errors](errors.md#an-error-keeps-data)); a value past the part budget is kept as the printer's cut (`print/prose` for a string, `print/text` marked code for the rest), which says what it omitted.
 - `seon.contract/problems`, `seon.task/file-declarations`: a refused value (a function's argument, a task file's entry) may be infinite, lazy or a host object, and travels on the wire as text, so its error keeps the printer's cut, which says what it omitted; the live value stays with the caller.
 - `seon.proofs/result-tx`: a red test's first failing assertion is stored as a fact on its var entity (`:seon.test/failure`, seon.proofs/test-results-are-a-few-facts), so it is printed once where it is made, by the one printer under a part's budget, whose cut says what it omitted; the render shows the stored text and prints nothing again.
 
@@ -164,7 +165,7 @@ The places that cut a value where it is made, not in the printer, each with its 
 Uses of take, subs and the like in display code that choose what to find or read, not what to cut from output.
 
 - `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
-- `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives, each kept as written; a name's first letter made capital: text rearranged, nothing left out.
+- `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `seon.context/related`: what a search ranked (`seon.context/relevance`), cut by its chance (`:seon.config.render/relevance-summary`) and counted (`take` the config's `:seon.config.render/related`), the cited ones left out; what the cut left out is counted with the form that lists it: a search's answer, not a cut of output.
 - `seon.context/search`: a search's answer, its first `:k` hits (`take`) with a count of the rest and the form that returns them, that form printed as code to evaluate (`pr-str` of the query and its options): not a cut of output.
@@ -173,7 +174,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `seon.context/neighbours`: the first `cap` of who names a var or key (`take`), a bounded read of the reference graph for a score (a var every form names would cost thousands of datoms): work bound, not output.
 - `seon.agent/embed-written!`: the first `:seon.config.vector/texts` of the texts due go in one `:embed` request (`take`), the rest stay due for the next: a batch bound on work, not a cut of output.
 - `my.agent/file-source`, `seon.repl/form-src`: a form's own text out of its file or its reply (`subs` at a reader's offsets).
-- `seon.repl/do-body`: the text inside a top-level `(do ...)`'s own text, read again as its forms, each top level as Clojure's compiler takes them: code read, not output.
+- `seon.repl/do-parts`: a top-level form written `(do ...)` (its text opens with `(` and the token `do`, so a reader macro that expands to do is not one) as its inner forms, each the form the reader already returned, with its exact text and leading comments from the reader's own positions in the do's text (no pattern, no cut by text), each then evaluated as a top-level form as Clojure's compiler takes them: code read, not output.
 - `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.render.ui/utc-offset-ms`: parsing `:seon.config.web/utc-offset`.
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.
