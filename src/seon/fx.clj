@@ -125,20 +125,21 @@
 
 (defn- follow-main
   "Bring the write-back checkout at base (Seon's own source tree, on a branch of its own) to the
-  branch of the main checkout co (of the same repository: another one's commits are none of its
-  history): fast-forwarded (git merge --ff-only in base) when its HEAD is an
-  ancestor of it, so the source follows main with no step of the owner's. nil when base is co,
-  either is no checkout of its own, co's HEAD is detached, or base is at main already; the gap
+  ref of the branch main in co's repository (of the same repository: another one's commits are none
+  of its history), never co's checked-out HEAD: fast-forwarded (git merge --ff-only in base) when
+  its HEAD is an ancestor of it, so the source follows main with no step of the owner's, whatever
+  branch the main tree has checked out (docs/source.md#mains-program-follows-the-tree). nil when
+  base is co, either is no checkout of its own, co's repository has no branch main, or base is at main already; the gap
   {:main sha :source sha :ahead n :behind m} (commits base holds that main lacks, and the reverse)
   when base holds commits main lacks, or {:main :source :refused git's words} when the fast-forward
   is refused (a dirty tree): read-source records either and imports the tree as it is."
   {:malli/schema [:=> [:cat :string :string] [:maybe :map]]}
   [base co]
   (let [branch (when (and (not= base (.getCanonicalPath (java.io.File. ^String co))) (checked-out? co) (checked-out? base) (same-repository? base co))
-                 (git-try co ["symbolic-ref" "-q" "--short" "HEAD"]))
-        main (when branch (git! {} co ["rev-parse" "--verify" branch] nil))
-        source (when branch (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
-    (when (and branch (not= main source))
+                 "main")
+        main (when branch (git-try co ["rev-parse" "--verify" "--quiet" "refs/heads/main"]))
+        source (when main (git! {} base ["rev-parse" "--verify" "HEAD"] nil))]
+    (when (and main (not= main source))
       (if (zero? (:exit (git-run {} base ["merge-base" "--is-ancestor" "HEAD" main] nil)))
         (let [r (git-run {} base ["merge" "--ff-only" "-q" main] nil)]
           (when-not (zero? (:exit r)) {:main main :source source :refused (str/trim (str (:err r)))}))
@@ -158,7 +159,7 @@
   inputs only for a binary built from this very tree. In a git repository also :tree, the id
   of the whole tree as it is on disk (tree-id: git's own index makes it the cost of what
   changed), which stands for every file's content.
-  With :follow (the main checkout), root's tree is first brought to that checkout's branch
+  With :follow (the main checkout), root's tree is first brought to the branch main of that checkout's repository (never its checked-out HEAD)
   (follow-main): fast-forwarded when it is behind (the files it moved are read whole, :paths
   set aside, and the answer then holds no :paths). When it holds commits main lacks, or git
   refuses the fast-forward, the answer is a :seon.fx/io-error naming why that still carries the
