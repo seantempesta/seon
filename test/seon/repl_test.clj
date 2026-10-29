@@ -28,7 +28,10 @@
       (is (= {:forms 2 :value [3]} (select-keys e [:forms :value])) "the values of the forms before it, and the forms after it never ran"))
     ;; md-scan #11: an error in macroexpanding says so, where, as Clojure's REPL does (clojure.main/ex-str)
     (let [e (ev "(cond true 1 false)")]
-      (is (str/starts-with? (str (get-in e [:ex :seon.error/message])) "Syntax error macroexpanding clojure.core/cond at (1:1). ")
+      ;; the macro as written, as Clojure's REPL names it, and the reference's own reason (Jolt f6bac31c)
+      (is (str/starts-with? (str (get-in e [:ex :seon.error/message])) "Syntax error macroexpanding cond at (1:1). ")
+          (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message])))
+      (is (str/includes? (str (get-in e [:ex :seon.error/message])) "cond requires an even number of forms")
           (str "the phase, the macro and the position first: " (get-in e [:ex :seon.error/message]))))
     ;; a form past its byte budget stops with the typed error, its allocation and budget as data
     (let [old2 @agent/state
