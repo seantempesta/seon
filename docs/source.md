@@ -42,7 +42,7 @@ Measured by `bin/check loop` on a clone (1,646 forms): the merged `seon.generati
 
 ## An agent changes code at its REPL
 
-An agent changes the program by `in-ns` and `defn` at its REPL: each form it evaluates there is its branch's change. `require` and `load-file` load as in Clojure and record nothing. Its working directory is a scratch dir with no repository above it (`:seon.config.agent/cwd`, made and entered by the boot server's ```seon.fork-server/main```; every agent forks from it): it reads and writes any file by its path, git finds nothing, and editing source files is not how Seon develops.
+An agent changes the program by `in-ns` and `defn` at its REPL: each form it evaluates there is its branch's change. It removes a definition as Clojure does, `(ns-unmap 'n 's)`: the eval observes the var gone and retracts its definition on the branch, saying so (`:unmapped`, `seon.repl/unmapped`), as v1's REPL recorded it; nothing refuses an unmap a caller still needs, which fails where that caller loads and in its tests. `require` and `load-file` load as in Clojure and record nothing. Its working directory is a scratch dir with no repository above it (`:seon.config.agent/cwd`, made and entered by the boot server's ```seon.fork-server/main```; every agent forks from it): it reads and writes any file by its path, git finds nothing, and editing source files is not how Seon develops.
 
 ## A form's account is the program's facts
 
