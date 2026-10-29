@@ -255,7 +255,7 @@
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
           "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/program-store)) nil) 'seon.program/reach-update))
+              (program/tests-reaching (program/reach-graph (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store)) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
 (deftest load-order-reads-no-quoted-name
@@ -369,6 +369,24 @@
 (defn- scratch-dir [label]
   (let [d (str (System/getProperty "user.dir") "/target/tmp/reach-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
+    d))
+
+(defn- sampled-repo
+  "A new git repository (its path) holding every nth file of the checkout's src, test and schemas as
+  they are on disk (tracked and untracked, unignored, not HEAD's: the digests are the working tree's; a
+  tracked file deleted on disk is no file) and the files `extra` names: the same cross-file references
+  and quoted names as the tree, at 1/n of its import and reach work (what the proofs of a tree's digests
+  and pins ask of the whole program cost 3.4 G ticks to import alone). program-db reads a tree from
+  its repository's git objects, so the sample is a repository."
+  [label n extra]
+  (let [here (System/getProperty "user.dir")
+        files (->> (:out (apply sh/sh "git" "-C" here "ls-files" "-co" "--exclude-standard" (cfg/value :seon.config.source/dirs)))
+                   str/split-lines sort (filter #(.exists (java.io.File. here %)))
+                   (keep-indexed (fn [i f] (when (or (zero? (mod i n)) (contains? (set extra) f)) f))))
+        listing (str (scratch-dir (str label "-list")) "/files")
+        d (scratch-dir label)]
+    (spit listing (str/join "\n" files))
+    (sh/sh "zsh" "-c" (str "tar -c -C '" here "' -T '" listing "' -f - | tar -x -C '" d "' && git -C '" d "' init -q"))
     d))
 
 (deftest a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
@@ -518,7 +536,7 @@
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
   ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (System/getProperty "user.dir")
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         a (update-vals (program/graph-index g in nil) :digest)
         moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
@@ -576,7 +594,7 @@
   ;; (:seon.config.source/process-entry)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs in))
         idx (program/graph-index g in nil)
         process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
         reaching (set (filter (set (keys idx)) (program/tests-reaching g 'seon.turn/observe)))]
@@ -661,11 +679,13 @@
   ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (System/getProperty "user.dir")
         in (fx/inputs here)
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs in))
+        sample (sampled-repo "pins" 6 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj" "src/seon/source.clj" "src/seon/contract.clj"])
+        g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
         a (update-vals (program/graph-index g in nil) :digest)
         all-tests (set (keys a))
-        moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
-                        (set (for [[t d] a :when (not= d (b t))] t))))]
+        ;; each class once: the checks below ask the same sets several times, a graph-index of the whole program each
+        moved (memoize (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
+                                 (set (for [[t d] a :when (not= d (b t))] t)))))]
     (is (every? #(contains? (:config in) %) [:seon.pin/datahike :seon.pin/konserve :seon.pin/malli :seon.pin/crypto]) "the pins the config names are classes of the inputs")
     (is ((moved :seon.pin/datahike) 'datahike.query-test/a-nested-call-in-a-predicate-is-refused) "a test that calls datahike takes its pin")
     ;; root, 2026-10-27: the Jolt pin was in every test's :env and moved 15 times in 3 days; as one
@@ -834,25 +854,23 @@
   ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
+  ;; An eighth of the tree's files, in two repositories (sampled-repo); the whole tree's run of the same
+  ;; property cost 6.7 G ticks.
   (let [here (System/getProperty "user.dir")
-        copy (scratch-dir "copy")
-        ;; src and test as they are on disk (tracked and untracked, unignored), not HEAD's: the
-        ;; digests are the working tree's, and HEAD's copy was red whenever the tree was dirty
-        ;; (pure-tests 2026-10-23: HEAD is no input of the digest)
-        ;; (a tracked file deleted on disk is no file of the tree: left out)
         dirs (cfg/value :seon.config.source/dirs)
-        _ (sh/sh "zsh" "-c" (str "cd '" here "' && for f in ${(0)\"$(git ls-files -z -co --exclude-standard " (str/join " " dirs) ")\"}; do [[ -e $f ]] && print -rN -- $f; done | tar -c --null -T - -f - | tar -x -C '" copy "'"))
+        copy (sampled-repo "copy" 8 []) copy2 (sampled-repo "copy2" 8 [])
         in (fx/inputs here)
-        a (ts/reach-digests (runner/program-db here (ts/program-store)) in)
-        b (ts/reach-digests (runner/program-db here (ts/program-store)) in)
-        c (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        a (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        b (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
+        ;; another checkout, in a store of its own: imported again, not read from a's branch
+        c (ts/reach-digests (runner/program-db copy2 (scratch-dir "store2")) in)
         ;; root imports into its own store, which holds no example program (the test store's seed
         ;; does: names a test quotes would reach it)
         {:keys [conn]} (pdb/open! :lmdb (scratch-dir "root-import") 0 :db)
-        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root here :dirs dirs}})))})
+        r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root copy :dirs dirs}})))})
                (ts/reach-digests @conn in)
                (finally (d/release conn true)))]
-    (is (< 300 (count a)) "the whole suite")
+    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
@@ -866,7 +884,7 @@
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
   (let [here (System/getProperty "user.dir")
-        g (program/reach-graph (runner/program-db here (ts/program-store)) (:data-refs (fx/inputs here)))
+        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
         in (fx/inputs here)
         digests #(update-vals (program/graph-index g % nil) :digest)
         a (digests in)
@@ -896,12 +914,12 @@
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
   ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
   ;; namespace (seon.program/file-readers) does.
-  (let [db (runner/program-db (System/getProperty "user.dir") (ts/program-store))
+  (let [db (runner/program-db (System/getProperty "user.dir") (ts/kept-program-store))
         in #(hash-map :env "e" :tree % :config {})
         a (ts/reach-digests db (in "t1"))
         b (ts/reach-digests db (in "t2"))
         step #(ts/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
-    (is (< 300 (count a)) "the whole suite")
+    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
     ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
     ;; one digest and was marked flaky (the-old-word-check-reads, 2026-10-27)

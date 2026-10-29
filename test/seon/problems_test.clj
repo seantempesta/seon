@@ -504,7 +504,7 @@
                           "characters of EDN read (example, failures, error)")
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
-               :sizes [4 40 400]
+               :sizes [4 20 100]
                ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
                :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
 

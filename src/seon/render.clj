@@ -361,8 +361,14 @@
     (ratom/view? x) (html {} (ratom/unwrap x))
     (seq? x) (doall (map #(emit w % env) x))
     (and (vector? x) (keyword? (first x)))
-    (let [[tag & more] x attrs (when (map? (first more)) (first more)) kids (if attrs (rest more) more)]
-      (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids))
+    (let [[tag & more] x attrs (when (map? (first more)) (first more)) kids (if attrs (rest more) more)
+          only (:only env) sel (when-let [id (:id attrs)] (str "#" id))]
+      (cond
+        ;; a draw of some lists only (draw's sels): below the layout's outer element, an element with an id that is none of them is not drawn
+        (and only sel (not (only sel)) (:inside env)) nil
+        only (let [env (if (only sel) (dissoc env :only) (assoc env :inside true))]
+               (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids))
+        :else (into (cond-> [tag] attrs (conj attrs)) (map #(emit w % env)) kids)))
     (and (vector? x) (seq (reads (first x)))) (render! w (first x) (or (second x) {}) (drop 2 x) env)
     (and (vector? x) (or (var? (first x)) (fn? (first x)))) (into [(first x)] (map ratom/realize) (rest x))
     :else (ratom/realize x)))
@@ -395,7 +401,7 @@
   datoms touch, in mount order, parents first. Answers the root's key."
   {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:vector :any]]}
   [w datoms]
-  (let [env {:children (volatile! []) :datoms datoms}]
+  (let [env {:children (volatile! []) :datoms datoms :only (:only w)}]
     (if-let [root @(:out w)]
       (do (ratom/flush!)
           (when (seq datoms)
@@ -488,12 +494,17 @@
   "Tree t (a ctx value: seon.ctx/build's :tree) drawn once by the layout var root-var over db, its
   diff changes: a walker over a reactive atom holding t, framed. Its caller reads it
   (placed-units, placed-hiccup) and disposes it (dispose-walk!): root drawing an agent's branch, the
-  model's page at a commit."
-  {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]}
-  [t changes db root-var]
-  (let [w (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}])]
-    (frame! w nil)
-    w))
+  model's page at a commit. With sels, the element ids of the lists its caller reads ([\"#p-task\"]),
+  only those lists are drawn: the layout's outer element is, and of the elements inside it the ones with an
+  id that is none of sels are neither rendered nor placed (the layout's lists are its outer element's
+  children), so a read of one list costs that list, not the page (docs/render.md#the-page-is-sent-as-what-changed)."
+  {:malli/schema [:function [:=> [:cat :map :seon.host/fn :seon.host/db :any] :map]
+                  [:=> [:cat :map :seon.host/fn :seon.host/db :any [:sequential :string]] :map]]}
+  ([t changes db root-var] (draw t changes db root-var nil))
+  ([t changes db root-var sels]
+   (let [w (cond-> (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}]) (seq sels) (assoc :only (set sels)))]
+     (frame! w nil)
+     w)))
 
 (defn ledger
   "Walk w's ledger: by render var, its :miss (ran, output new), :same (ran, output =) and :hit

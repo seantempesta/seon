@@ -55,6 +55,16 @@
            (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
            path)))
 
+(defn kept-program-store
+  "The path of the plan's program store (:seon.config.proofs/program-store, keyed by kept-program-digest): the
+  one bin/test's plan imported the checkout's tree into before any shard started, so a test that reads the
+  checkout's own program (test-runner/program-db of the working directory) reads that tree's branch and
+  imports nothing (3.4 G ticks a shard process, to the first test in it that read the program). A test that
+  imports another tree takes program-store, a store of its process's own: its branches are scratch, and
+  never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat] :string]}
+  [] (kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
+
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):
   seon.program/graph-index over a graph built from db (seon.program/reach-graph). A test's helper: production
