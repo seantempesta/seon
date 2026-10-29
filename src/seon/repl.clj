@@ -259,8 +259,9 @@
 
 (defn- given
   "For a macro's syntax error in the form an eval read (phase macroexpansion or its syntax check, at
-  Jolt's position): the forms the macro call was given, each in one line by the one printer, as the
-  reader read them, {:seon.error/given [..]}; else nil. A count or a grouping is what such an error is
+  Jolt's position): the forms the macro call was given, each printed whole by the one printer (marked
+  :seon.print/full: a cut would drop the tail a swallowed form sits in, and an agent's own error is never
+  cut), as the reader read them, {:seon.error/given [..]}; else nil. A count or a grouping is what such an error is
   about, and the reader's grouping is what the writer cannot see: md-scan #22 read \"cond requires an
   even number of forms\" and bisected its clauses for twenty evals, its and one paren short (it counted
   the literal \\) as a closer), the clause's value swallowed into the and. See
@@ -271,7 +272,7 @@
     (when (and line col (#{:macro-syntax-check :macroexpansion} phase))
       (when-let [f (some #(when (and (seq? %) (= line (:line (meta %))) (= col (:column (meta %)))) %)
                          (tree-seq coll? seq (:repl/form m)))]
-        {:seon.error/given (mapv #(print/line % (cfg/value :seon.config.render/line-budget)) (rest f))}))))
+        {:seon.error/given (mapv #(print/text (cond-> % (instance? clojure.lang.IObj %) (vary-meta assoc :seon.print/full true))) (rest f))}))))
 
 (defn- error-data
   "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
