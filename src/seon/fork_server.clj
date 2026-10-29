@@ -74,6 +74,25 @@
     (cond-> st (not= from (d/commit-id (:db st)))
             (assoc :index {:commit (d/commit-id (:db st)) :index (r/index idx (d/commit-as-db (:store st) from) (:db st))}))))
 
+(defn warm-first-write
+  "Server state st with the index nodes an agent's first write reaches read into this process's node
+  cache (:warm-t: the t of main it was done for), once per move of main: a write of the shape
+  seon.agent/begin-run! makes (a task's execution, a run and its agent) applied with d/with to :db and
+  dropped, so each agent forked from here inherits those nodes decoded and its first write reads none
+  (a cold agent read 10-13 of them, 2 MB allocated, against 0.2 MB warm; a root's main resumed from its
+  store holds no node its in-memory import wrote). Nothing is written. See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [db (:db st) t (:max-tx db)]
+    (if (= t (:warm-t st))
+      st
+      (let [task (:v (first (d/datoms db :avet :seon.task/id)))]
+        (when task
+          (d/with db [{:seon.task/id task :seon.task/execution :running}
+                      {:seon.run/id "warm#0" :seon.run/task [:seon.task/id task]
+                       :seon.run/agent {:seon.agent/key "warm" :seon.agent/id :warm :seon.agent/task {:seon.task/id task}}}]))
+        (assoc st :warm-t t)))))
+
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current
   (index-at-fork brought it there), which the agent holds as its :main and :base."
@@ -142,7 +161,7 @@
      :fork (let [t0 (profile/now-ns)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
-                 st (index-at-fork st)
+                 st (-> st index-at-fork warm-first-write)
                  ;; the heap made static when it is due (static-due?), so the agent's collections never
                  ;; trace (and un-share) much of what it inherits (design agent-loop section 2: 163 MB
                  ;; of this heap sat in generations 3-4 at fork; static, an agent's work left 106 MB
