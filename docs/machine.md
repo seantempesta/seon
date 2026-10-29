@@ -80,6 +80,23 @@ The import and the wiki are the two phases that grow with the program, and a mai
 
 What is left in a seeded boot: the image (2.3 s, fixed), the program loaded from the store (1 s) and the wiki computed to nothing (1.3 s: every page parsed and every section compared, to find that the tree's wiki is the one stored; a digest of the wiki dirs on main would skip it).
 
+### The restart tests
+
+The tests whose subject is a restart or a resume keep a store of their own, and what they cost was measured solo on 2026-10-29 (load 3-5, `bin/prove --out`; "before" is the median `:ms` of the last twelve verdicts, taken under the shared load of other runs, except the restart test's, which was also run solo: 197 s):
+
+| test | before | after | what moved |
+|---|---|---|---|
+| `seon.source-test/a-restart-catches-up-and-a-new-generation-resumes` | 197 s solo (236 median) | 123 s | its first loop merge's gate ran 48 tests for 1 deferred one (`seon.program-test/a-test-that-starts-a-process-reaches-the-program-it-runs`; the test itself is left out): ~85 s (worktree 9, plan 9, binary build 30, seed 22, shards 42), now the one test named (`seon.fx/test-command`, [merging](merging.md#a-merge-runs-what-the-change-reaches)); its own store is a clone of the process store (-8 s, one first boot that imports nothing) |
+| `seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart` | 72 s | 39 s | its store is a clone of the process store: the first boot imports nothing |
+| `seon.root-test/every-end-of-a-root-is-a-fact` | 84 s | 48 s (shard) | the same |
+| `seon.root-test/a-second-boot-resumes-the-same-main` | 80 s | not changed | a clone gave 67 s `:ms` against 81-94 s, inside the noise, so it keeps its empty store: its attach forks an agent, which waits behind the fork server's compile of the program the clone now holds |
+| `seon.root-test/main-follows-its-source-tree-across-restarts` | 26 s | not changed | already three resumes on a branch of the process store (nothing seeds twice) |
+| `seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged` | 100 s | not changed (130 s solo) | not a restart: the shared root's boot with `src` and `test` imported (~one boot per shard) and the judge's run of `seon.ref-test`; a task of its own |
+
+The phases of the restart test, solo, before: boot 15 s, `load-all!` of the test namespaces in root 10 s, the first loop turn 137 s (its gate ~110 s, the turn itself ~25 s), the second 2.6 s, SIGKILL 0.8 s, second boot 8.7 s, `my.root/build!` 35 s (`bin/worktree --at` 9 s, `bin/build seon` 30 s of Jolt's whole-program link: with every compile cache warm and the tree unchanged a second build there took the same 31 s, since the stamp is the generation's own), the generation's boot 0.8 s. The build is not a lookup: the shared caches (`target/cache`, bin/env) already serve it, and the tree it builds is new (the two merges change it). A no-op `bin/build seon` of a built tree is 1 s.
+
+`seon.test-store/clone-process-store!` is the one way a test makes a store of its own from the seeded one (APFS copy-on-write of `data.mdb`, as `bin/check` takes its store).
+
 A test root's processes end with the runner. `bin/held`'s watcher blocked in a `read` of the starter's fifo, and on macOS the last writer closing wakes one blocked reader, not all of them: a root started under a held starter has two watchers on the one fifo (the outer holder of `bin/root start`, and the detached holder of the root), so a runner killed while a root was booting (every test's `start-root!` waits for ROOT LISTENING, 7-45 s) woke one, and the root, its fork server and their agents stayed (~50 found, 2026-10-29). Reproduced by killing the starter 4 s into a root's boot (four survivors); the watcher now opens the fifo non-blocking and waits with `select`, which wakes every watcher (three readers of one fifo: one woken with `read`, three with `select`), and the same kill leaves none.
 
 ## Processes
