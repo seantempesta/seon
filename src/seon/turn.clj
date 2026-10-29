@@ -151,9 +151,10 @@
   "A turn Seon could not draw (st, its state; em, the error map: what it threw, seon.agent/error-map,
   or the walk's missing status, :seon.turn/no-status) given to the agent as data: em as a message
   from seon on its branch, which its
-  next turn reads as any message, the turn counted and the throw counted in :threw (work! ends the
-  agent's work :error on the second turn in a row that throws: its request cannot be drawn, so no
-  model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
+  next turn reads as any message, counted in :threw. A walk that drew no status still makes its model
+  call that turn, the message in its request; a throw counts the turn, and work! ends the agent's
+  work :error on the second throw in a row with no model turn between (its request cannot be drawn,
+  so no model turn could read the message). Answers st after it, :error its error map. The turn loop's entrant boundary (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map):
   Seon's code meets the agent's program each turn (md-scan #7's redefined scan ended its run at turn 8)."
   {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
   [st em]
@@ -163,7 +164,7 @@
                                     assoc :seon.print/full true))]
     (agent/transact! (update (task/message-tx (str k "/turn-error/" (random-uuid)) :message "seon" nil body) 0 assoc :seon.message/agent {:seon.agent/key k}))
     (agent/commit!)
-    (-> st (update :turn inc) (update :threw (fnil inc 0)) (assoc :error em))))
+    (-> st (update :threw (fnil inc 0)) (assoc :error em))))
 
 (defn- basis!
   "What a turn's context is built from, recorded instead of its text (a model call stores its
@@ -456,8 +457,9 @@
                     hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
                 (cond
                   ;; no status is no done rule: the run ends on that error, never green
-                  ;; the walk drew no status (the agent's program broke the layout): the agent's to read, as a throw is
-                  (contract/error? s) [::undrawn s]
+                  ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
+                  (contract/error? s) (let [st (turn-error! st s) st' (act! st obs s model)]
+                                        (if (contract/error? st') (end! st :error (:seon.error/message st') st') [::next (dissoc st' :threw :error)]))
                   ;; git's CI after the merge: green on the combined program; merge main again until
                   ;; it brings nothing new
                   (and (empty? reasons) merge?)
@@ -475,12 +477,12 @@
                       ;; a turn that threw is the agent's to read, as data, and the loop goes on (turn-error!); the
                       ;; second in a row, with no model turn between, ends its work with that error
                       (catch Throwable e [::undrawn (agent/error-map e 'seon.turn/work!)]))
-            ;; a turn Seon could not draw (it threw, or drew no status) is given to the agent (turn-error!); the
-            ;; second in a row, with no model turn between, ends its work with that error
+            ;; a turn that threw is given to the agent (turn-error!) and counted; the second in a row, with no
+            ;; model turn between, ends its work with that error
             step (if (and (vector? step) (= ::undrawn (first step)))
-                   (let [st' (turn-error! st (second step))]
+                   (let [st' (update (turn-error! st (second step)) :turn inc)]
                      (if (< 1 (:threw st'))
-                       (end! st' :error (str "two turns in a row Seon could not draw: " (:seon.error/message (:error st'))) (:error st'))
+                       (end! st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
                        [::next st']))
                    step)]
         (if (and (vector? step) (= ::next (first step))) (recur (second step)) step)))))
