@@ -48,6 +48,8 @@ The failure points whose edge function catches, each with the one variant it dec
 | An interrupt or a tick budget stops a running form (root's SIGUSR1; Jolt's `run-interruptible` past its ticks, `:seon.config.agent/form-ticks`: work done, never time). Interrupts live in `seon.intr`, from two sources: root's SIGUSR1 (`seon.intr/install!`), and SIGIO from the agent's own socket to root (`seon.intr/exit-at-eof!`), which ends the process when that socket reads EOF. A form blocked in a wait (a channel take) is reached too: the signal wakes Chez's condition-wait, which runs the handler before the waiter waits again (Chez ``jolt/signal-wakes-wait``), and root's interrupt also sets the thread's interrupt flag, which ends a blocked `<!!` as `Thread.interrupt` does | `seon.intr/run` | ex-info `{:interrupted true}`, or the typed `:seon.repl/ticks-spent` `{:ticks :budget}` | `seon.repl/eval-code` answers the form `interrupted` or its typed error and goes on |
 | A test that does more work than its tick budget (`:seon.config.agent/test-ticks`, per test; Jolt's `run-interruptible`) | `seon.proofs/test-vars` | `:seon.test/ticks-spent` `{:ticks :budget}` on that test's `:error` report, naming it | that test is red; the run goes on to the next test |
 
+Whatever an edge or boundary raises is kept as data, not as the value that made it: [an error keeps data](errors.md#an-error-keeps-data).
+
 ## Entrant boundaries (a defect becomes a recorded error map)
 
 The boundaries where a defect in a request becomes a recorded error map instead of ending its process.
