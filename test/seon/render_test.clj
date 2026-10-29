@@ -1250,7 +1250,9 @@
                   [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make demo/f." :seon.task/execution :running
                     :seon.task/branch :task-demo-f :seon.task/kind :whole :seon.task/proofs #{'demo/f-test}}]
                   (seon.task/agent-tx "b1" :a3 {:status :idle :branch :task-demo-f})
-                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")]]
+                  (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
+                  ;; the agent's task, its record's :task (task seon.agent/the-agent-is-the-unit-not-the-run)
+                  [{:seon.agent/key (seon.task/agent-key "b1" :a3) :seon.agent/task {:seon.task/id "demo/f"}}]]]
         (d/transact conn tx))
       (let [c0 (d/commit-id @conn)
             k (seon.task/agent-key "b1" :a3)
