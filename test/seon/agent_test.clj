@@ -994,15 +994,16 @@
            member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#1" :key k :db @store-conn})
-         (is (nil? (:seon.run/outcome (member :runs :seon.run/id "demo/w#1"))) "before the take, nothing of main's")
+         (is (nil? (:seon.run/outcome (d/entity (agent/db) [:seon.run/id "demo/w#1"]))) "before the take, nothing of main's")
          (is (= [{:seon.run/id "demo/w#1" :seon.run/outcome :waiting :seon.run/reason "waiting for a message"}
                  {:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its run and its evals that the branch does not; e9 is no eval of its branch")
          (is (= [] (agent/take-main!)) "the take a turn makes (seon.turn/take!): no entries here, the facts written")
          (is (= [nil :waiting "waiting for a message"]
-                (mapv (member :runs :seon.run/id "demo/w#1") [:seon.run/status :seon.run/outcome :seon.run/reason]))
-             "the run's outcome and reason on main are in its ctx after the take; its status is not taken")
+                (mapv (d/entity (agent/db) [:seon.run/id "demo/w#1"]) [:seon.run/status :seon.run/outcome :seon.run/reason]))
+             ;; read from the branch: the agent's record no longer pulls runs (the-agent-is-the-unit-not-the-run, cut 1)
+             "the run's outcome and reason on main are on its branch after the take; its status is not taken")
          (is (= [] (task/running (agent/db))) "so the branch holds no whole run: its reference is no running run")
          (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "and the opened eval")
          (is (= [] (agent/untaken-facts)) "taken: nothing more to copy")

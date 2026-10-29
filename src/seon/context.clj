@@ -905,8 +905,8 @@
 
 (defn records
   "What agent a's conversation is made of on db, in tx order: its evals (not a context read's: that
-  ends only the request that ran it) and the messages its runs took
-  (written on its branch by the turn that took each), each [tx value schema-key]; with since,
+  ends only the request that ran it) and the messages it took
+  (:seon.message/agent, written on its branch by the turn that took each), each [tx value schema-key]; with since,
   only those of transaction since and later (what a request has not printed yet). The
   session's, not one run's: a run that wakes or loads the session reads every run before it
   (design agent-loop section 1)."
@@ -918,7 +918,7 @@
                      :let [v (d/pull db [:seon.eval/id :seon.eval/by :seon.eval/record] e)]
                      :when (not= "context" (:seon.eval/by v))]
                  [tx v :seon.db/eval-fact])
-               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?ru :seon.run/agent ?a] [?m :seon.message/to ?ru ?tx] [(>= ?tx ?since)]] db a (or since 0))]
+               (for [[e tx] (d/q '[:find ?m ?tx :in $ ?a ?since :where [?m :seon.message/agent ?a ?tx] [(>= ?tx ?since)]] db a (or since 0))]
                  [tx (d/pull db [:seon.message/id :seon.message/from :seon.message/body] e) :seon.message/fact]))
        (sort-by (fn [[tx v]] [tx (:seon.eval/id v (:seon.message/id v))]))
        vec)))
@@ -968,16 +968,11 @@
                   told #(cond (not (map? %)) %
                               (:seon.eval/id %) (symbol "result" (:seon.eval/id %))
                               (:seon.turn/id %) (:seon.turn/id %)
-                              ;; a task held whole, which the page's task data draws, by its id: a task
-                              ;; re-homed under a restart's new run was 190 KB of :ctx in one read
+                              ;; a task held whole, which the page's task data draws, by its id
                               (:seon.task/id %) (:seon.task/id %)
                               :else %)
-                  ;; a task leaving a run's path as it re-homes (whole there before, a stub now), which
-                  ;; the diff tells key by key: its page part tells the move, never this
-                  whole? (fn [r rid] (some? (get-in (:tree r) [:runs rid :task :seon.task/id])))
-                  left? (fn [[k rid t]] (and (= [k t] [:runs :task]) (whole? r0 rid) (not (whole? r1 rid))))
                   dc (into (sorted-map-by #(compare (str %1) (str %2)))
-                           (for [[p ov] (ctx/diff r0 r1) :when (not (left? p))] [p (mapv #(walk/prewalk told %) ov)]))]
+                           (for [[p ov] (ctx/diff r0 r1)] [p (mapv #(walk/prewalk told %) ov)]))]
               (cond-> {} (seq dp) (assoc :page dp) (seq dc) (assoc :ctx dc))))]
     (with-meta [{:role "user" :content (print/text (vary-meta v assoc :seon.print/full true))}] {:commit c1 :page @p1-of}))))
 
@@ -989,7 +984,7 @@
   was never asked."
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :keyword] [:vector [:tuple :int :any]]]}
   [db a origin]
-  (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a ?o :where [?r :seon.run/agent ?a] [?t :seon.turn/run ?r] [?t :seon.turn/origin ?o ?tx]] db a origin))
+  (let [ts (sort-by first (d/q '[:find ?tx ?t :in $ ?a ?o :where [?t :seon.turn/agent ?a] [?t :seon.turn/origin ?o ?tx]] db a origin))
         newest (second (last ts))]
     (vec (keep (fn [[tx t]]
                  (if-let [c (some (fn [ref] (when (= :page (first ref)) (nth ref 3))) (rseq (vec (:seon.turn/sent (d/pull db [:seon.turn/sent] t)))))]
