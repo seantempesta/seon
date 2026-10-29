@@ -210,10 +210,10 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:stalled :dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :leadless-section :uncited-task :problem-unlinked :old-word}
+ :seon.problems/class [:enum {:seon.problems/derived #{:stalled :dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :old-word}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
-                             :seon.problems/attention #{:stale-section}
-                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page :leadless-section}] [:tests #{:red :cost}]
+                             :seon.problems/attention #{:stale-section :uncited-var}
+                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost}]
                                                     [:laws #{:unnamed-site :old-word}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed :uncited-task}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
@@ -226,9 +226,9 @@
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
                                                   :old-word "docs/health.md#an-old-word" :dead-citation "docs/health.md#a-dead-citation" :unnamed-site "docs/health.md#a-laws-unnamed-site"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-section "docs/health.md#a-stale-section"
-                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
+                                                  :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :uncited-var "docs/health.md#a-function-that-cites-no-section" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
                        :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin :unrun
-                       :stale-section :orphan-page :leadless-section :uncited-task :problem-unlinked :old-word]
+                       :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :old-word]
  :seon.problems/row [:map {:seon.render/html seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]
                      [:evidence :map] [:proofs [:vector :qualified-symbol]] [:answered-by [:vector :string]]
