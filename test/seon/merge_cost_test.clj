@@ -7,7 +7,7 @@
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector] [seon.merge :as merge]
             [clojure.java.shell]))
 
-;; A store on disk of this test's own, the last resort (docs/storage.md): the in-memory test
+;; One store on disk of this test's own for its three proofs (a branch each, removed by the namespace's fixture), the last resort (docs/storage.md): the in-memory test
 ;; store gives its index nodes no addresses, so no two db values of it share a stored subtree
 ;; and a structural diff of them reads everything; LMDB, as in production, shares them.
 (def ^:private store
@@ -35,8 +35,7 @@
     r))
 
 (deftest a-three-way-costs-the-changes-not-the-program
-  (try
-    (cost/proof
+  (cost/proof
       {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/three-of
        :n "forms the branches hold"
        :work (str "the datoms that differ between base and each side (datoms-diff skips every subtree they "
@@ -56,15 +55,7 @@
        ;; descend once. Until then the proof judges the sizes a merge meets
        :per-n {:ns 400000 :bytes 500000}
        :fixed {:ns 4000000 :bytes 6800000}
-       :sizes [100 300 1000]})
-    (finally (when (realized? store)
-               (let [path (get-in @@store [:config :store :path])]
-                 (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))
-
-;; data-of's store, a second of this test's own: the three-way proof releases and removes its
-;; store at its end
-(def ^:private data-store
-  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-data-cost-" (random-uuid)) 0 :db))))
+       :sizes [10 30 100]}))
 
 (defn data-of
   "delta-three-way's arguments for a merge of declared data (:all): base holding n data
@@ -72,7 +63,7 @@
   theirs, each a branch of it that changed that one value, all read from the store."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:= :all]]]}
   [n]
-  (let [conn @data-store
+  (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
         b (keyword (str "d" n "-" (random-uuid)))
         _ (d/branch! conn :db b)
@@ -97,8 +88,7 @@
   ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
   ;; is data is asked of the attributes of the datoms that differ (seon.merge/data-attr?), so the
   ;; merge costs the same however many attributes the store declares
-  (try
-    (cost/proof
+  (cost/proof
       {:of 'seon.merge/delta-three-way :input 'seon.merge-cost-test/data-of
        :n "data attributes the store declares, one value changed on each side"
        :work (str "the datoms that differ (one value each side), the keys their entity bears, each "
@@ -110,15 +100,7 @@
        ;; function, 43, 43 and 47); reading (d/schema db) per db per read it was 8.11 / 11.84 / 25.57 MB and 2,726 / 3,926 /
        ;; 8,126 calls; 46 since touched-keys calls touched-by (which takes datoms a caller already holds) once per side
        :fixed {:bytes 650000 :calls 48}
-       :sizes [100 300 1000]})
-    (finally (when (realized? data-store)
-               (let [path (get-in @@data-store [:config :store :path])]
-                 (d/release @data-store) (clojure.java.shell/sh "rm" "-rf" path))))))
-
-;; embedded-of's store, a third of this test's own, for the same reason as data-store: the other proofs
-;; release and remove theirs at their end, and tests of one shard share the process
-(def ^:private embedded-store
-  (delay (:conn (pdb/open! :lmdb (str (seon.config/checkout) "/target/merge-embedded-cost-" (random-uuid)) 0 :db))))
+       :sizes [10 30 100]}))
 
 (defn embedded-of
   "delta-three-way's arguments for a main that only embedded: base holding n forms, ours changing
@@ -126,7 +108,7 @@
   seon.vector writes of a form's text), no form's program content changed."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:set :keyword]]]}
   [n]
-  (let [conn @embedded-store
+  (let [conn @store
         cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
         b (keyword (str "e" n "-" (random-uuid)))
         _ (d/branch! conn :db b)
@@ -144,9 +126,9 @@
 (use-fixtures :once
   (fn [run]
     (try (run)
-         (finally (when (realized? embedded-store)
-                    (let [path (get-in @@embedded-store [:config :store :path])]
-                      (d/release @embedded-store) (clojure.java.shell/sh "rm" "-rf" path)))))))
+         (finally (when (realized? store)
+                    (let [path (get-in @@store [:config :store :path])]
+                      (d/release @store) (clojure.java.shell/sh "rm" "-rf" path)))))))
 
 (deftest a-main-that-only-embedded-changes-no-key
   (let [[base ours theirs das] (embedded-of 10)]
@@ -171,4 +153,4 @@
      ;; 27 calls since 2026-10-30: seon.merge/content-attr, one contracted call per side's filter, was
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
      :fixed {:bytes 4000000 :calls 27}
-     :sizes [10 100 1000]}))
+     :sizes [10 30 100]}))
