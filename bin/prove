@@ -57,6 +57,18 @@ MERGE=0
 WHAT=both
 [[ ${1:-} == --tests || ${1:-} == --checks ]] && { WHAT=${1#--}; shift }
 (( MERGE )) && [[ $WHAT != both ]] && { echo "MERGE FAILED: --merge runs the tests and the checks both (no --$WHAT)"; exit 1 }
+# no work, no run: a tree a green prove of the same kind already proved (bin/tree, its id with untracked files)
+# answers at once, before any process starts; a green run below writes its marker (the verdict cache's
+# dir, which every checkout shares: bin/env)
+. "$ROOT/bin/env"
+TREE=$("$ROOT/bin/tree" "$ROOT") || TREE=
+KEY=${TREE:+$WHAT-$MERGE-$(print -r -- "$*" | shasum | cut -c1-12)-$TREE}
+MARK=$SEON_RESULTS_DIR/proved/$KEY
+if [[ -n $KEY && -f $MARK ]]; then
+  echo "prove: tree $TREE proved green already ($(cat "$MARK")): nothing to run"
+  echo "PROVE OK"
+  exit 0
+fi
 OWN=0
 if [[ -z $OUT ]]; then
   OWN=1; OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$
@@ -77,6 +89,10 @@ if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
 exit $st
 ) 2>&1 | tee "$OUT/prove.log"
 st=${pipestatus[1]}
+# the marker: this tree, this kind of run, green (a red, or a tree edited during the run, writes none)
+if (( st == 0 )) && [[ -n $KEY && $("$ROOT/bin/tree" "$ROOT") == $TREE ]]; then
+  mkdir -p "${MARK:h}" && print -r -- "$(date '+%Y-%m-%d %H:%M') ${OUT:t}" > "$MARK.$$" && mv "$MARK.$$" "$MARK"
+fi
 # a green run's logs are read by no one: the directory it made is reclaimed with the run (a red or
 # killed run's stays, its evidence; a --merge run's too, the merge log names it; one --out named is its caller's)
 if (( ! MERGE )); then (( st == 0 && OWN )) && rm -rf "$OUT"; exit $st; fi
