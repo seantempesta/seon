@@ -1,4 +1,1 @@
-[{:seon.task/name "a-registration-counts-the-stored-values-it-refuses"
-  :seon.task/plan "Done; what exists. `my.schema/registration`'s `:registration` carries `:seon.schema.usage/check {:checked n :refused m}` when the registered key is an attribute the db stores: its stored values on the branch (one `:aevt` pass over its datoms) validated by the new form's validator (`my.schema/usage-check`), so an agent narrowing `:seon.run/status` learns what its change breaks before it merges, not when the next generation reads the store. Cost: proportional to the attribute's datoms, one validator call each. The schema `:seon.schema.usage/check` is registered in `resources/seon/schemas/seon.schema.edn`, an optional member of `:seon.schema/registration`. v1: `seon.schema/register!` answered the same check (`~/src/seon` `seon.db/registration-check`), run once in the registering evaluation. Docs: docs/source.md#schemas-at-the-repl."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.schema-test/a-registration-counts-the-stored-values-it-refuses}}]
+[]
