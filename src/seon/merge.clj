@@ -36,10 +36,11 @@
   carried, so main writing one never puts a branch behind."
   #{:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause})
 
-(def ^:private content-namespaces
-  "The namespaces of the attributes a program key's content reads: the program's (seon.program/attr-namespaces) and
-  the wiki's, a section a key of its own (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  (conj program/attr-namespaces "seon.section"))
+(def ^:private section-stated
+  "The attributes a page's text states of a section: its address, heading, own text and parent. The rest of a
+  section (lead, references, names, dead links, what it read) the load derives from these, so a change shows
+  in these four and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  #{:seon.section/address :seon.section/heading :seon.section/text :seon.section/parent})
 
 (defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
   (let [n (namespace k)]
@@ -56,7 +57,7 @@
   (if (= :all data-attrs)
     (let [schema (:schema db)]
       (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (content-namespaces (namespace a))) (not (platform-record? a))))))
+                            (not (or (program/attr-namespaces (namespace a)) (section-stated a))) (not (platform-record? a))))))
     data-attrs))
 
 (defn- data-attr-set
@@ -83,13 +84,13 @@
       c)))
 
 (defn- section-content
-  "Section entity e's content on db: each :seon.section/* attribute it holds, a card-many one as a set, refs as
-  entity ids (issued once across the store, so they name the same sections on every branch). See
+  "Section entity e's content on db: what its page states of it (section-stated), refs as entity ids (issued
+  once across the store, so they name the same sections on every branch). See
   docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :int] :map]}
   [db e]
   (let [many (get-in db [:rschema :db.cardinality/many] #{})]
-    (reduce (fn [m dt] (if (= "seon.section" (namespace (:a dt)))
+    (reduce (fn [m dt] (if (section-stated (:a dt))
                          (if (many (:a dt)) (update m (:a dt) (fnil conj #{}) (:v dt)) (assoc m (:a dt) (:v dt)))
                          m))
             (sorted-map) (d/datoms db :eavt e))))
@@ -229,7 +230,7 @@
   only embedded) with no contract of its own."
   {:malli/schema [:=> [:cat ifn? ifn?] :seon.host/fn]}
   [das-b das-d]
-  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (content-namespaces (namespace a))) (das-b a) (das-d a))))))
+  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (section-stated a))) (das-b a) (das-d a))))))
 
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ
@@ -241,7 +242,7 @@
   [base db data-attrs moved]
   (let [read (fn [db] (let [das (data-attr? db data-attrs)]
                         [db (get-in db [:rschema :db.cardinality/many] #{}) das
-                         (fn [a] (or (content-namespaces (namespace a)) (das a)))]))
+                         (fn [a] (or (program/attr-namespaces (namespace a)) (section-stated a) (das a)))]))
         b (read base) d (read db)
         content-attr? (content-attr (nth b 2) (nth d 2))
         content? (fn [{:keys [a]}] (content-attr? a))]
@@ -366,7 +367,7 @@
         ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
         es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
         das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (content-namespaces (namespace a))))))
+        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (= "seon.section" (namespace a))))))
         [gone added] (d/datoms-diff base src :eavt [])
         added (filterv carry? added)
         retracted (vec (for [d gone :when (carry? d)
