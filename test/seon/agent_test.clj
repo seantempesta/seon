@@ -150,19 +150,32 @@
       (sh/sh "rm" "-rf" runs)
       {:agents agents :out log :left (if drained left (conj left :not-drained))})))
 
-(deftest a-wait-takes-a-request-another-wait-left-pending
-  ;; docs/failure-points.md: md-scan #21 hung: root's :tests reached the agent during a model call's wait, which put
-  ;; it in :pending; prove!'s wait then read only its socket, and root answered prove! only after :tests
-  (let [q (into clojure.lang.PersistentQueue/EMPTY [{:op :catch-up} {:op :tests :id :a1 :mode :turn} {:op :eval :k 3}])
-        [m q'] (agent/take-op q :tests)]
-    (is (= {:op :tests :id :a1 :mode :turn} m) "the pending request of the op the wait takes")
-    (is (= [{:op :catch-up} {:op :eval :k 3}] (vec q')) "and the others stay, in their order, for the loop")
-    (is (instance? clojure.lang.PersistentQueue q') "still the loop's queue")
-    (is (nil? (agent/take-op q' :tests)) "none left, none taken")
-    ;; and the wait takes it so: what await-op! calls, as the compiler's facts say (seon.source/accounts)
-    (is (contains? (into #{} (mapcat :refs) (:accounts (seon.source/accounts 'seon.agent (my.agent/source-fn 'seon.agent/await-op!))))
-                   'seon.agent/take-op)
-        "await-op! takes a pending request before it reads")))
+(deftest a-tests-request-is-answered-while-an-eval-blocks
+  ;; task seon.agent/the-agent-is-a-flow-graph: root's :tests request goes to the agent's :tests proc,
+  ;; never behind the eval the :repl proc runs (md-scan #21: a :tests waited behind a wait that held the
+  ;; loop). An eval blocks on a channel take that nothing will answer; the test service proves the
+  ;; agent's branch meanwhile and answers; then root's interrupt stops the eval and the agent answers on
+  (let [checkout (seon.config/checkout)
+        main (str "tests-beside-an-eval-" (random-uuid))
+        store (ts/process-store checkout)
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store store :main main :runs runs})
+        ask (fn [m] (ts/ask root m))
+        eval-root (fn [code] (let [r (ask {:op :eval :agent "root" :code code})] (if (:error r) r (value-of (:response r)))))
+        _ (eval-root "(c/spawn! sys {})")
+        _ (eval-root (str "(let [ev (c/events sys)] (def blocked (c/submit! sys :a1 \"(clojure.core.async/<!! (clojure.core.async/chan))\")) "
+                          "(loop [] (let [e (clojure.core.async/<!! ev)] (if (and (= :started (:type e)) (= :a1 (:agent e))) :began (recur)))))"))
+        ;; the run's answer, or :none if the agent did not answer it while its eval blocked
+        proved (eval-root "(deref (future @(c/prove! sys :a1 #{} :turn)) 60000 :none)")
+        _ (eval-root "(c/interrupt! sys :a1)")
+        stopped (eval-root "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")")
+        next-answer (let [r (ask {:op :eval :agent "a1" :code "(+ 2 2)"})] (if (:error r) r (value-of (:response r))))]
+    (ts/stop-root! root)
+    (ts/drop-main! store main)
+    (sh/sh "rm" "-rf" runs)
+    (is (and (map? proved) (contains? proved :pass)) (str "the run answered while the eval blocked: " (pr-str (if (map? proved) (select-keys proved [:pass :fail :error :ran]) proved))))
+    (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
+    (is (= 4 next-answer) (pr-str next-answer))))
 
 (deftest a-spawn-after-the-fork-server-is-lost-answers
   ;; task seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
