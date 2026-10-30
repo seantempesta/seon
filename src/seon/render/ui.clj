@@ -986,33 +986,6 @@
   (let [main (when (task/merges? (:seon.task/kind (:task c))) (ratom/realize (:seon.agent/main-commit c)))]
     (with-meta (context/status db aid {:main main}) {:seon.render/schema :seon.context/status})))
 
-(defn related-html
-  "What is related as the page shows it (the declared html render of :seon.context/related; the model
-  reads the same value, the forms that read more among it, by its model render, the value itself):
-  folded to how many of each kind, opened to one line each, as related-view lines them. See
-  docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts v]
-  (let [kinds (filter (comp sequential? val) (dissoc v :read :more))]
-    [:details
-     [:summary {:class "kicker"} (str "related · " (str/join ", " (for [[k xs] kinds] (str (count xs) " " (name k)))))]
-     [:ul {:class "mt-1 flex flex-col gap-1"}
-      (for [[_ xs] kinds x xs]
-        [:li {:class "text-text-300"} (if (string? x) x [#'render/html {:budget (config/value :seon.config.render/value-budget)} x])])]]))
-
-(defn related
-  "What the agent's work on its task is likely to need beyond what the plan cites (a component over
-  ctx and the db): the units its last turn included (:seon.agent/included, seon.context/selected:
-  what its plan and recent evals point to, each whole with its chance, in the order they entered), as
-  seon.context/related-view lines them (with the forms that read more), a part (its data,
-  :seon.context/related: docs/render.md#a-part-answers-data); a line saying so when there is nothing
-  yet. No relevance call here: the turn decides, the page draws."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} _aid]
-  (if-let [r (some->> (not-empty (:seon.agent/included c)) context/shown (context/related-view db))]
-    (with-meta r {:seon.render/schema :seon.context/related})
-    [:section [:h2 "related"] [:p {:class "muted"} "nothing related yet"]]))
-
 (defn namespaces-html
   "The namespaces the work touches as the page shows them (the declared html render of
   :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
@@ -1294,7 +1267,7 @@
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): its ctx,
   read through the view, as components placed in the render's three lists, each keyed by what it
   shows (an eid, a var, a key). The task's list (p-task, the parts the model is sent: seon.context/page-lists):
-  the newest run's task, each var its plan cites, what is related, what its newest turn observed,
+  the newest run's task, each var its plan cites, what its newest turn observed,
   the run once it took a turn, then each key the agent added to its ctx. The conversation (c-rows, the chat a person reads): the run's turns as
   their replies (chat-turn), its evals as lines that open (eval-item) and its messages as bubbles
   (chat-message), in the order they were written (eids are issued in that order), then how the run
@@ -1327,7 +1300,6 @@
                        (for [cite (context/citations db (task/task db (:seon.task/id task)))] [#'cited {:seon.ref/citation cite} aid (context/cite-key cite)])
                        ;; where the code lives: each namespace the work touches, its aliases, definitions and tests
                        [#'namespaces {} aid]
-                       [#'related {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                        [#'status {} aid]))
       ;; the run once it took a turn: before that it says only its id, which the task's names

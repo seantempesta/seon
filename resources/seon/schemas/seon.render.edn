@@ -15,9 +15,6 @@
  :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html :seon.render/model seon.render.ui/cited-model}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
- ;; what an agent's work is likely to need beyond what its plan cites (seon.context/related-view), a part of its
- ;; page: the page draws it folded, the model is sent the value, the forms that read more among it
- :seon.context/related [:map {:seon.render/html seon.render.ui/related-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests
  :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by

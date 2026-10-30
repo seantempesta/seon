@@ -394,10 +394,10 @@
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
  ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where
  ;; the program is told from its tests: the failure-point law's sites (a namespace with no file,
- ;; an agent's REPL app, is no failure point), and related's and similar's functions (there one
+ ;; an agent's REPL app, is no failure point), and similar's functions (there one
  ;; with no file is the agent's new work, and shown). Provenance: root, 2026-10-25 (the live round
- ;; 5's big-map request, whose related functions were test/ helpers). At the bound: an empty
- ;; vector makes nothing the program's (no law site, no related function but the agent's own).
+ ;; 5's big-map request, whose similar functions were test/ helpers). At the bound: an empty
+ ;; vector makes nothing the program's (no law site, no similar function but the agent's own).
  :seon.config.source/program-dirs ["src"]
  ;; Unit: paths. The checkout's top-level paths no file read and no binary build reads: left out of
  ;; its tree id (seon.fx/tree-id, bin/tree, which reads this line of the shipped file), so a
@@ -796,16 +796,6 @@
  ;; that listed them named the same functions as a run listing none (my.agent/prove,
  ;; seon.model/provider-error, seon.docs/view, seon.print/print-value): no measured gain.
  :seon.config.render/similar 0
- ;; Unit: lines of each kind. The wiki sections, program functions and schema keys the task's plan
- ;; is likely to need (seon.context/related, ranked by seon.context/relevance) that the plan does
- ;; not cite, at most this many of each in the page's related part and (my.task/related), those at
- ;; :seon.config.render/relevance-summary or more; 0 shows none. Not :seon.config.render/similar:
- ;; that counts program functions in the task's data, the run's fixed part (for the prompt cache),
- ;; and is off by step 6's measurement; these follow the plan as it is rewritten. Provenance: the
- ;; owner, 2026-10-25 ("embeddings on our docs ... pulling in related concepts that we can refine
- ;; over the session"); 5 each found 0.427 of what 57 merged tasks' plans changed in functions,
- ;; 0.798 in sections and 0.403 in schema keys (docs/vector.md#relevance).
- :seon.config.render/related 5
  ;; Relevance (seon.context/relevance, docs/vector.md#relevance): a logistic over five features of
  ;; an item near a context, one weight set a kind: zc its cosine with the query's vector, zb its BM25
  ;; for the query's words, zt its cosine with the touched items' mean vector (each a z-score over
@@ -844,36 +834,14 @@
  :seon.config.render/relevance-calibration {:function [[-6.51 0.16] [-5.17 0.169] [-3.83 0.243] [-3.3 0.312] [-2.78 0.362] [-1.95 0.433] [-1.12 0.485] [-0.6 0.554] [-0.07 0.602] [0.62 0.701] [1.32 0.753] [2.56 0.77] [3.81 0.784]]
                                             :section [[-6.16 0.0] [-4.98 0.0] [-3.8 0.002] [-3.3 0.004] [-2.81 0.007] [-2.63 0.022] [-2.45 0.045] [-2.19 0.127] [-1.92 0.232] [-1.55 0.373] [-1.19 0.497] [-0.94 0.582] [-0.69 0.651] [-0.54 0.765] [-0.4 0.834] [2.12 0.913] [4.65 0.948]]
                                             :schema [[-8.67 0.014] [-6.58 0.02] [-4.49 0.043] [-4.14 0.07] [-3.79 0.096] [-3.36 0.17] [-2.93 0.237] [-2.39 0.401] [-1.84 0.515] [-1.68 0.591] [-1.52 0.648] [-0.61 0.72] [0.29 0.769] [0.65 0.769] [1.0 0.769]]}
- ;; Unit: chance (0-1). An item related ranks at this relevance or more is shown, a line with its
- ;; chance; below it, counted (:hidden) with the form that lists it. A task may set its own (its
+ ;; Unit: chance (0-1). A hit my.agent/search ranks at this relevance or more is shown, a line with its
+ ;; chance; below it, counted (a last :more entry) with the call that lists it. A task may set its own (its
  ;; :seon.task/config). Provenance: the judge's labels, cross-fitted: at 0.4 the lines shown were
  ;; worth reading 0.57 (functions), 0.66 (sections) and 0.68 (schema keys) of the time, about 3.6,
  ;; 2.3 and 1.6 a page of the first five; at 0.05 (the merge-change scale's cut before) functions
  ;; were starved and sections and keys half noise (docs/vector.md#relevance). At the bound: an item at
  ;; exactly this chance is shown.
  :seon.config.render/relevance-summary 0.4
- ;; Unit: chance (0-1). An item shown at this relevance or more is shown at doc depth: a section's
- ;; whole lead, a function's whole doc. Provenance: the judge's labels, cross-fitted: at 0.6 the lines
- ;; were worth reading 0.73 (functions), 0.80 (sections) and 0.80 (keys) of the time. It is the page's
- ;; entry cut too (seon.context/selected: nothing below it is shown). A task may set its own (its
- ;; :seon.task/config). At the bound: an item at exactly this chance is shown at doc depth.
- :seon.config.render/relevance-doc 0.6
- ;; Unit: tokens (chars/4 of a line as drawn). How much the page's selected units may take
- ;; (seon.context/selected): each enters, best first, when it first reaches relevance-doc, while its
- ;; line (whole) fits. Provenance: on 44 recorded turns of 10 runs, recall of what the agent read next rose to
- ;; 0.48-0.56 by 800 tokens and little after (0.48-0.58 at 1,600), plan alone and plan plus its evals'
- ;; trajectory (docs/vector.md); revisit when 1,600 is measured on live turns.
- ;; At the bound: a unit that does not fit is counted in :hidden, not shown.
- :seon.config.render/relevance-budget 800
- ;; Unit: evals. How fast an eval's weight in the work's focus (seon.context/focus) fades: it halves
- ;; every this many of the agent's later evals. Provenance: the replay above, 1 and 3 ranked alike
- ;; (R@10 0.441 both on the trajectory alone); 1 follows the agent's newest turn. At the bound: none.
- :seon.config.render/relevance-half-life 1.0
- ;; Unit: evals. How many of the agent's latest evals give their code as the words of the work's focus
- ;; (seon.context/focus), which the page's text scores take beside its vector. Provenance: the value the
- ;; focus shipped with (the replay above measured the vector, not this); revisit when text recall is
- ;; measured on live turns. At the bound: earlier evals' code is not in the words.
- :seon.config.render/relevance-words 3
  ;; Unit: items of each kind. How many of the nearest by meaning relevance's pool takes
  ;; (seon.vector/near), beside the seeds and their neighbourhood, and how many of a seed's
  ;; neighbours each read of who names it takes (seon.context/neighbours: a plan citing
@@ -898,20 +866,12 @@
  ;; embeddings-design.md): tokens kept at z >= 2 lifted R@10 from 0.68 to 0.71 without hurting the
  ;; paraphrase queries; unfiltered they are noise on prose. At the bound: a text scoring below it is not a hit.
  :seon.config.render/search-token-z 2.0
- ;; Unit: candidates per line shown. How many of the nearest by meaning related reads for each line
- ;; of a kind it shows (seon.vector/near takes this times :seon.config.render/related), before the
- ;; fusion and the filters (a cited one, a test) cut them to the count. Provenance: the literal the
- ;; fused related was measured with (b9920ecf5b, docs/vector.md#what-was-compared-and-what-it-left-out); no other value
+ ;; Unit: candidates per hit shown. How many of the nearest by meaning my.agent/search reads for each hit
+ ;; it may show (seon.vector/near takes this times :seon.config.render/search), before the
+ ;; fusion and the filters cut them to the count. Provenance: the literal the
+ ;; fused search was measured with (b9920ecf5b, docs/vector.md#what-was-compared-and-what-it-left-out); no other value
  ;; was measured. At the bound: a candidate past it is never ranked by meaning.
  :seon.config.render/related-near 4
- ;; Unit: forms. When the plan cites no defined var (a user's request in prose), the call graph's half
- ;; of related starts from the first :seon.config.render/related program functions among this many
- ;; forms nearest the plan (near a prose request most are tests). Provenance: the 8 requests of the
- ;; design-build run db1, each true site in the page's functions (cited, or related's five): none
- ;; 4 of 8, seeds among the 20 candidates 5, among the 50 nearest forms 6, among 200 6 (task
- ;; seon.context/a-prose-request-finds-its-functions): 50 is the smallest measured that found as
- ;; many; 8 requests do not tell 50 from 200. At the bound: a function past it never seeds.
- :seon.config.render/related-seeds-near 50
  ;; Semantic search's pyramid (seon.vector/near, docs/vector.md#the-pyramid), measured against an
  ;; exact 768-dim search, recall@10 (EmbeddingGemma-2):
  ;; - bin/check vectors, Seon's whole text (2,681: 1,783 forms with the schemas, 321 sections, the

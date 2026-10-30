@@ -176,14 +176,10 @@
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set :string]
- ;; what its context includes beside its task (seon.context/selected: the wiki sections, functions and schema keys
- ;; its work points to), [name chance] in the order they entered, written by its turn before its request is drawn,
- ;; so the page and the request draw the same units (seon.render.ui/related) and a replay at that commit too
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
- ;; page's branch views read, written by its turn with what it included, so a cold build draws what the live page does
+ ;; page's branch views read, written by its turn, so a cold build draws what the live page does
  :seon.agent/main-commit :uuid
  :seon.agent/base-commit :uuid
- :seon.agent/included [:vector [:tuple [:or :string :qualified-symbol :qualified-keyword] number?]]
  :seon.db/eval-fact [:map {:seon.db/attributes true :seon.render/html seon.render.ui/evaluation}
                      [:seon.eval/id :seon.eval/id] [:seon.eval/agent :seon.eval/agent] [:seon.eval/by {:optional true} :seon.eval/by]
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
@@ -196,7 +192,6 @@
                        [:seon.agent/description {:optional true} :seon.agent/description]
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
-                       [:seon.agent/included {:optional true} :seon.agent/included]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----

@@ -15,8 +15,6 @@
     (grep "text")             the program vars whose recorded definition's text holds it (the search's text half)
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
     (similar "text")          what is nearest the text by meaning (seon.vector/near)
-    (related "text" k)        the k wiki sections nearest the text, a line each, and how to read one:
-                              refine what the page's related part showed
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
@@ -211,20 +209,6 @@
   ([x] (similar x (cfg/value :seon.config.render/search)))
   ([x k] (let [r (search x {:by #{:meaning} :k k})]
            (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
-
-(defn related
-  "The wiki sections nearest x by meaning, a text or a var's definition, k of them
-  (:seon.config.render/related unless given), each a line at summary depth with the forms that read one
-  whole and search further (seon.context/related-view): (search x {:kinds #{:section} :by #{:meaning} :min 0.0})
-  (the nearest k, whatever their relevance: the page's own cut is the page's) shown as the page's related part shows its own. A failed embedding answers its error."
-  {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :string]] :map]
-                  [:=> [:cat [:or :qualified-symbol :string] nat-int?] :map]]}
-  ([x] (related x (cfg/value :seon.config.render/related)))
-  ([x k]
-   (let [r (search x {:kinds #{:section} :by #{:meaning} :k (max 1 k) :min 0.0})]
-     (cond (contract/error? r) r
-           (empty? (remove #(= :more (:kind %)) r)) {:not-embedded (str x " has no vector yet")}
-           :else (context/related-view (agent/db) {:sections (into [] (comp (remove #(= :more (:kind %))) (map :name)) r)})))))
 
 (defn prove
   "Run what root's judge will run on this branch, through the test service (seon.agent/prove!
