@@ -6,7 +6,7 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
 
 ### Light tests while an agent develops, the full suite near merge (owner, 2026-10-30)
-"let's keep the test suite minimal and most likely impact (we can see there's a change in a function so we need to re-run all tests that consume that function and we'll do a more thorough check when all the proofs are green and we are building towards a full merge". A turn runs the proofs and the tests its change reaches, in-process and fast; the process tests and the full suite run once the proofs are green, before a merge. Stated in docs/merging.md#what-an-agent-runs.
+"let's keep the test suite minimal and most likely impact (we can see there's a change in a function so we need to re-run all tests that consume that function and we'll do a more thorough check when all the proofs are green and we are building towards a full merge". A turn runs the proofs and the tests its change reaches, in-process and fast; the process tests and the full suite run once the proofs are green, before a merge. Stated in docs/merging.md#a-merge-runs-what-the-change-reaches.
 
 ### A process test's cache gap stays; the full run catches it (owner, 2026-10-30)
 An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#waiting-on-the-owner.
