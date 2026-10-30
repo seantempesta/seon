@@ -66,14 +66,28 @@
        (vector-set! c 5 (+ (- db seon-profile-kid-bytes) (vector-ref c 5)))
        (set! seon-profile-kid-ticks (+ kt dt))
        (set! seon-profile-kid-bytes (+ kb db)))
+     ;; true while work that is not the running call's runs (a signal handler, seon-profile-aside):
+     ;; its calls are not counted, and its ticks and bytes are a callee's to the call it interrupted
+     (define seon-profile-off #f)
      (define-syntax seon-profile-call
        (syntax-rules ()
-         [(_ c e) (let ([kt seon-profile-kid-ticks] [kb seon-profile-kid-bytes])
+         [(_ c e) (if seon-profile-off e
+                  (let ([kt seon-profile-kid-ticks] [kb seon-profile-kid-bytes])
                     (seon-profile-hit! c)
                     (set! seon-profile-kid-ticks 0) (set! seon-profile-kid-bytes 0)
                     (let* ([t0 (jolt-ticks)] [b0 (seon-profile-alloc)] [r e])
                       (seon-profile-took! c (- (jolt-ticks) t0) (- (seon-profile-alloc) b0) kt kb)
-                      r))]))
+                      r)))]))
+     ;; thunk run with its calls uncounted, its work a callee's of the call it interrupted
+     (define (seon-profile-aside thunk)
+       (if seon-profile-off (thunk)
+           (let ([t0 (jolt-ticks)] [b0 (seon-profile-alloc)])
+             (dynamic-wind
+               (lambda () (set! seon-profile-off #t))
+               thunk
+               (lambda () (set! seon-profile-off #f)
+                          (set! seon-profile-kid-ticks (+ seon-profile-kid-ticks (- (jolt-ticks) t0)))
+                          (set! seon-profile-kid-bytes (+ seon-profile-kid-bytes (- (seon-profile-alloc) b0))))))))
      (define (seon-profile-counted c f)
        (case-lambda
          [() (seon-profile-call c (f))]
@@ -100,7 +114,7 @@
 
 (def ^:private procs
   "The Scheme procedures above, by name (host procedures, resolved once)."
-  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu]]
+  (into {} (for [k [:cell :counted :begin! :fold :calls :now :alloc :cpu :aside]]
              [k (scm/proc (str "seon-profile-" (name k)))])))
 
 (defn now-ns
@@ -134,6 +148,15 @@
   "f, counted under fn-sym: every call counted, with the ticks and bytes it did, in all and of its own."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.host/fn] :seon.host/fn]}
   [fn-sym f] ((:counted procs) ((:cell procs) fn-sym) f))
+
+(defn aside
+  "(thunk) run with its calls not counted, its work counted as a callee's of the call it interrupted:
+  the work of a signal handler run at a safe point (seon.intr), which is not the running call's (an
+  agent's test child counted its SIGIO handler's seon.sock/peer-gone? in the eval it interrupted,
+  and seon.profile-test/an-evals-record-carries-its-costliest-functions was red only there:
+  md-scan #28). See docs/cost.md#counting-calls."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [thunk] ((:aside procs) thunk))
 
 (defn begin!
   "Open a new epoch: counts start again from zero for every function. Answers its number."

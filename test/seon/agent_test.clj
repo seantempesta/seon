@@ -1118,6 +1118,18 @@
     (is (= :cap (:outcome end)) (pr-str end))
     (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
 
+(deftest a-run-the-branch-holds-for-another-agent-becomes-this-agents
+  ;; task seon.agent/a-death-names-its-cause's resume path (bin/check resume, calc/square capped at 40): an
+  ;; agent killed after it committed its run on its branch but before main recorded the run leaves the
+  ;; branch's run naming the dead agent; the restarted root starts the same run, and begin-run! must make
+  ;; it this agent's, or the run is no session's and every turn draws no status
+  (let [[_ _ mine] (in-agent (fn [{:keys [task ns]}]
+                               (let [run (str ns "/t#resumed")]
+                                 [(str "(seon.agent/transact! [{:seon.run/id " (pr-str run) " :seon.run/agent {:seon.agent/key \"an-earlier-boot/a9\" :seon.agent/id :a9}}])")
+                                  (str "(seon.agent/begin-run! " (pr-str task) " " (pr-str run) ")")
+                                  (str "(= (:key @seon.agent/state) (-> (seon.agent/db) (datahike.api/entity [:seon.run/id " (pr-str run) "]) :seon.run/agent :seon.agent/key))")])))]
+    (is (true? (:value mine)) (str "the run names this agent: " (pr-str mine)))))
+
 (deftest a-step-that-throws-answers-its-error-and-the-agent-goes-on
   ;; task seon.agent/a-death-names-its-cause, as the owner ruled 2026-10-30 (task
   ;; seon.agent/the-agent-is-a-flow-graph, step 4): a defect no request's own boundary catches (here
