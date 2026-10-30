@@ -638,6 +638,22 @@
   {:malli/schema [:=> [:cat :map] :any]}
   [c] (some-> (:runs c) vals first))
 
+(defn task-of
+  "The task agent record c holds (its :task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
+  accumulated plan and proofs take (seon.task/pulled-accumulated): its id, kind, plan and proofs and its
+  needs', and each proof's var as :proved holds it ({name var}: its verdict, failures and form), the
+  task's and its needs'. Each read by its path, so a reader of it reads nothing else of the task."
+  {:malli/schema [:=> [:cat :map] [:maybe [:map [:task :map] [:proved [:map-of :qualified-symbol :map]]]]]}
+  [c]
+  (when-let [t (:task c)]
+    (let [own (fn [x] (into {} (for [k [:seon.task/id :seon.task/kind :seon.task/plan :seon.task/proofs] :let [v (get x k)] :when (some? v)] [k (ratom/realize v)])))
+          needs (vals (:needs t))]
+      {:task (assoc (own t) :needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
+       :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
+                          ;; its verdict and failures, and its source (whether it is defined): its form's text
+                          [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
+                               (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
+
 (defn status
   "How the agent of record rec (its ctx: its :db/id, its run, `run-of`) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
@@ -661,9 +677,10 @@
   [db rec {:keys [index deferred main]}]
   (let [a (:db/id rec)
         ag (d/entity db a)
-        tid (some-> ag :seon.agent/task :seon.task/id)
-        t (when tid (task/task db tid))
-        {:keys [proofs plan]} (:seon.task/accumulated t)
+        ;; the task and its proofs as the record pulls them (task-of): the accumulated plan and proofs over its needs
+        {t :task proved :proved} (task-of rec)
+        tid (:seon.task/id t)
+        {:keys [proofs plan]} (when tid (task/pulled-accumulated t))
         kind (:seon.task/kind t :work)
         ;; a test run that failed as a whole: present on its process only while it is so (the
         ;; process's other facts, written on every eval, are not read)
@@ -702,10 +719,15 @@
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         defined? #(some? (docs/source-of db %))]
     (cond-> {:reasons reasons
+             ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
-                                :let [src (docs/source-of db p)
-                                      st (get results p (cond (deferred p) :deferred (nil? src) :undefined (some? test-error) :not-run :else :unknown))
-                                      fs (get-in vs [p :failures])
+                                :let [v (get proved p)
+                                      src (get-in v [:form :form/src])
+                                      verdict (when-not test-error (case (:seon.test/status v) nil nil :green :pass :deferred :deferred :fail))
+                                      st (cond (and verdict (not= :deferred verdict)) verdict
+                                               (or (deferred p) (= :deferred verdict)) :deferred
+                                               (nil? src) :undefined (some? test-error) :not-run :else :unknown)
+                                      fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (callees db p))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))

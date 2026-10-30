@@ -958,6 +958,7 @@
                        (for [q paths :let [id (get-in c (conj q :db/id))] :when id] [q (some? (get-in c (conj q a))) id])))
         found (concat (join-paths [] [[:task] :seon.task/id]) (join-paths [] [[:task :needs :*] :seon.task/id])
                       (join-paths [] [[:task :proved :*] :var/name]) (join-paths [] [[:task :proved :* :form] :form/id])
+                      (join-paths [] [[:task :needs :* :proved :*] :var/name]) (join-paths [] [[:task :needs :* :proved :* :form] :form/id])
                       (for [p ps j cite-joins q (join-paths p j)] q))]
     (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
 

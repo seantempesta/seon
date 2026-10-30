@@ -1713,3 +1713,17 @@
     (is (str/includes? (pr-str (ui/chat-start opts aid)) "a budget of 7 turns") "the chat's start: the same run's")
     (is (not (str/includes? (pr-str (ui/chat-end opts aid)) "Done")) "the chat's end: its own run has not ended, the earlier one's end is not its")
     (is (not-any? #(= :no-design (:reason %)) (:reasons (ui/status opts aid))) "the status: its plan changed since its own run began")))
+
+;; docs/render.md#how-the-work-stands: the status's proofs are the task's :proved as the record pulls them (each
+;; var's verdict, failures and form), never read again from the db; the done rule's verdict scan and the diff read it
+(deftest the-status-proofs-are-what-the-record-pulled
+  (let [[db aid] (cited-world)
+        red (d/db-with db [{:var/name 'demo-test/g-test :seon.test/status :red
+                            :seon.test/failures [{:type :fail :expected "(g 1)" :actual "nil" :got "nil"}]}])
+        ;; the record pulled where the proof is red, the status read over a db that holds no verdict of it
+        st (seon.context/status db (:tree (seon.ctx/build red aid :b)) {})
+        [p :as ps] (:proofs st)]
+    (is (= 1 (count ps)) (pr-str ps))
+    (is (= ['demo-test/g-test :fail] [(:test p) (:status p)]) "the verdict the record holds")
+    (is (= "nil" (get-in p [:failures 0 :got :seon.print/code])) "its failure, as the record holds it")
+    (is (str/includes? (pr-str (:source p)) "deftest g-test") "its source, the pulled form's")))

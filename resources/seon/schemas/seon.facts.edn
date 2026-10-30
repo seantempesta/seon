@@ -269,7 +269,7 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.task/needs :as :needs] [* {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]}] :seon.render/html seon.render.ui/task}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/needs :as :needs] [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]

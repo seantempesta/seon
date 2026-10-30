@@ -433,7 +433,9 @@
                        ;; 555 calls at 10 since the layout places the cites from ctx (seon.render.ui/page-cites: where ctx holds each
                        ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
                        ;; pull's, where the draw used to query them), 548 before; 574 since the agent's record joins its run
-                       ;; (seon.context/run-of: the turn line, the chat's start and end and the status read it there, where each queried the db)
+                       ;; (seon.context/run-of: the turn line, the chat's start and end and the status read it there, where each queried the db);
+                       ;; 604 since the status reads its proofs from the record (seon.context/task-of, seon.task/pulled-accumulated) and
+                       ;; the needs join their proofs
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 534 :bytes 3200000}
+                       :fixed {:calls 564 :bytes 3200000}
                        :sizes [10 40 80]}))))))
