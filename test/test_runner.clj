@@ -78,7 +78,7 @@
     (let [files (if paths
                   (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
                   (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs (config/value :seon.config.source/dirs)}}))))]
-      (sh/sh "rm" "-rf" dir tar)
+      (run! fx/remove-tree! [dir tar])
       files)))
 
 (defn keep-tree!
@@ -128,7 +128,7 @@
   ([root store] (program-db root store (fx/tree-id root)))
   ([root store tree]
   (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
-    (sh/sh "rm" "-rf" store))
+    (fx/remove-tree! store))
   (let [b (tree-branch tree)
         {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
         branches (d/branches conn)]
@@ -505,7 +505,7 @@
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir)] dir))
-                       (finally (sh/sh "rm" "-rf" dir)))
+                       (finally (fx/remove-tree! dir)))
             {:keys [caused attention checks]} (branch-health based head classes)
             h (problems/health head)
             open (reduce + 0 (for [c (or (seq classes) (sort problems/caused-classes))] (get-in h [:classes c :n] 0)))]
