@@ -325,6 +325,20 @@
           (is (some #(= [:db/cas [:seon.task/id "demo/a"] :seon.task/execution :running :held] %) tx))
           (is (str/starts-with? (get-in (some :seon.task/failure tx) [:reason]) "the same verdict again: "))
           (is (not-any? :seon.message/kind tx) "and no entry")))
+      (testing "behind alone is main moving under the run, not the agent's news: the same count again is a verdict
+                again (swarm's s9: behind s0's 3 keys, then s1's), held only once :seon.config.merge/max-behind of
+                the task's runs were judged behind"
+        (let [behind [{:reason :behind :behind 3}]
+              behind-run (fn [n] {:seon.run/id (str "demo/a#" n) :seon.run/behind 3})
+              db-b (fn [k] (-> (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :green) (ended 2) (mapcat #(run "a" % :parked :outcome :green) (range 3 (inc k)))
+                                                                        (map behind-run (range 1 (inc k)))))
+                               (verdict 1 behind)))
+              tx-b (fn [k] (tx-of (start (db-b k) {:op :verdict :run "demo/a#2" :task "demo/a" :reasons behind})))]
+          (is (= :verdict (:seon.message/kind (first (filter :seon.message/kind (tx-b 2))))) "under the bound: told again")
+          (is (not-any? :seon.task/failure (tx-b 2)) "and not held")
+          (let [max-b (cfg/value :seon.config.merge/max-behind)]
+            (is (str/starts-with? (get-in (some :seon.task/failure (tx-b max-b)) [:reason]) "the same verdict again: behind")
+                "at the bound: held for root"))))
       (testing "different reasons: a verdict again, which wakes"
         (let [tx (tx-of (start db2 {:op :verdict :run "demo/a#2" :task "demo/a" :reasons [{:reason :no-proofs}]}))]
           (is (= :verdict (:seon.message/kind (first (filter :seon.message/kind tx))))))))
