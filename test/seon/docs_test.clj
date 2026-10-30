@@ -44,6 +44,17 @@
     (is (= "Count every message, with `app.m0/f1`."
            (:seon.ref/text (docs/view (d/db-with db tx) "demo/flow.md#quiet" :code))))))
 
+;; docs/references.md#the-wiki-in-the-store: md-scan 29's agent added a row to one page with load-tx and its branch lost
+;; the other 33 pages (556 sections), so the system prompt read nil and two turns threw
+(deftest a-load-of-one-page-leaves-the-others
+  (let [db (load-pages (empty-db) pages)
+        edited {"demo/flow.md" (str/replace flow "Count messages" "Count every message")}
+        db' (d/db-with db (docs/load-tx db "demo" edited))]
+    (is (= "Count every message, with `app.m0/f1`." (:seon.ref/text (docs/view db' "demo/flow.md#quiet" :code))) "the page given is loaded")
+    (is (= #{"demo/async.md#async" "demo/async.md#waiting"}
+           (set (filter #(str/starts-with? % "demo/async.md") (map :v (d/datoms db' :avet :seon.section/address)))))
+        "a page not given keeps every section")))
+
 (deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
         db (load-pages (empty-db) broken)
