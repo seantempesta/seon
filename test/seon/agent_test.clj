@@ -1094,7 +1094,16 @@
                              (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#after")) " :max-turns 3})")])
                           {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)]
-    (is (= :cap (:outcome end)) (str "each turn reached its model, so none ended the work: " (pr-str end)))))
+    (is (= :cap (:outcome end)) (str "each turn reached its model, so none ended the work: " (pr-str end))))
+  ;; md-scan #27: the agent's change broke the status, every turn drew none, and the run made 156 model calls past its
+  ;; cap of 40: a turn with no status ends at the cap as every turn does
+  (let [[_ end] (in-agent (fn [{:keys [task ns]}]
+                            ["(in-ns 'seon.context) (clojure.core/defn status [& _] (throw (ex-info \"boom: the status, broken\" {})))"
+                             (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#nostatus")) " :max-turns 3})")])
+                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        end (:value end)]
+    (is (= :cap (:outcome end)) (pr-str end))
+    (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
 
 (deftest an-agent-that-throws-ends-with-its-cause
   ;; task seon.agent/a-death-names-its-cause: a defect that no request's own boundary
