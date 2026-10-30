@@ -517,6 +517,10 @@
           (if ok 0 1))))))
 
 (defn -main [& args]
+  ;; a shard forks (a test's child, its store's create), so it starts no collector sweeper, as the binary does
+  ;; (seon.main/-main, seon.lib/gc-sweepers!): a sweeper started in a forked child deadlocked it on Chez's
+  ;; thread mutex, and a-create-that-fails-leaves-no-store hung run 29's gate, its orphan left 70 min
+  (lib/gc-sweepers! 0)
   (let [[flag & more] (config/without-overrides args)]
     (System/exit
       (case flag
