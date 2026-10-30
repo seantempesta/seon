@@ -2,5 +2,4 @@
 ;; patterns name by config key (a :limit that is a keyword), so no limit is a literal.
 {:seon.config.ctx/window [:int {:min 1 :seon.config/unit "members" :description "The newest members a collection of a record holds (a pattern's :limit :seon.config.ctx/window, read newest first): an agent's evals, runs, turns and messages; root's agents."}]
  :seon.config.ctx/cited-by [:int {:min 0 :seon.config/unit "sections" :description "The wiki sections shown with a var a task cites (the sections that cite it, those of the decisions page last): the ones it owes an edit to and the ones that explain it."}]
- :seon.config.ctx/errors [:int {:min 0 :seon.config/unit "errors" :description "The newest recorded errors last raised in a task its record holds (a lookup by the task's id on :seon.error/last-task, newest first); older ones stay in the store."}]
  :seon.config.ctx/callers [:int {:min 0 :seon.config/unit "forms" :description "The newest forms naming a cited var a task's record holds (its callers: :form/_refs by name)."}]}

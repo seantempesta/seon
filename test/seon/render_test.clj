@@ -15,6 +15,28 @@
    :seon.task/needs #{} :seon.task/kind :work
    :seon.task/accumulated {:plan "Make `app.calc/add` pass" :proofs #{'app.proofs/add-test}}})
 
+(deftest a-problems-report-is-sent-grouped-with-its-handles
+  ;; task seon.agent/every-limit-fails-loudly (the owner, 2026-10-30: errors grouped by signature with their counts, the
+  ;; newest first line and a handle): the problems report a part answers is sent the model by its declared model render,
+  ;; a few fields a row, never a row's example or evidence printed whole, each recorded error with the form that reads it
+  (let [big (vec (range 5000))
+        row (fn [sig ms n msg] {:class :eval :signature sig :type :seon.agent/eval-error :message msg :count n :at-ms ms
+                                :example {:value big} :evidence {:kind :error :signature sig :example {:value big}}
+                                :producer 'seon.ref/scan :owner-ns 'seon.ref :proofs [] :answered-by []})
+        report (with-meta {:t 7 :classes {:eval {:n 2 :rows [(row "aaa" 10 31 "seon.ref/scan invalid-output at [:seon.ref/blocks 4]\n  a key its closed map does not admit")
+                                                             (row "bbb" 20 1 "unbound var seon.ref/emit")]}}}
+                 {:seon.render/schema :seon.problems/report})
+        sent (ui/problems-model {} report)
+        rows (get-in sent [:classes :eval :rows])]
+    (is (= 'seon.render.ui/problems-model (r/model-declared :seon.problems/report)) "the report's schema declares it")
+    (is (= 2 (get-in sent [:classes :eval :n])))
+    (is (= ["unbound var seon.ref/emit" "seon.ref/scan invalid-output at [:seon.ref/blocks 4]"] (mapv :message rows))
+        "newest first, each message's first line")
+    (is (= [1 31] (mapv :count rows)) "with its count")
+    (is (= '(my.agent/problem "bbb") (:read (first rows))) "and the form that reads it whole")
+    (is (not-any? #(or (contains? % :example) (contains? % :evidence)) rows) "never its example or evidence")
+    (is (< (count (pr-str sent)) 600) (str "a few lines for any number of errors: " (count (pr-str sent)) " chars"))))
+
 (deftest selection
   (testing "the value's own override key wins: data as is"
     (is (= [:b "mine"] (r/html {:schema :seon.task/task} {:a 1 :seon.render/html [:b "mine"]}))))
