@@ -42,6 +42,23 @@
         (is (= (:bytes b) (+ (:self-bytes b) (:bytes l))) (pr-str b l))
         (is (< (:self-ticks b) (:ticks b)))))))
 
+(defn interrupted {:malli/schema [:=> [:cat :int] :int]} [n] (+ (branch n) (profile/aside #(branch n))))
+
+(deftest work-set-aside-is-not-the-interrupted-calls
+  ;; docs/cost.md#counting-calls: a signal handler runs at a safe point inside whatever call is running
+  ;; (seon.intr); md-scan #28's test child counted its SIGIO handler's calls in the eval it interrupted.
+  ;; Work set aside (seon.profile/aside) is neither counted nor the interrupted call's own
+  (when contract/on?
+    (profile/begin!)
+    (interrupted 50)
+    (let [by (into {} (map (juxt :var identity)) (profile/touched))
+          i (by 'seon.profile-test/interrupted) b (by 'seon.profile-test/branch)]
+      (is (= {'seon.profile-test/interrupted 1 'seon.profile-test/branch 1 'seon.profile-test/leaf 50}
+             (into {} (map (juxt key (comp :calls val))) by))
+          "only the calls outside the aside are counted")
+      (is (< (+ (:self-ticks i) (:ticks b)) (:ticks i)) "the aside's work is not the interrupted call's own")
+      (is (= 1 (profile/aside (constantly 1))) "it answers its thunk's value"))))
+
 (defn- bare-leaf [x] (* x x))
 
 (deftest counting-a-call-allocates-nothing-and-costs-a-few-ticks
