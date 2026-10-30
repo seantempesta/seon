@@ -42,7 +42,7 @@ Each v1 function of the agent's REPL and where it stands here.
 | `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
 | `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: the owner's message a fact on main and on the taking agent's branch (`:seon.message/*`); another agent's send held in the agent's process | partial |
-| `my.test/run`, `check` | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
+| ``my.test/run``, ``check`` (v1's) | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
 | removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, observed and recorded on the branch (`seon.repl/unmapped`); a referrer is not refused (it fails where it loads and in its tests) | partial |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
 | `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |

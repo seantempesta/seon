@@ -253,14 +253,15 @@
             base (sort-by (juxt #(- (cost %)) identity) (keys mg)))))
 
 (defn- write-shards!
-  "tests (var symbols) dealt into :seon.config.proofs/jobs shards (shards), the generative check's keys mg
+  "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
+  verification, 1 for what a change reaches), the generative check's keys mg
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg]
+  [out tests digests tree mg jobs]
   (let [ms (measured-ms tests)
-        sh (proofs/shards tests (config/value :seon.config.proofs/jobs) ms)
+        sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
@@ -301,7 +302,8 @@
                                                                                                  ;; a cost proof's verdict, as data, so its reused red reports it (seon.proofs/costs)
                                                                                                  (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
                                                ;; a test's end, so bin/stalls never names one that finished
-                                               :else (do (println "ended" (:test x))
+                                               ;; and its cost, the work it did (a green test's is read nowhere else)
+                                               :else (do (println "ended" (:test x) (str (:ticks x) " ticks"))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)
@@ -382,7 +384,10 @@
         ;; tests (shard!, seon.proofs/mg-run): no binary, no process of their own
         {mg-run true run-steps false} (group-by proofs/mg-key? run-steps)
         mg-run (vec mg-run) run-steps (vec run-steps)
-        n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run))
+        ;; an incremental run (what a change reaches) is one process: four starts cost more than the few
+        ;; seconds of work they split (the owner, 2026-10-30); the full run and a merge's verification shard
+        n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
+                         (if all? (config/value :seon.config.proofs/jobs) 1))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
