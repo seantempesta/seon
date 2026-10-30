@@ -1028,10 +1028,11 @@
            (r/root-causes (r/index db))))))
 
 (deftest hairy-rule
-  (let [t {:seon.task/accumulated {:plan "Use `app/g` and `app/f`." :proofs #{'app.proofs/a-test}}}
+  ;; refs: the task's proofs and the names its plan's cites hold (the facts its write derived, never its text re-parsed)
+  (let [refs '#{app/g app/f app.proofs/a-test}
         c (fn [k kind] {:key [:var k] :kind kind})
         merge-cfg {:max-conflicts 3 :max-merge-turns 2}]
-    (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :task t :merge-turns merge-turns}))))
+    (are [conflicts merge-turns rule] (= rule (:rule (r/hairy (merge merge-cfg {:conflicts conflicts :refs refs :merge-turns merge-turns}))))
       [] 0 nil
       [(c 'app/f :both-modified)] 0 nil
       [(c 'app/f :both-modified) (c 'app/h :both-modified) (c 'app/i :both-added)] 0 nil

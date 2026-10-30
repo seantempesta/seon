@@ -484,7 +484,13 @@
                              no-status? (contract/error? s)
                              reasons (:reasons s)
                              stop (get-in @agent/state [:turn :stop])
-                             hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
+                             ;; what the task references, as facts (its proofs, its plan's cites): never its plan re-parsed
+                             ;; here, by a seon.ref/scan the agent may have broken (md-scan's broken scan ended two runs :error)
+                             hairy (when (and merge? (not (contract/error? s)))
+                                     (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
+                                                                :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
+                                                                            (comp (keep :seon.cite/name) (filter qualified-symbol?))
+                                                                            (task/task-cites (agent/db) task))})))]
                          (cond
                            ;; git's CI after the merge: green on the combined program; merge main again until
                            ;; it brings nothing new, a work task's run as a merge's, so it ends on main as main is
