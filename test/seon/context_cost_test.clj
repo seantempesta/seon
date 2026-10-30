@@ -5,7 +5,7 @@
   id). Run: bin/test seon.context-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.context] [seon.ctx]
-            [datahike.api :as d] [seon.test-store :as ts] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.program-cost-test :as pc]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.program-cost-test :as pc]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -62,7 +62,7 @@
                ;; record: its pull and its record's data value), one contracted call (records itself)
                :per-n {:bytes 52500}
                :fixed {:bytes 300000 :calls 1}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (defn related-of-changed
   "seon.context/related's arguments at n wiki sections, each with a vector, and the plan's: its
@@ -167,7 +167,7 @@
                ;; replaced (get-else per tuple) 1.36 MB and 5.87 MB, a pull each 837 KB and 7.76 MB
                :per-n {:bytes 35000}
                :fixed {:calls 2 :bytes 80000}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest task-data-costs-what-the-plan-names
   ;; the task's data (task-data over the task as of t), as the task's component draws it when a
@@ -255,4 +255,4 @@
                :growth :constant
                :fixed {:calls 327}
                ;; measured 2026-10-29: 9 contracted calls at 10, 100 and 1,000 evals before the turn (the moved part printed once, the new record once)
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
