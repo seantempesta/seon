@@ -1193,8 +1193,9 @@
 (def file-readers
   "The vars a test calls to read the checkout's files: the tree-readers but binary-sh (which runs
   the binary: its tests are digested by what they reach), and src's readers of a checkout
-  directory (the wiki, the source dirs). See docs/source.md#tests-run-by-reach."
-  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.docs/load-dir-tx 'seon.fx/read-source)))
+  directory (the wiki, read or loaded, and the source dirs: seon.repl-test/the-help-page-runs read
+  the help page through seon.docs/pages and was reused over its edits). See docs/source.md#tests-run-by-reach."
+  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.docs/load-dir-tx 'seon.docs/pages 'seon.fx/read-source)))
 
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts
