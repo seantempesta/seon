@@ -121,10 +121,10 @@
     [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) (repeat (count es) 10) "m")) te]))
 
 (defn task-data-of
-  "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db,
-  without its write set, as the task part draws it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :boolean]]}
-  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") false]))
+  "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
+  its cites, without its write set, as the task part draws it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map] :boolean]]}
+  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r") false]))
 
 (defn namespace-of
   "seon.context/namespace-data's arguments at n definitions: a branch whose namespace app.pc defines

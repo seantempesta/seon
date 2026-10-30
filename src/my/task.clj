@@ -15,7 +15,7 @@
   var the plan cites, its source and callers), how to run each proof, the sections it cites; what
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
-  [] (some->> (current) (context/task-data (agent/db))))
+  [] (when-let [t (current)] (context/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,

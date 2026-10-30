@@ -23,6 +23,8 @@
                               from any namespace)
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
                               transaction on the branch, or refused with why; the next turn tells it
+    (cite! "docs/x.md?full#y") read a section (a page whole with no anchor, or a name) beside the task,
+                              at its ?depth (summary, lead, full); (uncite! "docs/x.md#y") stops reading it
     (help 'ns.name)           a namespace: every definition, privates included, a line each in file order
     (help)                    the help page's sections (docs/agent.md); (help "done") one whole;
                               (help "docs/vector.md#the-model") any section, (help "docs/vector.md") a page
@@ -39,6 +41,43 @@
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
 (defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), then other agents' sends ({:from :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
+(defn- own-cites
+  "What this agent cites now, its cite entities on its branch (seon.task/cites-of), each as {:cites target
+  :depth d}."
+  {:malli/schema [:=> [:cat] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  []
+  (let [db (agent/db)]
+    (mapv (fn [c] {:cites (or (:seon.cite/address c) (:seon.cite/name c)) :depth (:seon.cite/depth c)})
+          (task/cites-of db (pdb/eid db :seon.agent/key (:key @agent/state))))))
+
+(defn cite!
+  "Add address to what this agent's context reads beside its task, in place of its cite of the same section,
+  page or name: a path with an optional ?depth (summary, lead or full) and #anchor (\"docs/flow.md?full#idioms\";
+  a page whole with no anchor), or a name. Written as a cite entity of this agent on its branch
+  (seon.task/cite-tx), committed: its page draws it at its next draw. Answers what it cites now. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  [address]
+  (let [db (agent/db) k (:key @agent/state)
+        order (inc (reduce max -1 (map :seon.cite/order (task/cites-of db (pdb/eid db :seon.agent/key k)))))]
+    (when-let [c (ref/address-citation address)]
+      (agent/transact! [(task/cite-tx db [:seon.agent/key k] k c order)])
+      (agent/commit!))
+    (own-cites)))
+
+(defn uncite!
+  "Stop reading address beside the task (cite!'s other half): this agent's cite of the same section, page or
+  name retracted whole, whatever depth it asked. Answers what it cites now. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :string] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
+  [address]
+  (let [db (agent/db) k (:key @agent/state)
+        id (some->> (ref/address-citation address) (#(task/cite-tx db [:seon.agent/key k] k % 0)) :seon.cite/id)]
+    (when-let [e (and id (pdb/eid db :seon.cite/id id))]
+      (agent/transact! [[:db/retractEntity e]])
+      (agent/commit!))
+    (own-cites)))
+
 (defn problem
   "One open problem of this agent, whole: its row of seon.problems/own's report (a recorded
   error's example and evidence, its count and when it was first and last raised), by the signature its
@@ -355,6 +394,17 @@
                            (keep #(when (= :section (:kind %)) (:name %)) (search address {:kinds #{:section} :k 3}))
                            ranked)))))
 
+(defn- cited
+  "Name n as a cite of it on the agent's page shows it, on demand: a cite of n at doc depth made on db (one
+  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by the cite's model render
+  (seon.render.ui/cite-model), so on demand and on the page are one render. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
+  [db n]
+  (let [r (d/with db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
+        db' (:db-after r)]
+    ((requiring-resolve 'seon.render.ui/cite-model) {} (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
+
 (defn help
   "The wiki through the one view (seon.docs/view), as this branch holds it. No argument: the help
   page (seon.context/help-page) at summary, each section its address, heading and lead's first
@@ -378,9 +428,9 @@
                         :task (select-keys (task/task db name) [:seon.task/id :seon.task/plan :seon.task/proofs :seon.task/needs])
                         :section (docs/view db name :code)
                         :more address
-                        (docs/cited-code db {:seon.ref/name name :seon.ref/depth :doc :seon.ref/line 1})))
+                        (cited db name)))
      (or (symbol? address) (keyword? address))
-     (docs/cited-code (agent/db) {:seon.ref/name address :seon.ref/depth :doc :seon.ref/line 1})
+     (cited (agent/db) address)
      :else
    (let [db (agent/db)
          a (if (str/includes? address "#") address (str context/help-page "#" address))]

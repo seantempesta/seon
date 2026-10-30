@@ -11,8 +11,6 @@
  ;; the task an agent works (seon.context/task-data, with its proofs' sources and verdicts), a part of its page:
  ;; the page draws it (task-html), the model is sent the value
  :seon.context/task [:map {:seon.render/html seon.render.ui/task-html :seon.render/model seon.render.ui/task-model}]
- ;; a thing the plan cites, at its citation's depth (seon.render.ui/cited; a var with its tests and callers), a part of the page
- :seon.context/cited [:map {:seon.render/html seon.render.ui/cited-html :seon.render/model seon.render.ui/cited-model}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
  ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests

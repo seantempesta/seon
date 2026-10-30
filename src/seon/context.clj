@@ -148,22 +148,12 @@
            (seq inserted) (assoc :inserted inserted)))))
 
 
-(defn plan-citations
-  "The references task t's texts make, read on db: the citations their writes derived
-  (:seon.task/citations, along its needs: seon.task/references-of), once each at their strongest
-  depth, those db holds (seon.ref/kept). What every part reads of what the plan cites; none parses
-  the plan again with the program the agent may be changing. See docs/references.md#task-references."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
-  [db t] (ref/kept db (ref/cited (vec (:citations (:seon.task/accumulated t))))))
-
 (defn- program-vars
-  "Of citations, those of the program's vars (seon.program/program-names), in their order: what a
-  task's page cites as vars."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
+  "Of cites (cite entities, as ctx holds them or seon.task/cites-of reads them), the names of the program's
+  vars (seon.program/program-names), in their order: what a task's data shows as its write set."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :qualified-symbol]]}
   [db cites]
-  (let [vars (filterv #(= :var (docs/citation-kind db %)) cites)
-        names (set (program/program-names db (mapv :seon.ref/name vars)))]
-    (filterv (comp names :seon.ref/name) vars)))
+  (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
 (defn- not-written
   "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
@@ -527,11 +517,6 @@
 
 (declare cited)
 
-(defn cite-key
-  "Citation c's one key on a page: the name it cites, else its address (docs/references.md#resolving-and-showing)."
-  {:malli/schema [:=> [:cat :seon.ref/citation] :string]}
-  [c] (str (or (:seon.ref/name c) (:seon.ref/address c) (:seon.ref/path c))))
-
 (defn current-ns
   "The namespace agent a's REPL is in on db: the one its newest eval left it in (its response's :ns,
   as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
@@ -573,12 +558,12 @@
 (defn namespaces-of
   "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
   (`current-ns`) first, marked :here, then those of what the plan
-  cites (a var's, a namespace itself) and of the task's proofs, once each, those db records. What
+  cites (its cites, a var's namespace or a namespace itself) and of the task's proofs, once each, those db records. What
   the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task :int] [:map-of :symbol :map]]}
-  [db t a]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :int] [:map-of :symbol :map]]}
+  [db t cites a]
   (let [{:keys [proofs]} (:seon.task/accumulated t)
-        cited (for [{n :seon.ref/name} (plan-citations db t)
+        cited (for [{n :seon.cite/name} cites
                     :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
     (let [here (current-ns db a)]
       ;; the one the REPL is in first; a map by name, in
@@ -588,48 +573,29 @@
            (mapcat (fn [d] [(:ns d) (dissoc d :ns)]))
            (apply array-map)))))
 
-(defn citations
-  "The citations of task t's plan and instructions as their write derived them (:seon.task/citations,
-  seon.task/references-of: no draw parses the plan with the program the agent may be changing), one per
-  name, in first-mention order, each at the depth its delimiter asks
-  (docs/references.md#the-delimiter-picks-the-depth): each that pulls something
-  (seon.docs/citation-kind), the task's own proofs left out (the status shows them). What the page and
-  the model are shown of what the task cites, one part each (seon.render.ui/cited)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :seon.ref/citation]]}
-  [db t]
-  (let [{:keys [proofs]} (:seon.task/accumulated t)
-        proof? (set proofs)]
-    (let [cs (into [] (comp (filter #(docs/citation-kind db %)) (remove #(proof? (:seon.ref/name %))))
-                   (plan-citations db t))
-          by (group-by cite-key cs)]
-      ;; a name cited twice is shown once, at the deepest depth it is cited at
-      (mapv (fn [k] (apply max-key #(get {:summary 0 :doc 1 :code 2} (:seon.ref/depth %) 0) (by k)))
-            (distinct (map cite-key cs))))))
-
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
-  plan as it accumulated along :needs, prerequisites first); its write set, each var the plan
-  cites with its source and its callers (docs/callers), the names that resolve to nothing said
+  plan as it accumulated along :needs, prerequisites first); its write set, each program var cites
+  name with its source and its callers (docs/callers), the names that resolve to nothing said
   once; each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
-  proofs part's: it changes each turn); the wiki sections it cites; the functions nearest its plan
-  by meaning that it does not name (`similar`). With write-set? false (the page's task part, whose cited vars are
-  parts of their own, `cited`), no write set is made."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task] :map] [:=> [:cat :seon.host/db :seon.task/task :boolean] :map]]}
-  ([db t] (task-data db t true))
-  ([db t write-set?]
+  proofs part's: it changes each turn); the wiki sections cites name; the functions nearest its plan
+  by meaning that it does not name (`similar`). cites: what the task cites, its cite entities and its needs'
+  (the page's from ctx, seon.task/task-cites on demand). With write-set? false (the page's task part, whose
+  cites are parts of their own, seon.render.ui/cited), no write set is made."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map] [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :boolean] :map]]}
+  ([db t cites] (task-data db t cites true))
+  ([db t cites write-set?]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
-        cites (plan-citations db t)
         refs (program-vars db cites)
-        sections (into [] (comp (filter #(= :view (docs/citation-kind db %))) (map #(docs/cited-view db %)))
-                       cites)
-        near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) (map :seon.ref/name) refs))]
+        sections (into [] (keep (fn [{a :seon.cite/address d :seon.cite/depth}] (when a (docs/view db a d)))) cites)
+        near (similar db (some->> (:seon.task/id t) (pdb/eid db :seon.task/id)) (into (set proofs) refs))]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
              ;; resolve to nothing are one entry, their problem said once
              :write-set (when write-set?
-                          (let [rs (into [] (comp (remove (comp (set proofs) :seon.ref/name)) (map #(cited db (:seon.ref/name %)))) refs)
+                          (let [rs (into [] (comp (remove (set proofs)) (map #(cited db %))) refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)
                             gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)}))))
@@ -743,14 +709,6 @@
       (seq (:attention split)) (assoc :attention (:attention split))
       (seq (pm/divergence ch)) (assoc :its-merge-carries (pm/divergence ch))
       (and main base) (assoc :merge (pm/readiness base db (d/commit-as-db (:store db) main) moved)))))
-
-(defn cited-names
-  "The program vars task t's plan and instructions cite (seon.ref/references, those of the program:
-  `program-vars`), by name: what the task part shows of its write set, which the turn's waste log
-  charges a form reading again to (seon.learn/waste, producer seon.docs/resolve-ref)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:vector :symbol]]}
-  [db t]
-  (mapv :seon.ref/name (program-vars db (plan-citations db t))))
 
 (defn status-model
   "The status as the model is sent it (the declared model render of :seon.context/status): its
@@ -1032,5 +990,5 @@
   ([db {:keys [agent] :as basis} {:keys [printed parts]}]
   (let [a (d/pull db [:db/id :seon.agent/key] [:seon.agent/key agent])
         r (request a {:db db :basis basis :help (system-text db) :printed printed :parts parts
-                      :help-ref [:section (docs/page-top db system-page) (docs/page-t db system-page)]})]
+                      :help-ref [:section (ref/page-top db system-page) (docs/page-t db system-page)]})]
     (select-keys r [:messages :sent :printed]))))

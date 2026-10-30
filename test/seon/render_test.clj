@@ -319,11 +319,10 @@
   (let [k (seon.task/agent-key "b1" :a3)
         main0 (reduce (if conn (fn [_ tx] (:db-after (d/transact conn {:tx-data tx}))) d/db-with) (if conn @conn (ts/test-db))
                       [[{:seon.root/id :root :seon.root/boot "b1"}]
-                       [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
-                         :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}
-                         ;; the names its plan cites, as the task writer derives them (seon.task/references-of)
-                         :seon.task/references (set (seon.ref/names walked-plan))
-                         :seon.task/citations (vec (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan))))}]
+                       (into [{:db/id "demo/f" :seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
+                               :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
+                             ;; what its plan cites, as the task writer writes it (seon.task/cites-tx)
+                             (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
                        (seon.task/agent-tx "b1" :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.task/run-start-tx "demo/f#1" "demo/f" "b1" :a3 {:branch :task-demo-f :model "m" :max-turns 8} 0 "p")
                        (update (seon.task/message-tx "m-1" :message "owner" :task-demo-f "check g") 0 assoc :seon.message/agent {:seon.agent/key k})
@@ -1049,7 +1048,7 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.context-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md")
+    (is (= [(str "task-data-" rid) (str "cited-" rid "-seon.render_2Fhtml") (str "cited-" rid "-seon.print") (str "cited-" rid "-docs_2Frender.md_23no-clipping")
             (str "namespaces-" rid) (str "status-" rid) (str "run-head-" rid) (str "own-problems-" rid)] (mapv :id task))
         "the task, each thing its plan cites (a part each), the namespaces it touches, how the work stands, the agent's turn, its open problems (the proof it fails; none open draws nothing) (and the keys the agent added, when it added one): each keyed by what it shows")
     (let [h (:html (unit-of task "status-"))]
@@ -1649,3 +1648,49 @@
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
            (is (= "drawn" (last fine)) "the other part draws"))
          (finally (r/dispose-walk! w)))))
+
+(defn cited-world
+  "A task demo/c whose plan cites a wiki section, a defined var (with a test and a caller) and its own proof,
+  and its agent made as root makes one (seon.task/agent-cites-tx: every agent's cites, a page whole and a
+  section), each written by its one writer: [db agent-eid]."
+  []
+  (let [k "b1/a1"
+        db (d/db-with (ts/test-db)
+                      [{:ns/name 'demo :ns/file "src/demo.clj"}
+                       {:seon.section/address "docs/x.md#the-x" :seon.section/heading "The x" :seon.section/lead "What x does. And more." :seon.section/text "What x does. And more."}
+                       {:db/id "top" :seon.section/address "docs/testing.md#testing" :seon.section/heading "Testing" :seon.section/lead "How a test is written."}
+                       {:seon.section/address "docs/testing.md#testing-in-the-world" :seon.section/heading "Testing in the world" :seon.section/parent "top"}
+                       {:seon.section/address "docs/references.md#an-entity-cites" :seon.section/heading "An entity cites" :seon.section/lead "A citation is an entity."}
+                       {:db/id "g" :form/id "demo/g-1" :form/src "(defn g \"Gets it.\" [x] x)"} {:db/id "gv" :var/name 'demo/g :var/doc "Gets it." :var/form "g"}
+                       {:db/id "t" :form/id "demo-test/g-test-1" :form/src "(deftest g-test (is (g 1)))" :form/refs #{'demo/g} :form/defines ["tv"]}
+                       {:db/id "tv" :var/name 'demo-test/g-test :var/kind :test :var/form "t"}
+                       {:db/id "h" :form/id "demo/h-1" :form/src "(defn h [] (g 2))" :form/refs #{'demo/g} :form/defines ["hv"]}
+                       {:db/id "hv" :var/name 'demo/h :var/kind :fn :var/form "h"}])
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/proofs #{'demo-test/g-test}
+                                                   :seon.task/plan "Make `demo/g` pass `demo-test/g-test`; see [the x](docs/x.md#the-x)."}]))
+        db (d/db-with db (into [{:db/id k :seon.agent/key k :seon.agent/id :a1 :seon.agent/task [:seon.task/id "demo/c"]}] (seon.task/agent-cites-tx db k k)))]
+    [db (seon.db/eid db :seon.agent/key k)]))
+
+;; docs/render.md#a-part-answers-data: a cite's part is drawn from what @ctx holds; its renders read no db
+(deftest a-cited-part-reads-only-what-ctx-holds
+  (let [[db aid] (cited-world)
+        tree (:tree (seon.ctx/build db aid :b))
+        ;; each cite the layout places, drawn as the walk draws it, over a db that throws when anything reads it
+        drawn (into {} (for [[p k held] (#'ui/page-cites tree)]
+                         (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes}
+                                           (fn [] (throw (ex-info "a cite's part read the db" {})))
+                                           [#'ui/cited {:at p :held held} aid k])]
+                           (try (r/flush! w nil)
+                                (let [c (get @(:cache w) @(:out w))] [k {:data (:data c) :html (h/html (r/resolved w @(:out w) true))}])
+                                (finally (r/dispose-walk! w))))))
+        model #(ui/cite-model {} (:data (drawn %)))]
+    (is (= #{"demo/g" "docs/x.md#the-x" "docs/testing.md#testing" "docs/references.md#an-entity-cites"} (set (keys drawn)))
+        "a part per cite, the task's and the agent's (its proof's left to the status), each target once")
+    (is (every? #(= :seon.cite/cite-fact (:seon.render/schema (meta (:data %)))) (vals drawn)) (str "every cite's part draws with the db unread: " (pr-str drawn)))
+    (is (str/includes? (:seon.print/prose (:text (model "docs/x.md#the-x"))) "What x does. And more.") "a section at doc depth: its lead")
+    (is (str/includes? (:seon.print/prose (:text (model "docs/testing.md#testing"))) "Testing in the world (docs/testing.md#testing-in-the-world)")
+        "a page cited whole: its top section, the headings below it joined")
+    (is (= {:seon.print/prose "Gets it."} (:doc (model "demo/g"))) "a var at doc depth: its doc, from the pulled var")
+    (is (= '[demo-test/g-test] (:tests (model "demo/g"))) "its test, among its pulled callers")
+    (is (= '[demo/h] (:callers (model "demo/g"))) "and its other caller")
+    (is (str/includes? (:html (drawn "docs/x.md#the-x")) "What x does.") "and the page's html, by the cite's html render")))
