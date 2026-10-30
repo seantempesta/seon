@@ -313,9 +313,9 @@
             entry (first (filter :seon.message/kind tx))]
         (is (true? (get-in (first outs) [:req :req :flush?])) "synced before the spawn that reads it")
         (is (some #(= [:db/cas [:seon.run/id "demo/a#1"] :seon.run/status :ended :parked] %) tx))
-        (is (= [:verdict "demo/a#1"] [(:seon.message/kind entry) (:seon.message/to entry)]))
+        (is (= [:verdict (task/default-branch "demo/a")] [(:seon.message/kind entry) (:seon.message/branch entry)]))
         (is (= {:reasons reasons :results {(t "a") :fail}} (select-keys (sedn/decode (:seon.message/body entry)) [:reasons :results])))))
-    (let [verdict (fn [db n why] (d/db-with db (task/message-tx (str "v-demo/a#" n) :verdict "root" (str "demo/a#" n) (sedn/encode {:reasons why}))))
+    (let [verdict (fn [db n why] (d/db-with db (task/message-tx (str "v-demo/a#" n) :verdict "root" (task/default-branch "demo/a") (sedn/encode {:reasons why}))))
           db2 (-> (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :red) (ended 2))) (verdict 1 reasons))]
       (testing "parked by a verdict, its process gone: the next run is a spawn, never a wake"
         (is (= [(spawn "a" 2)] (actions-for (-> (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :red) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]))
@@ -347,7 +347,7 @@
     (is (= [(spawn "a" 3)]
            (actions-for (db-of [(decl "a")] :extra (concat (run "a" 1 :parked :outcome :waiting) [{:seon.run/id "demo/a#1" :seon.run/taken 0}]
                                                            (run "a" 2 :lost)
-                                                           (task/message-tx "m1" :message "user" "demo/a#1" "carry on")))))
+                                                           (task/message-tx "m1" :message "user" (task/default-branch "demo/a") "carry on")))))
         "the next run is a spawn")))
 
 (deftest the-judge-reads-its-branch-in-one-request
@@ -812,7 +812,7 @@
 
 (defn- told
   "db with a :verdict entry to run aid giving reasons, as the judge's first verdict of the session wrote it."
-  [db aid reasons] (d/db-with db (task/message-tx (str "v-told-" aid) :verdict "root" aid (sedn/encode {:reasons reasons}))))
+  [db aid reasons] (d/db-with db (task/message-tx (str "v-" aid "-told") :verdict "root" (get-in (task/run db aid) [:seon.run/env :branch]) (sedn/encode {:reasons reasons}))))
 
 (defn- held
   "main db after the hold the reconciler's one action for it writes, and the action (its :problem
@@ -1192,7 +1192,7 @@
   (let [red {(t "a") :fail}
         parked (fn [outcome taken] (into (run "a" 1 :parked :results red :outcome outcome)
                                          [{:seon.run/id "demo/a#1" :seon.run/taken taken}]))
-        msg (fn [mid] (task/message-tx mid :message "user" "demo/a#1" "carry on"))
+        msg (fn [mid] (task/message-tx mid :message "user" (task/default-branch "demo/a") "carry on"))
         wake {:op :wake :task "demo/a" :run "demo/a#2" :agent :a-a1
               :env {:branch (task/default-branch "demo/a") :model nil :max-turns (cfg/value :seon.config.agent/max-turns)}}]
     (testing "judged: a park outcome parks the run; a red outcome is a verdict to the agent"

@@ -1306,18 +1306,19 @@
                                     (task/run-start-tx "demo/w#2" "demo/w" "boot-1" :a2 env 1000 "Wait.")))
            ;; the session's branch, then on main: a verdict to its earlier run, a message to another session's run
            _ (d/branch! conn (:branch cfg) ab)
-           _ (d/transact conn (into (task/message-tx "m-v" :verdict "root" "demo/w#1" "red: demo-test/w is red")
+           br (get-in (task/run @conn "demo/w#1") [:seon.run/env :branch])
+           _ (d/transact conn (into (task/message-tx "m-v" :verdict "root" br "red: demo-test/w is red")
                                     (task/run-start-tx "demo/x#1" "demo/w" "boot-1" :a3 {:branch :elsewhere :model nil :max-turns 4} 1000 "Wait.")))
-           _ (d/transact conn (task/message-tx "m-x" :message "user" "demo/x#1" "not yours"))
+           _ (d/transact conn (task/message-tx "m-x" :message "user" (get-in (task/run @conn "demo/x#1") [:seon.run/env :branch]) "not yours"))
            store-conn (d/connect (assoc cfg :branch ab))
            [a b] (sock/socketpair)
            old @agent/state]
        (try
          (reset! agent/state {:fd a :store-conn store-conn :cfg cfg :branch ab :run "demo/w#2" :db @store-conn})
-         (is (= [{:id "m-v" :kind :verdict :from "root" :to "demo/w#1" :body "red: demo-test/w is red"}]
+         (is (= [{:id "m-v" :kind :verdict :from "root" :branch br :body "red: demo-test/w is red"}]
                 (agent/untaken-entries))
              "the session takes what main holds to its earlier run, and nothing of another session's")
-         (agent/transact! (task/message-tx "m-v" :verdict "root" "demo/w#1" "red: demo-test/w is red"))
+         (agent/transact! (task/message-tx "m-v" :verdict "root" br "red: demo-test/w is red"))
          (agent/commit!)
          (is (= [] (agent/untaken-entries)) "once its branch holds it, it is taken")
          (finally (reset! agent/state old) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
@@ -1519,7 +1520,7 @@
                   "                  [id (when-let [e (datahike.api/entity @(:conn sys) [:seon.run/id id])] {:status (:seon.run/status e) :outcome (:seon.run/outcome e) :reason (:seon.run/reason e)})]))"
                   " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/st\")}}))"
                   " sent (fn [run] (mapv second (sort (datahike.api/q '[:find ?n ?s :in $ ?id :where [?r :seon.run/id ?id] [?u :seon.turn/run ?r] [?u :seon.turn/n ?n] [?u :seon.turn/origin :model] [?m :seon.model-call/turn ?u] [?m :seon.model-call/sent ?s]] b run))))"
-                  " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"" % "/st-implement#1\"] [?m :seon.message/to ?r] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
+                  " boundary (datahike.api/q '[:find ?mid . :where [?r :seon.run/id \"" % "/st-implement#1\"] [?r :seon.run/branch ?br] [?m :seon.message/branch ?br] [?m :seon.message/from \"root\"] [?m :seon.message/id ?mid]] b)]"
                   " {:ended ended :design (sent \"" % "/st#1\") :implement (sent \"" % "/st-implement#1\") :boundary boundary})")
         names (volatile! nil)
         [_ r] (in-agent #(do (vreset! names %) [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}])
@@ -1671,7 +1672,7 @@
                                              "   :prose (mapv #(:prose (datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/record ?r]] db %)) (keep :eval (:seon.turn/calls t)))})")
                                         {:op :eval :agent "root"
                                          :code (str "(datahike.api/q '[:find ?id ?f ?to ?b :where [?m :seon.message/id ?id] [?m :seon.message/from ?f]"
-                                                    " [?m :seon.message/to ?r] [?r :seon.run/id ?to] [(= ?to " (pr-str run) ")] [?m :seon.message/body ?b]] @(:conn sys))")}])
+                                                    " [?m :seon.message/branch ?br] [?r :seon.run/branch ?br] [?r :seon.run/id ?to] [(= ?to " (pr-str run) ")] [?m :seon.message/body ?b]] @(:conn sys))")}])
                                        {:config {:seon.config.ai/script 'seon.fixtures/thinking-call}})
         end (:value end)
         {:keys [calls on-branch committed prose reply agent-key basis-keys]} (:value turn)

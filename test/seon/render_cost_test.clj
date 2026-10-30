@@ -402,7 +402,7 @@
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
                          :seon.eval/record {:code (str "(f " i ")") :response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :line (str i) :run run :call-id (str "c" i) :call 0 :prose (str "Step " i ".")}}])
       (when (even? i)
-        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" run (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
+        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) :message "user" (keyword (str "b-p" n)) (str "note " i)) 0 assoc :seon.message/agent {:seon.agent/key k}))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
 

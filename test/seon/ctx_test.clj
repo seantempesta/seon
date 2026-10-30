@@ -87,7 +87,7 @@
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj {:seon.turn/id (str "lab/ctx#1/" i) :seon.turn/run [:seon.run/id "lab/ctx#1"] :seon.turn/agent [:seon.agent/key k] :seon.turn/n i})
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/to [:seon.run/id "lab/ctx#1"] :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/branch :lab-ctx :seon.message/agent [:seon.agent/key k] :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
 
@@ -114,7 +114,7 @@
       0 (eval-tx (+ 10000 i))
       1 (run-tx (str "lab/ctx#" (+ 2 i)) 2)
       2 [{:seon.turn/id (str run "/x" i) :seon.turn/run [:seon.run/id run] :seon.turn/n i}]
-      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/to [:seon.run/id run] :seon.message/body (str "note " i)}]
+      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/branch :lab-ctx :seon.message/body (str "note " i)}]
       4 [[:db/add [:seon.run/id run] :seon.run/status (nth [:running :done :closed] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
@@ -153,7 +153,7 @@
            (let [e (nth evals (.nextInt r (count evals)))]
              [[:db/retract [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]] [:db/add [:seon.eval/id e] :seon.eval/agent [:seon.agent/key k]]])
            (eval-tx (+ 80000 i)))
-      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :in $ ?r :where [?re :seon.run/id ?r] [?m :seon.message/to ?re]] db run)] [:db/retractEntity m])))
+      11 (or (not-empty (vec (for [m (d/q '[:find [?m ...] :where [?m :seon.message/branch :lab-ctx]] db)] [:db/retractEntity m])))
              (eval-tx (+ 50000 i))))))
 
 (deftest an-agents-record-holds-its-task-and-every-turn-and-eval
@@ -856,7 +856,7 @@
                                                                 (assoc-in [:runs r1 :messages "m-new"]
                                                                           {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
         (is (= :done (:seon.run/status (d/entity db' [:seon.run/id "lab/ctx#1"]))))
-        (is (= "lab/ctx#1" (:seon.run/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"])))))
+        (is (= :lab-ctx (:seon.message/branch (d/entity db' [:seon.message/id "m-new"]))))
         (is same)
         (is (= "a note to myself" (get-in @ctx/ctx [:runs r1 :messages (id db' [:seon.message/id "m-new"]) :seon.message/body])) "the swap!'s map gave way to the db's: the new member under its id")))
     (testing "a cardinality-many attribute of a forward unit, member by member"
