@@ -93,6 +93,7 @@
 (def ^:private still-worked
   "Task entries whose branch merged and whose work goes on under the same entry, each with its reason."
   {"seon.reconcile/one-observe-descends-once" "merged as the stored-shape measurement only; the one multi-prefix datoms-diff walk its plan asks for is still a per-attribute loop (low priority in its plan)"
+   "my.test/a-test-runs-in-the-world" "the world and two shrink groups merged (15b53fa3ae names it); the rest of the heavy tests, the world as the test store's seed and the ceiling at 2e8 still to do"
    "seon.render/walk" "render work still moving: later branches finish it"
    "seon.render/page" "render work still moving: later branches finish it"
    "seon.context/the-context-is-the-agents-evals-and-seons" "R1 merged (7602f8a398); R2 (root's after-turn work as facts) and R3 (the request from its basis) still to do"

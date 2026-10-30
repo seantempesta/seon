@@ -536,9 +536,25 @@
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
                         {:kind :uncited-var :var v} {:var v})))))
 
+(defn long-forms
+  "Each of the named vars (a set of symbols, the vars a branch changed), in source or in a test, whose
+  form's text is longer than :seon.config.shrink/form-chars, as a :long-form row with its chars and the
+  bound: a long form is split by what it does (docs/health.md#a-form-too-long). Closed by splitting the
+  form under the bound. Cost: one seek per named var and its form's text length."
+  {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
+  [db ans names]
+  (let [bound (config/value :seon.config.shrink/form-chars)]
+    (vec (for [v (sort names)
+               :let [e (pdb/eid db :var/name v) src (some-> e (as-> e (d/entity db e)) :var/form :form/src)
+                     n (count src)]
+               :when (> n bound)
+               :let [s (str "long-form " v) nsym (some-> (namespace v) symbol)]]
+           (derived-row ans s nsym (str v " is " n " chars, over the bound of " bound ": split it by what it does")
+                        {:kind :long-form :var v :chars n :bound bound} {:var v :chars n :bound bound})))))
+
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:dead-citation :unnamed-site :stale-section :old-word :uncited-var})
+  #{:dead-citation :unnamed-site :stale-section :old-word :uncited-var :long-form})
 
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
@@ -605,7 +621,8 @@
                        (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                        (map #(assoc % :class :old-word) (old-words-in db ans {:vars moved-vars :sections text-secs :tasks task-ids}))
-                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))))
+                       (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
+                       (map #(assoc % :class :long-form) (long-forms db ans moved-vars))))
         forms-in (fn [db] (fn [fact] (set (keep #(:e (law-form-at db fact %)) (changed-forms fact)))))
         had (vec (rows base bs (forms-in base)))
         has (vec (rows head hs (forms-in head)))
