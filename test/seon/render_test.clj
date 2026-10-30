@@ -1016,7 +1016,8 @@
   ;; wrong): they are drawn above the plan, whole
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
-        h (h/html (ui/task-html {} (ui/task-data {:seon.ctx/ctx {:task {:seon.task/id "demo/w"}} :seon.db/db db} 1)))]
+        ;; the task as its record pulls it, drawn by its html render
+        h (h/html (ui/task {} (:tree (seon.ctx/build db (seon.db/eid db :seon.task/id "demo/w") nil))))]
     (is (str/includes? h "first reproduce it in one eval") "the whole instructions are on the page")
     (is (str/includes? h "your run ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "first reproduce it in one eval") (str/index-of h "Make w true.")) "above the plan")))
@@ -1056,8 +1057,8 @@
       (is (str/includes? h "text-error") "the failing proof's verdict is the status's mark")
       (is (str/includes? h "(= 4 5)") "and what its assertion got"))
     (let [h (:html (unit-of task "task-data-"))]
-      (is (str/includes? h "demo/f") "drawn by task-data")
-      (is (str/includes? h "to-prove") "as the task's data, drawn from the db when it is drawn"))
+      (is (str/includes? h "demo/f") "drawn by the task's html render")
+      (is (str/includes? h "to-prove") "with how to run each proof, from what the record pulled"))
     (is (= [(str "chat-ask-" rid) (str "chat-start-" rid)
             (str "chat-message-" rid "-" (eid :seon.message/id "m-1")) (str "eval-item-" (eid :seon.eval/id "e1")) (str "eval-item-" (eid :seon.eval/id "e2"))
             (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/0")) (str "eval-item-" (eid :seon.eval/id "e3")) (str "chat-turn-" rid "-" (eid :seon.turn/id "demo/f#1/1"))
@@ -1118,7 +1119,7 @@
 
 (deftest a-part-returns-its-data-as-a-call-of-the-printer
   ;; root, 2026-10-26 (the owner's compact renders, not stripped), moved with the parts that answer data
-  ;; (docs/render.md#a-part-answers-data): the task part is its data; the page draws it by task-html, whose
+  ;; (docs/render.md#a-part-answers-data): the task part is its data; the page draws it by its html render (seon.render.ui/task), whose
   ;; data is a call of the printer, [#'seon.render/html opts value], which the page's serializer expands when it
   ;; writes the page; the model is sent the value as data. Its opts are plain data, so an equal value draws an
   ;; equal call
@@ -1126,8 +1127,8 @@
         k (seon.task/agent-key "b1" :a3)
         walk-of #(let [w (r/draw (:tree (seon.ctx/build branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                                  (requiring-resolve (r/declared :seon.render/render-ctx)))]
-                   (try (let [d (get (r/placed-data w ["#p-task"]) :seon.context/task)]
-                          {:data d :model (second (first (r/placed-hiccup w ["#p-task"]))) :html (r/html {:schema :seon.context/task :as :block} d)})
+                   (try (let [d (get (r/placed-data w ["#p-task"]) :seon.task/task-fact)]
+                          {:data d :model (second (first (r/placed-hiccup w ["#p-task"]))) :html (r/html {:schema :seon.task/task-fact :as :block} d)})
                         (finally (r/dispose-walk! w))))
         call-of (fn [h] (some #(when (and (vector? %) (= #'r/html (first %))) %) (tree-seq coll? seq h)))
         {:keys [data model] h0 :html} (walk-of)
@@ -1727,3 +1728,30 @@
     (is (= ['demo-test/g-test :fail] [(:test p) (:status p)]) "the verdict the record holds")
     (is (= "nil" (get-in p [:failures 0 :got :seon.print/code])) "its failure, as the record holds it")
     (is (str/includes? (pr-str (:source p)) "deftest g-test") "its source, the pulled form's")))
+
+;; docs/render.md#a-part-answers-data: the task part is the pulled task drawn by its schema's renders
+;; (seon.render.ui/task, task-model): its plan accumulated over its joined needs, each proof's form to run
+;; it or what to assert, from what @ctx holds; its render reads no db
+(deftest the-task-part-reads-only-what-ctx-holds
+  (let [[db _] (cited-world)
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "First the need." :seon.task/proofs #{'demo-test/n-test}}]))
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "m" :seon.task/needs #{"demo/n"} :seon.task/proofs #{'demo-test/g-test}
+                                                   :seon.task/plan "Then make `demo/g` pass."}]))
+        db (d/db-with db [{:seon.agent/key "b1/a2" :seon.agent/id :a2 :seon.agent/task [:seon.task/id "demo/m"]}])
+        aid (seon.db/eid db :seon.agent/key "b1/a2")
+        tree (:tree (seon.ctx/build db aid :b))
+        w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes}
+                    (fn [] (throw (ex-info "the task's part read the db" {})))
+                    [#'ui/task-data {} aid])
+        [data html] (try (r/flush! w nil)
+                         [(:data (get @(:cache w) @(:out w))) (h/html (r/resolved w @(:out w) true))]
+                         (finally (r/dispose-walk! w)))
+        m (ui/task-model {} data)]
+    (is (= :seon.task/task-fact (:seon.render/schema (meta data))) (str "the part draws with the db unread: " (pr-str data)))
+    (is (= "First the need.\n\nThen make `demo/g` pass." (get-in m [:task :seon.task/plan])) "its plan accumulated over its need, the need's first")
+    (is (= '(my.agent/prove #{demo-test/g-test}) (get-in m [:to-prove 'demo-test/g-test])) "a written proof: the form that runs it")
+    (is (str/starts-with? (str (get-in m [:to-prove 'demo-test/n-test])) "not written yet") "its need's unwritten proof: what to write")
+    (is (not (contains? data :cites)) "the cites are parts of their own")
+    (is (nil? (meta (:task m))) "its model value names no schema: the printer does not draw it by this render again")
+    (is (str/includes? (seon.print/response-text {:value data} r/model-printed) "First the need.") "the part printed as an eval's value is, by its model render: it ends")
+    (is (str/includes? html "First the need.") "the page's html, by the task's html render")))

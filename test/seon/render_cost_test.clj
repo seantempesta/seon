@@ -435,7 +435,8 @@
                        ;; pull's, where the draw used to query them), 548 before; 574 since the agent's record joins its run
                        ;; (seon.context/run-of: the turn line, the chat's start and end and the status read it there, where each queried the db);
                        ;; 604 since the status reads its proofs from the record (seon.context/task-of, seon.task/pulled-accumulated) and
-                       ;; the needs join their proofs
+                       ;; the needs join their proofs; 608 since the task part is the pulled task's renders (task-model's
+                       ;; pulled-accumulated, where task-data queried the db: 2.50 MB -> 2.16 MB at 10)
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 564 :bytes 3200000}
+                       :fixed {:calls 568 :bytes 3200000}
                        :sizes [10 40 80]}))))))

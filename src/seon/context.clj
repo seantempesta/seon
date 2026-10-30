@@ -155,7 +155,7 @@
   [db cites]
   (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
 
-(defn- not-written
+(defn not-written
   "What unwritten proof p should assert, by the plan's own words: the plan's sentences that name
   it, or that it is not written yet when none does (the plan is on the page already)."
   {:malli/schema [:=> [:cat :qualified-symbol :string] :string]}
@@ -581,11 +581,10 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view); the functions nearest its plan
   by meaning that it does not name (`similar`). cites: what the task cites, its cite entities and its needs'
-  (the page's from ctx, seon.task/task-cites on demand). With write-set? false (the page's task part, whose
-  cites are parts of their own, seon.render.ui/cited), no write set is made."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map] [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :boolean] :map]]}
-  ([db t cites] (task-data db t cites true))
-  ([db t cites write-set?]
+  (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
+  the pulled task's own renders (seon.render.ui/task-data, docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
+  [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (program-vars db cites)
         sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
@@ -595,11 +594,10 @@
                           :seon.task/plan plan)
              ;; a proof is shown with the proofs, not again in the write set; the names that
              ;; resolve to nothing are one entry, their problem said once
-             :write-set (when write-set?
-                          (let [rs (into [] (comp (remove (set proofs)) (map #(cited db %))) refs)
+             :write-set (let [rs (into [] (comp (remove (set proofs)) (map #(cited db %))) refs)
                               {gone true there false} (group-by (comp boolean :unresolved) rs)]
                           (cond-> (vec there)
-                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)}))))
+                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)})))
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]
@@ -607,8 +605,7 @@
                                     (list 'my.agent/prove #{p})
                                     (not-written p plan))]))}
       (seq sections) (assoc :sections sections)
-      near (assoc :similar near)
-      (not write-set?) (dissoc :write-set)))))
+      near (assoc :similar near))))
 
 (defn cited
   "Var v as the task's page shows it: its source and its callers (docs/callers), or that it

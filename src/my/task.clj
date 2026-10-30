@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.context :as context] [seon.ctx] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -56,7 +56,7 @@
   recorded, reused greens included: (my.agent/prove) runs what changed since."
   {:malli/schema [:=> [:cat] :any]}
   []
-  ;; the page's status part, from the agent's walk drawn to now (seon.turn/status-now): one computation
-  (let [s (turn/status-now)]
-    (if (contract/error? s) s (context/status-model {} s))))
+  ;; from the agent's record (@seon.ctx/ctx: its run, its task's proofs), as the page's status part reads it; never
+  ;; the walk from inside an eval (drawing the page within an eval spun the agent: seon.server-test's my.task/status)
+  (context/status-model {} (context/status (agent/db) @seon.ctx/ctx {})))
 

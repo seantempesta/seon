@@ -122,9 +122,9 @@
 
 (defn task-data-of
   "seon.context/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
-  its cites, without its write set, as the task part draws it."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map] :boolean]]}
-  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r") false]))
+  its cites, as my.task/data answers it at the REPL."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:vector :map]]]}
+  [n] (let [[db _] (sections-of n)] [db (seon.task/task db "demo/r") (seon.task/task-cites db "demo/r")]))
 
 (defn namespace-of
   "seon.context/namespace-data's arguments at n definitions: a branch whose namespace app.pc defines
