@@ -81,6 +81,31 @@
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
+(deftest a-merge-candidate-is-what-the-merge-writes
+  ;; the merge gate's checkout takes the writer's :merge-candidate: the files the octopus merge would write, with their
+  ;; text, its changed schema entries' resources among them (md-scan 29: the gate wrote the changed namespace's file
+  ;; but not :seon.ref/block's resource, so the checkout's new seon.ref/scan met its old schema and the seed threw)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :a1)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (d/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
+                          [:db/add v :var/form "f2'"]
+                          {:schema/key :app.m0/thing :schema/form "[:map [:x :int]]" :schema/file "resources/seon/schemas/app.m0.edn"}])
+        _ (d/release bc)
+        t0 (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge-candidate :branch b :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
+    (is (:ok r) (pr-str r))
+    (is (some #{"resources/seon/schemas/app.m0.edn"} (:files r)) (str "the changed schema entry's resource: " (pr-str (:files r))))
+    (is (re-find #":app.m0/thing" (str (get (:text r) "resources/seon/schemas/app.m0.edn"))) "with its text as the merge holds it")
+    (is (or (some #(re-find #"\.clj$" %) (:files r)) (contains? (:unfiled r) 'app.m0))
+        (str "the changed namespace's own source file, or it named as unfiled (the schema resource alone is not it): " (pr-str (select-keys r [:files :unfiled]))))
+    (is (= t0 (:max-tx @conn)) "and main is unchanged: a candidate is never committed")))))
+
 (deftest the-fork-servers-replica-is-main-at-each-commit
   ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
   ;; commit the writer names), never replaying its datoms: replaying the boot's 42,942-datom
@@ -634,7 +659,9 @@
         m (#'root/flow-error {:clojure.core.async.flow/pid :reconciler :clojure.core.async.flow/ex ex
                               :clojure.core.async.flow/msg {:tag 7 :r nil}})
         p (promise)
-        _ (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+        [_ outs] (step #'root/api-proc (api-state) :back (assoc m :msg {:op :state :p p}))]
+    (is (= [{:type :proc-defect :pid :reconciler :message (ex-message ex)}] (map #(dissoc % :at-ms) (:events outs)))
+        "an event, so a wait on root's events for what the proc owed ends (bin/check robust waited for good)")
     (is (= "seon.procs-test" (some-> (:in m) namespace)) (str "the fn it threw in: " (pr-str (:in m))))
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))
@@ -909,3 +936,15 @@
     (is (zero? (seon.lib/c-kill pid 0)) "the child is running")
     (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
     (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
+
+(deftest an-agents-memory-alone-moves-no-main
+  ;; root wrote :seon.process/mem-mb on every change, so main moved five times under three reads of a
+  ;; working agent (seon.server-test/a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did)
+  (let [st {:boot "b1" :agents {} :pending {} :rid 0 :view {:agents {:a1 {:status :busy :pid 7 :mem-mb 151.66}}}}
+        o (volatile! {})
+        writes #(:to-writer @o)
+        rec (fn [st before] (vreset! o {}) (#'root/record-agents st o before) (writes))]
+    (is (empty? (rec (assoc-in st [:view :agents :a1 :mem-mb] 152.42) (get-in st [:view :agents])))
+        "memory alone writes nothing")
+    (let [[w] (rec (update-in st [:view :agents :a1] assoc :status :idle :mem-mb 152.42) (get-in st [:view :agents]))]
+      (is (some #(= 152.42 (:seon.process/mem-mb %)) (:tx-data w)) "it goes with the agent's next other change"))))

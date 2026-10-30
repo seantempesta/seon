@@ -200,7 +200,7 @@
         ;; its standby is its child
         _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
         _ (sh/sh "kill" "-9" (str fs))
-        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (if (= :fork-server-lost (:type e)) :lost (recur))))")
+        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (case (:type e) :fork-server-lost :lost :proc-defect e (recur))))")
         spawned (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
         status (eval-root "(get-in (c/state sys) [:fork-server :status])")
         agents (eval-root "(count (:agents (c/state sys)))")

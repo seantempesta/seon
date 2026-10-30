@@ -4,7 +4,7 @@
   (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn]
-            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib]
+            [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi]
             [jolt.scheme :as scm] [superv.async :as sv]))
 
@@ -238,28 +238,23 @@
 (deftest a-create-that-fails-leaves-no-store
   ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
   ;; after its env had made data.mdb, and the path then held a file with no database that no open
-  ;; recovered ("Database does not exist"). Here a child creates a store and is killed the moment a
-  ;; data file shows, at the path or in a directory beside it (where a create builds it): each path
-  ;; then holds a whole store or none, and the next open answers either. Ten creates (n <= 20); the
-  ;; kill's moment moves with the machine, the verdict holds for any. Stores on disk of this test's
-  ;; own, removed at the end
+  ;; recovered ("Database does not exist"). Here a child creates a store and kills itself (SIGKILL,
+  ;; nothing cleaned up) once the create has run its tick budget (seon.intr/run): ten budgets spread
+  ;; over a create's work (~22 M ticks) kill it at ten points of that work, the same on any machine,
+  ;; and one larger than the create lets it finish first. Each path then holds a whole store or none, and
+  ;; the next open answers either. (It killed at the moment a data file showed, read by a busy loop of up
+  ;; to 10 M directory listings: 0.25-147 G ticks a run, red at its budget.) Stores of this test's own
   (let [base (str (seon.config/checkout) "/target/db-test-create-" (random-uuid))
-        data-shown? (fn [path]
-                      (or (.exists (java.io.File. (str path "/data.mdb")))
-                          (some #(and (str/starts-with? (.getName ^java.io.File %) (str (.getName (java.io.File. path)) ".making-"))
-                                      (.exists (java.io.File. ^java.io.File % "data.mdb")))
-                                (.listFiles (java.io.File. base)))))
-        killed (fn [path]
-                 (lib/fork! {:child #(pdb/open! :lmdb path 0 :db)
+        killed (fn [path ticks]
+                 (lib/fork! {:child #(do (try (intr/run ticks (fn [] (pdb/open! :lmdb path 0 :db))) (catch Throwable _ nil))
+                                         (lib/kill! (lib/c-getpid) 9))
                              :refused (fn [n] {:refused n})
-                             ;; a bound on looking, never a verdict: a kill at any moment must leave a whole store or none
-                             :parent (fn [pid] (loop [i 0] (when (and (not (data-shown? path)) (< i 10000000)) (recur (inc i))))
-                                       (lib/c-kill pid 9) (lib/wait-status pid))}))
+                             :parent (fn [pid] (lib/wait-status pid))}))
         opens (fn [path] (try (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true) :opens)
                               (catch Exception x (ex-message x))))]
     (.mkdirs (java.io.File. base))
     (try
-      (is (= (repeat 10 :opens) (vec (for [i (range 10) :let [p (str base "/store-" i)]] (do (killed p) (opens p)))))
+      (is (= (repeat 10 :opens) (vec (for [i (range 10) :let [p (str base "/store-" i)]] (do (killed p (long (* 100000 (Math/pow 2.0 i)))) (opens p)))))
           "every path a killed create left opens")
       (testing "a create that completes leaves nothing beside its store"
         (let [p (str base "/whole")]

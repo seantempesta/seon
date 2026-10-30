@@ -61,6 +61,8 @@ The flow-lab's wake hazards, each a proof:
 
 A replay that resumes a session must not trust a form whose effect is visible only through a helper, a form that reads a world that has moved on (the time, files, main), or a handle to a resource that died with the process.
 
+Root records what it observes of each agent on main (```seon.root/record-agents```, ```seon.task/agent-tx```: its status, pid, branch, the form running) when one of those changes. Its memory alone is no change: it moves with every allocation, and main moved five times in three reads of one working agent, each move merged into every branch and redrawn; it is written with the agent's next other change.
+
 ## A stalled agent
 
 An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `:seon.config.agent/stall-ms`, a clock named in [clocks](clocks.md)).
@@ -73,7 +75,7 @@ A stall is not pushed to the owner: it becomes a task for root to deal with. Its
 
 Root and an agent speak length-prefixed frames over one Unix socket: `seon.sock` on the agent's side, read by one fiber (```seon.agent/intake```, the `:transport` proc's in-port) and written whole by whichever proc answers (a write blocks the thread, so no two frames interleave). Root's side is a `jolt.async.remote` end; the agent's becomes one when an end carries a descriptor with its value (task jolt.async/a-remote-end-carries-descriptors: a clone's socket arrives in a frame).
 
-A frame is a length word and a jfasl body; a descriptor can travel with a frame. The socket's buffer is the bounded channel: a full buffer makes the sender wait. Root's end is a `jolt.async.remote` end on fiber pumps, whose `:in` is the in-port of the agent's proc in root, ```seon.agent-proc/agent-proc```: one proc per agent, added and removed by the api with `flow/update!` ([root](root.md#the-root-graph)). It passes Flow's pause, resume and stop on to the agent, whose transport pauses and resumes its REPL proc with Flow's own `pause-proc` and `resume-proc`; on stop the agent exits after the requests before it, and past `:seon.config.agent/stop-ms` it is SIGKILLed.
+A frame is a length word and a jfasl body; a descriptor can travel with a frame. The socket's buffer is the bounded channel: a full buffer makes the sender wait. Root's end is a `jolt.async.remote` end on fiber pumps, whose `:in` is the in-port of the agent's proc in root, ```seon.agent-proc/agent-proc```: one proc per agent, added and removed by the api with `flow/update!` ([root](root.md#the-root-graph)). It passes Flow's pause, resume and stop on to the agent, whose transport pauses and resumes its REPL proc with Flow's own `pause-proc` and `resume-proc`; on stop an eval in flight is interrupted (SIGUSR1) and the agent exits after the requests before it; its proc waits for its socket's close with no bound, and an agent that never exits is a stall the stall check records (```seon.agent-proc/stop!```).
 
 ## Interrupts
 

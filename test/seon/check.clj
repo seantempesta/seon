@@ -41,9 +41,14 @@
 (defn- await-event
   "The first event on ev (a tap of root's events, seon.root/events, taken before what causes
   it) for which (pred e) holds: root's events are the dependency, never a poll or a
-  deadline. An error when the events end (root stopped) first."
+  deadline. An error when the events end (root stopped) first, or when a root proc threw
+  (:proc-defect): what the step owed may never come."
   [ev pred]
-  (loop [] (let [e (a/<!! ev)] (cond (nil? e) (throw (ex-info "root's events ended" {})) (pred e) e :else (recur)))))
+  (loop [] (let [e (a/<!! ev)]
+             (cond (nil? e) (throw (ex-info "root's events ended" {}))
+                   (pred e) e
+                   (= :proc-defect (:type e)) (throw (ex-info (str "root's " (name (:pid e)) " proc threw: " (:message e)) e))
+                   :else (recur)))))
 
 (defn- await-each
   "The first event on ev (await-event) for each of preds, in preds' order, whatever order
@@ -609,9 +614,10 @@
                      t3 (profile/now-ns)]
                  (cond-> {:id id :ok (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
                           :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}
-                   ;; a failed agent names itself: its eval's answer and its test run's counts
+                   ;; a failed agent names itself: its eval's answer and its test run's whole answer but its
+                   ;; function costs (:error 2 with no reports, under load, said nothing of why)
                    (not (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr)))))
-                   (assoc :eval r :tests (select-keys tr [:pass :fail :error :ex])))))
+                   (assoc :eval r :tests (dissoc tr :fns)))))
         results (vec (pmap work ids))
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
@@ -1167,7 +1173,9 @@
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
           block (byte-array (* 300 1024 1024))]
-      (java.util.Arrays/fill block (byte 7))
+      ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
+      ;; charge read 206 MB of the 300 written (run 29's gate, 2026-10-30)
+      (.nextBytes (java.util.Random. 42) block)
       (let [held (lib/real-mb)
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
                                           ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes

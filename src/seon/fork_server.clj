@@ -137,13 +137,19 @@
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
-                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled
-                 errs (seq (program/load-changes! db' (:tx-data m)))]
+                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
+                 ;; the tests' load is still due it loads them all at the first fork, as main has them then
+                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))
      :fork (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd) ; the request's socket, closed if this step throws before fork!
                  t0 (profile/now-ns)
+                 ;; main's tests, loaded once, before the first fork, so every agent and test child forked from here
+                 ;; inherits them compiled, as read-only pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them);
+                 ;; their errors go to root as a tx's load errors do
+                 load-errs (when (:tests-due st) (seq (:errors (program/load-all! (:db st)))))
+                 st (dissoc st :tests-due)
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork warm-first-write)
@@ -160,12 +166,14 @@
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
              (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :marks marks) (:db st) (:ns m))
-                             (fn [n] [st {:ev [{:ev :fork-failed :agent (:agent m) :active-threads n}]}])
+                             (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
+                                            load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
-                                         [st {:ev (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
-                                                          :fork-ms (- (profile/ms-since t0) static-ms) :static-ms static-ms
-                                                          :t (:max-tx (:db st))}]
-                                                        evs)}]))))
+                                         [st {:ev (cond-> (into [{:ev :forked :agent (:agent m) :slot (:slot m) :pid pid
+                                                                  :fork-ms (- (profile/ms-since t0) static-ms) :static-ms static-ms
+                                                                  :t (:max-tx (:db st))}]
+                                                                evs)
+                                                    load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}]))))
      :stats [st {:ev [{:ev :stats :t (:max-tx (:db st)) :datoms (count (d/datoms (:db st) :eavt))
                        :mismatch (:mismatch st) :mem-mb (lib/r2 (lib/real-mb)) :os-threads (lib/nthreads)
                        :active-threads (lib/active-threads)}]}]
@@ -176,7 +184,7 @@
      ;; its graph and index brought to :db first, so a standby never holds one a commit has passed
      :standby (let [fd (sock/take-fd! (:conn st)) _ (vreset! open fd)
                     st (-> st graph-at-fork index-at-fork)]
-               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index]))
+               (fork-carrying! st fd open #(main (:db st) (:cfg st) % false (select-keys st [:graph :index :tests-due]))
                               (fn [n] [st {:ev [{:ev :standby-failed :gen (:gen m) :active-threads n}]}])
                               (fn [pid] (when-let [old (:standby-pid st)] (lib/kill! old 9))
                                 (let [[st evs] (adopt (assoc st :standby-pid pid) pid)]
@@ -196,8 +204,8 @@
   ;; observed forward the same way (index-at-fork) and handed to every agent forked (seon.agent/reconcile-index starts from it)
   ;; the reach graph is built here when the server starts (a standby inherits its server's), so no
   ;; spawn waits for it (the first fork built it: 0.8-3.8 s measured)
-  ([{:keys [db cfg store conn graph index exits]}]
-   {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{}
+  ([{:keys [db cfg store conn graph index exits tests-due]}]
+   {:db db :cfg cfg :store store :mismatch 0 :conn conn :exits exits :status-buf (ffi/alloc 4) :children #{} :tests-due (boolean tests-due)
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
     :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
@@ -243,7 +251,7 @@
   returns."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean] :any] [:=> [:cat :seon.host/db :seon.db/cfg :seon.lib/fd :boolean [:maybe :map]] :any]]}
   ([db0 cfg fd boot?] (main db0 cfg fd boot? nil))
-  ([db0 cfg fd boot? {:keys [graph index]}]
+  ([db0 cfg fd boot? {:keys [graph index tests-due]}]
   ;; every agent forked from here works in the scratch dir, with no repository above it: an
   ;; agent changes code through its REPL and git finds nothing (DECISIONS, Agents work at
   ;; the REPL through tool calls: no git, no source-file editing)
@@ -262,13 +270,6 @@
         ;; docs/machine.md#what-a-process-owns-in-memory)
         db0 (d/commit-as-db store (d/commit-id db0))
         _ (when boot? (pdb/preload! db0))
-        ;; root evaluates no test namespace (program/load-all! {:tests? false}); this server does, once,
-        ;; so every agent and test child forked from here inherits main's tests compiled, as read-only
-        ;; pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them). The first fork
-        ;; waits behind it; its errors go to root as a tx's load errors do.
-        _ (when boot?
-            (when-let [errs (seq (:errors (program/load-all! db0)))]
-              (sock/send! fd {:ev :load-errors :t (:max-tx db0) :errors (vec errs)})))
         ;; one wait on its two dependencies, root's socket and a child's exit (no timeout): alts! over
         ;; the exits channel and the socket's readiness, which stays pending until the socket is read
         exits (a/chan 64)
@@ -282,7 +283,10 @@
                                (do (vreset! ready nil) (recur))
                                [:cmd {:op :exit :pid v}]))
                            (case m :eof nil [:cmd m])))))]
-    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index}
+    ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at
+    ;; its first fork (:tests-due), so a root that forks no agent never loads them, and its socket is read
+    ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
+    (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index :tests-due (or boot? tests-due)}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))
