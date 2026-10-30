@@ -93,13 +93,25 @@
   [] (or (get (nth (repl/page-parts) 2) :seon.context/status)
          (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
 
+(defn run-tokens
+  "The tokens run's model calls spent, summed from their records on db (:seon.model-call/tokens, a
+  call's record beside its turn: one fact, whichever way the turn ended), nil when no call reported
+  its usage (unknown, never 0). A count carried through the turn loop lost every turn that threw after
+  its model call answered (a bench run wrote 111k of its calls' 3.54M)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :int]]}
+  [db run]
+  (let [ts (keep #(:seon.model-call/tokens (d/entity db [:seon.model-call/id %]))
+                 (d/q '[:find [?t ...] :in $ ?r :where [?x :seon.run/id ?r] [?u :seon.turn/run ?x] [?u :seon.turn/id ?t]] db run))]
+    (when (seq ts) (reduce + ts))))
+
 (defn- end!
   "The run's end: the live runtime staged onto the branch, the end written there (with
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.run/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
-  [{:keys [turn tokens t0 run log]} outcome reason error]
+  [{:keys [turn t0 run log]} outcome reason error]
   (stage/stage!)
+  (let [tokens (run-tokens (agent/db) run)]
   (agent/write-end! run {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   ;; what was not measured is absent, never 0: an outside run counts no model calls and no loop time
@@ -107,7 +119,7 @@
     turn (assoc :turns turn :model-calls turn)
     t0 (assoc :ms (profile/ms-since t0))
     tokens (assoc :tokens tokens)
-    reason (assoc :reason reason)))
+    reason (assoc :reason reason))))
 
 (defn usage
   "What completion c cost, as the turn's model call records it (:seon.model-call/*): its tokens (prompt and completion), and the
@@ -248,7 +260,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn tokens max-turns merge? whole? run] :as st} {:keys [tests-ms] :as obs} s model-name]
+  [{:keys [turn max-turns merge? whole? run] :as st} {:keys [tests-ms] :as obs} s model-name]
   (let [t (:task obs)
         t0 (profile/now-ns)
         _ (take! true)
@@ -323,7 +335,6 @@
             rs (mapv :response calls)
             eval-ms (long (profile/ms-since t2))
             _ (swap! agent/state assoc-in [:turn :evals] rs)
-            used (:seon.model-call/tokens (usage c))
             t3 (profile/now-ns)]
         ;; a reply with prose and no call is a message to the user: the turn ends, and the run
         ;; waits for the user (the design's tool_choice auto)
@@ -353,7 +364,7 @@
                            :seon.model-call/split (cond-> {:context-ms context-ms :model-ms model-ms :eval-ms eval-ms
                                                            :record-ms (long (profile/ms-since t3))}
                                                     tests-ms (assoc :tests-ms tests-ms))}])
-        (cond-> (-> (assoc st :turn (inc turn) :tokens (when (and tokens used) (+ tokens used)))
+        (cond-> (-> (assoc st :turn (inc turn) )
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
                                                  :shown {'seon.render.ui/cite-model (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
@@ -446,7 +457,7 @@
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :tokens 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
+    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :run run :whole? (= :whole (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
