@@ -57,7 +57,7 @@
     ;; a cause carried from a task entry is that entry's own words, so the two cannot drift
     (when-let [[_ tid cause] (re-find #"Its cause \(task ([\w./-]+)\): (.*)$" (:seon.task/plan d))]
       (let [[tns tname] (str/split tid #"/" 2)
-            entry (some #(when (= tname (:seon.task/name %)) %) (clojure.edn/read-string (slurp (str "resources/seon/tasks/" tns ".edn"))))
+            entry (some #(when (= tname (:seon.task/name %)) %) (clojure.edn/read-string (slurp (str (seon.config/checkout) "/resources/seon/tasks/" tns ".edn"))))
             words #(str/replace % #"`" "")]
         (is (some? entry) (str "its task entry exists: " tid))
         (is (str/includes? (words (:seon.task/plan entry)) (str/replace (words cause) #"\.$" ""))
