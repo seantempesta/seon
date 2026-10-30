@@ -518,14 +518,12 @@
 (declare cited)
 
 (defn current-ns
-  "The namespace agent a's REPL is in on db: the one its newest eval left it in (its response's :ns,
-  as nREPL's carries it), or nil before it has evaluated anything there. Where its next eval runs (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :symbol]]}
-  [db a]
-  ;; newest eval first: eval ids are the store's counter, so the index read backward from a's last datom is
-  ;; time order (seon.ctx's rseek), and it stops at the first record that carries the ns (every response does)
-  (some (fn [dt] (get-in (d/pull db [:seon.eval/record] (:e dt)) [:seon.eval/record :response :ns]))
-        (take-while #(and (= :seon.eval/agent (:a %)) (= a (:v %))) (d/rseek-datoms db :avet :seon.eval/agent a))))
+  "The namespace the REPL of agent record c (its ctx) is in: the one its newest eval left it in (its response's
+  :ns, as nREPL's carries it), read from its :evals (newest first, docs/ctx.md#the-pattern), stopping at the
+  first that carries one; nil before it has evaluated anything there. Where its next eval runs
+  (docs/render.md#a-part-answers-data)."
+  {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
+  [c] (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c)))
 
 (defn namespace-data
   "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
@@ -560,12 +558,12 @@
   (`current-ns`) first, marked :here, then those of what the plan
   cites (its cites, a var's namespace or a namespace itself) and of the task's proofs, once each, those db records. What
   the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :int] [:map-of :symbol :map]]}
-  [db t cites a]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :map] [:map-of :symbol :map]]}
+  [db t cites c]
   (let [{:keys [proofs]} (:seon.task/accumulated t)
         cited (for [{n :seon.cite/name} cites
                     :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
-    (let [here (current-ns db a)]
+    (let [here (current-ns c)]
       ;; the one the REPL is in first; a map by name, in
       ;; that order (a part answers a map: a vector is hiccup)
       (->> (concat (some-> (some->> here (namespace-data db)) (assoc :here true) vector)

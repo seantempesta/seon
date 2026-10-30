@@ -1095,7 +1095,7 @@
   {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
   [{c :seon.ctx/ctx db :seon.db/db} aid]
   (when-let [t (some->> (:task c) :seon.task/id (task/task db))]
-    (with-meta (context/namespaces-of db t (task-cites c) aid) {:seon.render/schema :seon.context/namespaces})))
+    (with-meta (context/namespaces-of db t (task-cites c) c) {:seon.render/schema :seon.context/namespaces})))
 
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
@@ -1111,7 +1111,7 @@
         ;; the tokens its requests sent so far, the provider's counts summed (each request the whole context then)
         sent (d/q '[:find (sum ?k) . :with ?m :in $ ?a :where [?t :seon.turn/agent ?a] [?m :seon.model-call/turn ?t] [?m :seon.model-call/tokens ?k]] db aid)
         ;; the namespace the REPL is in: the one its newest eval left it in
-        in-ns (context/current-ns db aid)]
+        in-ns (context/current-ns c)]
     ;; a part: the page draws it by run-html, the model is sent the value (docs/render.md#a-part-answers-data); this
     ;; turn's number (its record is written before its page is drawn), of the cap, and a cut reply
     (with-meta (cond-> {:turn (if cap (str n " of " cap) n)}

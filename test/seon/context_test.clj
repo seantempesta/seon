@@ -1306,6 +1306,15 @@
         "a test namespace: how many deftests, how many green, which red")
     (is (nil? (context/namespace-data db 'x.nowhere)) "a namespace db does not record")))
 
+;; docs/render.md#a-part-answers-data: the namespace the REPL is in is the newest eval's that carries one, read from
+;; the record's :evals (newest first), never the eval datoms
+(deftest the-repls-namespace-is-the-newest-evals
+  (let [c {:evals (sorted-map-by > 3 {:seon.eval/record {:response {:value 1}}}
+                                 2 {:seon.eval/record {:response {:ns 'x.b}}}
+                                 1 {:seon.eval/record {:response {:ns 'x.a}}})}]
+    (is (= 'x.b (context/current-ns c)) "the newest that carries one")
+    (is (nil? (context/current-ns {})) "none before an eval")))
+
 (deftest a-draw-reads-the-cites-its-plan-write-derived
   ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan
   ;; again ran its broken parser (the layout, the status, the namespaces part); a task's cites are
