@@ -157,7 +157,8 @@
                   ;; answers the missing file as its own error
                   (and (seq? form) (= 'load-file (first form)) (= 2 (count form)) (string? (second form))
                        (.isFile (java.io.File. ^String (second form))))
-                  (@forms-ref (slurp (second form)) ns top)
+                  ;; the file's end is this form's: the request's next form runs after it
+                  (let [[ns' how] (@forms-ref (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
 
                   (do-parts form src ns)
                   (let [parts (do-parts form src ns)]

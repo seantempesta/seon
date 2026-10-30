@@ -236,7 +236,7 @@
         path (.getPath file)
         body (fn [ns n] (str "(ns " ns ".lf)\n(seon.contract/defn f {:malli/schema [:=> [:cat] :int]} [] " n ")"))]
     (try
-      (let [[_ _ _ _ loaded called src]
+      (let [[_ _ _ _ loaded called src then]
             (at/in-agent (fn [{:keys [ns]}]
                            [(str "(ns " ns ".core)")
                             (str "(spit " (pr-str path) " " (pr-str (body ns 1)) ")")
@@ -244,9 +244,12 @@
                             (str "(spit " (pr-str path) " " (pr-str (body ns 2)) ")")
                             (str "(load-file " (pr-str path) ")")
                             (str "(" ns ".lf/f)")
-                            (str "(my.agent/source-fn '" ns ".lf/f)")]))]
+                            (str "(my.agent/source-fn '" ns ".lf/f)")
+                            ;; a form after the load-file in the same request runs after the file's forms
+                            (str "(load-file " (pr-str path) ")\n(" ns ".lf/f)")]))]
         (is (= 2 (:value called)) "the new definition runs")
         (is (str/includes? (:value src) "[] 2") "source shows the new text")
+        (is (= 2 (last (:value then))) (str "the form after a load-file runs: " (pr-str (select-keys then [:value :forms :ex]))))
         (is (some #(str/ends-with? (str %) ".lf/f") (:recorded loaded)) (str "the loaded definition is recorded as program on the branch: " (pr-str (:recorded loaded)))))
       (finally (.delete file)))))
 
