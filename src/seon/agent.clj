@@ -932,10 +932,11 @@
                ;; the test's own working directory: what a test writes relative to it is this run's, removed
                ;; below when the child has ended (docs/failure-points.md, a directory walk)
                (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
-               (let [res (try (load-removed! (:removed plan)) (run-tests-here w ticks budgets tests)
-                              (catch Throwable e {:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]}))]
-                 ;; the reports went as their tests ended: this line is the run's end and its counts
-                 (sock/write-line! w (sedn/encode (assoc res :reports [])))))
+               (let [[res streamed?] (try [(do (load-removed! (:removed plan)) (run-tests-here w ticks budgets tests)) true]
+                                          (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
+                 ;; a run's reports went as its tests ended: this line is its end and its counts; a run that threw
+                 ;; streamed none, so its line keeps the throw's report (scale's agents read :error 2 and nothing else)
+                 (sock/write-line! w (sedn/encode (cond-> res streamed? (assoc :reports []))))))
       :parent (fn [pid]
                 (lib/c-close w) (swap! fds disj w)
                 (forked pid)
