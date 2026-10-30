@@ -1048,18 +1048,47 @@
                  :when r]
              r)))))
 
+(defn- required!
+  "Of form rows forms, the test namespaces whose every live form is its file's as imported
+  (:form/source, the namespace's :ns/file) and that this process holds none of, each loaded whole
+  by require, in load order: through Jolt's AOT cache (JOLT_CACHE_DIR, bin/env) a namespace's
+  compile is paid once, by the first process, and every later one loads it compiled (main's 78
+  test namespaces: 12.2 s evaluated form by form, 0.70 s loaded warm, 16.1 s cold, 2026-10-30), its
+  contracted vars armed. A namespace whose require throws is left to load-forms!, which names the
+  form that fails. Answers [the namespaces loaded, the errors]. See docs/source.md#a-process-holds-the-tests-only-when-it-runs-them."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:tuple [:set :symbol] [:vector :seon.program/error]]]}
+  [db forms]
+  (let [tnss (test-nss db)
+        live (group-by :ns (live-forms db))
+        whole? (fn [n] (and (tnss n) (nil? (find-ns n)) (:ns/file (d/entity db [:ns/name n]))
+                            (every? #(:form/source (d/entity db (:e %))) (live n))))]
+    (binding [mr/*registry* (schema-registry (schema-changes db))]
+      (reduce (fn [[ok errs] n]
+                (if (try (require n) true (catch Throwable _ false))
+                  [(conj ok n) (into errs (for [v (vals (ns-interns n))
+                                                :when (contract/contract v)
+                                                :let [r (contract/arm! v)]
+                                                :when (contract/error? r)]
+                                            {:ns n :message (:seon.error/message r)}))]
+                  [ok errs]))
+              [#{} []] (filter whole? (distinct (map :ns (load-order forms))))))))
+
 (defn load-all!
   "Load db's program where this binary runs: every live form it does not hold, with what
   they reach (load!). With {:tests? false} (root's) the test namespaces' forms are left
   unevaluated: root imports test/ as facts and runs no deftest; the fork server loads them for
-  every agent and test child (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them).
+  every agent and test child, each namespace read from its file whole where main holds it as the
+  file is (required!), the rest form by form
+  (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them).
   Answers {:loaded n :errors [...]}."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.program/load-report]
                   [:=> [:cat :seon.host/db [:map [:tests? {:optional true} :boolean]]] :seon.program/load-report]]}
   ([db] (load-all! db {}))
   ([db {:keys [tests?] :or {tests? true}}]
-   (let [forms (loadable db (filterv #(not (held? db %)) (live-forms db)) tests?)]
-     {:loaded (count forms) :errors (load! db forms (set (keys (schema-changes db))) tests?)})))
+   (let [forms (loadable db (filterv #(not (held? db %)) (live-forms db)) tests?)
+         [required errs] (if tests? (required! db forms) [#{} []])]
+     {:loaded (count forms)
+      :errors (into errs (load! db (filterv #(not (required (:ns %))) forms) (set (keys (schema-changes db))) tests?))})))
 
 (defn- live-in?
   "Is form entity e live on db, for one form: it has an id, and defines nothing or one of its
