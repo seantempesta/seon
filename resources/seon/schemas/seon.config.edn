@@ -49,6 +49,7 @@
   [:seon.config.check/sample-ms :seon.config.check/sample-ms]
   ;; agents
   [:seon.config.agent/max-running :seon.config.agent/max-running]
+  [:seon.config.agent/cites :seon.config.agent/cites]
   [:seon.config.agent/max-turns :seon.config.agent/max-turns]
   [:seon.config.agent/cwd :seon.config.agent/cwd]
   [:seon.config.agent/inbox-size :seon.config.agent/inbox-size]

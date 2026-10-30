@@ -236,6 +236,12 @@
  ;; sits above the measured p90. Tokens are the paid resource; task
  ;; seon.model/budgets-are-data-and-spend-is-measured makes them the budget.
  :seon.config.agent/max-turns 40
+ ;; Unit: addresses. What every agent reads beside its task (the owner, 2026-10-30: every agent reads the
+ ;; testing instructions, no copy to drift): the page whole, sections added later too, at lead depth (each
+ ;; section's heading, lead and the headings below). Written as the agent's own cite entities by its first
+ ;; run on its branch (seon.task/agent-cites-tx, seon.agent/begin-run!); the agent changes its own with my.agent/cite! and uncite!. At the
+ ;; bound: an empty vector makes an agent cite nothing beside its task.
+ :seon.config.agent/cites ["docs/testing.md?lead" "docs/references.md?lead#an-entity-cites"]
  ;; Unit: path, every agent process's working directory, shared, made at the fork server's boot.
  ;; No repository above it: an agent changes code through its REPL, never git (owner, 2026-10-22:
  ;; "no git in agents"); it reads and writes any file by its absolute path. At the bound: n/a.
@@ -762,10 +768,10 @@
  ;; message it has, never windowed (the owner, 2026-10-30: "deliver all messages and
  ;; errors"; 2026-10-29: no cuts on an agent's context). Older members stay on main, read by a query.
  :seon.config.ctx/window 100
- ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds, and the
- ;; newest of its tests the cited render reads by its own query (seon.render.ui/cited-of: newer
- ;; callers of other kinds never push the tests out of a window they share), each joined to its last
- ;; result by name. At the bound the older ones are left out, and
+ ;; Unit: forms. The newest forms naming a cited var (its callers) a cite's record holds, each with the
+ ;; vars it defines: the cite's part shows its tests and other callers among them (seon.render.ui/cite-model;
+ ;; newer callers of other kinds can push a test out of the window they share). At the bound the older ones
+ ;; are left out, the part names (my.agent/tests-reaching 'x), and
  ;; (my.agent/callers 'x) reads them all. 50: the six capped design-build runs of
  ;; 2026-10-26 lacked the cited vars' existing tests (short-history spent 25 turns before finding
  ;; kept's tests, mixed 9 guessing inputs that problem-rows in print_test builds); a cited var is

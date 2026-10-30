@@ -185,7 +185,7 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]}] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -193,6 +193,41 @@
                        [:seon.agent/task {:optional true} :seon.agent/task] [:seon.agent/max-turns {:optional true} :seon.agent/max-turns]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]]
+ ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
+ ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
+ ;; :seon.agent/key) and its target as text (the address it is written with, or the name)
+ :seon.cite/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ ;; the citing entity: a task (its text's, written by seon.task/cites-tx with the text) or an agent
+ ;; (my.agent/cite!, and :seon.config.agent/cites written when the agent is made)
+ :seon.cite/of :seon.db/ref
+ ;; a section's address, path#anchor; a page cited whole is its top section's (the sections below it
+ ;; joined), a page the db does not hold the address as written (it joins nothing)
+ :seon.cite/address :string
+ ;; a var or test (a qualified symbol), a schema key (a qualified keyword) or a namespace (a symbol)
+ :seon.cite/name :seon.ref/name
+ ;; a name that names a task, its id (a task's :seon.task/id is a string, a cite's name a symbol): what the
+ ;; pattern joins the task by
+ :seon.cite/task :string
+ :seon.cite/depth :seon.ref/depth
+ ;; its first mention's place in the citing text (an agent's: the order its cites were written)
+ :seon.cite/order :int
+ ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
+ ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
+ ;; namespace), drawn by its two renders (docs/render.md#a-part-answers-data)
+ :seon.cite/cite-fact [:map {:seon.db/attributes true
+                             :seon.ctx/pattern [* {[:seon.cite/address :by :seon.section/address :as :section]
+                                                   [:seon.section/address :seon.section/heading :seon.section/lead :seon.section/text :seon.section/references
+                                                    {[:seon.section/_parent :as :below] [:seon.section/address :seon.section/heading]}]}
+                                                {[:seon.cite/name :by :var/name :as :var]
+                                                 [* {[:var/form :as :form] [*]}
+                                                  {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true]
+                                                   [* {[:form/defines :as :defines] [:var/name :var/kind]}]}]}
+                                                {[:seon.cite/task :by :seon.task/id :as :task] [:seon.task/id :seon.task/plan :seon.task/kind]}
+                                                {[:seon.cite/name :by :schema/key :as :schema] [*]}
+                                                {[:seon.cite/name :by :ns/name :as :ns] [:ns/name :ns/doc]}]
+                             :seon.render/html seon.render.ui/cite :seon.render/model seon.render.ui/cite-model}
+                       [:seon.cite/id :seon.cite/id] [:seon.cite/of :seon.cite/of] [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]
+                       [:seon.cite/address {:optional true} :seon.cite/address] [:seon.cite/name {:optional true} :seon.cite/name] [:seon.cite/task {:optional true} :seon.cite/task]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true} :string]
@@ -202,14 +237,6 @@
  :seon.task/instructions [:string]
  :seon.task/proofs [:set :qualified-symbol]
  :seon.task/needs [:set :seon.db/ref]
- :seon.task/references [:set :qualified-symbol]
- ;; the wiki sections the plan and instructions cite, by address (seon.ref/addresses): the
- ;; section-address twin of :seon.task/references, written by the same producer from the same text
- :seon.task/sections [:set :string]
- ;; its text's citations, each at its depth (seon.ref/references), written by the same producer
- ;; when its plan or instructions are written: what each draw of the agent's page reads, so no draw
- ;; parses the plan with the program the agent may be changing (seon.task/references-of)
- :seon.task/citations [:vector :seon.ref/citation]
  :seon.task/branch :keyword
  :seon.task/model :string
  :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
@@ -242,12 +269,11 @@
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
  ;; config keys are attributes of the task, by their own names (schemas: seon.config.agent.edn, seon.config.merge.edn)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/references :by :var/name :as :cited] [* {[:var/form :as :form] [*]} {[:form/_refs :by :var/name :as :callers :limit :seon.config.ctx/callers :reverse true] [*]}]} {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.task/sections :by :seon.section/address :as :sections] [:seon.section/address :seon.section/heading :seon.section/text]} {[:seon.task/needs :as :needs] [*]}] :seon.render/html seon.render.ui/task}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [* {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {[:seon.cite/_of :as :cites] :seon.cite/cite-fact} {[:seon.task/needs :as :needs] [* {[:seon.cite/_of :as :cites] :seon.cite/cite-fact}]}] :seon.render/html seon.render.ui/task}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
                           [:seon.task/proofs {:optional true} :seon.task/proofs] [:seon.task/needs {:optional true} :seon.task/needs]
-                          [:seon.task/references {:optional true} :seon.task/references] [:seon.task/sections {:optional true} :seon.task/sections] [:seon.task/citations {:optional true} :seon.task/citations]
                           [:seon.task/instructions {:optional true} :seon.task/instructions]
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
