@@ -903,8 +903,8 @@
   "The open problems of one agent, by class and shaped as `report` (so the one render draws it, an
   agent's page and root's alike): the agent with entity aid on db (its branch): its newest run's
   (the run's own facts: run-rows), its task's (:seon.agent/task) failure, and the recorded errors last
-  raised in its task. Cost: the run's pull, the task's, and the error signatures' last-task datoms
-  with a pull for each match; never main's history. See docs/health.md#two-kinds-of-problem."
+  raised in its task. Cost: the run's pull, the task's, and an index seek of the task's id on
+  :seon.error/last-task with a pull for each error it finds; never main's history nor other tasks' errors. See docs/health.md#two-kinds-of-problem."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.problems/report]}
   [db aid]
   (let [ans (answers db)
@@ -915,7 +915,7 @@
         by-class (merge-with into
                              (when run-e (run-rows db ans run-e))
                              (when (and te (seq (d/datoms db :eavt te :seon.task/failure))) {:failed [(failed-row db ans te)]})
-                             (group-by :class (for [{:keys [e v]} (d/datoms db :aevt :seon.error/last-task) :when (and tid (= tid v))] (error-row db ans e))))]
+                             (group-by :class (for [{:keys [e]} (when tid (d/datoms db :avet :seon.error/last-task tid))] (error-row db ans e))))]
     (vary-meta {:t (:max-tx db)
                 :classes (into {} (for [[c rows] by-class :let [rows (open rows)] :when (seq rows)] [c {:n (count rows) :rows rows}]))}
                assoc :seon.render/schema :seon.problems/report)))
