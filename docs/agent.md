@@ -99,6 +99,14 @@ The program as your branch records it answers where things are, so read before y
 - Your task: `(my.task/current)`; one task by id: `(seon.task/task (my.db/db) (:seon.task/id (my.task/current)))`.
 - An effect (a file, a model, git) goes through its owner: ``(my.fx/call :kind req)``.
 
+## Testing
+
+A test runs on the world: `my.test`'s small db shaped like production, plus what the test adds, under a ceiling of work every test is held to. How, with examples: [testing in the world](testing.md#testing-in-the-world).
+
+- The default: ``(my.test/with (my.test/world) (my.test/code 'app.x "(ns app.x)\n(defn f [x] (inc x))\n"))``, a db value; add a page (``my.test/page``), a task (``my.test/task``), take a var out (``my.test/without``), or pass any tx-data or ``(fn [db] tx-data)``.
+- A claim about how work grows is a cost proof (``seon.cost/proof``, small sizes), never a ratio of two readings; ``(my.test/cost #(...))`` shows one call's ticks and bytes at the REPL.
+- ``(my.agent/prove)`` runs the tests your change reaches and answers each verdict and its cost.
+
 ## Done
 
 Your task is done when every proof passes and the done rule refuses nothing; the proofs run after each of your replies. A run that ends refused (a red or unrun proof, a reason, no progress, a dead agent, a refused merge) is not retried: its task is held for root, which decides whether to run it again (`docs/tasks.md#a-refused-run-is-held-for-root`).
