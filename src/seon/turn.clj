@@ -472,6 +472,10 @@
             step (repl/with-branch-schemas
                    (fn []
                      (try
+                       ;; main moved since the last turn: merge it in now, so the agent works on main's program and
+                       ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
+                       ;; merge (the owner, 2026-10-30: "updates as often as we can")
+                       (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
                        (let [obs (observe task)
                              ;; how the work stands, from the walk the request is drawn from (one computation a turn)
                              s (status-now)

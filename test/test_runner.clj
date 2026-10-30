@@ -302,7 +302,8 @@
                                                                                                  ;; a cost proof's verdict, as data, so its reused red reports it (seon.proofs/costs)
                                                                                                  (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
                                                ;; a test's end, so bin/stalls never names one that finished
-                                               :else (do (println "ended" (:test x))
+                                               ;; and its cost, the work it did (a green test's is read nowhere else)
+                                               :else (do (println "ended" (:test x) (str (:ticks x) " ticks"))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)

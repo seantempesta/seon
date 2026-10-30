@@ -1808,6 +1808,19 @@
       (is (str/includes? l "ones you changed too: [app.md/g]") l)
       (is (str/includes? l "conflict on: [app.md/g]") l))))
 
+;; docs/merging.md#main-moved-is-said-at-every-eval: a turn merges main in whenever main moved past the branch's
+;; merge base (the owner, 2026-10-30: "updates as often as we can"), and never when it did not
+(deftest a-turn-merges-main-only-when-main-moved
+  ;; committed values, as an agent's base and heard main are (a d/db-with value names no commit)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [base @conn
+            _ (d/transact conn {:tx-data [{:note/text "main moved"}]})
+            main @conn]
+        (is (false? (agent/main-moved? base base)) "main at the merge base: nothing to merge")
+        (is (true? (agent/main-moved? base main)) "main moved: the turn merges it")
+        (is (false? (agent/main-moved? nil main)) "no merge base yet: nothing to compare")))))
+
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
 (deftest main-line-costs-what-changed
   ;; the coordinator, 2026-10-29: an eval should cost ms; main-line (13.9 M ticks, 38.8 MB, 304 contracted
