@@ -391,6 +391,12 @@
     (.mkdirs (java.io.File. d))
     d))
 
+(defn- kept-graph
+  "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
+  program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
+  [here]
+  (runner/reach-graph-of (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)) (ts/kept-program-store)))
+
 (defn- sampled-repo
   "A new git repository (its path) holding every nth file of the checkout's src, test and schemas as
   they are on disk (tracked and untracked, unignored, not HEAD's: the digests are the working tree's; a
@@ -596,7 +602,11 @@
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
   ;; every file class when it reads files or runs a process (a pin it takes by reach alone)
   (let [here (seon.config/checkout)
-        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
+        named '#{seon.main-test/no-docstring-carries-a-date seon.reader-test/prose-without-a-fence-is-a-comment
+                 seon.test-store-test/n-roots-open-the-process-store-at-once seon.render-cost-test/main-info-reads-what-the-page-shows}
+        ;; the kept graph with every fifth test and the tests asserted on below: each class's digests are
+        ;; computed over that sample (a fifth of the work of seven indexes), the same claim over fewer tests
+        g (let [g (kept-graph here)] (assoc g :tests (vec (keep-indexed (fn [i t] (when (or (named t) (zero? (mod i 5))) t)) (sort (:tests g))))))
         in (fx/inputs here)
         a (update-vals (program/graph-index g in nil) :digest)
         moved (fn [c] (let [b (update-vals (program/graph-index g (assoc-in in [:config c] "other") nil) :digest)]
@@ -778,7 +788,8 @@
   ;; a test that reads files or runs a process too; the runtime core's pins are no test's (ruling D)
   (let [here (seon.config/checkout)
         in (fx/inputs here)
-        sample (sampled-repo "pins" 6 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj" "src/seon/source.clj" "src/seon/contract.clj"])
+        sample (sampled-repo "pins" 1000 ;; the first file of the tree and the four named: seon.db and its test reach lmdb and zstd, datahike.query-test datahike, reader-test nothing
+                                 ["test/datahike/query_test.clj" "test/seon/reader_test.clj" "src/seon/db.clj" "test/seon/db_test.clj"])
         g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
         a (update-vals (program/graph-index g in nil) :digest)
         all-tests (set (keys a))
@@ -853,7 +864,7 @@
     (testing "the digest of every test and every contract key takes :env"
       (let [here (seon.config/checkout)
             in (fx/inputs here)
-            sample (sampled-repo "runtime-pins" 12 ["test/seon/reader_test.clj" "src/seon/reader.clj"])
+            sample (sampled-repo "runtime-pins" 1000 ["test/seon/reader_test.clj" "src/seon/reader.clj"])
             g (program/reach-graph (runner/program-db sample (ts/program-store)) (:data-refs in))
             roots {"k" ['seon.reader/read-text]}
             at (fn [env] [(update-vals (program/graph-index g (assoc in :env env) nil) :digest)
@@ -960,11 +971,24 @@
   ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
-  ;; An eighth of the tree's files, in two repositories (sampled-repo); the whole tree's run of the same
-  ;; property cost 6.7 G ticks.
+  ;; A small tree of eight files in two repositories (tiny-tree): a function calling another file's, and names quoted
+  ;; before the var they name is imported (src/app/ta.clj quotes app.tz/g and app.tb/late, which files after it
+  ;; define), and tests calling and naming them. The whole tree's run of the same property cost 6.7 G ticks, an
+  ;; eighth of it 1.5 G, and each import of a store of its own about 100 M ticks beside the sample's.
   (let [here (seon.config/checkout)
         dirs (cfg/value :seon.config.source/dirs)
-        copy (sampled-repo "copy" 8 []) copy2 (sampled-repo "copy2" 8 [])
+        tiny-tree (fn [label]
+                    (checkout! label
+                               (into {"deps.edn" "{}"
+                                      "src/app/ta.clj" "(ns app.ta (:require [app.tz :as z]))\n(defn f [x] (z/g x))\n(def names '[app.tz/g app.tb/late])\n"
+                                      "src/app/tz.clj" "(ns app.tz)\n(defn g [x] (inc x))\n"
+                                      "src/app/tb.clj" "(ns app.tb)\n(defn late [x] x)\n"}
+                                     (for [i (range 4)]
+                                       [(str "test/app/t" i "_test.clj")
+                                        (str "(ns app.t" i "-test (:require [clojure.test :refer [deftest is]] [app.ta :as ta]))\n"
+                                             "(deftest calls-test (is (= 2 (ta/f 1))))\n"
+                                             "(deftest names-test (is (= '[app.tb/late] ['app.tb/late])))\n")]))))
+        copy (tiny-tree "copy") copy2 (tiny-tree "copy2")
         in (fx/inputs here)
         a (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
         b (ts/reach-digests (runner/program-db copy (ts/program-store)) in)
@@ -976,7 +1000,7 @@
         r (try (d/transact conn {:tx-data (source/import-tx @conn (:value (fx/read-source {:req {:root copy :dirs dirs}})))})
                (ts/reach-digests @conn in)
                (finally (d/release conn true)))]
-    (is (< 20 (count a)) "a sample of the suite, not an empty tree")
+    (is (< 5 (count a)) "a sample of the suite, not an empty tree")
     (is (= a b) "the same tree imported twice in one process: every digest equal")
     (is (= a c) "the same tree in another checkout: every digest equal, so its results are shared")
     (is (= a (select-keys r (keys a))) "root's import of the tree: bin/test's digest for every test")
@@ -990,7 +1014,7 @@
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
   (let [here (seon.config/checkout)
-        g (program/reach-graph (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)))
+        g (kept-graph here)
         in (fx/inputs here)
         digests #(update-vals (program/graph-index g % nil) :digest)
         a (digests in)
@@ -1020,11 +1044,12 @@
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
   ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
   ;; namespace (seon.program/file-readers) does.
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [g (kept-graph (seon.config/checkout)) ;; the graph once: each digest set is an index over it
         in #(hash-map :env "e" :tree % :config {})
-        a (ts/reach-digests db (in "t1"))
-        b (ts/reach-digests db (in "t2"))
-        step #(ts/reach-digests db (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
+        digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
+        a (digests (in "t1") nil)
+        b (digests (in "t2") nil)
+        step #(digests (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace walks a directory (file-seq) judges the files
     ;; themselves, so it takes the tree; no-text-uses-an-old-word judged a red tree and a green one by
