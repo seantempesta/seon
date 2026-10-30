@@ -1071,7 +1071,7 @@
         built (system/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
-        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms 10000})
+        g (flow/create-flow {:procs root-procs :conns root-conns :stop-timeout-ms (cfg/value :seon.config.root/flow-stop-ms)})
         _ (deliver graph-p g)
         {root-errors :error-chan} (flow/start g)
         ;; Flow's error channel (every proc's, agents included) piped into :back, each defect
@@ -1410,7 +1410,7 @@
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
   stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
-  past seon.agent-proc/stop-bound-ms); the writer's in-port closes, it commits and flushes what it
+  past :seon.config.agent/stop-ms); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
   reader. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.root/stopped {:boot :cause :at-ms}; cause
@@ -1429,10 +1429,10 @@
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
     ;; agents not stopped by the api's drain, late or never asked (its api closed), are killed
-    (let [answer (deref p (+ ap/stop-bound-ms 1000) ::late)]
+    (let [answer (deref p (+ (cfg/value :seon.config.agent/stop-ms) (cfg/value :seon.config.root/stop-slack-ms)) ::late)]
       (when (or (= ::late answer) (contract/error? answer))
         (a/>!! (:back sys) {:op :kill-all})))
-    (let [drained (deref p 15000 :timeout)
+    (let [drained (deref p (cfg/value :seon.config.root/drain-ms) :timeout)
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))

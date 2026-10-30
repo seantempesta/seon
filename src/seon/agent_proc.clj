@@ -6,7 +6,7 @@
   agent's process and passes Flow's pause, resume and stop on to the agent's own loop.
   From proto/flow f2-final proto.control (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.sock :as sock] [seon.step :as step]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
 (defn- to-proc!
@@ -39,27 +39,17 @@
 (defn- busy {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (seq (:inflight st)) :busy :idle))
 
-(def stop-bound-ms
-  "How long an agent may take to exit after :stop before it is SIGKILLed. A guard, not a
-  config key (GUARDS finding 3: a clock standing in for the exit event); it goes with
-  seon.root/shutdown-and-death-are-dataflow."
-  2000)
-
 (defn- await-dead
-  "Wait (bounded) on the end's :in for its close (the process is gone): true, or false
-  past ms."
+  "Wait on the end's :in for its close (the process is gone): true, or false when ms pass first.
+  One core.async timeout arms the bound (docs/clocks.md#time-decides-owed-its-owners-fix)."
   {:malli/schema [:=> [:cat :seon.host/chan :int] :boolean]}
   [from ms]
-  (let [deadline (+ (System/currentTimeMillis) ms)]
+  (let [t (a/timeout ms)]
     (loop []
-      (let [left (- deadline (System/currentTimeMillis))]
-        (if (<= left 0)
-          false
-          (let [t (a/timeout left)
-                [m c] (a/alts!! [from t])]
-            (cond (= c t) false
-                  (nil? m) true
-                  :else (recur))))))))
+      (let [[m c] (a/alts!! [from t])]
+        (cond (= c t) false
+              (nil? m) true
+              :else (recur))))))
 
 (declare agent-frame)
 
@@ -258,10 +248,10 @@
      ::flow/stop (do (when-not (:dead? st)
                        (when-not (:stop-sent st)
                          (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
-                       (when-not (await-dead (:in (:end st)) stop-bound-ms)
+                       (when-not (await-dead (:in (:end st)) (cfg/value :seon.config.agent/stop-ms))
                          (some-> (:pid st) (lib/kill! 9))
                          (hang-up! st)
-                         (await-dead (:in (:end st)) 5000)))
+                         (await-dead (:in (:end st)) (cfg/value :seon.config.agent/kill-wait-ms))))
                      (assoc st :dead? true))
      st))
   ([st in m]
