@@ -489,7 +489,11 @@
                              hairy (when (and merge? (not (contract/error? s))) (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :task (:task obs) :merge-turns (:merge-turns st)})))]
                          (cond
                            ;; the walk drew no status (the agent's program broke the layout): the agent reads why, this turn
-                           (contract/error? s) (next-of (act! (turn-error! st s) obs s model))
+                           ;; past its cap it ends there, as every turn does (md-scan #27: the agent's change broke
+                           ;; the status, each turn took this branch, and its run made 156 model calls past a cap of 40)
+                           (contract/error? s) (if (>= (:turn st) max-turns)
+                                                 (ended st :cap (str "no status at the cap: " (:seon.error/message s)) s)
+                                                 (next-of (act! (turn-error! st s) obs s model)))
                            ;; git's CI after the merge: green on the combined program; merge main again until
                            ;; it brings nothing new
                            (and (empty? reasons) merge?)
@@ -511,9 +515,12 @@
                            (let [called? (not (identical? asked (get-in @agent/state [:requests run])))
                                  st' (cond-> (update (turn-error! st (agent/error-map e 'seon.turn/work!)) :turn inc)
                                        called? (assoc :threw 1))]
-                             (if (< 1 (:threw st'))
-                               (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
-                               [::next st'])))))))]
+                             (cond (< 1 (:threw st'))
+                                   (ended st' :error (str "two turns in a row threw: " (:seon.error/message (:error st'))) (:error st'))
+                                   ;; a turn that threw counts against the cap too
+                                   (>= (:turn st') max-turns)
+                                   (ended st' :cap (str "threw at the cap: " (:seon.error/message (:error st'))) (:error st'))
+                                   :else [::next st'])))))))]
         (case (first step)
           ::next (recur (second step))
           ::end (let [[_ st outcome reason err] step] (end! st outcome reason err)))))))
