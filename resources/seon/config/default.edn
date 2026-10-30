@@ -714,24 +714,16 @@
   {:seon.ai.model/provider "deepseek"
    ;; DeepSeek-V4.1-Flash-1017; the legacy names deepseek-v4-flash(-vision-exp) route here
    :seon.ai.model/version "DeepSeek-V4.1-Flash-1017"
-   :seon.ai.model/context-window-tokens 1048576
-   :seon.ai.model/max-output-tokens 393216
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
-   :seon.ai.model/thinking-modes #{:enabled :disabled}
-   :seon.ai.model/provider-max-in-flight 2500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}
   "deepseek-v4-pro"
   {:seon.ai.model/provider "deepseek"
    :seon.ai.model/version "DeepSeek-V4-Pro-0813"
-   :seon.ai.model/context-window-tokens 1048576
-   :seon.ai.model/max-output-tokens 393216
    :seon.ai.model/input-usd-per-mtok 0.66
    :seon.ai.model/cached-input-usd-per-mtok 0.022
    :seon.ai.model/output-usd-per-mtok 1.98
-   :seon.ai.model/thinking-modes #{:enabled :disabled}
-   :seon.ai.model/provider-max-in-flight 500
    :seon.ai.model/source "api-docs.deepseek.com/quick_start/pricing and /rate_limit, read 2026-10-21"}}
  ;; Unit: tokens per second the provider admits, cluster-wide: the :model owner's token bucket
  ;; (session R3; AIMD on a 429). 0: no bucket.

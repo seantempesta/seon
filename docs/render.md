@@ -182,7 +182,7 @@ The places that cut a value where it is made, not in the printer, each with its 
 Uses of take, subs and the like in display code that choose what to find or read, not what to cut from output.
 
 - `my.schema/unknown-key`: a registered key's text without its colon, to name the nearest keys of a key no schema registers by Jolt's ranking: a lookup, not a cut of output.
-- `seon.render.ui/kname`, `seon.render.ui/dom-id`: a keyword's text without its colon.
+- `seon.render.ui/kname`: a keyword's text without its colon.
 - `seon.render.ui/markdown`, `seon.render.ui/task-title`: Markdown text split into its blocks by the offsets its parse (`seon.ref/scan`) gives (a fenced block's content and a list's items too), each kept as written; a name's first letter made capital: text rearranged, nothing left out.
 - `seon.context/similar`: the top k of a search (`take` the config's `:seon.config.render/similar` of its ranking), and the forms that search further beside them: a search's answer, not a cut of output.
 - `seon.context/related`: what a search ranked (`seon.context/relevance`), cut by its chance (`:seon.config.render/relevance-summary`) and counted (`take` the config's `:seon.config.render/related`), the cited ones left out; what the cut left out is counted with the form that lists it: a search's answer, not a cut of output.
