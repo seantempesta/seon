@@ -32,7 +32,7 @@ Where things live in the repository:
 |---|---|
 | `src/`, `resources/`, `web/` | the platform: the root, the agents, the store, the reconciler, the printer and the dashboard; `resources/seon/tasks/` is the work itself, as task files |
 | `test/` | the deftests (`bin/test NS`); `bin/check MODE` is the end-to-end suite |
-| `bin/` | `build`, `root`, `prove`, `test`, `check`, `worktree`, `ports`, `laws`, `mcp`, `agy-agent` |
+| `bin/` | `build`, `root`, `prove`, `test`, `check`, `worktree`, `ports`, `laws`, `mcp` |
 | `docs/` | the wiki, and the only place documentation lives ([how it is kept](docs/README.md#how-the-wiki-is-kept)) |
 | `reference-code/` | our forks of Chez, Jolt, Datahike, Konserve, Malli and others, as submodules ([forks](docs/forks.md)), and upstream sources we read |
 | `native/` | C for the native libraries |
