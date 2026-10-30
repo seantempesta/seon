@@ -512,18 +512,6 @@
                 (seq waste) (assoc :seon.end/waste waste))])
   (commit!))
 
-(defn died!
-  "The process's death by defect e, caught at its entrant boundary (seon.repl/serve!): the
-  cause, printed by the one printer, to stderr (root records its tail with the death, even
-  when the end cannot be written), then the end of the run this process works, written
-  on its branch. Root names the death by the exit status that follows."
-  {:malli/schema [:=> [:cat :seon.host/throwable] :any]}
-  [e]
-  (let [em (error-map e 'seon.repl/serve!)]
-    (sock/write-line! 2 (print/text em (:part print/budgets)))
-    (when-let [a (get-in @state [:turn :run])]
-      (write-end! a {:outcome :error :reason (str "the agent's process died: " (:seon.error/message em)) :error em}))))
-
 (defn- interrupt-self-test
   "T1's boot check: SIGUSR1 reaches a Chez handler only in a process whose ancestors were
   all forked from a main thread. Answers whether this agent's handler ran."
