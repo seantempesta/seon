@@ -189,7 +189,7 @@
                      [:seon.eval/record :seon.eval/record] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/id :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [* {[:seon.agent/task :as :task] :seon.task/task-fact} {[:seon.turn/_agent :as :turns] [*]} {[:seon.eval/_agent :as :evals] [*]} {[:seon.message/_agent :as :messages :reverse true] [*]}] :seon.render/parts [:seon.turn/_agent] :seon.render/html seon.render.ui/agent}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/id {:optional true} :seon.agent/id]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]

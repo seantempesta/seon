@@ -633,7 +633,7 @@
 
 (defn diff-of
   "seon.source/program-tx's arguments: refresh-of n's db and its edited file, read."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map :set]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map [:set :any]]]}
   [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss ch) ch #{}]))
 
 (defn transact-of

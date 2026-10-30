@@ -5,6 +5,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 ## 2026-10-30 rulings
 The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
 
+### There are no runs: an agent has an env, a branch and its evals (owner, 2026-10-30)
+"there is no concept of a \"run\" agents have an env a branch and are doing evals. Attach data only to real things"; "please correct whatever is saying that runs exist it's a bad design"; "Agents have envs and run evals and take steps and we have max steps that we can increase if they hit their limit." At :seon.agent/max-turns an agent parks with its process and context; raising it, or a message, wakes the same agent, its turns counting on. A message wake raises the limit by a config amount ("nothing hard coded and we can override it on the agent's record ... defaults are properly inherited automatically"). Every message, the owner's, root's or another agent's, is a fact on main addressed to the agent, which root delivers and which wakes a parked agent. The standing store is erased when the run records are deleted. Stated in: task seon.agent/the-agent-is-the-unit-not-the-run.
+
+### Errors reach the agent grouped, once (owner, 2026-10-30)
+"errors render grouped by signature with counts, newest first line and a handle; root records all; the context sends what changed." Stated in: seon.render.ui/problems-model, task seon.agent/every-limit-fails-loudly.
+
+### The context sends changes, cites code at preview, and counts turns on the eval line (owner, 2026-10-30)
+Approved after the run removal: a changed part that answers data sends clojure.data/diff of its value; a cited var at preview depth, its source on request; the turn counter on each eval's one-line outcome, not a part. Stated in: task seon.context/the-context-is-the-agents-evals-and-seons (when built).
+
 ### Light tests while an agent develops, the full suite near merge (owner, 2026-10-30)
 "let's keep the test suite minimal and most likely impact (we can see there's a change in a function so we need to re-run all tests that consume that function and we'll do a more thorough check when all the proofs are green and we are building towards a full merge". A turn runs the proofs and the tests its change reaches, in-process and fast; the process tests and the full suite run once the proofs are green, before a merge. Stated in docs/merging.md#a-merge-runs-what-the-change-reaches.
 

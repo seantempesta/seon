@@ -176,7 +176,7 @@
     (is (= 3 (count (:turns t))) "every turn")
     (is (= 5 (count (:evals t))) "every eval")
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
-    (is (= [:seon.message/_agent] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on the turns and evals: the messages alone are windowed")
+    (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
     (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
 
 (deftest an-agents-record-holds-only-its-work
@@ -349,6 +349,15 @@
   (let [db (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit n :reverse true] [(symbol "*")]}]]]))
         c (ctx/build db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
+
+(deftest an-agents-own-record-holds-every-message-and-turn
+  ;; task seon.agent/every-limit-fails-loudly item (2) (the owner, 2026-10-30: "deliver all messages and errors"): an
+  ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
+  ;; never the newest :seon.config.ctx/window of them (100), which only root's own record keeps for its copies
+  (let [n 2400 db (seeded n nil) c (ctx/build db (aid db) :b)]
+    (is (< (seon.config/value :seon.config.ctx/window) (quot n 20)) "more of each than the window")
+    (is (= (quot n 20) (count (:messages (:tree c)))) "every message to the agent")
+    (is (= (quot n 3) (count (:turns (:tree c)))) "every turn it has")))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's

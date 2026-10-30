@@ -316,7 +316,7 @@
                       ;; its REPL and its messages while its process runs; its held task's release
                       :input {:schema :seon.render/agent-input
                               :value {:id (:seon.agent/id e) :live? (live? st id)
-                                      :held (d/q '[:find ?id . :in $ ?a :where [?r :seon.run/agent ?a] [?r :seon.run/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
+                                      :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}}}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (or id (:seon.agent/branch e) (:seon.agent/id e)))))
 

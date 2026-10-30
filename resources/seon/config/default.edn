@@ -33,13 +33,6 @@
  ;; file. Provenance: the value seon.root held as a literal (shrink). At the bound: earlier
  ;; output is not recorded; the file itself is kept.
  :seon.config.root/death-stderr-bytes 2048
- ;; Unit: ms. Slack added to :seon.config.agent/stop-ms in seon.root/stop!'s wait for the api's shutdown
- ;; answer, before agents still alive are killed. Provenance: the literal 1000 it replaces. At the
- ;; bound: root sends :kill-all.
- :seon.config.root/stop-slack-ms 1000
- ;; Unit: ms. How long seon.root/stop! waits for the api's drain answer after that. Provenance: the
- ;; literal 15000 it replaces. At the bound: stop! goes on, :drained :timeout.
- :seon.config.root/drain-ms 15000
  ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.root/start!). Provenance: the literal
  ;; 10000 it replaces. At the bound: flow/stop answers the pids still running.
  :seon.config.root/flow-stop-ms 10000
@@ -326,16 +319,6 @@
  ;; guessed tolerance the agent proc held as a var (30 s; a model call answers or streams within
  ;; it). Past it nothing is ended. 0: no check.
  :seon.config.agent/stall-ms 30000
- ;; Unit: ms. How long an agent may take to exit after :stop before it is SIGKILLed
- ;; (seon.agent-proc's ::flow/stop), and the base of the wait for root's shutdown answer
- ;; (seon.root/stop!). Provenance: the literal seon.agent-proc/stop-bound-ms (2 s) it replaces. At the
- ;; bound: the agent is killed and its end closed; named in docs/clocks.md, owed
- ;; seon.root/shutdown-and-death-are-dataflow.
- :seon.config.agent/stop-ms 2000
- ;; Unit: ms. How long a killed agent's end may take to close after SIGKILL and hang-up
- ;; (seon.agent-proc/await-dead). Provenance: the literal 5000 beside stop-ms. At the bound: the proc stops
- ;; waiting; the agent is recorded dead by the socket's EOF when it comes.
- :seon.config.agent/kill-wait-ms 5000
  ;; Unit: bytes. How much of a stalled agent's stderr file its stall evidence keeps as the fiber dump
  ;; (seon.fx/stall-evidence; seon.lib/tail-bytes says how many earlier bytes were left out). Provenance:
  ;; the literal 262144 (256 KiB) the evidence script's `tail -c` held; a dump of a few hundred fibers fits.
@@ -772,11 +755,12 @@
  ;; Unit: tokens for the context block the model reads (the task, its proofs, what it cites),
  ;; breadth first so every section shows before any one deepens (session P1).
  :seon.config.render/context-budget 16000
- ;; Unit: members. The newest members of each collection a record holds (an agent's evals, runs,
- ;; turns and messages; root's agents), read newest first and stopping there, so a record costs its
- ;; window, not its history. 100: a session's evals measured on live agents run 20-80 a task
- ;; (render-workload-a1: 63 evals over 4 runs), so a working session's conversation fits whole.
- ;; Older members stay on the branch, read by a query or a wider pattern (swap! :seon.ctx/pattern).
+ ;; Unit: members. The newest members of each collection root's own record holds (its agents, and
+ ;; their runs and evals), read newest first and stopping there, so root's long-lived copy of other
+ ;; processes' data costs its window, not their history (and the run records, which go: task
+ ;; seon.agent/the-agent-is-the-unit-not-the-run). An agent's own record holds every eval, turn and
+ ;; message it has, never windowed (the owner, 2026-10-30: "deliver all messages and
+ ;; errors"; 2026-10-29: no cuts on an agent's context). Older members stay on main, read by a query.
  :seon.config.ctx/window 100
  ;; Unit: forms. The newest forms naming a cited var (its callers) a task's record holds, and the
  ;; newest of its tests the cited render reads by its own query (seon.render.ui/cited-of: newer

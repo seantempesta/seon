@@ -607,12 +607,14 @@
       ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
-                 (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s)))
+                 ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
+                 ;; ends it (no clock of the stop's own: task seon.root/shutdown-and-death-are-dataflow)
+                 (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
+                   (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
                      (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
-      :kill-all (reduce (fn [st aid] (-> st (set-agent o aid {:status :killed}) (to-agent o aid {:op :kill}))) st (keys (:agents st)))
       st)))
 
 (defn- answer-taken
@@ -1415,10 +1417,10 @@
 
 (defn stop!
   "Stop root by letting the flow drain: the api closes (later calls answer \"root
-  stopped\"); every agent is sent :stop and exits after the requests before it (SIGKILL
-  past :seon.config.agent/stop-ms); the writer's in-port closes, it commits and flushes what it
+  stopped\"); every agent is interrupted and sent :stop, and exits after the requests before
+  it (seon.agent-proc/stop!); the writer's in-port closes, it commits and flushes what it
   took; the fork server is killed and reaped; then flow/stop (every proc exited) and the
-  reader. Nothing accepted is lost.
+  reader. Every wait ends on its answer, none on a clock. Nothing accepted is lost.
   First the end is a fact on main, durable (:seon.root/stopped {:boot :cause :at-ms}; cause
   :stop! unless the caller names it: :stdin-eof, :signal), so every clean end says why; a
   refused stop fact still stops root, and the answer carries it (:stop-fact-refused).
@@ -1434,11 +1436,10 @@
     (a/close! (:ext sys))
     ;; a wait on main asked after this answers stopped at once (ask-edge's closed case)
     (a/close! (:judge sys))
-    ;; agents not stopped by the api's drain, late or never asked (its api closed), are killed
-    (let [answer (deref p (+ (cfg/value :seon.config.agent/stop-ms) (cfg/value :seon.config.root/stop-slack-ms)) ::late)]
-      (when (or (= ::late answer) (contract/error? answer))
-        (a/>!! (:back sys) {:op :kill-all})))
-    (let [drained (deref p (cfg/value :seon.config.root/drain-ms) :timeout)
+    ;; parked on the drain, no bound: each agent interrupted and stopped exits (seon.agent-proc/stop!), the
+    ;; writer flushes, the fork server ends; one that never does is a stall, recorded (task
+    ;; seon.root/shutdown-and-death-are-dataflow)
+    (let [drained @p
           graph (flow/stop (:graph sys))]
       ;; a wait put on :judge that the stopped reconciler never took is answered here
       (loop [] (when-let [m (a/poll! (:judge sys))] (some-> (:p m) (deliver {:stopped true})) (recur)))

@@ -1173,7 +1173,9 @@
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
           block (byte-array (* 300 1024 1024))]
-      (java.util.Arrays/fill block (byte 7))
+      ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
+      ;; charge read 206 MB of the 300 written (run 29's gate, 2026-10-30)
+      (.nextBytes (java.util.Random. 42) block)
       (let [held (lib/real-mb)
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
                                           ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
