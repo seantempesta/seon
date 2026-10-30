@@ -99,4 +99,8 @@ Scoped 2026-10-29 (the owner chose \"Agent runs only\" for step R2a of seon.cont
 Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts
 and docs/storage.md updated; `bin/prove` green; a one-function prove's result lookup still milliseconds."
   :seon.task/kind :work
-  :seon.task/proofs #{}}]
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-flaky-test-is-a-task"
+  :seon.task/plan "The owner, 2026-10-30: \"we shouldn't write tests that drift like that -- so a flaky test is a mining and task to fix it dispatched to an agent\". What exists: seon.proofs/flaky marks a test the runner saw green and red at one digest (:flaky true, judged red until its digest moves), and bin/prove prints \"N flaky\"; nothing more happens, so a flaky test stays red and unowned (2026-10-30: three load-sensitive agent tests held flaky by run 29's gate). Correct: the first time a test is judged flaky at a digest, root writes a task for it from a template, as seon.template/stall writes a stall's (one task per test and digest, its name; its cause pre-filled: the test, both results with their failures, the run logs' paths, the load the runs saw), released for a Seon agent to find the cause and fix it at its cause (a clock, a race, live state: never a retry or a wider bound). It is the first kind of one mechanism, a finding becomes a task (seon.template/a-finding-is-a-task's template per kind), so the shrink kinds reuse it. Deletes nothing; replaces bin/prove's print-only flaky count as the place a flaky test goes."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.proofs-test/a-test-green-and-red-at-one-digest-becomes-one-task}}]
