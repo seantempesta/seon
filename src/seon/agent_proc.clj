@@ -40,16 +40,23 @@
   [st] (if (seq (:inflight st)) :busy :idle))
 
 (defn- await-dead
-  "Wait on the end's :in for its close (the process is gone): true, or false when ms pass first.
-  One core.async timeout arms the bound (docs/clocks.md#time-decides-owed-its-owners-fix)."
-  {:malli/schema [:=> [:cat :seon.host/chan :int] :boolean]}
-  [from ms]
-  (let [t (a/timeout ms)]
-    (loop []
-      (let [[m c] (a/alts!! [from t])]
-        (cond (= c t) false
-              (nil? m) true
-              :else (recur))))))
+  "Wait on the end's :in for its close: the process is gone, its socket's last holder with it.
+  No bound: the agent was interrupted and told to stop (stop!), and one that never ends is
+  a stall the stall check records (docs/processes.md#a-stalled-agent). nil."
+  {:malli/schema [:=> [:cat :seon.host/chan] :nil]}
+  [from]
+  (loop [] (when (some? (a/<!! from)) (recur))))
+
+(defn- stop!
+  "Stop the agent: an eval in flight interrupted (SIGUSR1: it ends at its next safe point, a
+  blocking host call too, seon.root/interrupt!), then :stop, which the agent answers after the
+  requests before it by exiting; with no process, root's end hung up. Answers st."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (cond (:stop-sent st) st
+        (:pid st) (do (when (seq (:inflight st)) (lib/kill! (:pid st) lib/SIGUSR1))
+                      (assoc (to-proc! st {:op :stop}) :stop-sent true))
+        :else (do (hang-up! st) (assoc st :stop-sent true))))
 
 (declare agent-frame)
 
@@ -90,8 +97,7 @@
                 [(assoc st :pid (:pid m)) nil])
     ;; a process that never existed reads as dead: hang up root's end, the reader sees EOF
     :failed (do (hang-up! st) [st {:to-api [(status st {:error (:error m)})]}])
-    :drain (let [st (if (:pid st) (to-proc! st {:op :stop}) (do (hang-up! st) st))]
-             [(assoc st :draining (:rid m) :stop-sent true) nil])
+    :drain [(assoc (stop! st) :draining (:rid m)) nil]
     :kill (do (if (:pid st) (lib/kill! (:pid st) 9) (hang-up! st))
               [(assoc st :kill? true) nil])
     [st nil]))
@@ -246,12 +252,7 @@
      ::flow/pause (if (:pid st) (to-proc! st {:op :pause}) st)
      ::flow/resume (if (:pid st) (to-proc! st {:op :resume}) st)
      ::flow/stop (do (when-not (:dead? st)
-                       (when-not (:stop-sent st)
-                         (if (:pid st) (to-proc! st {:op :stop}) (hang-up! st)))
-                       (when-not (await-dead (:in (:end st)) (cfg/value :seon.config.agent/stop-ms))
-                         (some-> (:pid st) (lib/kill! 9))
-                         (hang-up! st)
-                         (await-dead (:in (:end st)) (cfg/value :seon.config.agent/kill-wait-ms))))
+                       (await-dead (:in (:end (stop! st)))))
                      (assoc st :dead? true))
      st))
   ([st in m]

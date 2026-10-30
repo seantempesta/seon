@@ -13,8 +13,6 @@
   [:seon.config.root/profile {:optional true} :seon.config.root/profile]
   [:seon.config.root/max-agents :seon.config.root/max-agents]
   [:seon.config.root/death-stderr-bytes :seon.config.root/death-stderr-bytes]
-  [:seon.config.root/stop-slack-ms :seon.config.root/stop-slack-ms]
-  [:seon.config.root/drain-ms :seon.config.root/drain-ms]
   [:seon.config.root/flow-stop-ms :seon.config.root/flow-stop-ms]
   [:seon.config.root/view-window :seon.config.root/view-window]
   [:seon.config.root/api-writes :seon.config.root/api-writes]
@@ -66,8 +64,6 @@
   [:seon.config.agent/test-ticks-floor :seon.config.agent/test-ticks-floor]
   [:seon.config.agent/test-ticks-factor :seon.config.agent/test-ticks-factor]
   [:seon.config.agent/stall-fibers-bytes :seon.config.agent/stall-fibers-bytes]
-  [:seon.config.agent/stop-ms :seon.config.agent/stop-ms]
-  [:seon.config.agent/kill-wait-ms :seon.config.agent/kill-wait-ms]
   [:seon.config.agent/stall-ms :seon.config.agent/stall-ms]
   ;; merges
   [:seon.config.merge/max-running :seon.config.merge/max-running]
