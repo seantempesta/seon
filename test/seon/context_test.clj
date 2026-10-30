@@ -1291,29 +1291,24 @@
     (is (= npe (:seon.print/code (:got (first fs)))))
     (is (= "(= 3 (g))" (:seon.print/code (:assert (second fs)))) "a failure of its own keeps its one assertion")))
 
-(deftest a-namespace-shows-its-aliases-definitions-and-tests
-  ;; 2026-10-29, the md-scan bench: ~15 evals asked the REPL for ns-aliases, ns-publics and find-ns
-  (let [db (d/db-with (db-with-program)
-                      [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
-                       {:form/id "x.nsd" :form/defines "n" :form/src "(ns x.nsd (:require [clojure.string :as str] [datahike.api :as d]))"}
-                       {:db/id "f1" :form/id "x.nsd/b" :form/order 1 :form/src "(defn b \"B.\" [x] x)"} {:db/id "f2" :form/id "x.nsd/a" :form/order 2}
-                       {:var/name 'x.nsd/b :var/ns "n" :var/form "f1"} {:var/name 'x.nsd/a :var/ns "n" :var/form "f2"}
-                       {:var/name 'x.nsd-test/t1 :var/ns "nt" :var/kind :test :seon.test/status :green}
-                       {:var/name 'x.nsd-test/t2 :var/ns "nt" :var/kind :test :seon.test/status :red}])]
-    (is (= '{:ns x.nsd :aliases {d datahike.api str clojure.string} :defines [b a]} (context/namespace-data db 'x.nsd))
-        "its aliases from its ns form, its definitions in file order")
-    (is (= '{:ns x.nsd-test :tests {:deftests 2 :green 1 :red [x.nsd-test/t2]}} (context/namespace-data db 'x.nsd-test))
-        "a test namespace: how many deftests, how many green, which red")
-    (is (nil? (context/namespace-data db 'x.nowhere)) "a namespace db does not record")))
-
-;; docs/render.md#a-part-answers-data: the namespace the REPL is in is the newest eval's that carries one, read from
-;; the record's :evals (newest first), never the eval datoms
-(deftest the-repls-namespace-is-the-newest-evals
-  (let [c {:evals (sorted-map-by > 3 {:seon.eval/record {:response {:value 1}}}
-                                 2 {:seon.eval/record {:response {:ns 'x.b}}}
-                                 1 {:seon.eval/record {:response {:ns 'x.a}}})}]
-    (is (= 'x.b (context/current-ns c)) "the newest that carries one")
-    (is (nil? (context/current-ns {})) "none before an eval")))
+(deftest a-namespace-shows-the-names-the-task-names
+  ;; docs/render.md#a-part-answers-data: a bench run's namespaces part was 1,256 tokens listing about 170 names
+  ;; the task never needed. It shows the namespaces of what the task cites and of its proofs, each with the
+  ;; names the task cites or its proofs call and the form that lists the rest, from the record alone
+  (let [db (d/db-with (ts/test-db)
+                      (into [{:db/id "n" :ns/name 'x.nsd} {:db/id "nt" :ns/name 'x.nsd-test}
+                             {:db/id "tf" :form/id "x.nsd-test/t1" :form/src "(deftest t1 (is (= 1 (b 1))))" :form/refs #{'x.nsd/b 'clojure.test/is}}
+                             {:var/name 'x.nsd-test/t1 :var/ns "nt" :var/kind :test :var/form "tf"}
+                             {:var/name 'x.nsd/b :var/ns "n"} {:var/name 'x.nsd/c :var/ns "n"}]
+                            (for [i (range 20)] {:var/name (symbol "x.nsd" (str "unrelated-" i)) :var/ns "n"})))
+        db (d/db-with db (task/create-tx db [{:seon.task/ns 'x :seon.task/name "nsd" :seon.task/proofs #{'x.nsd-test/t1}
+                                              :seon.task/plan "Make `x.nsd/c` call `x.nsd/b`."}]))
+        db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "x/nsd"]}])
+        tree (:tree (ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b))]
+    (is (= '{x.nsd {:names [b c] :more (my.agent/help 'x.nsd)} x.nsd-test {:names [t1] :more (my.agent/help 'x.nsd-test)}}
+           (context/namespaces-of tree))
+        "the cited names and the proof's callee, never the namespace's twenty others; a form for the rest")
+    (is (= '[x.nsd x.nsd-test] (keys (context/namespaces-of tree))) "the cited first, then the proofs'")))
 
 (deftest a-draw-reads-the-cites-its-plan-write-derived
   ;; md-scan #10, 2026-10-29: the agent redefined seon.ref/scan, and every draw that parsed the plan

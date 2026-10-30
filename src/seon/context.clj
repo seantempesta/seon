@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -525,51 +525,28 @@
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
   [c] (some (fn [[_ e]] (ratom/realize (get-in e [:seon.eval/record :response :ns]))) (:evals c)))
 
-(defn namespace-data
-  "Namespace nsym as db records it, the facts an agent asks its REPL for before it changes code
-  there (the md-scan bench: ~15 evals of ns-aliases, ns-publics and find-ns): its
-  aliases (from its recorded ns form, seon.learn/aliases), its definitions by name in file order,
-  and its deftests, how many are green and which are red: its datoms, never its forms read (a
-  definition's arglists are (doc f)'s, asked of the one at hand). nil when db records no such
-  namespace. See docs/render.md#a-part-answers-data."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] [:maybe :map]]}
-  [db nsym]
-  (when-let [e (pdb/eid db :ns/name nsym)]
-    (let [src (d/q '[:find ?src . :in $ ?n :where [?f :form/defines ?n] [?f :form/src ?src]] db e)
-          ;; its vars in one pass over the index of :var/ns, each read for the attributes it shows: its
-          ;; definitions, and its deftests
-          vars (for [dt (d/datoms db :avet :var/ns e) :let [x (d/entity db (:e dt))]]
-                 {:var/name (:var/name x) :var/kind (:var/kind x) :seon.test/status (:seon.test/status x)
-                  :var/form {:form/order (:form/order (:var/form x))}})
-          {tests true defs false} (group-by #(= :test (:var/kind %)) vars)
-          defs (->> defs
-                    (sort-by (fn [{v :var/name {o :form/order} :var/form}] [(or o Long/MAX_VALUE) (str v)]))
-                    (mapv #(symbol (name (:var/name %)))))
-          tests (for [{v :var/name st :seon.test/status} tests] [v (or st :none)])
-          by (group-by second tests)]
-      (cond-> {:ns nsym}
-        src (assoc :aliases (into (sorted-map) (learn/aliases [src])))
-        (seq defs) (assoc :defines defs)
-        (seq tests) (assoc :tests (cond-> {:deftests (count tests) :green (count (by :green))}
-                                    (seq (by :red)) (assoc :red (vec (sort (map first (by :red)))))))))))
-
 (defn namespaces-of
-  "The namespaces agent a's work on task t touches, {name its namespace-data}: the one its REPL is in
-  (`current-ns`) first, marked :here, then those of what the plan
-  cites (its cites, a var's namespace or a namespace itself) and of the task's proofs, once each, those db records. What
-  the page's namespaces part shows the model (docs/render.md#a-part-answers-data)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map] :map] [:map-of :symbol :map]]}
-  [db t cites c]
-  (let [{:keys [proofs]} (:seon.task/accumulated t)
-        cited (for [{n :seon.cite/name} cites
-                    :when (symbol? n)] (if (namespace n) (symbol (namespace n)) n))]
-    (let [here (current-ns c)]
-      ;; the one the REPL is in first; a map by name, in
-      ;; that order (a part answers a map: a vector is hiccup)
-      (->> (concat (some-> (some->> here (namespace-data db)) (assoc :here true) vector)
-                   (keep #(namespace-data db %) (remove #{here} (distinct (concat cited (map (comp symbol namespace) proofs))))))
-           (mapcat (fn [d] [(:ns d) (dissoc d :ns)]))
-           (apply array-map)))))
+  "The namespaces agent record c's work touches, as the namespaces part shows them, from ctx alone: those of
+  what its task and its needs cite (a var's namespace, or a namespace cited itself) and of their proofs,
+  once each, each {:names [...] :more form}: its names the task cites or its proofs call (their forms'
+  :form/refs, as :proved holds them), and the form that lists the rest of it (my.agent/help). It costs what it
+  shows, never the namespace's size. See docs/render.md#a-part-answers-data."
+  {:malli/schema [:=> [:cat :map] [:map-of :symbol :map]]}
+  [c]
+  (let [t (:task c)
+        needs (vals (:needs t))
+        named (for [cs (cons (:cites t) (for [n needs :when (not= :merge (ratom/realize (:seon.task/kind n)))] (:cites n)))
+                    x (vals cs) :let [n (ratom/realize (:seon.cite/name x))] :when (symbol? n)] n)
+        proved (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :when (:var/name v)] v)
+        proofs (map #(ratom/realize (:var/name %)) proved)
+        calls (for [v proved r (ratom/realize (get-in v [:form :form/refs])) :when (qualified-symbol? r)] r)
+        ns-of #(if (namespace %) (symbol (namespace %)) %)
+        names (group-by ns-of (filter namespace (concat named proofs calls)))]
+    ;; a map by name, in the order first named (a part answers a map: a vector is hiccup)
+    (apply array-map (mapcat (fn [n] [n (cond-> {}
+                                           (seq (names n)) (assoc :names (vec (sort (distinct (map (comp symbol name) (names n))))))
+                                           true (assoc :more (list 'my.agent/help (list 'quote n))))])
+                             (distinct (map ns-of (concat named proofs)))))))
 
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its

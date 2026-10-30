@@ -10,7 +10,7 @@
  :seon.agent/state [:map {:seon.render/model seon.agent/state-summary}]
  ;; the agent's run (its turn of its cap, the tokens it sent, a cut reply), a part of the page
  :seon.context/run [:map {:seon.render/html seon.render.ui/run-html}]
- ;; the namespaces the work touches (seon.context/namespaces-of): each its aliases, definitions and deftests
+ ;; the namespaces the work touches (seon.context/namespaces-of): each the names the task cites or its proofs call
  :seon.context/namespaces [:map-of {:seon.render/html seon.render.ui/namespaces-html} :symbol :map]
  ;; how an agent's work on its task stands (seon.context/status), a part of its page: the page draws it by
  ;; its html render, the model is sent its data (docs/render.md#a-part-answers-data)

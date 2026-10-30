@@ -984,16 +984,6 @@
         links (mapv (fn [{p :path}] (if-let [sp (sec p)] (into #{} (map :db/id) (ratom/realize (get-in c (conj sp :seon.section/references)))) #{})) chosen)]
     (vec (for [i (builds-on secs links) :let [{:keys [path target]} (chosen i)]] [path target held]))))
 
-(defn- task-cites
-  "The cites of agent record c's task and its needs (one level, a merge task's left out), each the cite as ctx
-  holds it: what the task's data and its namespaces read of what it cites."
-  {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [c]
-  (let [task (:task c)]
-    (vec (for [cs (cons (:cites task) (for [n (keys (:needs task)) :when (not= :merge (get-in task [:needs n :seon.task/kind]))] (get-in task [:needs n :cites])))
-               k (keys cs)]
-           (ratom/realize (get cs k))))))
-
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
   {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
@@ -1079,7 +1069,7 @@
 (defn namespaces-html
   "The namespaces the work touches as the page shows them (the declared html render of
   :seon.context/namespaces; the model is sent the value): folded to their names, opened to each one's
-  aliases, definitions and tests by the one printer. See docs/render.md#a-part-answers-data."
+  names the task cites or its proofs call and the form that lists the rest, by the one printer. See docs/render.md#a-part-answers-data."
   {:malli/schema [:=> [:cat :seon.render/opts [:map-of :symbol :map]] :any]}
   [_opts v]
   [:details
@@ -1088,14 +1078,14 @@
          (for [[n d] v] [#'render/html {:budget (config/value :seon.config.render/value-budget)} {n d}]))])
 
 (defn namespaces
-  "The namespaces the agent's work touches (a component over ctx and the db): the one its REPL is in,
-  those of what the plan cites and of its proofs, each its aliases, definitions and deftests
+  "The namespaces the agent's work touches (a component over ctx alone): those of what its task and needs cite
+  and of their proofs, each the names the task cites or its proofs call and the form that lists the rest
   (seon.context/namespaces-of), a part (its data, :seon.context/namespaces:
-  docs/render.md#a-part-answers-data). Nothing before the task's record is read."
-  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :int] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db} aid]
-  (when-let [t (some->> (:task c) :seon.task/id (task/task db))]
-    (with-meta (context/namespaces-of db t (task-cites c) c) {:seon.render/schema :seon.context/namespaces})))
+  docs/render.md#a-part-answers-data). It reads no db."
+  {:seon.render/style panel-style :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} _aid]
+  (when (:task c)
+    (with-meta (context/namespaces-of c) {:seon.render/schema :seon.context/namespaces})))
 
 (defn run-head
   "The agent's run (a component over ctx): its relevant attributes and the turns it took, by the
@@ -1377,7 +1367,7 @@
       (when task (list [#'task-data {} aid]
                        ;; each thing its task, its needs and the agent cite, a part each, at the depth its cite asks
                        (for [[p k held] (page-cites c)] [#'cited {:at p :held held} aid k])
-                       ;; where the code lives: each namespace the work touches, its aliases, definitions and tests
+                       ;; where the code lives: each namespace the work touches, the names the task cites or its proofs call
                        [#'namespaces {} aid]
                        ;; how the work stands: the proofs, the done rule's reasons, what the branch did (one diff)
                        [#'status {} aid]))
