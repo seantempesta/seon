@@ -4,6 +4,7 @@
     ($ handle)                an earlier eval's response, its live value under :value (also result/e3)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages delivered and not yet taken, taken
+    (problem "signature")     one open problem of this agent's run whole, as its problems part names it
     (send-message tos body)   body to the agents tos (ids), delivered by root
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
@@ -32,7 +33,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.lib :as lib] [seon.context :as context] [seon.ref :as ref] [seon.docs :as docs]
             [seon.config :as cfg] [seon.proofs :as proofs] [seon.fx :as fx] [seon.program :as program] [seon.task :as task] [seon.vector :as vector] [seon.contract :as contract] [seon.ctx]
-            [seon.db :as pdb] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
+            [seon.db :as pdb] [seon.problems :as problems] [my.schema :as schema] [jolt.analyzer] [clojure.java.io :as io] [clojure.string :as str] [clojure.main] [datahike.api :as d]))
 
 (defn $ "An earlier eval's response (its live value under :value), by handle (:e3)." {:malli/schema [:=> [:cat :keyword] :any]}
   [h] (get-in @agent/state [:results h]))
@@ -40,6 +41,18 @@
   [] {:id (:id @agent/state) :branch (:branch @agent/state) :pid (lib/c-getpid)})
 (defn messages "The words to this agent not yet taken, taken: entries to its session's runs ({:id :kind :from :to :body}), then other agents' sends ({:from :body})." {:malli/schema [:=> [:cat] [:vector :map]]}
   [] (agent/messages))
+(defn problem
+  "One open problem of this agent's newest run, whole: its row of seon.problems/own's report (a recorded
+  error's example and evidence, its count and when it was first and last raised), by the signature its
+  context's problems part names; nil when no open problem has it. See docs/health.md#two-kinds-of-problem."
+  {:malli/schema [:=> [:cat :string] [:maybe :map]]}
+  [signature]
+  (let [db (agent/db)
+        aid (pdb/eid db :seon.agent/key (:key @agent/state))
+        run-e (when aid (d/q '[:find (max ?r) . :in $ ?a :where [?r :seon.run/agent ?a]] db aid))]
+    (when run-e
+      (some #(when (= signature (:signature %)) %) (mapcat :rows (vals (:classes (problems/own db run-e))))))))
+
 (defn send-message "Send body to the agents tos (ids); root delivers it by id. nil." {:malli/schema [:=> [:cat [:sequential :seon.agent/id] :any] :nil]}
   [tos body] (agent/send-message tos body))
 

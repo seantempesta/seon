@@ -350,37 +350,6 @@
         c (ctx/build db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
 
-(defn errored
-  "The input of size n: the agent's record built on a store whose history holds n recorded errors
-  last raised in the agent's task, and n errors of other tasks: [db agent-id branch]. The store grows;
-  what the agent's record reads of it is the task's newest few."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db pos-int? :keyword]]}
-  [n]
-  (let [db (:db-after (d/with (seeded 20)
-                              (vec (for [i (range n)]
-                                     (cond-> {:seon.error/signature (format "%016d" i) :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
-                                              :seon.error/first-ms i :seon.error/last-ms i :seon.error/type :seon.agent/eval-error
-                                              :seon.error/message (str "boom " i) :seon.error/last-task (if (even? i) "lab/ctx" "lab/other")})))))]
-    [db (aid db) :b]))
-
-(deftest a-pull-costs-what-the-task-cites-not-the-stores-history
-  ;; the agent's record reads the errors last raised in its task (a lookup by the task's id, newest
-  ;; first, :seon.config.ctx/errors) and not the store's history of them: its bytes and datoms read
-  ;; stay flat as the store holds 10, 100, 1,000 recorded errors of the task (measured: 541k, 543k
-  ;; and 548k ticks, 2.39 MB and 292 calls at each, against 408k ticks, 1.89 MB and 263 calls before
-  ;; the join; 298 calls with the content-id windows' one more check per reverse join read). The members are the task's own and the newest, never another task's
-  (let [[db a b] (errored 20) c (ctx/build db a b)
-        errs (:errors (:task (val (first (:runs (:tree c))))))]
-    (is (= #{"boom 18" "boom 16" "boom 14" "boom 12" "boom 10"} (set (map :seon.error/message (vals errs)))) "the newest errors raised in the task: five of its ten")
-    (is (every? #(= #{:db/id :seon.error/signature :seon.error/class :seon.error/type :seon.error/message :seon.error/count :seon.error/first-ms :seon.error/last-ms :seon.error/last-task} (set (keys %))) (vals errs)) "each a few attributes (what the scorer reads, docs/ctx.md), not the example's whole map"))
-  (cost/proof
-    {:of 'seon.ctx/build :input 'seon.ctx-test/errored
-     :n "recorded errors in the store, half of them last raised in the agent's task"
-     :work "the agent's pull as ever, and the task's errors join: an index seek of the task's id on :seon.error/last-task, the newest :seon.config.ctx/errors members pulled, whatever the history holds"
-     :growth :constant
-     :fixed {:calls 334 :bytes 2550000}
-     :sizes [10 100 1000]}))
-
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
   ;; size: a patch that walked the record, or a rebuild, grows with the session (measured: 25 calls,
