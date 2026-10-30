@@ -1450,7 +1450,8 @@
                              :when (some (fn [[k mm d]] (and (= :method k) (= m mm) (some #(= d (sedn/encode %)) (:ops f)))) (:defines (rows id)))]
                          id))
         edges (fn [f] (if (schema-row? f)
-                        (vec (filter rows (:schema f)))
+                        ;; the entries it names, and the vars (its renders) its properties name
+                        (vec (concat (filter rows (:schema f)) (keep var-form (:refs f))))
                         (vec (concat (remove test-ids (keep var-form (named f)))
                                      (when (or (proc (:id f)) (bin (:id f))) (remove #{(:id f)} entry-ids))
                                      ;; a request a test's code builds goes to a root's server (in-agent's ask)
@@ -1530,12 +1531,18 @@
                   :stale (as-> (into (:stale g #{}) stale) st (reduce disj st dead))))))
 
 (defn- schema-row
-  "The reach row of schema entry k (its text): its id, its own digest, and every entry its form names, held
-  whether or not the entry exists (reach-step's edges keep those rows holds), so one added later is an edge."
+  "The reach row of schema entry k (its text): its id, its own digest, every entry its form names, held
+  whether or not the entry exists (reach-step's edges keep those rows holds), so one added later is an edge,
+  and every var its form names (a render its properties declare, :seon.render/html, :seon.render/model): a
+  test reaching the entry reaches the render, so a change to the render's body moves it (a red recorded
+  while a render was unfinished was marked flaky at the same digest: step (c) of
+  seon.context/the-page-is-the-render-of-what-ctx-pulls)."
   {:malli/schema [:=> [:cat :any :string] :map]}
   [k text]
-  {:id (str "schema " k) :own (lib/digest (str k "\n" text)) :ns k :refs #{} :defines #{}
-   :schema (mapv #(str "schema " %) (names (sedn/decode text)))})
+  (let [form (sedn/decode text)]
+    {:id (str "schema " k) :own (lib/digest (str k "\n" text)) :ns k :defines #{}
+     :refs (into #{} (filter qualified-symbol?) (tree-seq coll? seq form))
+     :schema (mapv #(str "schema " %) (names form))}))
 
 (defn reach-graph
   "db's reach graph, a value: its live forms and schema entries (a schema entry's :schema, the

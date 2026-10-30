@@ -642,6 +642,22 @@
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
+(deftest a-render-a-schema-entry-declares-is-in-its-tests-reach
+  ;; a schema entry's properties name its renders (:seon.render/html): a test reaching the entry reaches
+  ;; them, so a render's body edited moves the test (it kept its digest, and a red recorded while the render
+  ;; was unfinished was later marked flaky at the same digest)
+  (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
+        db (-> (record (empty-db) 'user "(ns app.pt-sr)" 'app.pt-sr "(defn show [x] (str x))"
+                       'user "(ns app.pt-sr-test (:require [clojure.test :refer [deftest is]]))"
+                       'app.pt-sr-test "(deftest names-test (is (= 1 (count [:app.sr/k]))))"
+                       'app.pt-sr-test "(deftest other-test (is (= 1 1)))")
+               (schema :app.sr/k "[:map {:seon.render/html app.pt-sr/show}]"))
+        dg (fn [db] (ts/reach-digests db {:env "e" :tree "t" :config {}}))
+        before (dg db)
+        edited (dg (record db 'app.pt-sr "(defn show [x] (str \"<\" x \">\"))"))]
+    (is (not= (before 'app.pt-sr-test/names-test) (edited 'app.pt-sr-test/names-test)) "the test reaching the entry moves with its render")
+    (is (= (before 'app.pt-sr-test/other-test) (edited 'app.pt-sr-test/other-test)) "a test reaching neither keeps its digest")))
+
 (deftest a-schema-entry-added-changed-or-removed-is-updated-not-rebuilt
   ;; task seon.program/reach-update-takes-schema-entries: a merge that adds a schema entry rebuilt the graph (154M
   ;; ticks, 892 MB on Seon's program, 4,702 forms). The update is a rebuild's at every step: an entry added that a
