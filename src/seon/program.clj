@@ -1060,18 +1060,29 @@
   [db forms]
   (let [tnss (test-nss db)
         live (group-by :ns (live-forms db))
-        whole? (fn [n] (and (tnss n) (nil? (find-ns n)) (:ns/file (d/entity db [:ns/name n]))
-                            (every? #(:form/source (d/entity db (:e %))) (live n))))]
+        root (get cfg/config :seon.config.source/root)
+        ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
+        ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
+        ;; fixture under test/build/), is never what require loads
+        file-of (fn [n] (let [f (:ns/file (d/entity db [:ns/name n]))
+                              path (str (str/replace (str/replace (str n) "-" "_") "." "/") ".clj")]
+                          (when (and root f (some #(= f (str % "/" path)) (cfg/value :seon.config.source/dirs)))
+                            (java.io.File. (str root "/" f)))))
+        whole? (fn [n] (when-let [^java.io.File file (and (tnss n) (nil? (find-ns n)) (file-of n))]
+                         (and (.isFile file)
+                              (every? #(:form/source (d/entity db (:e %))) (live n))
+                              (let [text (slurp file)] (every? #(str/includes? text (:src %)) (live n))))))]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (reduce (fn [[ok errs] n]
-                (if (try (require n) true (catch Throwable _ false))
+                (if-let [e (try (require n) nil (catch Throwable e e))]
+                  ;; a file that holds main's forms and does not load is a load error, named; its forms then load one by one
+                  [ok (conj errs {:ns n :message (str "require of its file: " (step/error-msg e))})]
                   [(conj ok n) (into errs (for [v (vals (ns-interns n))
                                                 :when (contract/contract v)
                                                 :let [r (contract/arm! v)]
                                                 :when (contract/error? r)]
-                                            {:ns n :message (:seon.error/message r)}))]
-                  [ok errs]))
-              [#{} []] (filter whole? (distinct (map :ns (load-order forms))))))))
+                                            {:ns n :message (:seon.error/message r)}))]))
+              [#{} []] (filterv whole? (distinct (map :ns (load-order forms))))))))
 
 (defn load-all!
   "Load db's program where this binary runs: every live form it does not hold, with what

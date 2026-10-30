@@ -137,8 +137,9 @@
                  st (cond-> (assoc st :db db') (not= (:max-tx db') (:t m)) (update :mismatch inc)
                       ;; the program moved: the reach graph is brought to it at the next fork
                       (program/moves-program? (:tx-data m)) (assoc :graph-moved true :static-due true))
-                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled
-                 errs (seq (program/load-changes! db' (:tx-data m)))]
+                 ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
+                 ;; the tests' load is still due it loads them all at the first fork, as main has them then
+                 errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))]
              [st {:ev (cond-> [] errs (conj {:ev :load-errors :t (:t m) :errors (vec errs)})
                         true (conj {:ev :applied :t (:max-tx db') :writer-t (:t m) :apply-ms (profile/ms-since t0)
                                     :lag-ms (/ (- (profile/now-ns) (:ns m)) 1e6) :mismatch (:mismatch st)}))}]))

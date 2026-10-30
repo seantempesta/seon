@@ -607,7 +607,10 @@
       ;; waits on with it, an open problem while it holds (seon.problems/stalled-agents); its next
       ;; frame (:spoke) or its end retracts it
       :stalled (let [s (cond-> {:quiet-ms (:quiet-ms (:error m))} (get-in m [:error :last-op]) (assoc :last-op (get-in m [:error :last-op])))]
-                 (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s)))
+                 ;; while root stops, a stalled agent is one that does not exit on :stop: the stall, a recorded fact,
+                 ;; ends it (no clock of the stop's own: task seon.root/shutdown-and-death-are-dataflow)
+                 (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
+                   (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]

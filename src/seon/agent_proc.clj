@@ -50,10 +50,14 @@
 (defn- stop!
   "Stop the agent: an eval in flight interrupted (SIGUSR1: it ends at its next safe point, a
   blocking host call too, seon.root/interrupt!), then :stop, which the agent answers after the
-  requests before it by exiting; with no process, root's end hung up. Answers st."
+  requests before it by exiting; one its interrupt cannot reach, with an eval in flight, killed;
+  with no process, root's end hung up; a dead one, nothing. One that never exits is a stall,
+  which ends it while root stops (seon.root/back-op's :stalled). Answers st."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  (cond (:stop-sent st) st
+  (cond (or (:stop-sent st) (:dead? st)) st
+        ;; its interrupt never reaches it (the handler did not run at boot): an eval in flight can only be killed
+        (and (:pid st) (seq (:inflight st)) (:interrupt-unreachable st)) (do (lib/kill! (:pid st) 9) (assoc st :stop-sent true))
         (:pid st) (do (when (seq (:inflight st)) (lib/kill! (:pid st) lib/SIGUSR1))
                       (assoc (to-proc! st {:op :stop}) :stop-sent true))
         :else (do (hang-up! st) (assoc st :stop-sent true))))
@@ -142,7 +146,7 @@
                                          :error (contract/error :seon.agent/fork-misaligned #'seon.agent-proc/agent-frame
                                                                 (str "its branch or image is not at the commit it was branched at: " (sedn/encode x)) x)}))
                  (step/out! o :events (step/event {:type :ready :agent id :start-ms (:start-ms m) :phases (:phases m)}))
-                 (cond-> st (:cloned-from m) (assoc :pid (:pid m))))
+                 (cond-> st (:cloned-from m) (assoc :pid (:pid m)) (false? (:interrupt-ok m)) (assoc :interrupt-unreachable true)))
       ;; its eval's record could not be written on its branch (its entity ids are spent):
       ;; the typed error is recorded on main as its problem
       :fd-ready (send-fd! st (:k m) (get-in st [:inflight (:k m) :pass-fd]))
