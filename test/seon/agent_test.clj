@@ -1129,6 +1129,24 @@
     (is (= :cap (:outcome end)) (pr-str end))
     (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
 
+(deftest a-broken-parser-reaches-the-model
+  ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: two DeepSeek runs of md-scan
+  ;; gave seon.ref/scan's emit step a new arity its calls did not pass, so scan threw on every call; the turn's merge check,
+  ;; seon.reconcile/hairy, parsed the task's plan with it (seon.ref/names) before every model call, so two turns
+  ;; in a row threw and the run ended :error before the model read its own error. Seon's own decision reads the
+  ;; plan's cites, the facts its write derived, and the agent's broken parser costs only the parts that draw prose:
+  ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
+  (let [[_ end msgs] (in-agent (fn [{:keys [task ns]}]
+                                      ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
+                                       (str "(seon.turn/work! {:task " (pr-str task) " :run " (pr-str (str ns "/t#scan")) " :max-turns 2})")
+                                       (str "(mapv :content (get-in @seon.agent/state [:requests " (pr-str (str ns "/t#scan")) "]))")])
+                                    {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        end (:value end)]
+    (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
+    (is (= :cap (:outcome end)) (pr-str end))
+    (is (some #(str/includes? (str %) "Wrong number of args (6)") (:value msgs))
+        (str "the model was sent the error: " (pr-str (:value msgs))))))
+
 (deftest a-run-the-branch-holds-for-another-agent-becomes-this-agents
   ;; task seon.agent/a-death-names-its-cause's resume path (bin/check resume, calc/square capped at 40): an
   ;; agent killed after it committed its run on its branch but before main recorded the run leaves the
