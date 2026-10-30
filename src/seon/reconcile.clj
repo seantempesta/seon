@@ -808,7 +808,7 @@
       ;; the merge gate (a change reaching process tests): the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st run :gate-read
-                          {:op :write :req {:op :branch-db :branch (get-in (task/run (:db st) run) [:seon.run/env :branch])}})))))
+                          {:op :write :req {:op :merge-candidate :branch (get-in (task/run (:db st) run) [:seon.run/env :branch]) :data-attrs #{}}})))))
 
 (defn- work
   "[st [output]]: the agent's turn loop for run aid of act, asked of agent: seon.turn/work!,
@@ -1029,16 +1029,14 @@
                                                           {:seon.run/id run :seon.run/error r}))))
                                         (:members act) (:results r))))))
       ;; the gate's candidate: the files of the namespaces the branch changed, as it holds them
-      :gate-read (let [nss (sort (distinct (for [k (:seon.run/changed (task/run (:db st) aid))
-                                                  :let [[kind x] (read-string k)]
-                                                  :when (#{:var :form} kind)]
-                                              (symbol (first (str/split (str x) #"/" 2))))))
-                       file (partial source/ns-file (:db r))
+      ;; the gate's candidate is the writer's: the files the octopus merge would write (seon.writer's :merge-candidate),
+      ;; forms', tests' and schema resources' alike (md-scan 29: a :seon.ref/block change left out met its new
+      ;; seon.ref/scan in the checkout, and the seed threw on scan's contract)
+      :gate-read (let [files (:text r)
                        ;; a changed namespace with no file on the branch (made at the REPL, never
                        ;; written) cannot be put over the checkout: named, never dropped
-                       unread (vec (for [n nss :when (nil? (file n))]
-                                     {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))
-                       files (source/files (:db r) (vec (keep file nss)))]
+                       unread (vec (for [n (sort (keys (:unfiled r)))]
+                                     {:ns n :reason "no :ns/file on the branch: its forms were never written to a file"}))]
                    (one (request (assoc-in st [:flights aid :gate-unread] unread) aid :gated
                                  {:op :fx :kind :tests :req {:repo (get-in st [:idx :root :gate-checkout]) :branch (:branch (:source st))
                                                              :files files :tests (:tests act)}})))

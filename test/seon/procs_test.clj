@@ -81,6 +81,30 @@
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
+(deftest a-merge-candidate-is-what-the-merge-writes
+  ;; the merge gate's checkout takes the writer's :merge-candidate: the files the octopus merge would write, with their
+  ;; text, its changed schema entries' resources among them (md-scan 29: the gate wrote the changed namespace's file
+  ;; but not :seon.ref/block's resource, so the checkout's new seon.ref/scan met its old schema and the seed threw)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :a1)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (d/connect (assoc cfg :branch b))
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @bc)
+        _ (d/transact bc [{:db/id "f2'" :form/id "app.m0/f2-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                           :form/src "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 200))"}
+                          [:db/add v :var/form "f2'"]
+                          {:schema/key :app.m0/thing :schema/form "[:map [:x :int]]" :schema/file "resources/seon/schemas/app.m0.edn"}])
+        _ (d/release bc)
+        t0 (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :merge-candidate :branch b :dest {:rid 1}})
+        r (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]
+    (is (:ok r) (pr-str r))
+    (is (some #{"resources/seon/schemas/app.m0.edn"} (:files r)) (str "the changed schema entry's resource: " (pr-str (:files r))))
+    (is (re-find #":app.m0/thing" (str (get (:text r) "resources/seon/schemas/app.m0.edn"))) "with its text as the merge holds it")
+    (is (or (some #(re-find #"m0" %) (:files r)) (contains? (:unfiled r) 'app.m0)) "the changed namespace's file, or it named as unfiled")
+    (is (= t0 (:max-tx @conn)) "and main is unchanged: a candidate is never committed")))))
+
 (deftest the-fork-servers-replica-is-main-at-each-commit
   ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
   ;; commit the writer names), never replaying its datoms: replaying the boot's 42,942-datom

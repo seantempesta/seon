@@ -68,6 +68,14 @@
   (let [head (pdb/head conn b) base (pdb/branch-base conn (pdb/conn-main conn) b)]
     [head (pm/delta-three-way base head @conn data-attrs) base]))
 
+(defn- written
+  "What a merge of changes ours writes back, read on db (main with them merged): :files, the source
+  files (namespaces' and schema resources') they touch, and :unfiled, the changed forms of
+  namespaces with no file, which no write-back can write. The octopus merge's write-back and the
+  merge gate's candidate are both this (docs/merging.md#a-merge-runs-what-the-change-reaches)."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/changes] [:map [:files [:vector :string]] [:unfiled :map]]]}
+  [db ours] {:files (source/changed-files db ours) :unfiled (source/unfiled-forms db ours)})
+
 (defn- refused
   "The writer refusing a request, as the one error map (:seon.writer/refused); members
   describe the refused answer."
@@ -147,9 +155,8 @@
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
           ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
-          :results (mapv #(or (:refused %) {:merged? true :tx t :keys (count (:ours (:r %)))
-                                            :files (source/changed-files (:db-after rep) (:ours (:r %)))
-                                            :unfiled (source/unfiled-forms (:db-after rep) (:ours (:r %)))})
+          :results (mapv #(or (:refused %) (merge {:merged? true :tx t :keys (count (:ours (:r %)))}
+                                                  (written (:db-after rep) (:ours (:r %)))))
                          (:members judged))}]))))
 
 (defn- answer
@@ -231,6 +238,16 @@
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))
+      ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
+      ;; a value and never committed, and the files that merge would write, with their text as it holds them
+      ;; (written, source/files): what the gate tests is what the merge writes, schema resources included
+      :merge-candidate (reply st (if (exists? (:branch m))
+                                   (let [data-attrs (:data-attrs m #{})
+                                         [head r base] (branch-merge st (:branch m) data-attrs)
+                                         db (d/db-with @conn (pm/merge-tx @conn base head (keys (:ours r)) data-attrs))
+                                         w (written db (:ours r))]
+                                     (assoc w :ok true :text (source/files db (:files w))))
+                                   (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
