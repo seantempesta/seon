@@ -872,16 +872,20 @@
   a pidfd on Linux), the fact the fork server reaps by, so a process the child forked that holds
   the write end cannot keep the run waiting. Parks in alts! over the exit and r's readiness (a
   fiber's park). After the exit, what is left in the pipe is read: a read that found nothing there
-  (its wait called) with the pipe still open means it is held, and a read that ended on part of a
-  line goes on. Each whole line is given to seen as it is read (the tests as they start,
-  run-tests-forked). Answers {:line :held?}."
-  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean]]]
-                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean]]]]}
+  (its wait called) reaps the child first (the exit event can come before the kernel has closed the
+  dying child's fds: scale read 1-4 of 100 agents' pipes as held), and a read after the reap that
+  still finds the pipe open means another process holds it; a read that ended on part of a line goes
+  on. Each whole line is given to seen as it is read (the tests as they start, run-tests-forked). The
+  child is reaped once, here. Answers {:line :held? :status}, :status its exit status (seon.lib/wait-status)."
+  {:malli/schema [:function [:=> [:cat :seon.lib/fd pos-int?] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]
+                  [:=> [:cat :seon.lib/fd pos-int? :seon.host/fn] [:map [:line [:maybe :string]] [:held? :boolean] [:status :seon.lib/exit-status]]]]}
   ([r pid] (read-to-exit r pid (fn [_] nil)))
   ([r pid seen]
   (let [exit (poller/exit-chan pid)
         ready (volatile! nil)
         exited (volatile! false) waited (volatile! false)
+        status (volatile! nil)
+        reap! (fn [] (or @status (vreset! status (lib/wait-status pid))))
         ;; the readiness wait stays pending until r is read, so a wait the exit ended leaves none behind
         wait (fn [] (vreset! waited true)
                (when-not @exited
@@ -892,12 +896,14 @@
     (loop [line nil]
       (vreset! waited false)
       (let [ls (rd)]
-        (cond (= ls :eof) {:line line :held? false}
+        (cond (= ls :eof) {:line line :held? false :status (reap!)}
               (seq ls) (do (run! seen ls) (recur (peek ls)))
               ;; nothing there yet, or part of a line: read again
               (or (not @exited) (not @waited)) (recur line)
-              ;; exited, and a read found nothing there: the pipe is still open, held
-              :else {:line line :held? true}))))))
+              ;; exited, and a read found nothing there: reaped, every fd the child held is closed, so read again
+              (nil? @status) (do (reap!) (recur line))
+              ;; and still nothing there after the reap: another process holds the pipe
+              :else {:line line :held? true :status @status}))))))
 
 (defn run-selection
   "What a test-plan p runs when a request names namespaces (names; none: every test it selects), as
@@ -963,7 +969,7 @@
                 (lib/c-close w) (swap! fds disj w)
                 (forked pid)
                 (let [read (read-to-exit r pid #(when-let [t (:start (swap! lines take-line %))] (say {:op :testing :test t})))
-                      st (lib/wait-status pid)]
+                      st (:status read)]
                   (lib/c-close r) (swap! fds disj r)
                   (fx/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
