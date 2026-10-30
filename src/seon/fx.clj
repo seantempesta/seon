@@ -844,6 +844,11 @@
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
         clean child-env-scrub
+        ;; the run's own logs (seed.log, the shard logs) live in the worktree removed below: a run
+        ;; that is not all green keeps them beside its log, the evidence of why (run 29's gate
+        ;; seed threw, and its seed.log went with the worktree)
+        kept (str dir ".run")
+        green? (volatile! false)
         at (when-not (contract/error? sha) (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo))]
     (cond
       (contract/error? sha) sha
@@ -880,7 +885,9 @@
                 found
                 :else
                 (let [rs (test-results plan found tests)]
+                  (vreset! green? (every? #{:pass} (vals rs)))
                   {:value (cond-> {:results rs :ms (profile/ms-since t0) :log log}
+                            (not @green?) (assoc :kept kept)
                             all? (assoc :digests (select-keys (:digests plan) tests)
                                         ;; why each red is red: the failures its result recorded
                                         :failures (into {} (for [[t s] rs :when (not= :pass s)
@@ -888,8 +895,11 @@
                                                                  :when fs]
                                                              [t fs]))))})))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
-        (finally (let [rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
-                   (spit log (str "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
+        (finally (let [run (java.io.File. (str dir "/target/prove/run"))
+                       mv (when (and (not @green?) (.isDirectory run)) (sh/sh "mv" (.getPath run) kept))
+                       rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
+                   (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
+                                  "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 
