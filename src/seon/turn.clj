@@ -93,16 +93,18 @@
   [] (or (get (nth (repl/page-parts) 2) :seon.context/status)
          (contract/error :seon.turn/no-status #'status-now "the agent's walk drew no status (seon.render.ui/status threw, or no layout placed it): the done rule cannot be read" {})))
 
-(defn run-tokens
-  "The tokens run's model calls spent, summed from their records on db (:seon.model-call/tokens, a
-  call's record beside its turn: one fact, whichever way the turn ended), nil when no call reported
-  its usage (unknown, never 0). A count carried through the turn loop lost every turn that threw after
-  its model call answered (a bench run wrote 111k of its calls' 3.54M)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:maybe :int]]}
+(defn run-usage
+  "What run's model calls spent, from their records on db (a call's record beside its turn: one fact,
+  whichever way the turn ended): {:model-calls n :tokens t}, n the calls recorded (a turn that threw
+  before its call made none), t their :seon.model-call/tokens summed, absent when no call reported its
+  usage (unknown, never 0). A count carried through the turn loop lost every turn that threw after its
+  call answered (a bench run wrote 111k of its calls' 3.54M), and the turns stood for the calls."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.run/id] [:map [:model-calls nat-int?] [:tokens {:optional true} :int]]]}
   [db run]
-  (let [ts (keep #(:seon.model-call/tokens (d/entity db [:seon.model-call/id %]))
-                 (d/q '[:find [?t ...] :in $ ?r :where [?x :seon.run/id ?r] [?u :seon.turn/run ?x] [?u :seon.turn/id ?t]] db run))]
-    (when (seq ts) (reduce + ts))))
+  (let [calls (keep #(d/entity db [:seon.model-call/id %])
+                    (d/q '[:find [?t ...] :in $ ?r :where [?x :seon.run/id ?r] [?u :seon.turn/run ?x] [?u :seon.turn/id ?t]] db run))
+        ts (keep :seon.model-call/tokens calls)]
+    (cond-> {:model-calls (count calls)} (seq ts) (assoc :tokens (reduce + ts)))))
 
 (defn- end!
   "The run's end: the live runtime staged onto the branch, the end written there (with
@@ -111,12 +113,12 @@
   {:malli/schema [:=> [:cat :map :seon.run/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
   [{:keys [turn t0 run log]} outcome reason error]
   (stage/stage!)
-  (let [tokens (run-tokens (agent/db) run)]
+  (let [{:keys [tokens model-calls]} (run-usage (agent/db) run)]
   (agent/write-end! run {:outcome outcome :turns turn :tokens tokens :reason reason :error error
                              :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
   ;; what was not measured is absent, never 0: an outside run counts no model calls and no loop time
   (cond-> {:outcome outcome :results {} :uncontracted #{}}
-    turn (assoc :turns turn :model-calls turn)
+    turn (assoc :turns turn :model-calls model-calls)
     t0 (assoc :ms (profile/ms-since t0))
     tokens (assoc :tokens tokens)
     reason (assoc :reason reason))))
