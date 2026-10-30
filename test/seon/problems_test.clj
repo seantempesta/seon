@@ -452,7 +452,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 64) "the contracted calls of one health read (64 with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
+    (is (<= (:calls m) 72) "the contracted calls of one health read (72 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -673,8 +673,8 @@
 
 (deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
   (let [db (world)
-        v (:v (first (d/datoms db :aevt :var/name)))
-        e (:e (first (d/datoms db :aevt :var/name)))
+        v 'app.calc/inc2
+        e (pdb/eid db :var/name 'app.calc/inc2)
         none (symbol (namespace v) "no-such-var")
         page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
         db (d/db-with db (seon.docs/load-tx db "demo" {"demo/h.md" page}))
@@ -720,7 +720,7 @@
 
 (deftest caused-is-what-the-branch-made-true
   (let [db0 (world)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        [v w] ['app.calc/inc2 'app.calc/add]
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
@@ -737,10 +737,8 @@
   ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
   ;; the var it defines, named by docs/failure-points.md's cited names
   (let [db0 (world)
-        [fe v] (first (for [{:keys [e]} (d/datoms db0 :aevt :form/defines)
-                            :when (seon.program/live? db0 e)
-                            d (:form/defines (d/entity db0 e)) :when (:var/name d)]
-                        [e (:var/name d)]))
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
         ;; the test db's program is an example app; make its namespace one of Seon's src
         ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
         db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"] [:db/add ns-e :ns/file "src/app/m.clj"]])
@@ -792,8 +790,8 @@
         (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
         (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
-      (let [v (:v (first (d/datoms db0 :aevt :var/name)))
-            e (:e (first (d/datoms db0 :aevt :var/name)))
+      (let [v 'app.calc/inc2
+            e (pdb/eid db0 :var/name 'app.calc/inc2)
             err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
                                  :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
         (is (some? (row err)) "the error has a row") (is (not (false? (:open? (row err)))))
@@ -805,7 +803,7 @@
   "db0 with n more live forms in a src namespace, each defining one var and carrying a catch the
   law page does not name (so each is an :unnamed-site)."
   [db0 n]
-  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/m.clj"]]
                          (mapcat (fn [i] [{:db/id (- (inc (* 2 i))) :form/id (str "cost-form-" i) :form/ns ns-e :form/order i :form/src "(defn f [])"
                                            :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [(- (* 2 i))]}
@@ -829,8 +827,10 @@
                :n "live forms carrying a catch, each defining one var, none named by the page"
                :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
                :growth :linear
+               ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
+               ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 5}
+               :fixed {:ns 50000 :bytes 50000 :calls 9}
                :sizes [10 30 100]}))
 
 (deftest stale-pins-follow-the-pin-page
@@ -865,7 +865,7 @@
 
 (deftest caused-agrees-with-the-full-reading
   (let [db0 (world)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        [v w] ['app.calc/inc2 'app.calc/add]
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n\n## Q\n\nAlso `" v "`.\n")
@@ -966,7 +966,7 @@
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
   (let [db0 (world)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
         db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
         same? (fn [base head]
@@ -1023,7 +1023,7 @@
 
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
   (let [db0 (world)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "`.\n")
         db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
         stale #(get-in (problems/health %) [:classes :stale-section])
@@ -1067,7 +1067,8 @@
   (let [db0 (world)
         pages {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n" "docs/b.md" "# B\n\nThe page B.\n"}
         db (d/db-with db0 (seon.docs/load-tx db0 "docs" pages))
-        orphans #(mapv :page (get-in (problems/health %) [:classes :orphan-page :rows]))]
+        ;; the world's own page docs/calc.md is an orphan too (this load names only the test's pages); the test judges its own
+        orphans #(into [] (comp (map :page) (remove #{"docs/calc.md"})) (get-in (problems/health %) [:classes :orphan-page :rows]))]
     (is (= ["docs/b.md"] (orphans db)) "the map is the root; a is linked by it; b by nothing")
     (let [linked (d/db-with db (seon.docs/load-tx db "docs" (assoc pages "docs/a.md" "# A\n\nSee [b](b.md).\n")))]
       (is (= [] (orphans linked)) "another page links it: closed, nothing written to close it"))
@@ -1099,7 +1100,8 @@
                :sizes [10 30 100]}))
 
 (deftest an-issue-with-no-page-is-a-problem
-  (let [db0 (world)
+  (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
+        db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.section/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
              :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
         unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
@@ -1131,8 +1133,11 @@
                :n "sections each citing a var whose docstring then changed"
                :work "the read, review, vars' and forms' datoms in one scan each, then per recorded name whose form moved a seek of its var, its name's history and each meaning attribute's history (value-at), and a row"
                :growth :linear
+               ;; fixed calls 3 -> 18 (58 measured at n=10, 43 before): the world's own page docs/calc.md, whose two
+               ;; sections cite four of the vars this input changes, so they are stale too and their recorded names
+               ;; are read like the input's (about 4 calls a name, the per-n rate); ns and bytes are unchanged
                :per-n {:ns 90000 :bytes 120000 :calls 4}
-               :fixed {:ns 2500000 :bytes 4000000 :calls 3}
+               :fixed {:ns 2500000 :bytes 4000000 :calls 18}
                :sizes [10 30 100]}))
 
 (defn orphan-input
@@ -1171,7 +1176,7 @@
   ;; the turn records what it observed in its basis; a sorted set cannot be written to the store
   ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
   (let [db0 (world)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+        [v w] ['app.calc/inc2 'app.calc/add]
         base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
         head (change-meaning base v)
         {:keys [caused attention]} (problems/caused-split base head)]
@@ -1208,7 +1213,7 @@
 (defn uncited-input
   "The cost proof's input at n: n design steps (a finished run, a plan citing a var) and an
   implement step each, all ready and fine."
-  [n] (let [v (:v (first (d/datoms (world) :aevt :var/name)))]
+  [n] (let [v 'app.calc/inc2]
         [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
 (deftest uncited-tasks-follow-the-ready-implement-steps
@@ -1225,7 +1230,7 @@
   ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
   ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's prose plan is
   ;; its input, never red.
-  (let [v (:v (first (d/datoms (world) :aevt :var/name)))
+  (let [v 'app.calc/inc2
         cited (str "It changes `" v "`.")
         pairs [["cites" cited] ["prose" "Something should be shown somewhere."]
                ["stubbed" cited :seon.task/proofs #{'app-test/stub}] ["bare" cited :seon.task/proofs #{}]
@@ -1244,7 +1249,7 @@
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
   by (spec i) -> {:src :doc :kind}."
   [db0 n spec]
-  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))
+  (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
                          (mapcat (fn [i] (let [{:keys [src doc kind]} (spec i)]
@@ -1254,7 +1259,7 @@
                                  (range 1 (inc n)))))))
 
 (defn- cite-ns "The namespace var-forms' vars are in: the test db's first var's." [db0]
-  (str (:ns/name (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))))
+  (str (:ns/name (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))))
 
 (defn uncited-var-input
   "The cost proof's input at n: n public vars with a docstring citing nothing, named for the check."
