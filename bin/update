@@ -34,7 +34,9 @@ fi
 if [[ -d $MERGES ]]; then
   # the standing root's boot fast-forwards jolt/merges to main (seon.fx/read-source), after the merge above
   # a submodule behind main's new pin is not a change: --sync moves it, and names one that has changes
-  git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes"
+  # a refusal names the files, so its cause is read, not guessed (it has failed on a first try and been
+  # green on the next, with nothing in the worktree by then)
+  git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes: $(git -C "$MERGES" status --short --ignore-submodules | tr '\n' ' ')"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
