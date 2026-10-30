@@ -2,6 +2,24 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-10-30 rulings
+The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
+
+### Light tests while an agent develops, the full suite near merge (owner, 2026-10-30)
+"let's keep the test suite minimal and most likely impact (we can see there's a change in a function so we need to re-run all tests that consume that function and we'll do a more thorough check when all the proofs are green and we are building towards a full merge". A turn runs the proofs and the tests its change reaches, in-process and fast; the process tests and the full suite run once the proofs are green, before a merge. Stated in docs/merging.md#what-an-agent-runs.
+
+### A process test's cache gap stays; the full run catches it (owner, 2026-10-30)
+An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#waiting-on-the-owner.
+
+### Main keeps recording live data; agents react only when main's program moves (owner, 2026-10-30)
+"I do want a concept of a shared main moving forward with data so that has to remain the same"; "Should main's agents react only when main's program moves? I think so." An agent hears main moved only when main's program (forms, schemas, tests, by content key, never by entity id) moved; main's other facts (agents' live state) are recorded as before. Task seon.root/an-eval-never-moves-main; stated in docs/plan.md.
+
+### Eval budgets come from measured costs (owner, 2026-10-30)
+Budgets should be under 90%+ of the time and an overrun mostly a case worth intervening, as each test's tick budget comes from its own green history; :seon.config.agent/form-ticks and form-bytes are to be derived from measured eval costs, not fixed. The optimization session's; a test run an eval takes in place is not the form's work (task seon.agent/a-taken-test-run-is-not-the-forms-work).
+
+### Simplify by constraint; the test suite must be trusted (owner, 2026-10-30)
+"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Hangs are removed as a class (one reader of an agent's socket, a mailbox per request id, every taken request answered in a finally, the cap checked once at the top of each turn); tests run as agents run them. Stated in docs/plan.md#now-one-step.
+
 ## 2026-10-29 rulings
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
 
