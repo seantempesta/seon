@@ -919,7 +919,9 @@
                :per-n {}
                ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
                ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
-               ;; 2026-10-30: 67 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value)
+               ;; 67 calls at 10: :long-form (seon.problems/long-forms) is a class the changed vars are asked, with its bound read once (seon.config/value);
+               ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
+               ;; seek and text of a var cost ~8k ticks of it)
                :fixed {:ticks 460000 :bytes 1800000 :calls 68}
                :sizes [10 30 100]}))
 
