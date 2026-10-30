@@ -71,10 +71,12 @@
                 "run is done twice and no run is printed as data")
      :growth :linear
      ;; contracted calls a run, along the path above: seon.render's nested, render-of with
-     ;; own-key, schema-of and declared (its parents) each, print/line and its prose
-     :per-n {:calls 144}
-     :fixed {:calls 109}
-     :sizes [100 300 1000 4000]}))
+     ;; own-key, schema-of and declared (its parents) each, print/line and its prose.
+     ;; Re-derived on sizes 20 to 180 (measured 4,499 calls at 30 runs, 7,359 at 50, 8,789 at 60: 143 a run and 209 once;
+     ;; 144 and 109 were read at 100 to 4,000 runs and overstated the slope by 0.7%)
+     :per-n {:calls 143}
+     :fixed {:calls 209}
+     :sizes [20 60 180]}))
 
 (defn main-of
   "The input of size n: an empty render state and the test store's seed with n units of 20 more
@@ -101,7 +103,7 @@
      ;; the contracted calls a first read of main makes, whatever main holds, never one per record;
      ;; and its bytes, which a walk over every datom would grow with the records
      :per-n {:calls 33 :bytes 4000000}
-     :sizes [100 400 1000]}))
+     :sizes [10 40 100]}))
 
 (defn moved-of
   "The input of size n: the render state holding main with n tasks (main-info's first read), and

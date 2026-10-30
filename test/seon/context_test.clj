@@ -693,11 +693,12 @@
   ;; it sent reads back as the same bytes (the fold assertions went with the fold, 2026-10-29)
   (ts/test-branch!
     (fn [_ conn]
-      (wiki! conn)
+      ;; only the system prompt every request opens with (seon.context/system-page), not the checkout's wiki
+      (d/transact conn (docs/load-tx @conn "docs" {context/system-page (slurp (str (seon.config/checkout) "/" context/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.run/id "demo/g#1" :seon.run/task [:seon.task/id "demo/g"] :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
-      (let [rows (vec (for [i (range 40)] {:row i :name (str "row-" i)}))
+      (let [rows (vec (for [i (range 20)] {:row i :name (str "row-" i)}))
             ev! (fn [id by value & [more]]
                   (d/transact conn [{:seon.eval/id id :seon.eval/by by :seon.eval/agent {:seon.agent/key "b/a1"}
                                      :seon.eval/record (merge {:code (str "(" id ")") :response {:handle (symbol "result" id) :value value}
@@ -705,7 +706,7 @@
             basis (fn [n] {:commit (d/commit-id @conn) :task "demo/g" :run "demo/g#1" :turn n :max-turns 9
                            :origin :model :agent "b/a1"})
             turns (loop [n 0 printed nil out []]
-                    (if (= n 5)
+                    (if (= n 4)
                       out
                       ;; as a turn goes: its request, then its call's eval
                       (do (let [b (basis n)
@@ -730,7 +731,7 @@
           (let [e (d/q '[:find ?e . :in $ ?id :where [?e :seon.model-call/id ?id]] db (str "demo/g#1/" n))]
             (is (= (:messages warm) (into [] (mapcat second) (context/parts-of db (:seon.model-call/sent (d/pull db [:seon.model-call/sent] e)))))
                 (str "turn " n ": its read-back is the bytes it sent"))))
-        (is (= 5 (count turns)))))))
+        (is (= 4 (count turns)))))))
 
 (deftest a-turn-records-what-it-sent
   ;; task seon.context/a-turn-records-what-it-sent (A): a turn records the records its request

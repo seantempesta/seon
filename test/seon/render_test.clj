@@ -3,10 +3,10 @@
   and the render proc's step as a plain function: inputs before render, bytes before
   send, a new agent appended, a retired one removed, keyframes composed from what was
   retained. Run: bin/test seon.render-test"
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.render.ui :as ui] [seon.render.proc :as p]
-            [seon.web.html :as h] [clojure.walk] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
+            [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.docs] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.context] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.program] [seon.web] [seon.template] [seon.context-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [my.agent]))
 
 (def ^:private task
@@ -215,14 +215,20 @@
   '#{clojure.core/subs clojure.core/take clojure.core/take-last clojure.core/drop-last})
 
 (defn- src-program
-  "Main's db with every file of src imported (each form analyzed, never run: the running
-  generation's namespaces), as seon.source-test imports it."
+  "The checkout's program as facts, src and test (analyzed, never run): the kept program db the plan
+  imported once for this tree (test-runner/program-db, ts/kept-program-store), so a test reads it and
+  imports nothing (the import of src was 1.4 G ticks a test, 2 tests). Its src namespaces are
+  `src-nss`."
   []
   ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
   ;; and a test of it was red in every agent's run (md-scan #23)
-  (let [files (:value (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"]}}))]
-    (doseq [n (keep #(seon.source/file-ns (val %)) files)] (require n))
-    (let [db (ts/test-db)] (d/db-with db (seon.source/import-tx db files)))))
+  (runner/program-db (seon.config/checkout) (ts/kept-program-store)))
+
+(defn- src-nss
+  "The namespaces of db whose file is under src/."
+  [db]
+  (into #{} (comp (filter (fn [[_ f]] (str/starts-with? f "src/"))) (map first))
+        (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db)))
 
 (deftest a-render-reaches-no-process
   ;; root, 2026-10-25: after jolt/agent-conversation merged, bin/prove planned 29 keys of 686 tests:
@@ -230,7 +236,10 @@
   ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
   ;; follows (seon.program/reach-graph), so every test reached seon.lib/fork! through it, counted
   ;; as reaching a process and was left out of bin/prove. A render runs no process
-  (let [idx (ts/reach-index (src-program) {:env "e" :tree "t" :config {}}
+  (let [db (src-program)
+        in (seon.fx/inputs (seon.config/checkout))
+        g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store))
+        idx (seon.program/graph-index g in
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
     (is (= {"agent" false "root" false "root-ctx" false "render-ctx" false} (update-vals idx :process?))
         "no render reaches a process var (:seon.config.source/process-vars)")))
@@ -249,14 +258,20 @@
   ;; before then". Every var of src that prints beside seon.print, and every var of a
   ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
   ;; (the wire, storage, code text, or a cut of data, not of output); a new one is red.
-  (let [forms (seon.program/live-forms (src-program))
+  (let [db (src-program)
+        nss (src-nss db)
+        marks (clojure.set/union printer-vars cut-vars budgeted-vars)
+        ;; only the forms of src that reference a mark are read as rows (a row of every form was 200 M ticks)
+        forms (->> (d/datoms db :aevt :form/refs) (keep #(when (marks (:v %)) (:e %))) distinct sort
+                   (map #(seon.program/form-row db %)) (filter (comp nss :ns)) vec)
         doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One printer") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One printer"))) (count t))))
         ;; a site is named by a list item, before its reason (`- `ns/f`, `ns/g`: why`)
         named (set (for [[_ head] (re-seq #"(?m)^- (.*?): " doc) [_ n] (re-seq #"`([a-z][\w.\-]*/[^`\s]+)`" head)] (symbol n)))
         printer? #(not (str/starts-with? (str %) "seon.print"))
         display? #(re-find #"^(my\.|seon\.(render|web|context|mcp|server|cost|repl|agent|problems)($|\.))" (str %))]
     (testing "src is imported: the check reads facts, not nothing"
-      (is (< 1000 (count forms))))
+      (is (< 40 (count nss)))
+      (is (< 100 (count forms))))
     (testing "every var printing beside the one printer is named with its reason"
       (is (= [] (remove named (sites forms printer-vars printer?)))))
     (testing "every var cutting in a display namespace is named with its reason"
@@ -794,8 +809,9 @@
   ;; reprinting its whole request (O(turns^2)). A row now shows what its turn added and the rows a
   ;; tab scrolled to render; the page's size follows the rows shown, flat in the run's turns.
   ;; Measured 2026-10-24 before: 0.95 / 3.76 / 15.0 MB and 15,306 / 60,606 / 241,206 elements at 50 /
-  ;; 100 / 200 turns (seon.render-cost-test/page-size)
-  (let [[a b c] (map seon.render-cost-test/page-size [50 100 200])]
+  ;; 100 / 200 turns (seon.render-cost-test/page-size). Measured at 24 / 36 / 48 turns, all past the 20 rows a page
+  ;; shows (:seon.config.root/view-window): a page growing with its turns would grow 1.5x and 2x between them
+  (let [[a b c] (map seon.render-cost-test/page-size [24 36 48])]
     (is (< (:bytes c) (* 1.1 (:bytes a))) (pr-str [a b c]))
     (is (< (:nodes c) (* 1.1 (:nodes a))) (pr-str [a b c]))
     (is (< (:bytes c) 100000) "a page of the rows shown, not of the run")))

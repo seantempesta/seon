@@ -9,10 +9,10 @@
             [seon.source :as source] [seon.docs :as docs] [seon.task :as task] [seon.profile :as profile]))
 
 (defn- empty-db
-  "An empty db value with Seon's schema (seon.db/schema), in memory. See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) pdb/schema)
-                             {:keep-history? false :schema-flexibility :write}))
+  "An empty db value with Seon's schema (seon.db/schema), in memory, keeping history when history?. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) pdb/schema)
+                                     {:keep-history? history? :schema-flexibility :write}))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -24,11 +24,13 @@
 
 (defn code
   "A fixture: namespace nsym's source text as program facts (forms, vars, their contracts and
-  references), as an import of a file records it (seon.source/text-tx).
+  references), as an import of its file records it (seon.source/text-tx): under test/ when nsym ends
+  in -test, else under src/.
   Example: (my.test/code 'app.x \"(ns app.x)\\n(defn f [x] (inc x))\") See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :symbol :string] :seon.host/fn]}
   [nsym text]
-  (fn [db] (source/text-tx db nsym text (str "src/" (-> (str nsym) (.replace "-" "_") (.replace "." "/")) ".clj"))))
+  (fn [db] (source/text-tx db nsym text (str (if (.endsWith (str nsym) "-test") "test/" "src/")
+                                              (-> (str nsym) (.replace "-" "_") (.replace "." "/")) ".clj"))))
 
 (defn page
   "A fixture: a wiki page at path (under docs/) with markdown text, as its sections and their
@@ -77,18 +79,21 @@
    (page "docs/calc.md" "# Calc\n\nThe arithmetic every example uses: app.calc/add, app.calc/total.\n\n## Reports\n\nA report line, app.report/line, totals with app.calc/total.\n")
    (task 'app.calc "total-is-exact" "Make app.calc/total exact for an empty seq (0)." #{'app.calc-test/total-sums})])
 
-(def ^:private the-world
-  "The world, built once a process from base (`world` answers it). See docs/testing.md#testing-in-the-world."
-  (delay (apply with (empty-db) base)))
+(def ^:private the-worlds
+  "The world and the world that keeps history, each built once a process from base (`world` answers them). See docs/testing.md#testing-in-the-world."
+  {false (delay (apply with (empty-db false) base)) true (delay (apply with (empty-db true) base))})
 
 (defn world
   "The base world, a db value: Seon's schema and a small program shaped like production:
   namespaces app.calc (add, inc2, total; a macro twice; add contracted) and app.report (line,
   calling app.calc/total), their tests app.calc-test (add-adds, total-sums), the wiki page
   docs/calc.md citing them, and the task app.calc/total-is-exact. Built once per process, in
-  memory (~0.6 M ticks). Add what a test needs with `with`. See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:=> [:cat] :seon.host/db]}
-  [] @the-world)
+  memory (~0.6 M ticks). Add what a test needs with `with`. With {:history? true}, the same world
+  on a db that keeps history, for a test that reads d/history or d/as-of.
+  Example: (my.test/world {:history? true}) See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:function [:=> [:cat] :seon.host/db] [:=> [:cat [:map [:history? {:optional true} :boolean]]] :seon.host/db]]}
+  ([] (world {}))
+  ([{:keys [history?]}] @(the-worlds (boolean history?))))
 
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread

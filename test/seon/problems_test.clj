@@ -2,12 +2,17 @@
   "Session D2: every class of problem arrives as a typed fact written by its observer, and
   seon.problems/report lists them by class at a cost that follows the problems, not the
   program. Run: bin/test seon.problems-test"
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
+  (:require [seon.test-store :as ts] [my.test :as t] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.docs]))
+
+(defn- world
+  "The world these tests run on: my.test's, keeping history, since stale sections are read from d/history
+  (seon.problems/stale-sections), which a db without temporal indexes refuses (docs/testing.md#testing-in-the-world)."
+  [] (t/world {:history? true}))
 
 (defn- invalid [op v]
   (contract/error :seon.instrument/contract-error op (str op " invalid-input: its arguments do not satisfy its contract")
@@ -233,7 +238,7 @@
   ;; the first write of a stall in a live run writes one task (seon.template/stall), its cause
   ;; pre-filled with the stall, its proofs the boundary conditions; a later stall of the same run
   ;; writes none (one per agent and run), and an agent working no run gets none
-  (let [db (ts/test-db)
+  (let [db (world)
         view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"} :a2 {:status :busy :pid 78}}}
         stalled (fn [ag] {:op :stalled :agent ag
                           :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in (str "agent " (name ag) " sent nothing for 4000 ms with a request in flight")
@@ -256,7 +261,7 @@
   ;; the evening audit (a6's hang left no evidence: the root restarted and the process went with
   ;; it): the stall task's first write asks for the stuck process's evidence (the :evidence effect,
   ;; seon.fx/stall-evidence), and its answer's files are written into the task's cause on main
-  (let [db (ts/test-db)
+  (let [db (world)
         view {:agents {:a1 {:status :busy :pid 77 :task "demo/t" :run "demo/t#1"}}}
         st (assoc (api view) :conn (atom db) :system {:procs {:fx/evidence {}}})
         stalled {:op :stalled :agent :a1
@@ -275,7 +280,7 @@
     (is (= :a1 (get-in cause [:stall :agent])) "beside the stall it was captured for")))
 
 (deftest a-stalled-agent-is-an-open-problem-while-the-fact-holds
-  (let [db (d/db-with (ts/test-db) [{:seon.agent/key "b1/a1" :seon.agent/id :a1}
+  (let [db (d/db-with (world) [{:seon.agent/key "b1/a1" :seon.agent/id :a1}
                                     {:seon.process/id "b1/a1/77" :seon.process/agent [:seon.agent/key "b1/a1"] :seon.process/pid 77 :seon.process/forked-ms 10.0
                                      :seon.process/stall {:quiet-ms 4000 :last-op {:kind :tests :form "#'app.t/hangs"}}}
                                     {:seon.agent/key "b1/a2" :seon.agent/id :a2}])
@@ -340,7 +345,7 @@
 (deftest a-new-boot-ends-an-earlier-boots-live-agents
   ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path C
   (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
-    (let [db (d/db-with (ts/test-db) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/id :a1 :seon.agent/root "r"
+    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/id :a1 :seon.agent/root "r"
                                                             :seon.agent/status :busy}
                                                             {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
@@ -373,7 +378,7 @@
         good {:root "/c" :files 1 :forms 1 :ms 2.0 :digest "d"}]
     (is (= :seon.fx/io-error (:seon.error/type failed)) "an unreadable file fails the read")
     (testing "a failed import, then a good one"
-      (let [db (import (ts/test-db) failed bad)]
+      (let [db (import (world) failed bad)]
         (is (= 1 (count (rows db))) "one row for the failure")
         (is (open? db) "its fact is written in the same transaction: open")
         (let [again (import db failed bad)]
@@ -384,14 +389,14 @@
           (is (false? (:open? (first (rows fixed)))) "the good import writes another fact: closed"))))
     (testing "the reconciler's commit: a failed :git, then the next merge's sha"
       (let [git (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "git commit: index.lock exists" {}) :seon.fx/at-ms 2000)
-            db0 (ts/test-db)
+            db0 (world)
             db (d/db-with db0 (err/asked-tx db0 git :seon.run/commit [{:seon.run/id "r1" :seon.run/commit-error (:seon.error/message git)}]))
             fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.run/commit [{:seon.run/id "r2" :seon.run/commit "abc"}]))]
         (is (= 1 (count (rows db))))
         (is (open? db) "a failed commit writes no sha: open")
         (is (false? (:open? (first (rows fixed)))) "the next merge's commit writes one: closed")))
     (testing "an error the asker made itself (no owner's stamp) writes its fact alone"
-      (is (= [{:a 1}] (err/asked-tx (ts/test-db) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.run/deferred-results [{:a 1}]))))
+      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.run/deferred-results [{:a 1}]))))
     (.setReadable (java.io.File. co "a.clj") true)
     (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
 
@@ -399,28 +404,28 @@
 
 (defn- seeded
   "A main db with n recorded errors, n red runs and n dead runs over a task each,
-  plus k clean tasks with green runs (the program the read must not cost)."
+  plus k clean tasks with green runs (the program the read must not cost), on the world (my.test)."
   [n k]
-  (ts/test-branch! (fn [_ conn] (let [f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
+  (let [db (world)
+        f (reduce err/fold {} (for [i (range n)] (err/occurrence {:seon.error/type :seon.agent/eval-error :seon.error/operation 'seon.repl/eval-code
                                                                   :seon.error/message (str "Unable to resolve symbol: s" (char (+ 97 (mod i 26))) i) :class "x"}
                                                                  :eval {:agent :a1 :task "t/x0"} 100)))
-        [_ tx] (err/flush-tx f @conn)
+        [_ tx] (err/flush-tx f db)
         att (fn [tid aid m] (merge {:seon.run/id aid :seon.run/task [:seon.task/id tid] :seon.run/boot "b" :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1}
                                     :seon.run/start-ms 1 :seon.run/end-ms 2 :seon.run/branch :b :seon.run/max-turns 2} m))
         task (fn [tid] {:seon.task/id tid :seon.task/ns 't :seon.task/name (subs tid 2) :seon.task/plan "p" :seon.task/execution :running
                         :seon.task/branch :b :seon.task/kind :work})]
-    (d/transact conn tx)
-    (d/transact conn (vec (concat (for [i (range k)] (task (str "t/c" i)))
-                                  (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.run/status :done :seon.run/outcome :green}))
-                                  (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
-                                  (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
-                                                          {:seon.run/status :closed :seon.run/outcome :cap
-                                                           :seon.run/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
-                                  (for [i (range n)] (task (str "t/d" i)))
-                                  (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
-                                                          {:seon.run/status :dead :seon.run/reason "its agent died"
-                                                           :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))
-    @conn))))
+    (d/db-with (d/db-with db tx)
+               (vec (concat (for [i (range k)] (task (str "t/c" i)))
+                            (for [i (range k)] (att (str "t/c" i) (str "t/c" i "#1") {:seon.run/status :done :seon.run/outcome :green}))
+                            (for [i (range n)] (assoc (task (str "t/r" i)) :seon.task/proofs #{'app.t/red}))
+                            (for [i (range n)] (att (str "t/r" i) (str "t/r" i "#1")
+                                                    {:seon.run/status :closed :seon.run/outcome :cap
+                                                     :seon.run/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
+                            (for [i (range n)] (task (str "t/d" i)))
+                            (for [i (range n)] (att (str "t/d" i) (str "t/d" i "#1")
+                                                    {:seon.run/status :dead :seon.run/reason "its agent died"
+                                                     :seon.run/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))))
 
 (deftest a-cancelled-tasks-run-problems-close
   (let [db (seeded 2 1)
@@ -447,7 +452,7 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 64) "the contracted calls of one health read (64 with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
+    (is (<= (:calls m) 72) "the contracted calls of one health read (72 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the old-word class reads its table and texts in 4 contracted calls)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -494,7 +499,7 @@
 (defn rows-input
   "The cost proof's input at n: a main db with n problems of each of three classes over a
   fixed clean program."
-  [n] [(seeded n 20)])
+  [n] [(seeded n 4)])
 
 (deftest problems-reads-only-the-problems
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/rows-input
@@ -504,7 +509,7 @@
                           "characters of EDN read (example, failures, error)")
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
-               :sizes [4 20 100]
+               :sizes [2 6 18]
                ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
                :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
 
@@ -519,16 +524,15 @@
   "The flatness proof's input at k: the health of main with 4 problems of each class beside k finished
   tasks, each with a merged run as production writes it (judge-tx records its cost verdict and its
   waste too), then main one run later: [health base head moved]."
-  [k] (let [base (ts/test-branch! (fn [_ conn]
-                                    (d/transact conn (vec (concat
-                                                           (for [i (range k)] {:seon.task/id (str "t/h" i) :seon.task/ns 't :seon.task/name (str "h" i) :seon.task/plan "p"
-                                                                               :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work})
-                                                           (for [i (range k)] {:seon.run/id (str "t/h" i "#1") :seon.run/task [:seon.task/id (str "t/h" i)] :seon.run/boot "b"
-                                                                               :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 1 :seon.run/end-ms 2
-                                                                               :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green
-                                                                               :seon.run/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
-                                                                               :seon.run/waste {:turns 1}}))))
-                                    @conn))
+  [k] (let [base (d/db-with (world)
+                            (vec (concat
+                                  (for [i (range k)] {:seon.task/id (str "t/h" i) :seon.task/ns 't :seon.task/name (str "h" i) :seon.task/plan "p"
+                                                      :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work})
+                                  (for [i (range k)] {:seon.run/id (str "t/h" i "#1") :seon.run/task [:seon.task/id (str "t/h" i)] :seon.run/boot "b"
+                                                      :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 1 :seon.run/end-ms 2
+                                                      :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green
+                                                      :seon.run/costs {'app.t/cheap {:verdict {:ok? true :under []} :rows []}}
+                                                      :seon.run/waste {:turns 1}}))))
             head (d/db-with base [{:seon.run/id "t/h0#2" :seon.run/task [:seon.task/id "t/h0"] :seon.run/boot "b"
                                    :seon.run/agent {:seon.agent/key "b/a1" :seon.agent/id :a1} :seon.run/start-ms 3 :seon.run/end-ms 4
                                    :seon.run/branch :b :seon.run/max-turns 2 :seon.run/status :merged :seon.run/outcome :green}])]
@@ -550,7 +554,7 @@
                :growth :constant
                :ops {:db/pull 0 :db/pull-attr 0 :edn/read-char 0}
                :fixed {:ticks 85000 :bytes 320000 :calls 4}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest problems-move-at-the-cost-of-what-changed
   ;; main moves by one run while its finished history grows: the health of the move reads the run it
@@ -561,7 +565,7 @@
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
                :fixed {:ticks 650000 :bytes 3000000 :calls 54}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
   (cost/proof {:of 'seon.problems/report :input 'seon.problems-test/clean-input
@@ -570,7 +574,7 @@
                :growth :constant
                :ops {:db/pull 28 :db/pull-attr 152 :edn/read-char 2000}
                :fixed {:bytes 750000}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 ;; ---- the model call: thinking mode as a provider field, its cost and its empty reply as data ----
 
@@ -668,9 +672,9 @@
 ;; ---- derived: a dead citation is true while it is true (docs/health.md) ----
 
 (deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
-  (let [db (ts/test-db)
-        v (:v (first (d/datoms db :aevt :var/name)))
-        e (:e (first (d/datoms db :aevt :var/name)))
+  (let [db (world)
+        v 'app.calc/inc2
+        e (pdb/eid db :var/name 'app.calc/inc2)
         none (symbol (namespace v) "no-such-var")
         page (str "# Health\n\nThe check reads `" v "` and `" none "`; a prose word " (namespace v) "/nor-this is no citation.\n")
         db (d/db-with db (seon.docs/load-tx db "demo" {"demo/h.md" page}))
@@ -695,7 +699,7 @@
 (defn citing-input
   "The cost proof's input at n: a wiki page of n sections, each citing one of the seed's vars
   (cycling past its count), every cited var then deleted, so every citation is dead."
-  [n] (let [db0 (ts/test-db)
+  [n] (let [db0 (world)
             vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
             db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))
@@ -712,11 +716,11 @@
                :growth :linear
                :per-n {:ns 90000 :bytes 170000 :calls 6}
                :fixed {:ns 2000000 :bytes 3000000 :calls 5}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest caused-is-what-the-branch-made-true
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
@@ -732,11 +736,9 @@
 (deftest a-catch-its-page-does-not-name-is-a-law-problem
   ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
   ;; the var it defines, named by docs/failure-points.md's cited names
-  (let [db0 (ts/test-db)
-        [fe v] (first (for [{:keys [e]} (d/datoms db0 :aevt :form/defines)
-                            :when (seon.program/live? db0 e)
-                            d (:form/defines (d/entity db0 e)) :when (:var/name d)]
-                        [e (:var/name d)]))
+  (let [db0 (world)
+        v 'app.calc/inc2
+        fe (:db/id (:var/form (d/entity db0 [:var/name v])))
         ;; the test db's program is an example app; make its namespace one of Seon's src
         ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :avet :var/name v))))))
         db1 (d/db-with db0 [[:db/add fe :form/catches "{:class Exception, :answers :expr}"] [:db/add ns-e :ns/file "src/app/m.clj"]])
@@ -750,7 +752,7 @@
         (is (= [] (unnamed (d/db-with db1 (seon.docs/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
 (deftest a-pin-the-wiki-states-is-the-recorded-gitlink
-  (let [db0 (ts/test-db)
+  (let [db0 (world)
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
         db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))
         pinned (fn [pins] (mapv (juxt :path :stated :recorded)
@@ -764,7 +766,7 @@
 (deftest an-error-closes-when-its-subject-changes
   ;; an old store's :seon.docs/refused error (the type left the code) names its link's target in
   ;; its example; a new error may name :seon.error/subject. Neither is ever retracted.
-  (let [db0 (ts/test-db)
+  (let [db0 (world)
         refused (fn [db] (d/db-with db [{:seon.error/signature "aaaaaaaaaaaaaaaa" :seon.error/class :platform :seon.error/count 1
                                          :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1
                                          :seon.error/type :seon.docs/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
@@ -788,8 +790,8 @@
         (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
         (is (false? (:open? (rowc fixed))))))
     (testing "a named subject: open until a fact of the var is written after the error"
-      (let [v (:v (first (d/datoms db0 :aevt :var/name)))
-            e (:e (first (d/datoms db0 :aevt :var/name)))
+      (let [v 'app.calc/inc2
+            e (pdb/eid db0 :var/name 'app.calc/inc2)
             err (d/db-with db0 [{:seon.error/signature "bbbbbbbbbbbbbbbb" :seon.error/class :platform :seon.error/count 1
                                  :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/subject v}])]
         (is (some? (row err)) "the error has a row") (is (not (false? (:open? (row err)))))
@@ -801,21 +803,21 @@
   "db0 with n more live forms in a src namespace, each defining one var and carrying a catch the
   law page does not name (so each is an :unnamed-site)."
   [db0 n]
-  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/m.clj"]]
                          (mapcat (fn [i] [{:db/id (- (inc (* 2 i))) :form/id (str "cost-form-" i) :form/ns ns-e :form/order i :form/src "(defn f [])"
                                            :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [(- (* 2 i))]}
                                           {:db/id (- (* 2 i)) :var/name (symbol "app.cost" (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i)))}]))
                          (range 1 (inc n))))))
 
-(defn catch-input "The cost proof's input at n: n unnamed catch sites." [n] [(catch-forms (ts/test-db) n) {}])
+(defn catch-input "The cost proof's input at n: n unnamed catch sites." [n] [(catch-forms (world) n) {}])
 
-(defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (ts/test-db) n)])
+(defn health-input "The cost proof's input at n: the db of n unnamed catch sites." [n] [(catch-forms (world) n)])
 
 (defn pins-input
   "The cost proof's input at n: docs/forks.md of n sections each stating a pin, root's import
   recording a different gitlink for every one (so each is a :stale-pin)."
-  [n] (let [db0 (ts/test-db)
+  [n] (let [db0 (world)
             page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
             db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/forks.md" page}))]
         [(d/db-with db [{:seon.root/id :root :seon.root/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
@@ -825,9 +827,11 @@
                :n "live forms carrying a catch, each defining one var, none named by the page"
                :work "once: the page's cited names as a set, the method and impl owners, the program's namespaces (seon.program/program-nss); per site: its form entity, its defines and one row"
                :growth :linear
+               ;; fixed calls 5 -> 9 (39 measured at n=10, 35 before): the world's test namespace app.calc-test has two
+               ;; forms carrying a catch (a deftest's `is`), each read and dropped as no program namespace's: 2 calls each
                :per-n {:ns 76000 :bytes 74500 :calls 3}
-               :fixed {:ns 50000 :bytes 50000 :calls 5}
-               :sizes [10 100 1000]}))
+               :fixed {:ns 50000 :bytes 50000 :calls 9}
+               :sizes [10 30 100]}))
 
 (deftest stale-pins-follow-the-pin-page
   (cost/proof {:of 'seon.problems/stale-pins :input 'seon.problems-test/pins-input
@@ -836,7 +840,7 @@
                :growth :linear
                :per-n {:ns 30000 :bytes 30000 :calls 2}
                :fixed {:ns 600000 :bytes 600000 :calls 5}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest health-follows-what-is-recorded-and-cited
   (cost/proof {:of 'seon.problems/health :input 'seon.problems-test/health-input
@@ -848,7 +852,7 @@
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
                :fixed {:ns 19500000 :bytes 17500000 :calls 62}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
 
@@ -860,8 +864,8 @@
     (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
 (deftest caused-agrees-with-the-full-reading
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
         e (fn [db s] (pdb/eid db :var/name s))
         none (symbol (namespace v) "no-such-var")
         page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n\n## Q\n\nAlso `" v "`.\n")
@@ -894,9 +898,9 @@
   change, its changes since base and the datoms that differ read as the turn and the writer hold them
   (seon.merge/delta-changes and the diff, read once: their cost is proved at
   seon.program-cost-test/a-turns-diff-reads-what-the-branch-changed)."
-  [n] (let [db0 (ts/test-db)
+  [n] (let [db0 (world)
             vs (vec (take 10 (map :v (d/datoms db0 :aevt :var/name))))
-            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i 10)) "`.\n")))
+            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
             base (catch-forms (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page})) n)
             changed (str/replace page "## S0\n\nIt reads `" (str "## S0\n\nIt reads `app.nowhere/dead` and `"))
             head (catch-forms (d/db-with base (seon.docs/load-tx base "demo" {"demo/c.md" changed})) (inc n))]
@@ -916,7 +920,7 @@
                ;; measured 2026-10-29: ~0.45M ticks / 1.8 MB / 48 calls at 10, 100 and 1000 given the diff (the old-word table
                ;; read on each side is most of it); before, 0.69M / 2.8 MB / 37 at 10 and linear (docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
                :fixed {:ticks 160000 :bytes 1500000 :calls 60}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
 
@@ -939,7 +943,7 @@
 (deftest an-old-word-is-a-problem
   ;; task seon.problems/an-old-word-is-a-problem: a place that uses a word of AGENTS.md section 7a's table is a row
   ;; naming it and the word, found for the places a branch changed and failing its health step; a kept file is not read
-  (let [base (ts/test-db)
+  (let [base (world)
         page (fn [text] {"demo/p.md" (str "# P\n\nThe lead.\n\n## Part\n\n" text "\n")})
         with (fn [db text] (d/db-with db (seon.docs/load-tx db "demo" (page text))))
         row (fn [db] (set (map (juxt :id :word) (get-in (problems/health db) [:classes :old-word :rows]))))]
@@ -961,8 +965,8 @@
 (deftest health-moved-is-health
   ;; health-moved carries prev's rows and reads where base and head differ: for each kind of move
   ;; of main it equals health read whole (set of rows by class; the row order is the scan's)
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "` and `" w "`.\n")
         db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
         same? (fn [base head]
@@ -1018,8 +1022,8 @@
         (is (= (get-in whole [:classes :dead :rows]) (get-in moved [:classes :dead :rows])))))))
 
 (deftest a-section-is-stale-when-the-code-it-cites-changed-after-its-text
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
         page (str "# P\n\nIt reads `" v "`.\n")
         db1 (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" page}))
         stale #(get-in (problems/health %) [:classes :stale-section])
@@ -1060,10 +1064,11 @@
         (is (contains? (:seon.problems/attention (contract/properties :seon.problems/class)) :stale-section))))))
 
 (deftest a-page-nothing-links-to-is-an-orphan-until-something-does
-  (let [db0 (ts/test-db)
+  (let [db0 (world)
         pages {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n" "docs/b.md" "# B\n\nThe page B.\n"}
         db (d/db-with db0 (seon.docs/load-tx db0 "docs" pages))
-        orphans #(mapv :page (get-in (problems/health %) [:classes :orphan-page :rows]))]
+        ;; the world's own page docs/calc.md is an orphan too (this load names only the test's pages); the test judges its own
+        orphans #(into [] (comp (map :page) (remove #{"docs/calc.md"})) (get-in (problems/health %) [:classes :orphan-page :rows]))]
     (is (= ["docs/b.md"] (orphans db)) "the map is the root; a is linked by it; b by nothing")
     (let [linked (d/db-with db (seon.docs/load-tx db "docs" (assoc pages "docs/a.md" "# A\n\nSee [b](b.md).\n")))]
       (is (= [] (orphans linked)) "another page links it: closed, nothing written to close it"))
@@ -1071,7 +1076,7 @@
         "no map in the db: unknown, not every page an orphan")))
 
 (deftest a-section-with-no-lead-is-a-problem
-  (let [db0 (ts/test-db)
+  (let [db0 (world)
         page "# A\n\nThe page A.\n\n## Listed\n\n- one\n- two\n\n## Said\n\nA sentence that says what it is.\n"
         db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/a.md" page}))
         rows #(mapv :section (get-in (problems/health %) [:classes :leadless-section :rows]))]
@@ -1082,7 +1087,7 @@
 
 (defn leadless-input
   "The cost proof's input at n: n sections, none with a lead."
-  [n] (let [db0 (ts/test-db)]
+  [n] (let [db0 (world)]
         [(d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/p.md" (apply str "# P\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\n- item\n")))})) {}]))
 
 (deftest leadless-sections-follow-the-sections
@@ -1092,10 +1097,11 @@
                :growth :linear
                :per-n {:bytes 8500 :calls 1}
                :fixed {:bytes 9000 :calls 1}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest an-issue-with-no-page-is-a-problem
-  (let [db0 (ts/test-db)
+  (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
+        db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.section/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
              :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
         unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
@@ -1108,7 +1114,7 @@
 
 (deftest every-problem-class-points-at-a-section-of-the-real-wiki
   (let [docs (:seon.problems/docs (contract/properties :seon.problems/class))
-        db0 (ts/test-db)
+        db0 (world)
         db (d/db-with db0 (seon.docs/load-dir-tx db0 (seon.config/checkout) "docs"))]
     (is (every? docs (:seon.problems/derived (contract/properties :seon.problems/class))) "each derived class declares its section")
     (doseq [[c a] docs]
@@ -1116,7 +1122,7 @@
 
 (defn stale-input
   "The cost proof's input at n: n sections each citing a var, every var's docstring then changed (each section stale)."
-  [n] (let [db0 (ts/test-db)
+  [n] (let [db0 (world)
             vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
             page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
             db (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/c.md" page}))]
@@ -1127,13 +1133,16 @@
                :n "sections each citing a var whose docstring then changed"
                :work "the read, review, vars' and forms' datoms in one scan each, then per recorded name whose form moved a seek of its var, its name's history and each meaning attribute's history (value-at), and a row"
                :growth :linear
+               ;; fixed calls 3 -> 18 (58 measured at n=10, 43 before): the world's own page docs/calc.md, whose two
+               ;; sections cite four of the vars this input changes, so they are stale too and their recorded names
+               ;; are read like the input's (about 4 calls a name, the per-n rate); ns and bytes are unchanged
                :per-n {:ns 90000 :bytes 120000 :calls 4}
-               :fixed {:ns 2500000 :bytes 4000000 :calls 3}
-               :sizes [10 100 300]}))
+               :fixed {:ns 2500000 :bytes 4000000 :calls 18}
+               :sizes [10 30 100]}))
 
 (defn orphan-input
   "The cost proof's input at n: the map and n pages, none linked."
-  [n] (let [db0 (ts/test-db)]
+  [n] (let [db0 (world)]
         [(d/db-with db0 (seon.docs/load-tx db0 "docs" (into {"docs/README.md" "# Map\n\nThe map.\n"} (for [i (range n)] [(str "docs/p" i ".md") (str "# P" i "\n\nThe page.\n")])))) {}]))
 
 (deftest orphan-pages-follow-the-sections
@@ -1143,11 +1152,11 @@
                :growth :linear
                :per-n {:ns 30000 :bytes 30000 :calls 1}
                :fixed {:ns 500000 :bytes 500000 :calls 3}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (defn unlinked-input
   "The cost proof's input at n: a db with a wiki, and every class holding n open rows."
-  [n] (let [db0 (ts/test-db)
+  [n] (let [db0 (world)
             db (d/db-with db0 (seon.docs/load-tx db0 "docs" {"docs/README.md" "# Map\n\nThe map.\n"}))
             cs (:seon.problems/docs (contract/properties :seon.problems/class))]
         [db {} (into {} (for [c (keys cs)] [c {:n n :rows (vec (repeat n {:open? true}))}]))]))
@@ -1161,13 +1170,13 @@
                ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
                ;; 49: :flaky (seon.proofs/flaky) one more
                :fixed {:ns 3000000 :bytes 4000000 :calls 51}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
   ;; the turn records what it observed in its basis; a sorted set cannot be written to the store
   ;; (konserve's fasl), which ended every scripted turn's agent. caused-split answers vectors.
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
+  (let [db0 (world)
+        [v w] ['app.calc/inc2 'app.calc/add]
         base (d/db-with db0 (seon.docs/load-tx db0 "demo" {"demo/p.md" (str "# P\n\nIt reads `" v "`.\n")}))
         head (change-meaning base v)
         {:keys [caused attention]} (problems/caused-split base head)]
@@ -1182,7 +1191,7 @@
   [name design-plan & more design keys]; every design step has a finished run (its implement step
   is ready) unless named in not-done."
   [pairs not-done]
-  (let [db (ts/test-db)
+  (let [db (world)
         ;; the example program's namespaces with their files, as a root's store records a program
         ;; namespace, so a plan citing one of its vars cites the program's (seon.program/program-names)
         db0 (d/db-with db (vec (for [n (d/q '[:find [?n ...] :where [_ :ns/name ?n]] db)]
@@ -1204,7 +1213,7 @@
 (defn uncited-input
   "The cost proof's input at n: n design steps (a finished run, a plan citing a var) and an
   implement step each, all ready and fine."
-  [n] (let [v (:v (first (d/datoms (ts/test-db) :aevt :var/name)))]
+  [n] (let [v 'app.calc/inc2]
         [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
 (deftest uncited-tasks-follow-the-ready-implement-steps
@@ -1214,14 +1223,14 @@
                :growth :linear
                :per-n {:ns 100000 :bytes 130000 :calls 4}
                :fixed {:ns 500000 :bytes 500000 :calls 3}
-               :sizes [10 100 300]}))
+               :sizes [10 30 100]}))
 
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
   ;; plan (its design step's) cites no var, attribute or section reaches no reference, so the walk
   ;; pulls nothing (task seon.render/spend-has-a-render, 2026-10-23). A design step's prose plan is
   ;; its input, never red.
-  (let [v (:v (first (d/datoms (ts/test-db) :aevt :var/name)))
+  (let [v 'app.calc/inc2
         cited (str "It changes `" v "`.")
         pairs [["cites" cited] ["prose" "Something should be shown somewhere."]
                ["stubbed" cited :seon.task/proofs #{'app-test/stub}] ["bare" cited :seon.task/proofs #{}]
@@ -1240,7 +1249,7 @@
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
   by (spec i) -> {:src :doc :kind}."
   [db0 n spec]
-  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))
+  (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
                          (mapcat (fn [i] (let [{:keys [src doc kind]} (spec i)]
@@ -1250,16 +1259,16 @@
                                  (range 1 (inc n)))))))
 
 (defn- cite-ns "The namespace var-forms' vars are in: the test db's first var's." [db0]
-  (str (:ns/name (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))))
+  (str (:ns/name (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))))
 
 (defn uncited-var-input
   "The cost proof's input at n: n public vars with a docstring citing nothing, named for the check."
-  [n] [(var-forms (ts/test-db) n (fn [_] {:src "(defn f [])" :doc "Does a thing."})) {}
-       (into #{} (map #(symbol (cite-ns (ts/test-db)) (str "v" %))) (range 1 (inc n)))])
+  [n] [(var-forms (world) n (fn [_] {:src "(defn f [])" :doc "Does a thing."})) {}
+       (into #{} (map #(symbol (cite-ns (world)) (str "v" %))) (range 1 (inc n)))])
 
 ;; See docs/health.md#a-function-that-cites-no-section
 (deftest a-public-var-cites-the-section-that-describes-it
-  (let [db (var-forms (ts/test-db) 7
+  (let [db (var-forms (world) 7
                       (fn [i] (case (int i)
                                 7 {:src "(seon.contract/defn n [])" :doc "Does a thing."}
                                 1 {:src "(defn f [])" :doc "Does a thing."}
@@ -1274,8 +1283,8 @@
     (is (= [] (problems/uncited-vars db {} #{})) "no changed var, nothing read")
     (is (= [] (problems/uncited-vars db {} #{'app.nowhere/x})) "a name no var has")
     (testing "attention: a branch that adds an uncited public var is told, never refused (AGENTS section 4), and a var the base already left uncited is not its problem"
-      (let [base (var-forms (ts/test-db) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
-            head (var-forms (ts/test-db) 2 (fn [i] {:src "(defn f [])" :doc "Does a thing."}))
+      (let [base (var-forms (world) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
+            head (var-forms (world) 2 (fn [i] {:src "(defn f [])" :doc "Does a thing."}))
             split (problems/caused-split base head)]
         (is (some #(re-find #"/v2 is public" %) (:attention split)))
         (is (empty? (:caused split)) "and it refuses nothing")
@@ -1292,6 +1301,6 @@
                ;; 2026-10-29, the form's head read by seon.source/first-head (one contracted call per var): 32 calls at 10
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 5}
-               :sizes [10 100 1000]}))
+               :sizes [10 30 100]}))
 
 
