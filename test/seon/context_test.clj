@@ -41,7 +41,8 @@
    (let [db (d/db-with db (into [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id tid]}]
                                 (for [[t [st fs]] vs]
                                   (cond-> {:var/name t :seon.test/status st} (seq fs) (assoc :seon.test/failures (vec fs))))))]
-     (context/status db (pdb/eid db :seon.agent/key "b/a1") opts))))
+     ;; read from the agent's record as the page's status part reads it (its run, its task's proofs)
+     (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) opts))))
 
 (defn- index-of
   "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
@@ -141,7 +142,7 @@
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "demo/f"]}
                               {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"] :seon.process/test-error err}])
-            st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
+            st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
         (is (re-find #"did not load" (print/text (vary-meta (context/status-model {} st) assoc :seon.print/full true))) "printed, as the page and (my.task/status) print it, it is there"))
@@ -232,7 +233,7 @@
     (let [db (d/db-with db [{:seon.agent/key "b/a1" :seon.agent/task [:seon.task/id "ctx/sq"]}
                             {:seon.process/id "b/a1/1" :seon.process/agent [:seon.agent/key "b/a1"]
                              :seon.process/test-error {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load"}}])
-          b (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
+          b (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the run failed as a whole, a written proof did not run"))))
@@ -323,7 +324,7 @@
                         {:var/name 'demo-test/f-test :seon.test/status :green}])
       (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
       (d/transact conn [{:var/name 'demo/helper :var/kind :fn}])
-      (let [db @conn st (context/status db (pdb/eid db :seon.agent/key "b/a1") {})]
+      (let [db @conn st (context/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/a1") :b)) {})]
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 

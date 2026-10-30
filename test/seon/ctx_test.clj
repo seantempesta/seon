@@ -188,8 +188,9 @@
     (is (= 3 (count (:turns t))) "every turn")
     (is (= 5 (count (:evals t))) "every eval")
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it took")
-    (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
-    (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no runs, no catch-ups")))
+    (is (= [:seon.run/_agent] (for [[j _] joins :when (some #{:limit} j)] (first j)))
+        "no window on what it reads, every turn, eval and message (the owner: deliver all messages and errors); its run is the one it began last (seon.context/run-of), the cap and plan its turn line and status read")
+    (is (and (not (contains? t :runs)) (not (contains? t :catch-ups))) "no run before it began one, no catch-ups")))
 
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their

@@ -84,7 +84,7 @@
     (test-error! test-run)
     {:test-run test-run :tests-ms tests-ms :task (task/task (agent/db) id)}))
 
-(defn- status-now
+(defn status-now
   "How the work stands now, from the agent's walk drawn once (seon.repl/page-parts): the status
   part's data (seon.context/status), which the page and the model read too, so a turn computes it
   once. A walk that drew no status (its render threw, or the layout placed none) is the typed
@@ -492,7 +492,8 @@
                              ;; and the judge found 18 reds its change made
                              s (if (and (not (contract/error? s)) (empty? (:reasons s)))
                                  (do (test-error! (agent/prove! :judge))
-                                     (let [db (agent/db)] (context/status db (pdb/eid db :seon.agent/key (:key @agent/state)) {})))
+                                     ;; the walk drawn again, to the branch the judge's verdicts were written on
+                                     (status-now))
                                  s)
                              no-status? (contract/error? s)
                              reasons (:reasons s)

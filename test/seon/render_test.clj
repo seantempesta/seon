@@ -1400,7 +1400,7 @@
             agent-on (fn [db] (d/db-with db [{:seon.agent/key "b1/a3" :seon.agent/base-commit base}]))
             ours (agent-on (d/db-with (d/commit-as-db conn base) (defn-facts 'demo/h "(defn- h [] 1)")))
             a (seon.db/eid ours :seon.agent/key "b1/a3")
-            st (seon.context/status ours a {:main main})
+            st (seon.context/status ours (:tree (seon.ctx/build ours a :b)) {:main main})
             b (d/commit-as-db (:store ours) base)
             ch (seon.merge/delta-changes b ours #{})]
         (is (not (contains? st :caused)) "nothing caused")
@@ -1419,7 +1419,7 @@
           (is (not (str/includes? gaps "demo/f")) "never one it did not change"))
         ;; a branch that changed nothing: the status holds none of them, not a header over an empty answer
         (let [same (agent-on (d/commit-as-db conn base))
-              st0 (seon.context/status same (seon.db/eid same :seon.agent/key "b1/a3") {})]
+              st0 (seon.context/status same (:tree (seon.ctx/build same (seon.db/eid same :seon.agent/key "b1/a3") :b)) {})]
           (is (not-any? #(contains? st0 %) [:caused :attention :without-a-contract :its-merge-carries :merge :unmerged])
               "a branch with no changes holds none of them"))))))
 
@@ -1694,3 +1694,22 @@
     (is (= '[demo-test/g-test] (:tests (model "demo/g"))) "its test, among its pulled callers")
     (is (= '[demo/h] (:callers (model "demo/g"))) "and its other caller")
     (is (str/includes? (:html (drawn "docs/x.md#the-x")) "What x does.") "and the page's html, by the cite's html render")))
+
+;; docs/ctx.md#the-pattern: the agent's run is its record's :runs join (seon.context/run-of), which its turn
+;; line, the chat's start and end and the status all read: never the highest run id, which derives from content
+(deftest the-agents-run-is-the-one-its-record-joins
+  (let [[db aid] (cited-world)
+        te (seon.db/eid db :seon.task/id "demo/c")
+        plan (:seon.task/plan (d/entity db te))
+        ;; an earlier run of the agent, ended, whose plan is the task's now; then the run it began, with a turn
+        db (d/db-with db [[:db/add te :seon.task/kind :design]
+                          {:seon.run/id "demo/c#1" :seon.run/agent aid :seon.run/task te :seon.run/max-turns 3 :seon.run/plan plan}
+                          {:seon.end/run "demo/c#1" :seon.end/outcome :green :seon.end/turns 2}])
+        db (d/db-with db [{:seon.run/id "demo/c#2" :seon.run/agent aid :seon.run/task te :seon.run/max-turns 7 :seon.run/plan "An older plan."}
+                          {:seon.turn/id "demo/c#2/1" :seon.turn/run [:seon.run/id "demo/c#2"] :seon.turn/agent aid :seon.turn/n 1 :seon.turn/origin :model}])
+        opts {:seon.ctx/ctx (:tree (seon.ctx/build db aid :b)) :seon.db/db db}]
+    (is (< (seon.db/eid db :seon.run/id "demo/c#2") (seon.db/eid db :seon.run/id "demo/c#1")) "the earlier run has the higher id")
+    (is (= "1 of 7" (:turn (ui/run-head opts aid))) "the turn line: its own run's cap")
+    (is (str/includes? (pr-str (ui/chat-start opts aid)) "a budget of 7 turns") "the chat's start: the same run's")
+    (is (not (str/includes? (pr-str (ui/chat-end opts aid)) "Done")) "the chat's end: its own run has not ended, the earlier one's end is not its")
+    (is (not-any? #(= :no-design (:reason %)) (:reasons (ui/status opts aid))) "the status: its plan changed since its own run began")))

@@ -56,6 +56,7 @@
   recorded, reused greens included: (my.agent/prove) runs what changed since."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (let [db (agent/db)]
-    (context/status-model {} (context/status db (pdb/eid db :seon.agent/key (:key @agent/state)) {}))))
+  ;; the page's status part, from the agent's walk drawn to now (seon.turn/status-now): one computation
+  (let [s (turn/status-now)]
+    (if (contract/error? s) s (context/status-model {} s))))
 

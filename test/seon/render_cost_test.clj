@@ -432,7 +432,8 @@
                        ;; (seon.context/current-ns reads the newest eval's, not every record: 11 KB an eval before)
                        ;; 555 calls at 10 since the layout places the cites from ctx (seon.render.ui/page-cites: where ctx holds each
                        ;; joined entity whole, a cited task among them, and the order of what each builds on; the cites' joins are the
-                       ;; pull's, where the draw used to query them), 548 before
+                       ;; pull's, where the draw used to query them), 548 before; 574 since the agent's record joins its run
+                       ;; (seon.context/run-of: the turn line, the chat's start and end and the status read it there, where each queried the db)
                        :per-n {:calls 4 :bytes 35000}
-                       :fixed {:calls 515 :bytes 3200000}
+                       :fixed {:calls 534 :bytes 3200000}
                        :sizes [10 40 80]}))))))

@@ -9,7 +9,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [datahike.api :as d] [seon.render :as render]
             [seon.task :as task] [seon.db :as pdb] [seon.merge :as pm]
-            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
+            [seon.print :as print] [seon.print.select :as select] [seon.ref :as ref] [seon.docs :as docs] [seon.config :as cfg] [seon.vector :as vector] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.agent :as agent] [seon.program :as program] [seon.proofs :as proofs] [seon.problems :as problems] [seon.reconcile :as r] [seon.edn :as sedn] [seon.learn :as learn] [clojure.edn] [hasch.core :as hasch]))
 
 (def help-page
   "The help page, docs/agent.md: what my.agent/help answers, each section on demand. Main holds
@@ -630,8 +630,16 @@
              [(:var/name v) (cond-> {:status (case st :green :pass :deferred :deferred :fail)}
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
+(defn run-of
+  "The run agent record c (its ctx, or a map seon.ctx/build answers) holds as its run: its :runs join, the
+  newest run naming it by the transaction that wrote that (docs/ctx.md#the-pattern), with its :end joined;
+  nil before it began one. Every reader of the agent's run reads it here (its turn line, the chat's start and
+  end, the status)."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [c] (some-> (:runs c) vals first))
+
 (defn status
-  "How agent a's work on its task stands on its branch db, as data (task
+  "How the agent of record rec (its ctx: its :db/id, its run, `run-of`) works on its task stands on its branch db, as data (task
   seon.context/the-context-is-the-agents-evals-and-seons, R2b-1): each proof by the verdict its var
   entity holds (`verdicts`; none: :unknown, or :undefined while the branch defines no such test),
   a red or unknown one with its source and the program functions it calls (`callees`), a red one
@@ -649,9 +657,10 @@
   regression or a stray red is main's claims: measured cold on a demo branch, 14.8M ticks and
   70 MB), :main, main's commit (the merge view), and :deferred, the task's proofs a run leaves to root's gate (process
   tests: none while every proof has a verdict). See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
-  [db a {:keys [index deferred main]}]
-  (let [ag (d/entity db a)
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] :map]}
+  [db rec {:keys [index deferred main]}]
+  (let [a (:db/id rec)
+        ag (d/entity db a)
         tid (some-> ag :seon.agent/task :seon.task/id)
         t (when tid (task/task db tid))
         {:keys [proofs plan]} (:seon.task/accumulated t)
@@ -673,8 +682,8 @@
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
         unmerged (pm/unmerged db)
-        ;; its run by the agent, never through its turns: a turn's record moves nothing this reads
-        run (some->> (d/q '[:find [?r ...] :in $ ?a :where [?r :seon.run/agent ?a]] db a) seq (apply max) (d/entity db))
+        ;; its run as its record holds it (never the highest run id: a run's id is derived from its content)
+        run (ratom/realize (run-of rec))
         proof? (set proofs)
         ;; main's claims only when a test outside the proofs is red: the agent's index, else one built cold
         claims (when (some (fn [[t st]] (and (= :fail st) (not (proof? t)))) results)
