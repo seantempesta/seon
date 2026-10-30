@@ -68,7 +68,7 @@ This is a real Clojure REPL: what you define becomes part of your branch's progr
 
 Ask for the answer you need, never the whole value: a response is shown whole (nothing cuts your own results), so its size is the size of what you asked for. Look at a value's shape first, then narrow to the part you need. Each form below is the cheapest well-known Clojure for its question, measured on the program's 3,936 vars (ticks in millions).
 
-- **How many** (`wc -l`): `(count (my.db/datoms :aevt :var/name))`, 0.3 M. A query that collects them first costs 1.3 M, and an aggregate `(count ?e)` 2.0 M.
+- **How many** (`wc -l`): `(count (my.db/datoms :aevt :var/name))`, 0.3 M. A query that collects them first costs 1.3 M, and an aggregate ``(count ?e)`` 2.0 M.
 - **The first few** (`head`): `(->> (my.db/datoms :aevt :var/name) (take 5) (map :v))` reads five datoms (0.003 M, whatever the db's size); ``(take 5 (my.db/q ...))`` computes the whole query first (1.3 M). When the answer needs a join, ask the query for the limit: `(datahike.api/q {:query '[:find ?n :where [_ :var/name ?n]] :args [(my.db/db)] :limit 5})` (0.02 M).
 - **The last few** (`tail`): `(take-last 5 (clojure.string/split-lines (clojure.repl/source-fn 'seon.task/accumulate)))`.
 - **Lines n to m** (`sed -n`): `(->> (clojure.repl/source-fn 'seon.task/accumulate) clojure.string/split-lines (drop 2) (take 4))`.
