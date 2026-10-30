@@ -229,6 +229,30 @@
             "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]
            (:value branch)) "each recorded with its own exact text, not the do's")))
 
+(deftest a-loaded-file-defines-what-source-shows-and-the-branch-records
+  ;; seon.repl/a-loaded-file-is-recorded-as-evals-are: a top-level (load-file "path") is its file's forms,
+  ;; each evaluated as a top-level form of the request (bench run A3: source-fn answered the old text)
+  (let [file (java.io.File/createTempFile "loaded" ".clj")
+        path (.getPath file)
+        body (fn [ns n] (str "(ns " ns ".lf)\n(seon.contract/defn f {:malli/schema [:=> [:cat] :int]} [] " n ")"))]
+    (try
+      (let [[_ _ _ _ loaded called src then]
+            (at/in-agent (fn [{:keys [ns]}]
+                           [(str "(ns " ns ".core)")
+                            (str "(spit " (pr-str path) " " (pr-str (body ns 1)) ")")
+                            (str "(load-file " (pr-str path) ")")
+                            (str "(spit " (pr-str path) " " (pr-str (body ns 2)) ")")
+                            (str "(load-file " (pr-str path) ")")
+                            (str "(" ns ".lf/f)")
+                            (str "(my.agent/source-fn '" ns ".lf/f)")
+                            ;; a form after the load-file in the same request runs after the file's forms
+                            (str "(load-file " (pr-str path) ")\n(" ns ".lf/f)")]))]
+        (is (= 2 (:value called)) "the new definition runs")
+        (is (str/includes? (:value src) "[] 2") "source shows the new text")
+        (is (= 2 (last (:value then))) (str "the form after a load-file runs: " (pr-str (select-keys then [:value :forms :ex]))))
+        (is (some #(str/ends-with? (str %) ".lf/f") (:recorded loaded)) (str "the loaded definition is recorded as program on the branch: " (pr-str (:recorded loaded)))))
+      (finally (.delete file)))))
+
 (deftest a-value-that-is-no-data-reaches-root-printed
   ;; (in-ns 'x) answers a Namespace: it is printed for the model, and the agent's reply to root
   ;; carries the text, never the live value (which no wire encodes)
